@@ -1,0 +1,21 @@
+{
+  "name": "skald-server",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "MOCK_AGENT=1 bun --watch src/server.ts",
+    "start": "bun src/server.ts",
+    "build:web": "cd ../web && npm install --silent && npm run build",
+    "build": "bun run build:web && bun build --compile --minify src/server.ts --outfile bin/skald-web",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "4.12.25"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.10",
+    "typescript": "5.9.3"
+  }
+}
