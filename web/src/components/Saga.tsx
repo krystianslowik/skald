@@ -1,8 +1,9 @@
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { memo, useMemo } from "react";
 import type { AgentEvent } from "../types";
 import { gameVersion } from "../lib/format";
 import { useI18n, type I18n, type TextKey } from "../i18n";
-import { PlayerName } from "./Profile";
+import { PlayerName } from "./PlayerName";
 
 const SERVER_STATE: Record<string, TextKey> = {
   starting: "saga.server.starting",
@@ -22,10 +23,13 @@ const ACTION: Record<string, TextKey> = {
  * image handles asynchronously (up to ~20 s), so "requested" rather than
  * "done"; only restart reports completion.
  */
+const COMPLETE = /complete/;
+const STARTED = /started/;
+
 export function actionStatus(i: Pick<I18n, "t">, ok: boolean, message: string): string {
   if (!ok) return i.t("action.failed", { message });
-  if (/complete/.test(message)) return i.t("action.done");
-  if (/started/.test(message)) return i.t("action.inProgress");
+  if (COMPLETE.test(message)) return i.t("action.done");
+  if (STARTED.test(message)) return i.t("action.inProgress");
   return i.t("action.requested");
 }
 
@@ -118,13 +122,20 @@ function Glyph({ tone }: { tone: Tone }) {
 }
 
 /** The event scroll: newest first, grouped by day. */
-export function Saga({ events, now }: { events: AgentEvent[]; now: number }) {
+export const Saga = memo(function Saga({ events, now }: { events: AgentEvent[]; now: number }) {
   const i18n = useI18n();
   const { t, dayLabel, clock, fullDate } = i18n;
-  const rows = events.map((e) => ({ e, d: describe(i18n, e) })).filter((r): r is { e: AgentEvent; d: NonNullable<ReturnType<typeof describe>> } => r.d !== null);
+  const reduced = useReducedMotion();
+  const rows = useMemo(
+    () => events.flatMap((e) => {
+      const d = describe(i18n, e);
+      return d ? [{ e, d }] : [];
+    }),
+    [events, i18n],
+  );
   let lastDay = "";
   return (
-    <div className="scroll-quiet relative max-h-[420px] overflow-y-auto pr-2 [mask-image:linear-gradient(180deg,#000_85%,transparent)]">
+    <div className="scroll-quiet relative max-h-[26.25rem] overflow-y-auto pr-2 [mask-image:linear-gradient(180deg,#000_85%,transparent)]">
       {rows.length === 0 && <p className="text-sm text-ash">{t("saga.empty")}</p>}
       <ol className="relative border-l border-iron/40 pl-5">
         <AnimatePresence initial={false}>
@@ -135,14 +146,14 @@ export function Saga({ events, now }: { events: AgentEvent[]; now: number }) {
             return (
               <motion.li
                 key={`${e.ts}-${e.seq}-${e.type}`}
-                layout="position"
-                initial={{ opacity: 0, x: -10 }}
+                layout={reduced ? false : "position"}
+                initial={{ opacity: 0, x: reduced ? 0 : -10 }}
                 animate={{ opacity: 1, x: 0 }}
-                transition={{ type: "spring", stiffness: 200, damping: 24 }}
+                transition={{ type: "spring", bounce: 0, visualDuration: 0.35 }}
               >
                 {header && <div className="-ml-5 mb-1.5 mt-3 font-display text-xs font-semibold tracking-wider text-ash/80 first:mt-0">{header}</div>}
                 <div className="relative flex items-start gap-3 py-1.5">
-                  <span className="absolute -left-[29px] top-1.5 rounded-full bg-wood p-0.5">
+                  <span className="absolute -left-[1.8125rem] top-1.5 rounded-full bg-wood p-0.5">
                     <Glyph tone={d.tone} />
                   </span>
                   <span className={`flex-1 text-sm leading-snug ${d.tone === "death" || d.tone === "raid" ? "text-[#e3a091]" : d.tone === "leave" ? "text-ash" : "text-bone"}`}>
@@ -166,4 +177,4 @@ export function Saga({ events, now }: { events: AgentEvent[]; now: number }) {
       </ol>
     </div>
   );
-}
+});

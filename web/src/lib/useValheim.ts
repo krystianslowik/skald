@@ -5,9 +5,53 @@ import { applyEvent } from "./apply";
 
 const MAX_LOGS = 1500;
 
+/**
+ * The live log tail, kept outside React state: log lines are the most frequent
+ * event, and only the Chronicle shows them, so only the Chronicle subscribes
+ * (useSyncExternalStore). The rest of the dashboard does not re-render per line.
+ */
+export interface LogStore {
+  subscribe(listener: () => void): () => void;
+  getSnapshot(): LogLine[];
+}
+
+export function createLogStore(initial: LogLine[] = []): LogStore & { set(next: (l: LogLine[]) => LogLine[]): void } {
+  let lines = initial;
+  const listeners = new Set<() => void>();
+  return {
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    getSnapshot: () => lines,
+    set(next) {
+      lines = next(lines);
+      for (const l of listeners) l();
+    },
+  };
+}
+
+/**
+ * Keeps the previous object for every top-level slice that did not change (and
+ * the previous state itself when nothing did), so memoized planks skip.
+ */
+export function share(prev: ApiState, next: ApiState): ApiState {
+  const out = { ...next } as Record<string, unknown>;
+  const old = prev as unknown as Record<string, unknown>;
+  let changed = Object.keys(old).length !== Object.keys(out).length;
+  for (const k of Object.keys(out)) {
+    const a = old[k];
+    const b = out[k];
+    if (a === b) continue;
+    if (typeof a === "object" && a !== null && typeof b === "object" && b !== null && JSON.stringify(a) === JSON.stringify(b)) out[k] = a;
+    else changed = true;
+  }
+  return changed ? (out as unknown as ApiState) : prev;
+}
+
 export interface Valheim {
   state: ApiState | null;
-  logs: LogLine[];
+  logs: LogStore;
   /** Live link to the agent (WebSocket up and the server reports the agent reachable). */
   online: boolean;
   /** Last agent `action` events, newest first. */
@@ -16,7 +60,7 @@ export interface Valheim {
 
 export function useValheim(onUnauthorized: () => void): Valheim {
   const [state, setState] = useState<ApiState | null>(null);
-  const [logs, setLogs] = useState<LogLine[]>([]);
+  const [logs] = useState(createLogStore);
   // "connecting" counts as fine so the outage banner does not flash on page load.
   const [ws, setWs] = useState<"connecting" | "up" | "down">("connecting");
   const [agentUp, setAgentUp] = useState(true);
@@ -28,7 +72,7 @@ export function useValheim(onUnauthorized: () => void): Valheim {
   const refresh = useCallback(async () => {
     try {
       const s = await getState();
-      setState(s);
+      setState((prev) => (prev ? share(prev, s) : s));
       setAgentUp(s.online);
     } catch (e) {
       if (e instanceof Unauthorized) unauth.current();
@@ -43,13 +87,13 @@ export function useValheim(onUnauthorized: () => void): Valheim {
 
   useEffect(() => {
     void refresh();
-    getLogs(500).then(setLogs).catch(() => undefined);
+    getLogs(500).then((l) => logs.set(() => l)).catch(() => undefined);
     const poll = setInterval(() => void refresh(), 60_000);
     return () => {
       clearInterval(poll);
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
     };
-  }, [refresh]);
+  }, [refresh, logs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,7 +104,7 @@ export function useValheim(onUnauthorized: () => void): Valheim {
     const onEvent = (ev: AgentEvent) => {
       if (ev.type === "log") {
         const line = String(ev.data.line ?? "");
-        setLogs((l) => {
+        logs.set((l) => {
           const next = l.length >= MAX_LOGS ? l.slice(l.length - MAX_LOGS + 1) : l.slice();
           next.push({ ts: ev.ts, line });
           return next;
@@ -96,7 +140,7 @@ export function useValheim(onUnauthorized: () => void): Valheim {
         if (msg.type === "event") onEvent(msg.event);
         else {
           setAgentUp(msg.online);
-          setState((s) => (s ? { ...s, ...msg.state, online: msg.online } : s));
+          setState((s) => (s ? share(s, { ...s, ...msg.state, online: msg.online }) : s));
         }
       };
       sock.onclose = () => {
@@ -116,7 +160,7 @@ export function useValheim(onUnauthorized: () => void): Valheim {
       if (timer) clearTimeout(timer);
       sock?.close();
     };
-  }, [refresh, refreshSoon]);
+  }, [refresh, refreshSoon, logs]);
 
   return { state, logs, online: ws !== "down" && agentUp, lastAction };
 }

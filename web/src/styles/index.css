@@ -150,7 +150,9 @@ body {
   .plank-title {
     font-family: Cinzel, Georgia, serif;
     font-weight: 600;
-    letter-spacing: 0.06em;
+    /* Cinzel is all capitals: a hair of air at heading size, tighter than the old 0.06em. */
+    letter-spacing: 0.015em;
+    line-height: 1.2;
     color: #d9c7ab;
     text-shadow: 0 1px 0 rgba(0, 0, 0, 0.7);
   }
@@ -164,6 +166,74 @@ body {
     scrollbar-width: thin;
     scrollbar-color: #4a3524 transparent;
   }
+}
+
+/* ---- type ------------------------------------------------------------------ */
+
+@layer components {
+  /* Size-specific tracking and leading: display tight, titles slightly tight,
+     small capitals kickers open, body text (the default) left at 0. */
+  .type-display {
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .type-title {
+    letter-spacing: -0.01em;
+    line-height: 1.15;
+  }
+  .type-kicker {
+    letter-spacing: 0.18em;
+    line-height: 1.3;
+  }
+}
+
+/* ---- press feedback --------------------------------------------------------- */
+
+/* Feedback lands on pointer-down, not on release. Unlayered on purpose, so the
+   transform transition wins over the utilities' transition-colors. */
+.press,
+.press-soft {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+.press:active:not(:disabled) {
+  transform: scale(0.96);
+  transition-duration: 80ms;
+}
+.press-soft:active:not(:disabled) {
+  transform: scale(0.985);
+  transition-duration: 80ms;
+}
+/* Inline text buttons (player names) dim instead of scaling, so the line does not jiggle. */
+.press-text:active {
+  opacity: 0.65;
+  color: var(--flame);
+}
+
+/* ---- materials -------------------------------------------------------------- */
+
+/* A floating layer (sticky outage banner, chart readout): translucent smoked glass over the boards. */
+.material {
+  background: rgba(22, 14, 9, 0.72);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+}
+
+.sheet-scrim {
+  background: rgba(0, 0, 0, 0.65);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+
+/* ---- long lists -------------------------------------------------------------- */
+
+/* Off-screen log rows (up to 600) skip layout and paint until scrolled near.
+   Not used on the saga: its day headings hang outside the row, and the paint
+   containment that content-visibility implies would clip them. */
+.log-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1.2rem;
 }
 
 /* ---- join code ------------------------------------------------------------ */
@@ -197,5 +267,45 @@ body {
   .flame-sway,
   .flame-sway-fast {
     animation: none !important;
+  }
+  .press:active:not(:disabled),
+  .press-soft:active:not(:disabled) {
+    transform: none;
+    opacity: 0.75;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .material {
+    background: #1a110b;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .sheet-scrim {
+    background: rgba(0, 0, 0, 0.82);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .material {
+    background: #120b07;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border: 1px solid var(--flame);
+  }
+  .grain {
+    display: none;
+  }
+  /* Lift secondary text (ash) and hairlines (iron) for legibility. */
+  .text-ash,
+  .text-ash\/60,
+  .text-ash\/70,
+  .text-ash\/80 {
+    color: #d2c6b8;
+  }
+  .plank {
+    border-color: rgba(234, 220, 198, 0.35);
   }
 }

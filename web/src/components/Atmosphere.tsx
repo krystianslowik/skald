@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { useReducedMotion } from "motion/react";
 
 interface Ember {
@@ -14,6 +14,32 @@ interface Ember {
 }
 
 const COUNT = 60;
+const HUE_MIN = 18;
+const HUE_SPAN = 22;
+const HUE_STEPS = 12;
+const SPRITE = 32;
+
+/**
+ * One pre-rendered glow per hue band, drawn with globalAlpha each frame: far
+ * cheaper than building a radial gradient per ember per frame.
+ */
+function sprites(): HTMLCanvasElement[] {
+  return Array.from({ length: HUE_STEPS }, (_, i) => {
+    const hue = HUE_MIN + (i / (HUE_STEPS - 1)) * HUE_SPAN;
+    const c = document.createElement("canvas");
+    c.width = c.height = SPRITE;
+    const g = c.getContext("2d");
+    if (!g) return c;
+    const r = SPRITE / 2;
+    const grad = g.createRadialGradient(r, r, 0, r, r, r);
+    grad.addColorStop(0, `hsla(${hue + 10}, 100%, 75%, 1)`);
+    grad.addColorStop(0.35, `hsla(${hue}, 100%, 55%, 0.6)`);
+    grad.addColorStop(1, `hsla(${hue}, 100%, 50%, 0)`);
+    g.fillStyle = grad;
+    g.fillRect(0, 0, SPRITE, SPRITE);
+    return c;
+  });
+}
 
 function spawn(w: number, h: number, initial: boolean): Ember {
   const max = 6 + Math.random() * 9;
@@ -25,13 +51,13 @@ function spawn(w: number, h: number, initial: boolean): Ember {
     r: 0.6 + Math.random() * 1.8,
     life: initial ? Math.random() * max : 0,
     max,
-    hue: 18 + Math.random() * 22,
+    hue: Math.floor(Math.random() * HUE_STEPS),
     wobble: Math.random() * Math.PI * 2,
   };
 }
 
 /** Rising embers on a canvas behind the page. Paused when the tab is hidden or motion is reduced. */
-export function Embers({ intensity = 1 }: { intensity?: number }) {
+export const Embers = memo(function Embers({ intensity = 1 }: { intensity?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const reduced = useReducedMotion();
 
@@ -53,6 +79,7 @@ export function Embers({ intensity = 1 }: { intensity?: number }) {
     resize();
     const n = Math.round(COUNT * intensity);
     const embers = Array.from({ length: n }, () => spawn(w, h, true));
+    const glow = sprites();
     let raf = 0;
     let last = performance.now();
 
@@ -70,15 +97,12 @@ export function Embers({ intensity = 1 }: { intensity?: number }) {
         e.y += e.vy * dt;
         const k = e.life / e.max;
         const alpha = Math.sin(Math.PI * Math.min(1, k)) * (0.55 + 0.45 * Math.sin(t / 90 + i));
-        const g = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, e.r * 4);
-        g.addColorStop(0, `hsla(${e.hue + 10}, 100%, 75%, ${alpha})`);
-        g.addColorStop(0.35, `hsla(${e.hue}, 100%, 55%, ${alpha * 0.6})`);
-        g.addColorStop(1, `hsla(${e.hue}, 100%, 50%, 0)`);
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.arc(e.x, e.y, e.r * 4, 0, Math.PI * 2);
-        ctx.fill();
+        if (alpha <= 0.01) continue;
+        const size = e.r * 8;
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(glow[e.hue]!, e.x - size / 2, e.y - size / 2, size, size);
       }
+      ctx.globalAlpha = 1;
       raf = requestAnimationFrame(frame);
     };
 
@@ -90,7 +114,7 @@ export function Embers({ intensity = 1 }: { intensity?: number }) {
     const onVis = () => (document.hidden ? cancelAnimationFrame(raf) : start());
     if (!document.hidden) start();
     document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("resize", resize);
+    window.addEventListener("resize", resize, { passive: true });
     return () => {
       cancelAnimationFrame(raf);
       document.removeEventListener("visibilitychange", onVis);
@@ -99,9 +123,9 @@ export function Embers({ intensity = 1 }: { intensity?: number }) {
   }, [reduced, intensity]);
 
   return <canvas ref={ref} aria-hidden className="pointer-events-none fixed inset-0 z-[1] h-full w-full" />;
-}
+});
 
-export function Atmosphere({ dim = false }: { dim?: boolean }) {
+export const Atmosphere = memo(function Atmosphere({ dim = false }: { dim?: boolean }) {
   return (
     <>
       <div className="firelight" aria-hidden style={dim ? { opacity: 0.35, animation: "none" } : undefined} />
@@ -110,4 +134,4 @@ export function Atmosphere({ dim = false }: { dim?: boolean }) {
       <div className="grain" aria-hidden />
     </>
   );
-}
+});

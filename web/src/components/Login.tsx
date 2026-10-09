@@ -6,7 +6,7 @@ import { Atmosphere } from "./Atmosphere";
 
 function Campfire({ lit }: { lit: boolean }) {
   return (
-    <svg viewBox="0 0 200 170" className="w-[220px] overflow-visible sm:w-[260px]" aria-hidden>
+    <svg viewBox="0 0 200 170" className="w-[13.75rem] overflow-visible sm:w-[16.25rem]" aria-hidden>
       <defs>
         <radialGradient id="cf-glow" cx="50%" cy="78%" r="55%">
           <stop offset="0%" stopColor="#ff7a1a" stopOpacity="0.45" />
@@ -85,7 +85,7 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
       <div className="relative z-10 flex w-full max-w-sm flex-col items-center text-center">
         <Campfire lit={lit} />
         <motion.h1
-          className="mt-6 font-display text-3xl font-semibold tracking-wide text-bone sm:text-4xl"
+          className="type-title mt-6 font-display text-3xl font-semibold text-bone sm:text-4xl"
           animate={{ opacity: lit ? 0 : 1, y: lit ? -10 : 0 }}
         >
           {t("login.title")}
@@ -120,7 +120,7 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
           <button
             type="submit"
             disabled={busy || lit || !word}
-            className="mt-3 w-full rounded-md border border-ember/40 bg-gradient-to-b from-[#3a2414] to-[#22150c] py-2.5 font-display font-semibold tracking-wider text-flame transition-[border-color,box-shadow] enabled:hover:border-ember enabled:hover:shadow-[0_0_20px_-6px_#ff7a1a] disabled:opacity-50"
+            className="press mt-3 w-full rounded-md border border-ember/40 bg-gradient-to-b from-[#3a2414] to-[#22150c] py-2.5 font-display font-semibold tracking-wider text-flame transition-[border-color,box-shadow] enabled:hover:border-ember enabled:hover:shadow-[0_0_20px_-6px_#ff7a1a] disabled:opacity-50"
           >
             {busy ? t("login.busy") : t("login.submit")}
           </button>

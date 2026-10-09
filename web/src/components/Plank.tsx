@@ -16,7 +16,7 @@ export function Plank({
 }) {
   const headingId = id ? `${id}-h` : undefined;
   return (
-    <section className={`plank px-5 pb-5 pt-6 sm:px-6 ${className}`} aria-labelledby={headingId}>
+    <section className={`plank min-w-0 px-5 pb-5 pt-6 sm:px-6 ${className}`} aria-labelledby={headingId}>
       {title && (
         <header className="mb-4 flex items-baseline justify-between gap-3 pl-3">
           <h2 id={headingId} className="plank-title text-lg sm:text-xl">

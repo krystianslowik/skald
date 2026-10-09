@@ -1,13 +1,14 @@
+import { memo } from "react";
 import type { ApiState } from "../types";
 import { useCampfireSound } from "../lib/campfire";
 import { gameVersion } from "../lib/format";
 import { LocaleToggle, useI18n, type TextKey } from "../i18n";
 import { Flame, type FlameLevel } from "./Flame";
 
-export function flameLevel(s: ApiState | null, online: boolean): FlameLevel {
+export function flameLevel(s: ApiState["server"] | null, online: boolean): FlameLevel {
   if (!s || !online) return "embers";
-  if (s.server.status === "running") return "alive";
-  if (s.server.status === "starting" || s.server.status === "stopping") return "embers";
+  if (s.status === "running") return "alive";
+  if (s.status === "starting" || s.status === "stopping") return "embers";
   return "ash";
 }
 
@@ -19,17 +20,16 @@ const SERVER_STATUS: Record<string, TextKey> = {
   unknown: "status.unknown",
 };
 
-export function Header({ state, online, now, onLogout }: { state: ApiState | null; online: boolean; now: number; onLogout: () => void }) {
+export const Header = memo(function Header({ server: s, online, now, onLogout }: { server: ApiState["server"]; online: boolean; now: number; onLogout: () => void }) {
   const { t, duration } = useI18n();
-  const level = flameLevel(state, online);
-  const s = state?.server;
+  const level = flameLevel(s, online);
   const up = s?.serverStartedAt && s.status === "running" ? duration(now - Date.parse(s.serverStartedAt)) : null;
   return (
     <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
       <div className="flex min-w-0 items-center gap-4 sm:flex-1">
         <Flame level={level} size={44} className="shrink-0 drop-shadow-[0_0_14px_rgba(255,122,26,0.45)]" />
         <div className="min-w-0">
-          <h1 className="truncate font-display text-2xl font-semibold tracking-wide text-bone sm:text-3xl">{s?.name || "Valheim"}</h1>
+          <h1 className="type-title truncate font-display text-2xl font-semibold text-bone sm:text-3xl">{s?.name || "Valheim"}</h1>
           <p className="mt-0.5 text-sm text-ash">
             {t("header.world")} <span className="text-bone/90">{s?.world || t("header.worldUnknown")}</span>
             <span className="mx-2 text-iron">/</span>
@@ -53,7 +53,7 @@ export function Header({ state, online, now, onLogout }: { state: ApiState | nul
           <button
             type="button"
             onClick={onLogout}
-            className="whitespace-nowrap rounded-md border border-iron/50 px-3 py-1.5 text-xs text-ash transition-colors hover:border-ember/60 hover:text-flame"
+            className="press whitespace-nowrap rounded-md border border-iron/50 px-3 py-1.5 text-xs text-ash transition-colors hover:border-ember/60 hover:text-flame"
           >
             {t("header.logout")}
           </button>
@@ -61,7 +61,7 @@ export function Header({ state, online, now, onLogout }: { state: ApiState | nul
       </dl>
     </header>
   );
-}
+});
 
 /** Optional crackling-fire ambience; off until someone asks for it. */
 function SoundToggle() {
@@ -75,7 +75,7 @@ function SoundToggle() {
       aria-pressed={on}
       aria-label={t("sound.label")}
       title={on ? t("sound.on") : t("sound.off")}
-      className={`grid h-8 w-8 place-items-center rounded-md border transition-colors ${
+      className={`press grid h-8 w-8 place-items-center rounded-md border transition-colors ${
         on ? "border-ember/60 bg-ember/10 text-flame" : "border-iron/50 text-ash hover:border-ember/60 hover:text-flame"
       }`}
     >
@@ -97,7 +97,7 @@ function SoundToggle() {
 export function OfflineBanner() {
   const { t } = useI18n();
   return (
-    <div role="status" className="sticky top-0 z-30 border-b border-ember/30 bg-[#1a0f08]/90 px-4 py-2.5 text-center text-sm backdrop-blur">
+    <div role="status" className="material sticky top-0 z-30 border-b border-ember/30 px-4 py-2.5 text-center text-sm">
       <span className="font-display font-semibold tracking-wide text-ember">{t("offline.title")}</span>{" "}
       <span className="text-bone/80">{t("offline.body")}</span>
     </div>

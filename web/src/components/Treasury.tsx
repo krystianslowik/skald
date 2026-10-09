@@ -1,13 +1,14 @@
+import { memo } from "react";
 import type { Backup } from "../types";
 import { backupHref } from "../lib/api";
 import { useI18n } from "../i18n";
 
 /** Treasury: world backups, newest first, each downloadable. */
-export function Treasury({ backups, now }: { backups: Backup[]; now: number }) {
+export const Treasury = memo(function Treasury({ backups, now }: { backups: Backup[]; now: number }) {
   const { t, ago, bytes, fullDate } = useI18n();
   if (backups.length === 0) return <p className="text-sm text-ash">{t("treasury.empty")}</p>;
   return (
-    <ul className="scroll-quiet max-h-[300px] space-y-1 overflow-y-auto pr-1">
+    <ul className="scroll-quiet max-h-[18.75rem] space-y-1 overflow-y-auto pr-1">
       {backups.map((b, i) => (
         <li
           key={b.name}
@@ -21,7 +22,7 @@ export function Treasury({ backups, now }: { backups: Backup[]; now: number }) {
             <div className="truncate text-sm text-bone" title={b.name}>
               {fullDate(b.modifiedAt)}
             </div>
-            <div className="truncate text-[11px] text-ash">{b.name}</div>
+            <div className="truncate text-[0.6875rem] text-ash">{b.name}</div>
           </div>
           <div className="text-right text-xs tabular-nums">
             <div className="text-bone/90">{bytes(b.sizeBytes)}</div>
@@ -32,7 +33,7 @@ export function Treasury({ backups, now }: { backups: Backup[]; now: number }) {
             download={b.name}
             aria-label={t("treasury.downloadAria", { name: b.name })}
             title={t("treasury.download")}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-iron/40 text-ash transition-colors hover:border-ember/60 hover:bg-ember/10 hover:text-flame"
+            className="press grid h-8 w-8 shrink-0 place-items-center rounded-md border border-iron/40 text-ash transition-colors hover:border-ember/60 hover:bg-ember/10 hover:text-flame"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M8 2.5v8M4.5 7L8 10.5 11.5 7M3 13.5h10" />
@@ -42,4 +43,4 @@ export function Treasury({ backups, now }: { backups: Backup[]; now: number }) {
       ))}
     </ul>
   );
-}
+});

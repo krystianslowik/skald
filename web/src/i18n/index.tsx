@@ -15,7 +15,8 @@ export type TextKey = KeysOf<string>;
 export type PluralKey = Exclude<keyof Dict, TextKey>;
 type Vars = Record<string, string | number>;
 
-const fill = (s: string, vars?: Vars) => (vars ? s.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m)) : s);
+const PLACEHOLDER = /\{(\w+)\}/g;
+const fill = (s: string, vars?: Vars) => (vars ? s.replace(PLACEHOLDER, (m, k: string) => (k in vars ? String(vars[k]) : m)) : s);
 
 export const isLocale = (v: unknown): v is Locale => typeof v === "string" && (LOCALES as readonly string[]).includes(v);
 
@@ -198,7 +199,7 @@ export function I18nProvider({ locale: initial, children }: { locale: Locale; ch
 export function LocaleToggle({ className = "" }: { className?: string }) {
   const { locale, setLocale, t } = useI18n();
   return (
-    <div role="group" aria-label={t("lang.label")} className={`inline-flex rounded-md border border-iron/50 p-0.5 text-[11px] font-medium ${className}`}>
+    <div role="group" aria-label={t("lang.label")} className={`inline-flex rounded-md border border-iron/50 p-0.5 text-[0.6875rem] font-medium ${className}`}>
       {LOCALES.map((l) => (
         <button
           key={l}
@@ -207,7 +208,7 @@ export function LocaleToggle({ className = "" }: { className?: string }) {
           aria-pressed={locale === l}
           aria-label={fill(DICTS[l]["lang.switchTo"], { lang: LOCALE_NAMES[l] })}
           onClick={() => setLocale(l)}
-          className={`rounded px-1.5 py-1 uppercase tracking-wider transition-colors ${locale === l ? "bg-ember/15 text-flame" : "text-ash hover:text-bone"}`}
+          className={`press rounded px-1.5 py-1 uppercase tracking-wider transition-colors ${locale === l ? "bg-ember/15 text-flame" : "text-ash hover:text-bone"}`}
         >
           {l}
         </button>

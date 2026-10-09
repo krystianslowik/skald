@@ -1,5 +1,5 @@
-import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { motion } from "motion/react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Valheim } from "../lib/useValheim";
 import { useI18n } from "../i18n";
 import { Atmosphere } from "./Atmosphere";
@@ -10,13 +10,16 @@ import { Header, OfflineBanner } from "./Header";
 import { Hearth } from "./Hearth";
 import { JoinCode } from "./JoinCode";
 import { Plank } from "./Plank";
-import { ProfileProvider, ProfileSheet } from "./Profile";
+import { ProfileProvider } from "./PlayerName";
 import { Ranking } from "./Ranking";
 import { Runes } from "./Runes";
 import { Saga } from "./Saga";
 import { Treasury } from "./Treasury";
 import { Progress, World } from "./World";
 import { BOSSES } from "../lib/world";
+
+// Opened on demand; the chunk is preloaded as soon as a pointer reaches a player name.
+const ProfileSheet = lazy(() => import("./ProfileSheet"));
 
 function useNow(ms = 15_000): number {
   const [now, setNow] = useState(() => Date.now());
@@ -42,6 +45,17 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
     opener.current?.focus();
   }, []);
 
+  const online7d = state?.history.online7d;
+  const onlineChart = useMemo(
+    () => ({
+      series: [{ name: t("online.series"), points: online7d ?? [], color: "#ff7a1a" }],
+      format: (v: number) => t("online.value", { n: Math.round(v) }),
+      ticks: { every: 86_400_000, format: (v: number) => new Date(v).toLocaleDateString(intl, { weekday: "short" }) },
+    }),
+    [online7d, t, intl],
+  );
+  const onlineTime = useCallback((v: number) => `${dayLabel(new Date(v).toISOString(), now)}, ${clock(v)}`, [dayLabel, clock, now]);
+
   const serverName = state?.server.name;
   useEffect(() => {
     document.title = serverName ? `${serverName} - Skald` : "Skald";
@@ -51,7 +65,7 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
     return (
       <main className="relative grid min-h-[100dvh] place-items-center">
         <Atmosphere dim />
-        <p className="relative z-10 font-display text-lg tracking-wide text-ash">{t("app.loading")}</p>
+        <p className="relative z-10 font-display text-lg text-ash">{t("app.loading")}</p>
       </main>
     );
   }
@@ -63,12 +77,12 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
         <Atmosphere dim={!online} />
         {!online && <OfflineBanner />}
         <motion.main
-          className="relative z-10 mx-auto max-w-[1320px] space-y-5 px-4 pb-16 pt-6 sm:px-6 lg:space-y-6 lg:pt-10"
+          className="relative z-10 mx-auto max-w-[82.5rem] space-y-5 px-4 pb-16 pt-6 sm:px-6 lg:space-y-6 lg:pt-10"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.8 }}
         >
-          <Header state={state} online={online} now={now} onLogout={onLogout} />
+          <Header server={state.server} online={online} now={now} onLogout={onLogout} />
 
           <div className="grid gap-5 lg:grid-cols-12 lg:gap-6">
             <section className="plank plank-charred flex flex-col items-center justify-center px-4 py-10 sm:py-14 lg:col-span-8" aria-label={t("plank.joinCode")}>
@@ -99,20 +113,20 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
               <Plank title={t("plank.online")} id="online" aside={t("plank.online.aside")}>
                 <Chart
                   label={t("online.label")}
-                  series={[{ name: t("online.series"), points: state.history.online7d, color: "#ff7a1a" }]}
+                  series={onlineChart.series}
                   step
                   height={110}
-                  format={(v) => t("online.value", { n: Math.round(v) })}
-                  timeFormat={(v) => `${dayLabel(new Date(v).toISOString(), now)}, ${clock(v)}`}
+                  format={onlineChart.format}
+                  timeFormat={onlineTime}
                   empty={t("online.empty")}
-                  ticks={{ every: 86_400_000, format: (v) => new Date(v).toLocaleDateString(intl, { weekday: "short" }) }}
+                  ticks={onlineChart.ticks}
                 />
               </Plank>
             </div>
           </div>
 
           <Plank title={t("plank.forge")} id="forge" aside={state.metricsConfigured === false ? undefined : t("plank.forge.aside")}>
-            <Forge state={state} now={now} />
+            <Forge metrics={state.metrics} metricsConfigured={state.metricsConfigured} server={state.server} world={state.world} now={now} />
           </Plank>
 
           <div className="grid gap-5 lg:grid-cols-12 lg:gap-6">
@@ -125,10 +139,14 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
           </div>
 
           <Plank title={t("plank.chronicle")} id="chronicle" aside={t("plank.chronicle.aside")}>
-            <Chronicle lines={logs} />
+            <Chronicle source={logs} />
           </Plank>
         </motion.main>
-        <AnimatePresence>{profile && <ProfileSheet key={profile} name={profile} now={now} onClose={closeProfile} />}</AnimatePresence>
+        {profile && (
+          <Suspense fallback={null}>
+            <ProfileSheet key={profile} name={profile} now={now} onClose={closeProfile} />
+          </Suspense>
+        )}
       </div>
     </ProfileProvider>
   );

@@ -1,7 +1,8 @@
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { ActionName, AgentEvent } from "../types";
 import { runAction } from "../lib/api";
+import { crackle } from "../lib/campfire";
 import { useI18n, type TextKey } from "../i18n";
 import { actionStatus, actionTitle } from "./Saga";
 
@@ -23,52 +24,75 @@ const RUNES: RuneDef[] = [
 ];
 
 type Phase = { kind: "idle" } | { kind: "holding" } | { kind: "sent" } | { kind: "done"; ok: boolean; message: string };
+type Fire = (name: ActionName) => Promise<{ ok: boolean; message: string }>;
 
-function Rune({ def, disabled, onFire }: { def: RuneDef; disabled: boolean; onFire: () => Promise<{ ok: boolean; message: string }> }) {
+/** How the lit stroke returns to cold: from wherever it is, without overshoot. */
+const SPRING_BACK = { bounce: 0, visualDuration: 0.35 };
+const QUICK_BACK = { bounce: 0, visualDuration: 0.12 };
+
+const Rune = memo(function Rune({ def, disabled, onFire }: { def: RuneDef; disabled: boolean; onFire: Fire }) {
   const { t } = useI18n();
   const reduced = useReducedMotion();
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
-  const [progress, setProgress] = useState(0);
+  // Hold progress lives in a spring-backed motion value: no React render per
+  // frame. Holding jumps it directly (1:1 with time); letting go springs it
+  // back from the exact value and velocity it had.
+  const progress = useSpring(0, reduced ? QUICK_BACK : SPRING_BACK);
+  const glow = useTransform(progress, (v) => (v > 0.002 ? 1 : 0));
   const raf = useRef(0);
   const started = useRef(0);
   const firing = useRef(false);
+  const reset = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const release = useCallback(() => progress.set(0), [progress]);
 
   const stop = useCallback(() => {
     cancelAnimationFrame(raf.current);
     if (!firing.current) {
       setPhase((p) => (p.kind === "holding" ? { kind: "idle" } : p));
-      setProgress(0);
+      if (progress.get() > 0 && progress.get() < 1) release();
     }
-  }, []);
+  }, [progress, release]);
 
   const fire = useCallback(async () => {
     firing.current = true;
     setPhase({ kind: "sent" });
-    const r = await onFire();
+    const r = await onFire(def.name);
     setPhase({ kind: "done", ok: r.ok, message: r.message });
     firing.current = false;
-    setTimeout(() => {
-      setProgress(0);
+    if (!r.ok) release();
+    if (reset.current) clearTimeout(reset.current);
+    reset.current = setTimeout(() => {
+      release();
       setPhase({ kind: "idle" });
     }, 4000);
-  }, [onFire]);
+  }, [onFire, def.name, release]);
 
   const begin = useCallback(() => {
     if (disabled || firing.current || phase.kind === "sent") return;
-    started.current = performance.now();
+    // Pressed again while cooling: continue from the current glow, not from zero.
+    started.current = performance.now() - progress.get() * HOLD_MS;
     setPhase({ kind: "holding" });
     const tick = () => {
       const p = Math.min(1, (performance.now() - started.current) / HOLD_MS);
-      setProgress(p);
-      if (p >= 1) void fire();
-      else raf.current = requestAnimationFrame(tick);
+      progress.jump(p);
+      if (p >= 1) {
+        // Same frame as the stroke completing: the pop (if sound is on), then the request.
+        crackle();
+        void fire();
+      } else raf.current = requestAnimationFrame(tick);
     };
     raf.current = requestAnimationFrame(tick);
-  }, [disabled, fire, phase.kind]);
+  }, [disabled, fire, phase.kind, progress]);
 
-  useEffect(() => () => cancelAnimationFrame(raf.current), []);
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(raf.current);
+      if (reset.current) clearTimeout(reset.current);
+    },
+    [],
+  );
 
-  const lit = phase.kind === "sent" || (phase.kind === "done" && phase.ok);
   const status =
     phase.kind === "holding"
       ? t("rune.holding")
@@ -103,7 +127,7 @@ function Rune({ def, disabled, onFire }: { def: RuneDef; disabled: boolean; onFi
           if (e.key === " " || e.key === "Enter") stop();
         }}
         onContextMenu={(e) => e.preventDefault()}
-        className="group relative grid h-[120px] w-[96px] touch-none select-none place-items-center rounded-[48%_48%_44%_44%/40%_40%_60%_60%] border border-iron/50 bg-[radial-gradient(circle_at_50%_30%,#3a2a1d,#1d140e)] shadow-[inset_0_2px_0_rgba(255,179,71,0.08),inset_0_-6px_14px_rgba(0,0,0,0.6),0_10px_24px_-10px_#000] transition-[border-color,opacity] enabled:hover:border-ember/50 disabled:cursor-not-allowed disabled:opacity-40"
+        className="press group relative grid h-[7.5rem] w-24 touch-none select-none place-items-center rounded-[48%_48%_44%_44%/40%_40%_60%_60%] border border-iron/50 bg-[radial-gradient(circle_at_50%_30%,#3a2a1d,#1d140e)] shadow-[inset_0_2px_0_rgba(255,179,71,0.08),inset_0_-6px_14px_rgba(0,0,0,0.6),0_10px_24px_-10px_#000] transition-[border-color,opacity] enabled:hover:border-ember/50 disabled:cursor-not-allowed disabled:opacity-40"
       >
         <svg viewBox="0 0 40 62" width="46" height="70" aria-hidden className="overflow-visible">
           <path d={def.path} fill="none" stroke="#120c08" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
@@ -115,10 +139,7 @@ function Rune({ def, disabled, onFire }: { def: RuneDef; disabled: boolean; onFi
             strokeWidth="4"
             strokeLinecap="round"
             strokeLinejoin="round"
-            style={{ filter: "drop-shadow(0 0 4px #ff7a1a) drop-shadow(0 0 10px rgba(255,122,26,0.6))" }}
-            initial={false}
-            animate={{ pathLength: lit ? 1 : progress, opacity: lit || progress > 0 ? 1 : 0 }}
-            transition={phase.kind === "holding" || reduced ? { duration: 0 } : { type: "spring", stiffness: 120, damping: 20 }}
+            style={{ pathLength: progress, opacity: glow, filter: "drop-shadow(0 0 4px #ff7a1a) drop-shadow(0 0 10px rgba(255,122,26,0.6))" }}
           />
         </svg>
         <AnimatePresence>
@@ -134,8 +155,8 @@ function Rune({ def, disabled, onFire }: { def: RuneDef; disabled: boolean; onFi
           )}
         </AnimatePresence>
       </button>
-      <h3 className="mt-3 font-display text-[15px] font-semibold text-bone">{t(def.title)}</h3>
-      <p className="text-[11px] text-ash/80">{t("rune.name", { rune: def.rune })}</p>
+      <h3 className="mt-3 font-display text-[0.9375rem] font-semibold text-bone">{t(def.title)}</h3>
+      <p className="text-[0.6875rem] text-ash/80">{t("rune.name", { rune: def.rune })}</p>
       <p className="mt-1 max-w-[18ch] text-xs leading-snug text-ash">{t(def.hint)}</p>
       <p
         aria-live="polite"
@@ -145,22 +166,25 @@ function Rune({ def, disabled, onFire }: { def: RuneDef; disabled: boolean; onFi
       </p>
     </div>
   );
-}
+});
 
 /** Runes of power: actions behind a deliberate press-and-hold (pointer or Space/Enter). */
-export function Runes({ online, lastAction }: { online: boolean; lastAction: AgentEvent | null }) {
+export const Runes = memo(function Runes({ online, lastAction }: { online: boolean; lastAction: AgentEvent | null }) {
   const i18n = useI18n();
   const { t } = i18n;
-  const fire = (name: ActionName) => async () => {
-    try {
-      const r = await runAction(name);
-      if (r.status === 409) return { ok: false, message: t("rune.busy") };
-      if (r.status === 503 || r.status === 502) return { ok: false, message: t("rune.offline") };
-      return { ok: r.body.ok, message: r.body.ok ? t("rune.accepted") : r.body.message || t("rune.failed") };
-    } catch {
-      return { ok: false, message: t("rune.failed") };
-    }
-  };
+  const fire = useCallback<Fire>(
+    async (name) => {
+      try {
+        const r = await runAction(name);
+        if (r.status === 409) return { ok: false, message: t("rune.busy") };
+        if (r.status === 503 || r.status === 502) return { ok: false, message: t("rune.offline") };
+        return { ok: r.body.ok, message: r.body.ok ? t("rune.accepted") : r.body.message || t("rune.failed") };
+      } catch {
+        return { ok: false, message: t("rune.failed") };
+      }
+    },
+    [t],
+  );
   return (
     <div>
       <svg width="0" height="0" className="absolute">
@@ -173,7 +197,7 @@ export function Runes({ online, lastAction }: { online: boolean; lastAction: Age
       </svg>
       <div className="grid grid-cols-3 gap-3">
         {RUNES.map((r) => (
-          <Rune key={r.name} def={r} disabled={!online} onFire={fire(r.name)} />
+          <Rune key={r.name} def={r} disabled={!online} onFire={fire} />
         ))}
       </div>
       {lastAction && (
@@ -186,4 +210,4 @@ export function Runes({ online, lastAction }: { online: boolean; lastAction: Age
       )}
     </div>
   );
-}
+});

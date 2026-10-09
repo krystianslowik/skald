@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react";
 import type { ApiState, SeriesPoint } from "../types";
 import { useI18n } from "../i18n";
 import { Chart } from "./Chart";
@@ -46,39 +47,60 @@ function MetricsOff() {
 }
 
 /** Forge: what the server is burning through, plus the world itself. */
-export function Forge({ state, now }: { state: ApiState; now: number }) {
+export const Forge = memo(function Forge({
+  metrics: m,
+  metricsConfigured,
+  server,
+  world,
+  now,
+}: {
+  metrics: ApiState["metrics"];
+  metricsConfigured: ApiState["metricsConfigured"];
+  server: ApiState["server"];
+  world: ApiState["world"];
+  now: number;
+}) {
   const { t, tn, lookup, number, ago, bytes, rate, clock, modifiers } = useI18n();
-  const m = state.metrics;
   const empty = t("forge.promDown");
-  const hours = { every: 2 * 3_600_000, format: (v: number) => clock(v) };
-  const cores = (v: number) => t("forge.cores", { n: number(v, 2) });
-  const mods = modifiers(state.server.args);
+  // Stable chart inputs: the charts only redraw when their own series change.
+  const charts = useMemo(
+    () => ({
+      hours: { every: 2 * 3_600_000, format: clock },
+      cores: (v: number) => t("forge.cores", { n: number(v, 2) }),
+      cpu: [{ name: "CPU", points: m?.cpu ?? [], color: "#ff7a1a" }],
+      memory: [{ name: "RAM", points: m?.memory ?? [], color: "#ffb347" }],
+      network: [
+        { name: t("forge.rx"), points: m?.rx ?? [], color: "#ffb347" },
+        { name: t("forge.tx"), points: m?.tx ?? [], color: "#c2412d", fill: false },
+      ],
+    }),
+    [m, t, number, clock],
+  );
+  const { hours, cores } = charts;
+  const mods = useMemo(() => modifiers(server.args), [modifiers, server.args]);
   return (
     <div className="grid gap-x-8 gap-y-7 lg:grid-cols-[1fr_1fr_1fr_17rem]">
-      {state.metricsConfigured === false ? (
+      {metricsConfigured === false ? (
         <MetricsOff />
       ) : (
         <>
           <Gauge title={t("forge.cpu")} value={m ? cores(last(m.cpu) ?? 0) : null}>
-            <Chart label={t("forge.cpuLabel")} series={[{ name: "CPU", points: m?.cpu ?? [], color: "#ff7a1a" }]} format={cores} timeFormat={clock} empty={empty} ticks={hours} />
+            <Chart label={t("forge.cpuLabel")} series={charts.cpu} format={cores} timeFormat={clock} empty={empty} ticks={hours} />
           </Gauge>
           <Gauge title={t("forge.memory")} value={m ? bytes(last(m.memory) ?? 0) : null}>
-            <Chart label={t("forge.memoryLabel")} series={[{ name: "RAM", points: m?.memory ?? [], color: "#ffb347" }]} format={bytes} timeFormat={clock} empty={empty} ticks={hours} />
+            <Chart label={t("forge.memoryLabel")} series={charts.memory} format={bytes} timeFormat={clock} empty={empty} ticks={hours} />
           </Gauge>
           <Gauge title={t("forge.network")} value={m ? rate(last(m.rx) ?? 0) : null}>
             <Chart
               label={t("forge.networkLabel")}
-              series={[
-                { name: t("forge.rx"), points: m?.rx ?? [], color: "#ffb347" },
-                { name: t("forge.tx"), points: m?.tx ?? [], color: "#c2412d", fill: false },
-              ]}
+              series={charts.network}
               format={rate}
               timeFormat={clock}
               empty={empty}
               ticks={hours}
             />
             {m && (
-              <div className="mt-1 flex gap-4 text-[11px] text-ash">
+              <div className="mt-1 flex gap-4 text-[0.6875rem] text-ash">
                 <span><span className="mr-1.5 inline-block h-0.5 w-3 align-middle bg-flame" />{t("forge.rx")}</span>
                 <span><span className="mr-1.5 inline-block h-0.5 w-3 align-middle bg-blood" />{t("forge.tx")} {rate(last(m.tx) ?? 0)}</span>
               </div>
@@ -89,21 +111,21 @@ export function Forge({ state, now }: { state: ApiState; now: number }) {
       <dl className="grid grid-cols-2 gap-x-4 gap-y-4 border-t border-iron/30 pt-5 text-sm lg:grid-cols-1 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
         <div>
           <dt className="text-xs text-ash">{t("forge.worldSize")}</dt>
-          <dd className="text-bone">{bytes(state.world.sizeBytes)}</dd>
+          <dd className="text-bone">{bytes(world.sizeBytes)}</dd>
         </div>
         <div>
           <dt className="text-xs text-ash">{t("forge.lastSave")}</dt>
           <dd className="text-bone">
-            {ago(state.world.lastSaveAt ?? state.world.meta?.savedAt, now)}
-            {state.world.lastSaveMs > 0 && <span className="text-ash">, {state.world.lastSaveMs} ms</span>}
+            {ago(world.lastSaveAt ?? world.meta?.savedAt, now)}
+            {world.lastSaveMs > 0 && <span className="text-ash">, {world.lastSaveMs} ms</span>}
           </dd>
         </div>
-        {state.server.netStats && (
+        {server.netStats && (
           <div>
             <dt className="text-xs text-ash">{t("forge.objects")}</dt>
             <dd className="text-bone">
-              {number(state.server.netStats.zdos)}
-              <span className="text-ash">, {tn("forge.connections", state.server.netStats.connections)}</span>
+              {number(server.netStats.zdos)}
+              <span className="text-ash">, {tn("forge.connections", server.netStats.connections)}</span>
             </dd>
           </div>
         )}
@@ -121,16 +143,16 @@ export function Forge({ state, now }: { state: ApiState; now: number }) {
         <div className="col-span-2 lg:col-span-1">
           <dt className="text-xs text-ash">{t("forge.processes")}</dt>
           <dd className="mt-1 space-y-0.5">
-            {Object.entries(state.server.processes).map(([k, v]) => (
+            {Object.entries(server.processes).map(([k, v]) => (
               <div key={k} className="flex justify-between gap-2 text-xs">
                 <span className="text-bone/80">{lookup(`process.${k}`) ?? k}</span>
                 <span className={v === "RUNNING" ? "text-flame" : "text-blood"}>{v === "RUNNING" ? t("forge.running") : v.toLowerCase()}</span>
               </div>
             ))}
-            {Object.keys(state.server.processes).length === 0 && <span className="text-xs text-ash">{t("forge.noData")}</span>}
+            {Object.keys(server.processes).length === 0 && <span className="text-xs text-ash">{t("forge.noData")}</span>}
           </dd>
         </div>
       </dl>
     </div>
   );
-}
+});

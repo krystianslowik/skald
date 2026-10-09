@@ -1,10 +1,10 @@
-import { useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import type { WorldMeta } from "../types";
 import { useI18n } from "../i18n";
 import { mapUrl, type BossProgress } from "../lib/world";
 
 /** World: in-game day, seed and a link to the world map. */
-export function World({ meta, now }: { meta: WorldMeta | null; now: number }) {
+export const World = memo(function World({ meta, now }: { meta: WorldMeta | null; now: number }) {
   const { t, ago } = useI18n();
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -26,7 +26,7 @@ export function World({ meta, now }: { meta: WorldMeta | null; now: number }) {
     <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:gap-8">
       <div className="shrink-0" title={t("world.dayHint")}>
         <div className="text-xs text-ash">{t("world.gameTime")}</div>
-        <div className="font-deco text-4xl leading-tight text-flame">{t("world.day", { n: meta.day })}</div>
+        <div className="type-display font-deco text-4xl text-flame">{t("world.day", { n: meta.day })}</div>
       </div>
       <dl className="grid min-w-0 flex-1 grid-cols-2 gap-x-6 gap-y-3 text-sm">
         <div className="col-span-2 min-w-0 sm:col-span-1">
@@ -37,7 +37,7 @@ export function World({ meta, now }: { meta: WorldMeta | null; now: number }) {
               type="button"
               onClick={copy}
               aria-label={t("world.copySeed", { seed: meta.seedName })}
-              className="rounded border border-iron/50 px-2 py-0.5 text-[11px] text-ash transition-colors hover:border-ember/60 hover:text-flame"
+              className="press rounded border border-iron/50 px-2 py-0.5 text-[0.6875rem] text-ash transition-colors hover:border-ember/60 hover:text-flame"
             >
               {copied ? t("world.copied") : t("world.copy")}
             </button>
@@ -63,10 +63,10 @@ export function World({ meta, now }: { meta: WorldMeta | null; now: number }) {
       </dl>
     </div>
   );
-}
+});
 
 /** Progress: the boss path. `defeated: null` means not yet known. */
-export function Progress({ bosses }: { bosses: readonly BossProgress[] }) {
+export const Progress = memo(function Progress({ bosses }: { bosses: readonly BossProgress[] }) {
   const { t, lookup } = useI18n();
   const unknown = bosses.every((b) => b.defeated === null);
   return (
@@ -85,4 +85,4 @@ export function Progress({ bosses }: { bosses: readonly BossProgress[] }) {
       {unknown && <p className="mt-3 text-xs text-ash">{t("progress.note")}</p>}
     </div>
   );
-}
+});

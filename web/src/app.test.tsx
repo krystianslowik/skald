@@ -8,6 +8,7 @@ import { I18nProvider, makeI18n } from "./i18n";
 import { pl } from "./i18n/pl";
 import { applyEvent } from "./lib/apply";
 import { stripValheimStamp } from "./lib/format";
+import { createLogStore } from "./lib/useValheim";
 import { emptyAgentState, type ApiState, type PlayerProfile } from "./types";
 
 const inPolish = (ui: ReactElement) => render(<I18nProvider locale="pl">{ui}</I18nProvider>);
@@ -50,7 +51,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("Dashboard", () => {
   it("renders every plank in English by default", () => {
-    render(<Dashboard live={{ state: fixture(), logs: [], online: true, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
     expect(screen.getByRole("button", { name: /Join code 4 8 2 9 1 5/ })).toBeInTheDocument();
     for (const t of ["At the fire", "World", "Progress", "Saga", "Warrior ranking", "Forge", "Treasury", "Runes of power", "Chronicle"]) {
       expect(screen.getByRole("heading", { name: t })).toBeInTheDocument();
@@ -68,7 +69,7 @@ describe("Dashboard", () => {
   it("explains how to enable the resource charts when Prometheus is not configured", () => {
     const s = fixture();
     s.metricsConfigured = false;
-    render(<Dashboard live={{ state: s, logs: [], online: true, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: s, logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
     expect(screen.getByText("The charts are asleep")).toBeInTheDocument();
     expect(screen.getByText(/Set PROM_URL/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "How to enable metrics" })).toHaveAttribute("href", expect.stringContaining("#metrics"));
@@ -77,7 +78,7 @@ describe("Dashboard", () => {
   });
 
   it("renders every plank from a state snapshot in Polish", () => {
-    inPolish(<Dashboard live={{ state: fixture(), logs: [{ ts: "2026-10-09T19:59:00Z", line: "10/09/2026 19:59:00: World saved ( 87ms )" }], online: true, lastAction: null }} onLogout={() => {}} />);
+    inPolish(<Dashboard live={{ state: fixture(), logs: createLogStore([{ ts: "2026-10-09T19:59:00Z", line: "10/09/2026 19:59:00: World saved ( 87ms )" }]), online: true, lastAction: null }} onLogout={() => {}} />);
     expect(screen.getByRole("button", { name: /Kod dołączenia 4 8 2 9 1 5/ })).toBeInTheDocument();
     for (const t of ["Przy ognisku", "Świat", "Postęp", "Saga", "Ranking wojów", "Kuźnia", "Skarbiec", "Runy mocy", "Kronika"]) {
       expect(screen.getByRole("heading", { name: t })).toBeInTheDocument();
@@ -104,7 +105,7 @@ describe("Dashboard", () => {
     const s = fixture();
     s.world.meta = null;
     s.server.netStats = null;
-    inPolish(<Dashboard live={{ state: s, logs: [], online: true, lastAction: null }} onLogout={() => {}} />);
+    inPolish(<Dashboard live={{ state: s, logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
     expect(screen.getByText(/Zapis świata jeszcze nieczytelny/)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Mapa świata/ })).not.toBeInTheDocument();
     expect(screen.queryByText("Obiekty w świecie")).not.toBeInTheDocument();
@@ -112,7 +113,7 @@ describe("Dashboard", () => {
   });
 
   it("shows the outage banner and sleeps the runes when offline", () => {
-    render(<Dashboard live={{ state: fixture(), logs: [], online: false, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: false, lastAction: null }} onLogout={() => {}} />);
     expect(screen.getByText("The fire has dimmed.")).toBeInTheDocument();
     const runes = screen.getAllByRole("button", { name: /Hold for one and a half seconds/ });
     expect(runes).toHaveLength(3);
@@ -145,7 +146,7 @@ describe("Profile sheet", () => {
   it("opens from a player name, shows stats and badges, traps focus and closes on Escape", async () => {
     const fetchMock = vi.fn(async (url: string) => (String(url) === "/api/players/Ragnar" ? Response.json(profile()) : new Response("{}", { status: 404 })));
     vi.stubGlobal("fetch", fetchMock);
-    inPolish(<Dashboard live={{ state: fixture(), logs: [], online: true, lastAction: null }} onLogout={() => {}} />);
+    inPolish(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
     const ranking = screen.getByRole("heading", { name: "Ranking wojów" }).closest("section")!;
     const opener = within(ranking).getByRole("button", { name: "Ragnar" });
     fireEvent.click(opener);
@@ -165,7 +166,8 @@ describe("Profile sheet", () => {
     fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
     expect(dialog.contains(document.activeElement)).toBe(true);
     fireEvent.keyDown(document, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    // The sheet leaves along its own edge before it unmounts.
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument(), { timeout: 3000 });
     expect(opener).toHaveFocus();
   });
 });
@@ -193,7 +195,7 @@ describe("Campfire sound", () => {
     }
     vi.stubGlobal("AudioContext", FakeAudioContext);
     const store = memoryStorage();
-    const view = render(<Dashboard live={{ state: fixture(), logs: [], online: true, lastAction: null }} onLogout={() => {}} />);
+    const view = render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
     const toggle = screen.getByRole("button", { name: "Campfire crackle" });
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     expect(made).toEqual([]);
@@ -202,7 +204,7 @@ describe("Campfire sound", () => {
     expect(made).toEqual(["ctx"]);
     expect(store.get("skald_campfire_sound")).toBe("1");
     view.unmount();
-    const again = render(<Dashboard live={{ state: fixture(), logs: [], online: true, lastAction: null }} onLogout={() => {}} />);
+    const again = render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
     expect(screen.getByRole("button", { name: "Campfire crackle" })).toHaveAttribute("aria-pressed", "true");
     again.unmount();
   });

@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 
 interface Spark {
@@ -39,7 +39,7 @@ function Digit({ ch, index, reduced }: { ch: string; index: number; reduced: boo
   );
 }
 
-export function JoinCode({ code, codeAt, status, now }: { code: string; codeAt: string | null; status: string; now: number }) {
+export const JoinCode = memo(function JoinCode({ code, codeAt, status, now }: { code: string; codeAt: string | null; status: string; now: number }) {
   const { t, ago } = useI18n();
   const reduced = useReducedMotion() ?? false;
   const [sparks, setSparks] = useState<Spark[]>([]);
@@ -74,23 +74,24 @@ export function JoinCode({ code, codeAt, status, now }: { code: string; codeAt: 
 
   return (
     <div className="flex flex-col items-center text-center">
-      <p className="font-display text-sm tracking-[0.18em] text-ash sm:text-base">{t("joinCode.title")}</p>
+      <p className="type-kicker font-display text-sm text-ash sm:text-base">{t("joinCode.title")}</p>
       <button
         ref={box}
         type="button"
         onClick={copy}
         disabled={!ready}
         aria-label={ready ? t("joinCode.aria", { digits: code.split("").join(" ") }) : t("joinCode.notReady")}
-        className="group relative mt-3 select-none rounded-lg px-3 py-2 sm:px-6"
+        className="press-soft group relative mt-3 select-none rounded-lg px-3 py-2 sm:px-6"
       >
         {ready ? (
-          <span key={code} className="flex gap-[0.08em] text-[clamp(3.4rem,13vw,8.5rem)] sm:gap-[0.12em]">
+          <span className="type-display flex gap-[0.05em] text-[clamp(3.4rem,13vw,8.5rem)] sm:gap-[0.09em]">
             {code.split("").map((ch, i) => (
-              <Digit key={i} ch={ch} index={i} reduced={reduced} />
+              // Keyed by place and value: a new code re-ignites only the digits that changed.
+              <Digit key={`${i}-${ch}`} ch={ch} index={i} reduced={reduced} />
             ))}
           </span>
         ) : (
-          <span className="flex gap-[0.12em] text-[clamp(3.4rem,13vw,8.5rem)]" aria-hidden>
+          <span className="type-display flex gap-[0.05em] text-[clamp(3.4rem,13vw,8.5rem)] sm:gap-[0.09em]" aria-hidden>
             {Array.from({ length: 6 }, (_, i) => (
               <span key={i} className="digit digit-cold">
                 ·
@@ -128,4 +129,4 @@ export function JoinCode({ code, codeAt, status, now }: { code: string; codeAt: 
       </div>
     </div>
   );
-}
+});

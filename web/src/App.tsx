@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import { useCallback, useEffect, useState } from "react";
 import { Dashboard } from "./components/Dashboard";
 import { Login } from "./components/Login";
@@ -37,17 +37,20 @@ export default function App() {
   if (auth === "checking" || !locale) return <div className="min-h-[100dvh] bg-coal" />;
   return (
     <I18nProvider locale={locale}>
-      <AnimatePresence mode="wait">
-        {auth === "in" ? (
-          <motion.div key="in" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <Panel onUnauthorized={toLogin} onLogout={doLogout} />
-          </motion.div>
-        ) : (
-          <motion.div key="out" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.3 } }}>
-            <Login onSuccess={() => setAuth("in")} />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Reduced motion: transforms and layout animations are dropped app-wide, opacity cross-fades stay. */}
+      <MotionConfig reducedMotion="user">
+        <AnimatePresence mode="wait">
+          {auth === "in" ? (
+            <motion.div key="in" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <Panel onUnauthorized={toLogin} onLogout={doLogout} />
+            </motion.div>
+          ) : (
+            <motion.div key="out" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.3 } }}>
+              <Login onSuccess={() => setAuth("in")} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </MotionConfig>
     </I18nProvider>
   );
 }

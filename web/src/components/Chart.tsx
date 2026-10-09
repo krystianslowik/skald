@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState } from "react";
+import { memo, useId, useMemo, useRef, useState } from "react";
 import type { SeriesPoint } from "../types";
 import { useI18n } from "../i18n";
 
@@ -27,7 +27,7 @@ function pathFor(points: SeriesPoint[], x: (t: number) => number, y: (v: number)
  * Hand-rolled SVG area/line chart in ember colours with a hover readout.
  * Stretches to its container width; strokes stay crisp via non-scaling-stroke.
  */
-export function Chart({
+export const Chart = memo(function Chart({
   series,
   height = 120,
   step = false,
@@ -56,17 +56,29 @@ export function Chart({
   const H = height;
   const pad = 6;
 
-  const all = series.flatMap((s) => s.points);
   const geo = useMemo(() => {
-    if (all.length < 2) return null;
-    const t0 = Math.min(...all.map((p) => p[0]));
-    const t1 = Math.max(...all.map((p) => p[0]));
-    const vMax = Math.max(...all.map((p) => p[1]), yMin + 1e-9);
+    // One pass for the extent; no spread of large arrays into Math.min/max.
+    let n = 0;
+    let t0 = Infinity;
+    let t1 = -Infinity;
+    let vMax = yMin + 1e-9;
+    for (const s of series) {
+      for (const [pt, pv] of s.points) {
+        n++;
+        if (pt < t0) t0 = pt;
+        if (pt > t1) t1 = pt;
+        if (pv > vMax) vMax = pv;
+      }
+    }
+    if (n < 2) return null;
     const top = vMax * 1.15;
     const x = (t: number) => ((t - t0) / Math.max(1, t1 - t0)) * W;
     const y = (v: number) => H - pad - ((v - yMin) / Math.max(1e-9, top - yMin)) * (H - pad * 2);
     return { t0, t1, x, y };
   }, [series, H, yMin]);
+
+  // Paths only change with the data, not with the hover readout.
+  const lines = useMemo(() => (geo ? series.map((s) => pathFor(s.points, geo.x, geo.y, step)) : []), [series, geo, step]);
 
   if (!geo) {
     return (
@@ -135,7 +147,7 @@ export function Chart({
           <line key={f} x1="0" x2={W} y1={H * f} y2={H * f} stroke="rgba(155,143,132,0.12)" strokeDasharray="2 6" vectorEffect="non-scaling-stroke" />
         ))}
         {series.map((s, i) => {
-          const line = pathFor(s.points, geo.x, geo.y, step);
+          const line = lines[i]!;
           return (
             <g key={s.name}>
               {s.fill !== false && <path d={`${line}V${H}H${geo.x(s.points[0]![0]).toFixed(1)}Z`} fill={`url(#${uid}-g${i})`} />}
@@ -146,7 +158,7 @@ export function Chart({
         {hover !== null && <line x1={hover} x2={hover} y1="0" y2={H} stroke="rgba(255,179,71,0.5)" vectorEffect="non-scaling-stroke" />}
       </svg>
       {ticks && (
-        <div className="relative mt-1 h-4 text-[10px] text-ash/70" aria-hidden>
+        <div className="relative mt-1 h-4 text-[0.625rem] text-ash/70" aria-hidden>
           {tickTimes.map((t) => {
             const pct = (geo.x(t) / W) * 100;
             if (pct > 92) return null;
@@ -160,7 +172,7 @@ export function Chart({
       )}
       {hoverT !== null && (
         <div
-          className="pointer-events-none absolute top-1 z-10 rounded border border-ember/30 bg-coal/90 px-2 py-1 text-[11px] leading-tight shadow-lg"
+          className="material pointer-events-none absolute top-1 z-10 rounded border border-ember/30 px-2 py-1 text-[0.6875rem] leading-tight shadow-lg"
           style={{ left: `${(hover! / W) * 100}%`, transform: `translateX(${hover! > W / 2 ? "calc(-100% - 8px)" : "8px"})` }}
         >
           <div className="text-ash">{timeFormat(hoverT)}</div>
@@ -177,4 +189,4 @@ export function Chart({
       )}
     </div>
   );
-}
+});

@@ -3,6 +3,9 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./styles/index.css";
 
+// iOS Safari only applies :active (the press feedback) when a touch listener exists.
+document.addEventListener("touchstart", () => undefined, { passive: true });
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />

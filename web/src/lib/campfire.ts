@@ -86,6 +86,12 @@ class Campfire {
     this.timer = setTimeout(this.tick, 35 + r * r * 650);
   };
 
+  /** One crisp pop now, for a completed action; only when the fire is actually audible. */
+  snap(): void {
+    if (!this.running || this.ctx.state !== "running") return;
+    this.pop(this.ctx.currentTime, 0.75);
+  }
+
   resume(): void {
     void this.ctx.resume().catch(() => undefined);
     this.master.gain.setTargetAtTime(VOLUME, this.ctx.currentTime, 0.6);
@@ -106,6 +112,17 @@ class Campfire {
     clearTimeout(this.timer);
     void this.ctx.close().catch(() => undefined);
   }
+}
+
+/** The fire that is currently on, if any (the sound toggle owns its lifetime). */
+let active: Campfire | null = null;
+
+/**
+ * A single crackle pop in sync with a UI event (a rune that just caught).
+ * Silent unless the viewer turned the campfire sound on.
+ */
+export function crackle(): void {
+  active?.snap();
 }
 
 function readPref(): boolean {
@@ -157,6 +174,7 @@ export function useCampfireSound(): { on: boolean; supported: boolean; toggle: (
       window.removeEventListener("keydown", unlock);
     };
     const onVisibility = () => (document.hidden ? f.pause() : f.resume());
+    active = f;
     wake();
     if (f.ctx.state !== "running") {
       window.addEventListener("pointerdown", unlock);
@@ -167,6 +185,7 @@ export function useCampfireSound(): { on: boolean; supported: boolean; toggle: (
       window.removeEventListener("pointerdown", unlock);
       window.removeEventListener("keydown", unlock);
       document.removeEventListener("visibilitychange", onVisibility);
+      if (active === f) active = null;
       f.close();
     };
   }, [on]);
