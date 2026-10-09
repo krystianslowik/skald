@@ -1,0 +1,217 @@
+# The game pod: the Valheim server plus the Skald agent as a native sidecar.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valheim
+  labels:
+    app.kubernetes.io/name: valheim
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: valheim
+  strategy:
+    # Singleton: both PVCs are RWO and two servers on one world corrupt it.
+    # Every rollout restarts the game and changes the join code.
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: valheim
+    spec:
+      serviceAccountName: valheim
+      automountServiceAccountToken: false
+      # The image wraps SIGTERM: supervisord stopwaitsecs=90, inside that the
+      # server gets SIGINT (save + quit), then TERM/KILL.
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      # The game image is amd64 only.
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      initContainers:
+        # Native sidecar (restartPolicy: Always, Kubernetes 1.29+): starts
+        # before the game so it catches the first syslog lines, and can crash
+        # and restart on its own without taking the game down. Changing its
+        # spec still rolls the pod (and so the join code).
+        - name: agent
+          restartPolicy: Always
+          image: ghcr.io/krystianslowik/skald-agent:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: agent
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9464
+              protocol: TCP
+          env:
+            - name: AGENT_TOKEN
+              valueFrom:
+                secretKeyRef: {name: skald-agent, key: AGENT_TOKEN}
+            - name: SUPERVISOR_USER
+              value: admin
+            - name: SUPERVISOR_PASS
+              valueFrom:
+                secretKeyRef: {name: skald-agent, key: SUPERVISOR_HTTP_PASS}
+            # Keep these three in sync with the game container below.
+            - name: WORLD_NAME
+              value: "Midgard"
+            - name: SERVER_NAME
+              value: "My Valheim"
+            - name: SERVER_ARGS
+              value: ""
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: run
+              mountPath: /var/run/valheim
+              readOnly: true
+          readinessProbe:
+            httpGet: {path: /healthz, port: agent}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: agent}
+            periodSeconds: 30
+      containers:
+        - name: valheim
+          # community-valheim-tools/valheim-server (amd64 only). 1.3.0 or newer
+          # is required: earlier images mis-detect idleness with crossplay.
+          image: ghcr.io/community-valheim-tools/valheim-server:1.4.0
+          imagePullPolicy: IfNotPresent
+          # No ports: with crossplay the server does not bind UDP 2456 and all
+          # traffic goes out to the PlayFab relays. No Service, no LoadBalancer.
+          env:
+            - name: SERVER_NAME
+              value: "My Valheim"
+            # Exact (case-sensitive) folder name under /config/worlds_local;
+            # a mismatch silently generates a new world.
+            - name: WORLD_NAME
+              value: "Midgard"
+            - name: SERVER_ARGS
+              value: ""
+            - name: SERVER_PASS_FILE
+              value: /secrets/server-pass
+            - name: SERVER_PUBLIC
+              value: "true"
+            - name: CROSSPLAY
+              value: "true"
+            - name: TZ
+              value: UTC
+            # A scheduled restart rotates the join code; restart deliberately
+            # from the dashboard instead. A pod start always runs steamcmd
+            # first, so it doubles as a forced update.
+            - name: RESTART_CRON
+              value: ""
+            # Hourly zips kept 3 days would be up to 72; cap the count so they
+            # cannot fill the config volume.
+            - name: BACKUPS_MAX_COUNT
+              value: "48"
+            # Feed the agent sidecar: busybox syslogd forwards every line to
+            # UDP 127.0.0.1:5140 and still writes stdout for your log stack.
+            - name: SYSLOG_REMOTE_HOST
+              value: 127.0.0.1
+            - name: SYSLOG_REMOTE_PORT
+              value: "5140"
+            - name: SYSLOG_REMOTE_AND_LOCAL
+              value: "true"
+            # supervisord XML-RPC for the agent's actions. Binds :9001 on all
+            # pod interfaces; the NetworkPolicy admits only the agent ports.
+            - name: SUPERVISOR_HTTP
+              value: "true"
+            - name: SUPERVISOR_HTTP_PASS
+              valueFrom:
+                secretKeyRef: {name: skald-agent, key: SUPERVISOR_HTTP_PASS}
+          resources:
+            requests:
+              cpu: "1"
+              memory: 3Gi
+            limits:
+              # No CPU limit on purpose: the game loop is single-threaded and
+              # CFS throttling shows up as rubber-banding.
+              memory: 6Gi
+          # Root + writable root FS are required by the image: its bootstrap
+          # edits /etc/passwd, chowns the volumes and installs a crontab.
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: data
+              mountPath: /opt/valheim
+            - name: server-pass
+              mountPath: /secrets
+              readOnly: true
+            # Shared with the agent: valheim-server.status + pidfiles.
+            - name: run
+              mountPath: /var/run/valheim
+          # The status file goes starting -> running once the server is up.
+          # First boot downloads ~2.4 GB and steamcmd may retry for minutes.
+          startupProbe:
+            exec:
+              command: [sh, -c, "grep -qx running /var/run/valheim/valheim-server.status"]
+            periodSeconds: 10
+            failureThreshold: 180
+          readinessProbe:
+            exec:
+              command: [sh, -c, "grep -qx running /var/run/valheim/valheim-server.status"]
+            periodSeconds: 30
+            failureThreshold: 2
+          # Restarts and updates legitimately pass through STOPPED/STARTING, so
+          # only a server that has not been RUNNING for 15 min counts as dead.
+          livenessProbe:
+            exec:
+              command: [supervisorctl, status, valheim-server]
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 15
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: valheim-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: valheim-data
+        - name: server-pass
+          secret:
+            secretName: valheim-server-pass
+            defaultMode: 0400
+        - name: run
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: skald-agent
+  labels:
+    app.kubernetes.io/name: skald-agent
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: valheim
+  ports:
+    - name: agent
+      port: 8080
+      # Numeric on purpose: named ports declared on native-sidecar (init)
+      # containers are not resolved into EndpointSlices, so `targetPort: agent`
+      # would leave this Service without endpoints.
+      targetPort: 8080
+      protocol: TCP
+    - name: metrics
+      port: 9464
+      targetPort: 9464
+      protocol: TCP

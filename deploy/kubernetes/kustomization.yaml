@@ -1,0 +1,26 @@
+# Generic Kubernetes example: a crossplay Valheim server with the Skald agent
+# as a native sidecar, and the Skald web dashboard as its own Deployment.
+#
+#   cp secrets.example.yaml secrets.yaml   # fill in, keep it out of git
+#   kubectl apply -k deploy/kubernetes
+#
+# Requires Kubernetes 1.29+ (native sidecars: initContainers with
+# restartPolicy: Always). Exposing skald-web (Ingress, Gateway, a tunnel) is
+# up to you; see the README.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: valheim
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - pvc.yaml
+  - valheim.yaml
+  - skald-web.yaml
+  - networkpolicy.yaml
+  - secrets.yaml
+  # Needs the prometheus-operator CRDs (kube-prometheus-stack):
+  # - servicemonitor.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: skald
+    includeSelectors: false

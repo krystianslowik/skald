@@ -1,0 +1,2110 @@
+# Same dashboard as grafana-dashboard.json, as a ConfigMap for the Grafana
+# sidecar (kube-prometheus-stack picks up ConfigMaps labelled grafana_dashboard).
+# Regenerate after editing the JSON:
+#   kubectl create configmap skald-dashboard --from-file=skald-valheim.json=grafana-dashboard.json \
+#     --dry-run=client -o yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: skald-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  skald-valheim.json: |-
+    {
+      "title": "Skald: Valheim server",
+      "uid": "skald-valheim",
+      "tags": [
+        "skald",
+        "valheim"
+      ],
+      "editable": true,
+      "graphTooltip": 1,
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "timezone": "browser",
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "label": "Prometheus",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {},
+            "hide": 0,
+            "refresh": 1,
+            "options": []
+          },
+          {
+            "name": "loki",
+            "label": "Loki",
+            "type": "datasource",
+            "query": "loki",
+            "current": {},
+            "hide": 0,
+            "refresh": 1,
+            "options": []
+          },
+          {
+            "name": "job",
+            "label": "Agent job",
+            "type": "custom",
+            "query": "skald-agent",
+            "current": {
+              "text": "skald-agent",
+              "value": "skald-agent"
+            },
+            "hide": 0,
+            "options": [
+              {
+                "selected": true,
+                "text": "skald-agent",
+                "value": "skald-agent"
+              }
+            ]
+          },
+          {
+            "name": "namespace",
+            "label": "Namespace",
+            "type": "custom",
+            "query": "valheim",
+            "current": {
+              "text": "valheim",
+              "value": "valheim"
+            },
+            "hide": 0,
+            "options": [
+              {
+                "selected": true,
+                "text": "valheim",
+                "value": "valheim"
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "list": []
+      },
+      "panels": [
+        {
+          "type": "row",
+          "id": 1,
+          "title": "Server",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "type": "stat",
+          "id": 2,
+          "title": "Server up",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 0,
+            "y": 1
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  }
+                ]
+              },
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "0": {
+                      "text": "DOWN"
+                    },
+                    "1": {
+                      "text": "UP"
+                    }
+                  }
+                }
+              ]
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "max(valheim_server_up{job=\"$job\"}) or vector(0)",
+              "refId": "A",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 3,
+          "title": "Server status",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 3,
+            "y": 1
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "name",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": ""
+            }
+          },
+          "targets": [
+            {
+              "expr": "valheim_server_status{job=\"$job\"} == 1",
+              "refId": "A",
+              "instant": true,
+              "legendFormat": "{{status}}",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 4,
+          "title": "Supervisor up",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 6,
+            "y": 1
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  }
+                ]
+              },
+              "mappings": [
+                {
+                  "type": "value",
+                  "options": {
+                    "0": {
+                      "text": "DOWN"
+                    },
+                    "1": {
+                      "text": "UP"
+                    }
+                  }
+                }
+              ]
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "max(valheim_supervisor_up{job=\"$job\"}) or vector(0)",
+              "refId": "A",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 5,
+          "title": "Players online",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 9,
+            "y": 1
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "max(valheim_players_online{job=\"$job\"})",
+              "refId": "A",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 6,
+          "title": "PlayFab state",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 12,
+            "y": 1
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "name",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "valheim_playfab_state{job=\"$job\"} == 1",
+              "refId": "A",
+              "instant": true,
+              "legendFormat": "{{state}}",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 7,
+          "title": "Uptime",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 15,
+            "y": 1
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "time() - max(valheim_server_started_timestamp_seconds{job=\"$job\"})",
+              "refId": "A",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 8,
+          "title": "Join code age",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 18,
+            "y": 1
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "time() - max(valheim_join_code_changed_timestamp_seconds{job=\"$job\"})",
+              "refId": "A",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 9,
+          "title": "Version",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 3,
+            "x": 21,
+            "y": 1
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "name",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "valheim_info{job=\"$job\"}",
+              "refId": "A",
+              "instant": true,
+              "legendFormat": "{{version}} (net {{network_version}})",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "id": 10,
+          "title": "Process running by process",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 12,
+            "x": 0,
+            "y": 5
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "mode": "none"
+                }
+              },
+              "min": 0,
+              "max": 1
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "valheim_process_running{job=\"$job\"}",
+              "legendFormat": "{{process}}",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 11,
+          "title": "Server info (world / name)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 12,
+            "x": 12,
+            "y": 5
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "name",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "valheim_info{job=\"$job\"}",
+              "refId": "A",
+              "instant": true,
+              "legendFormat": "{{world}} / {{server_name}}",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "row",
+          "id": 12,
+          "title": "World",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 11
+          }
+        },
+        {
+          "type": "stat",
+          "id": 13,
+          "title": "World day",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 0,
+            "y": 12
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "max(valheim_world_day{job=\"$job\"})",
+              "refId": "A",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 14,
+          "title": "World size",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 4,
+            "y": 12
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "max(valheim_world_size_bytes{job=\"$job\"})",
+              "refId": "A",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 15,
+          "title": "ZDOs",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 8,
+            "y": 12
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "max(valheim_world_zdos{job=\"$job\"})",
+              "refId": "A",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 16,
+          "title": "Last save age",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 12,
+            "y": 12
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 1800
+                  },
+                  {
+                    "color": "red",
+                    "value": 7200
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "time() - max(valheim_world_last_save_timestamp_seconds{job=\"$job\"})",
+              "refId": "A",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 17,
+          "title": "Backups",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 16,
+            "y": 12
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "max(valheim_backups_count{job=\"$job\"})",
+              "refId": "A",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 18,
+          "title": "Last backup age",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 4,
+            "x": 20,
+            "y": 12
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 93600
+                  },
+                  {
+                    "color": "red",
+                    "value": 180000
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "time() - max(valheim_last_backup_timestamp_seconds{job=\"$job\"})",
+              "refId": "A",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "id": 19,
+          "title": "World size over time",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 16
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "max(valheim_world_size_bytes{job=\"$job\"})",
+              "legendFormat": "world",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            },
+            {
+              "expr": "max(valheim_backups_bytes{job=\"$job\"})",
+              "legendFormat": "backups",
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "id": 20,
+          "title": "ZDOs and connections",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 16
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "max(valheim_world_zdos{job=\"$job\"})",
+              "legendFormat": "zdos",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            },
+            {
+              "expr": "max(valheim_connections{job=\"$job\"})",
+              "legendFormat": "connections",
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "id": 21,
+          "title": "World day over time",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 24
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "max(valheim_world_day{job=\"$job\"})",
+              "legendFormat": "day",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "id": 22,
+          "title": "Backups count",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 24
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "max(valheim_backups_count{job=\"$job\"})",
+              "legendFormat": "count",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "row",
+          "id": 23,
+          "title": "Players and events",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 31
+          }
+        },
+        {
+          "type": "timeseries",
+          "id": 24,
+          "title": "Players online over time",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 32
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "mode": "none"
+                }
+              },
+              "min": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "max(valheim_players_online{job=\"$job\"})",
+              "legendFormat": "players",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "id": 25,
+          "title": "Events by type (increase per 1h)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 32
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum by (type) (increase(valheim_events_total{job=\"$job\"}[1h]))",
+              "legendFormat": "{{type}}",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 26,
+          "title": "Deaths (24h)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 40
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(valheim_events_total{job=\"$job\",type=\"death\"}[24h]))",
+              "refId": "A",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 27,
+          "title": "Raids (24h)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 40
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(valheim_events_total{job=\"$job\",type=\"raid\"}[24h]))",
+              "refId": "A",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 28,
+          "title": "Joins (24h)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 12,
+            "y": 40
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(valheim_events_total{job=\"$job\",type=\"player_join\"}[24h]))",
+              "refId": "A",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "id": 29,
+          "title": "Last log line age",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 18,
+            "y": 40
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 900
+                  },
+                  {
+                    "color": "red",
+                    "value": 3600
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "value",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            }
+          },
+          "targets": [
+            {
+              "expr": "time() - max(valheim_agent_last_log_timestamp_seconds{job=\"$job\"})",
+              "refId": "A",
+              "instant": true,
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "id": 30,
+          "title": "Deaths and raids (increase per 1h)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 24,
+            "x": 0,
+            "y": 44
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(increase(valheim_events_total{job=\"$job\",type=\"death\"}[1h]))",
+              "legendFormat": "deaths",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            },
+            {
+              "expr": "sum(increase(valheim_events_total{job=\"$job\",type=\"raid\"}[1h]))",
+              "legendFormat": "raids",
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "row",
+          "id": 31,
+          "title": "Resources",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 51
+          }
+        },
+        {
+          "type": "timeseries",
+          "id": 32,
+          "title": "CPU cores (game vs agent)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 52
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "mode": "normal"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum by (container) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",container=~\"valheim|agent\"}[5m]))",
+              "legendFormat": "{{container}}",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "id": 33,
+          "title": "Memory working set",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 52
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum by (container) (container_memory_working_set_bytes{namespace=\"$namespace\",container=~\"valheim|agent\"})",
+              "legendFormat": "{{container}}",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            },
+            {
+              "expr": "max(kube_pod_container_resource_limits{namespace=\"$namespace\",container=\"valheim\",resource=\"memory\"})",
+              "legendFormat": "limit (game)",
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "id": 34,
+          "title": "Network RX / TX (pod)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 60
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "Bps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(rate(container_network_receive_bytes_total{namespace=\"$namespace\",pod=~\"valheim-[a-z0-9]+-[a-z0-9]+\"}[5m]))",
+              "legendFormat": "rx",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            },
+            {
+              "expr": "sum(rate(container_network_transmit_bytes_total{namespace=\"$namespace\",pod=~\"valheim-[a-z0-9]+-[a-z0-9]+\"}[5m]))",
+              "legendFormat": "tx",
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "id": 35,
+          "title": "Container restarts (increase per 1h)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 60
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineWidth": 2,
+                "fillOpacity": 15,
+                "showPoints": "never",
+                "spanNulls": true,
+                "stacking": {
+                  "mode": "none"
+                }
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum by (container) (increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\"}[1h]))",
+              "legendFormat": "{{container}}",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "row",
+          "id": 36,
+          "title": "Logs",
+          "collapsed": false,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 68
+          }
+        },
+        {
+          "type": "logs",
+          "id": 37,
+          "title": "Game server",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 69
+          },
+          "options": {
+            "showTime": true,
+            "wrapLogMessage": true,
+            "sortOrder": "Descending",
+            "enableLogDetails": true,
+            "dedupStrategy": "none"
+          },
+          "targets": [
+            {
+              "expr": "{namespace=\"$namespace\", container=\"valheim\"}",
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "${loki}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "logs",
+          "id": 38,
+          "title": "PlayFab",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 79
+          },
+          "options": {
+            "showTime": true,
+            "wrapLogMessage": true,
+            "sortOrder": "Descending",
+            "enableLogDetails": true,
+            "dedupStrategy": "none"
+          },
+          "targets": [
+            {
+              "expr": "{namespace=\"$namespace\", container=\"valheim\"} |~ \"(?i)playfab\"",
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "${loki}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "logs",
+          "id": 39,
+          "title": "Errors",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 89
+          },
+          "options": {
+            "showTime": true,
+            "wrapLogMessage": true,
+            "sortOrder": "Descending",
+            "enableLogDetails": true,
+            "dedupStrategy": "none"
+          },
+          "targets": [
+            {
+              "expr": "{namespace=\"$namespace\", container=\"valheim\"} |~ \"(?i)(error|exception|fatal)\"",
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "${loki}"
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Valheim dedicated server metrics from the Skald agent (/metrics on :9464), plus cAdvisor resources and Loki logs."
+    }

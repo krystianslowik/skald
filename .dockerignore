@@ -1,0 +1,13 @@
+# Build context for server/Dockerfile is the repository root.
+**/node_modules
+**/dist
+**/bin
+**/*.db
+**/*.log
+.git
+.github
+.omc
+.env
+deploy
+docs
+agent

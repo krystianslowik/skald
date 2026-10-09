@@ -1,0 +1,20 @@
+# Prometheus scrapes the agent's metrics listener (:9464, no token). Needs the
+# prometheus-operator CRDs; enable it in kustomization.yaml. kube-prometheus-stack
+# only picks up ServiceMonitors whose labels match its serviceMonitorSelector
+# (by default `release: <helm release name>`), so adjust the label below.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: skald-agent
+  labels:
+    app.kubernetes.io/name: skald-agent
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: skald-agent
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

@@ -1,0 +1,113 @@
+# The dashboard. Its own Deployment, so releasing it never restarts the game.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skald-web
+  labels:
+    app.kubernetes.io/name: skald-web
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: skald-web
+  strategy:
+    # RWO SQLite volume: stop the old pod before starting the new one.
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: skald-web
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: ghcr.io/krystianslowik/skald-web:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: AGENT_URL
+              value: http://skald-agent.valheim.svc.cluster.local:8080
+            - name: AGENT_TOKEN
+              valueFrom:
+                secretKeyRef: {name: skald-agent, key: AGENT_TOKEN}
+            - name: PANEL_PASSWORD_HASH
+              valueFrom:
+                secretKeyRef: {name: skald-web, key: PANEL_PASSWORD_HASH}
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef: {name: skald-web, key: SESSION_SECRET}
+            - name: SKALD_LOCALE
+              value: en
+            # Calendar days for streaks and badges.
+            - name: SKALD_TZ
+              value: UTC
+            # Optional resource charts. kube-prometheus-stack example:
+            #   http://kube-prometheus-stack-prometheus.monitoring.svc:9090
+            - name: PROM_URL
+              value: ""
+            - name: PROM_NAMESPACE
+              value: valheim
+            # Behind an ingress or tunnel, the header with the real client IP
+            # (X-Forwarded-For, X-Real-IP, CF-Connecting-IP). Empty = socket peer.
+            - name: TRUSTED_IP_HEADER
+              value: ""
+            # Keep "true" when Skald is served over HTTPS (it should be).
+            - name: COOKIE_SECURE
+              value: "true"
+            - name: DB_PATH
+              value: /data/skald.db
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: skald-web-data
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: skald-web
+  labels:
+    app.kubernetes.io/name: skald-web
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: skald-web
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

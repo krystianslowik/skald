@@ -1,0 +1,61 @@
+# Alerts on the Skald agent's /metrics (:9464). Needs the prometheus-operator
+# CRDs. kube-prometheus-stack only loads rules whose labels match its
+# ruleSelector, by default `release: <helm release name>`: change the label
+# below to match your install.
+#
+# A restart (deploy, update, agent change) takes ~2 min of stopping plus up to
+# a few minutes of steamcmd validation on start, so "down" waits 15 min.
+# A version mismatch with clients cannot be seen from here: a server stuck on
+# an old build looks healthy.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: skald-valheim
+  namespace: valheim
+  labels:
+    app.kubernetes.io/part-of: skald
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: skald-valheim
+      rules:
+        - alert: ValheimMetricsAbsent
+          annotations:
+            summary: Skald agent /metrics is not being scraped
+            description: No successful scrape of the Skald agent for 10m. Every other Valheim rule is blind while this fires.
+          expr: absent(up{job="skald-agent"} == 1)
+          for: 10m
+          labels:
+            severity: warning
+        - alert: ValheimServerDown
+          annotations:
+            summary: Valheim server is not running
+            description: The server status file has not reported running for 15m. Check the logs of the valheim container.
+          expr: valheim_server_up{job="skald-agent"} == 0
+          for: 15m
+          labels:
+            severity: critical
+        - alert: ValheimPlayFabError
+          annotations:
+            summary: Valheim cannot reach PlayFab, crossplay players cannot join
+            description: PlayFab state has been error for 10m (reconnect loop, connectivity error or a PlayFab outage). Check outbound HTTPS and UDP 1024-65535 from the game pod.
+          expr: valheim_playfab_state{job="skald-agent", state="error"} == 1
+          for: 10m
+          labels:
+            severity: warning
+        - alert: ValheimProcessNotRunning
+          annotations:
+            summary: 'Valheim supervisor process {{ $labels.process }} is not running'
+            description: A supervisor loop of the game image stopped, so backups or update checks silently stop with it.
+          expr: valheim_process_running{job="skald-agent", process=~"valheim-server|valheim-backup|valheim-updater|crond"} == 0
+          for: 15m
+          labels:
+            severity: warning
+        - alert: ValheimBackupStale
+          annotations:
+            summary: 'Newest Valheim world backup is {{ $value | humanizeDuration }} old'
+            description: The image zips the world every hour. Check the valheim-backup process and free space on the config volume.
+          expr: time() - valheim_last_backup_timestamp_seconds{job="skald-agent"} > 3 * 3600
+          for: 15m
+          labels:
+            severity: warning

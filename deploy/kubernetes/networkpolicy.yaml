@@ -1,0 +1,79 @@
+# NetworkPolicies need a CNI that enforces them (Calico, Cilium, ...). Adjust
+# the namespace names for your ingress controller / tunnel and Prometheus.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: valheim
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: valheim
+  policyTypes: [Ingress, Egress]
+  # Players never connect in: crossplay goes through PlayFab relays that the
+  # server dials out to. The only ingress is the dashboard reaching the agent
+  # and Prometheus scraping it; supervisord's :9001 stays pod-local.
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: skald-web}}
+      ports:
+        - {protocol: TCP, port: 8080}
+    # Metrics listener has no token: keep it to the monitoring namespace.
+    - from:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+      ports:
+        - {protocol: TCP, port: 9464}
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    # Public internet only (RFC 1918 excluded):
+    # - TCP 443: PlayFab API, Steam
+    # - TCP 80:  steamcmd depot downloads from the Steam CDNs
+    # - UDP 1024-65535: PlayFab relays (Microsoft asks for the full
+    #   non-reserved range and no IP filtering) and Steam
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - {protocol: TCP, port: 80}
+        - {protocol: TCP, port: 443}
+        - {protocol: UDP, port: 1024, endPort: 65535}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: skald-web
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: skald-web
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Whatever exposes the dashboard: an ingress controller, a Gateway, or a
+    # tunnel connector. Narrow this to its namespace, e.g.
+    #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}
+    - ports:
+        - {protocol: TCP, port: 8080}
+  egress:
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    # The agent sidecar in the game pod.
+    - to:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: valheim}}
+      ports:
+        - {protocol: TCP, port: 8080}
+    # Prometheus for the resource charts (only if PROM_URL is set).
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+      ports:
+        - {protocol: TCP, port: 9090}

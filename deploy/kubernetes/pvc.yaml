@@ -1,0 +1,42 @@
+# No storageClassName: the cluster default is used. Set one explicitly if your
+# default is node-local and you want the world to survive a node loss.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: valheim-config
+  labels:
+    app.kubernetes.io/name: valheim
+spec:
+  # /config: worlds_local/<WORLD_NAME>/ (the world), hourly backup zips,
+  # admin/banned/permitted lists. The only irreplaceable data in this stack.
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: valheim-data
+  labels:
+    app.kubernetes.io/name: valheim
+spec:
+  # /opt/valheim: steamcmd download dir + live server copy (~2x 2.4 GB). Fully
+  # re-downloadable; persisted only so a restart does not re-pull the game.
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: skald-web-data
+  labels:
+    app.kubernetes.io/name: skald-web
+spec:
+  # SQLite event history (sessions, deaths, saves). Single writer.
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi

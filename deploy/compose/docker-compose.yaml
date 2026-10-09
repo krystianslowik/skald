@@ -1,0 +1,101 @@
+# Skald + a crossplay Valheim server with Docker Compose.
+#
+#   cp .env.example .env    # then fill in the secrets (see the comments there)
+#   docker compose up -d
+#   open http://localhost:8080
+#
+# Three containers:
+#   valheim    the game (community-valheim-tools/valheim-server, amd64 only)
+#   agent      Skald's sidecar; shares the game's network namespace so the
+#              game's syslog (UDP 127.0.0.1:5140) and supervisord's XML-RPC
+#              (127.0.0.1:9001) stay on loopback
+#   skald-web  the dashboard; a separate container, so updating it never
+#              restarts the game (a game restart rotates the join code)
+#
+# No game ports are published: with crossplay the server dials out to the
+# PlayFab relays and players join with the 6-digit code shown on the dashboard.
+
+name: skald
+
+services:
+  valheim:
+    image: ghcr.io/community-valheim-tools/valheim-server:1.4.0
+    # The game image is amd64 only; on an ARM host this runs under emulation.
+    platform: linux/amd64
+    restart: unless-stopped
+    # The image saves the world on SIGTERM; give it time (supervisord waits 90 s).
+    stop_grace_period: 2m
+    environment:
+      SERVER_NAME: ${SERVER_NAME:-My Valheim}
+      WORLD_NAME: ${WORLD_NAME:-Midgard}
+      SERVER_PASS: ${SERVER_PASS:?set SERVER_PASS in .env}
+      SERVER_PUBLIC: "true"
+      SERVER_ARGS: ${SERVER_ARGS:-}
+      CROSSPLAY: "true"
+      TZ: ${TZ:-UTC}
+      # A scheduled restart would rotate the join code; restart deliberately
+      # from the dashboard instead.
+      RESTART_CRON: ""
+      BACKUPS_MAX_COUNT: "48"
+      # Feed the agent: busybox syslogd forwards every line to the sidecar and
+      # still writes stdout, so `docker compose logs valheim` keeps working.
+      SYSLOG_REMOTE_HOST: 127.0.0.1
+      SYSLOG_REMOTE_PORT: "5140"
+      SYSLOG_REMOTE_AND_LOCAL: "true"
+      # supervisord XML-RPC for the agent's backup / update / restart actions.
+      SUPERVISOR_HTTP: "true"
+      SUPERVISOR_HTTP_PASS: ${SUPERVISOR_HTTP_PASS:?set SUPERVISOR_HTTP_PASS in .env}
+    volumes:
+      - valheim-config:/config
+      - valheim-data:/opt/valheim
+      - valheim-run:/var/run/valheim
+
+  agent:
+    image: ghcr.io/krystianslowik/skald-agent:${SKALD_VERSION:-latest}
+    restart: unless-stopped
+    # Same network namespace as the game: loopback is shared. If the valheim
+    # container is recreated, recreate this one too (`docker compose up -d`).
+    network_mode: "service:valheim"
+    depends_on: [valheim]
+    environment:
+      AGENT_TOKEN: ${AGENT_TOKEN:?set AGENT_TOKEN in .env}
+      SUPERVISOR_USER: admin
+      SUPERVISOR_PASS: ${SUPERVISOR_HTTP_PASS}
+      SERVER_NAME: ${SERVER_NAME:-My Valheim}
+      WORLD_NAME: ${WORLD_NAME:-Midgard}
+      SERVER_ARGS: ${SERVER_ARGS:-}
+    volumes:
+      - valheim-config:/config:ro
+      - valheim-run:/var/run/valheim:ro
+
+  skald-web:
+    image: ghcr.io/krystianslowik/skald-web:${SKALD_VERSION:-latest}
+    restart: unless-stopped
+    depends_on: [agent]
+    ports:
+      - "${SKALD_PORT:-8080}:8080"
+    environment:
+      # The agent lives in the game's network namespace, so it answers on the
+      # valheim service name.
+      AGENT_URL: http://valheim:8080
+      AGENT_TOKEN: ${AGENT_TOKEN}
+      PANEL_PASSWORD_HASH: ${PANEL_PASSWORD_HASH:?set PANEL_PASSWORD_HASH in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      SKALD_LOCALE: ${SKALD_LOCALE:-en}
+      SKALD_TZ: ${TZ:-UTC}
+      # Plain http on localhost/LAN needs this off, or the browser never sends
+      # the session cookie back. Set it to "true" as soon as HTTPS fronts Skald.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      # Behind a reverse proxy, name the header with the real client IP
+      # (X-Forwarded-For, CF-Connecting-IP, ...) so the login rate limit is per client.
+      TRUSTED_IP_HEADER: ${TRUSTED_IP_HEADER:-}
+      # Optional: a Prometheus with cAdvisor metrics for the resource charts.
+      PROM_URL: ${PROM_URL:-}
+    volumes:
+      - skald-data:/data
+
+volumes:
+  valheim-config: # the world, hourly backup zips, admin/ban lists: back this up
+  valheim-data: # game install (~5 GB), re-downloadable
+  valheim-run: # status file shared between the game and the agent
+  skald-data: # Skald's SQLite event history
