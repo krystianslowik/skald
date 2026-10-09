@@ -1,0 +1,267 @@
+DEBUG - [1] - Environment variable RESTART_CRON is empty - no automatic valheim-server restart scheduled
+2026-10-09 22:27:55,986 INFO spawned: 'valheim-server' with pid 226
+Oct  9 22:27:55 supervisord: valheim-server INFO - Running Valheim Server
+Oct  9 22:27:55 supervisord: valheim-server DEBUG - [226] - Server config is name: My Valheim, port: 2456/udp, world: Midgard, public: 1, mod: none
+Oct  9 22:27:55 supervisord: valheim-server DEBUG - [226] - Waiting for server to listen on UDP query port 2457
+Oct  9 22:27:55 supervisord: valheim-server I1009 22:27:55.996677     232 main.go:76] Configuring Valheim server log filter
+Oct  9 22:27:55 supervisord: valheim-server I1009 22:27:55.996755     232 main.go:96] Removing log lines starting with '(Filename:'
+Oct  9 22:27:55 supervisord: valheim-server I1009 22:27:55.996762     232 main.go:89] Removing log lines matching ' '
+Oct  9 22:27:55 supervisord: valheim-server I1009 22:27:55.996769     232 main.go:125] Removing invalid UTF-8 chars: true
+Oct  9 22:27:55 supervisord: valheim-server I1009 22:27:55.996774     232 main.go:122] Removing empty log lines: true
+Oct  9 22:27:55 supervisord: valheim-server I1009 22:27:55.996779     232 main.go:96] Removing log lines starting with 'src/steamnetworkingsockets/clientlib/steamnetworkingsockets_lowlevel.cpp'
+Oct  9 22:27:56 supervisord: valheim-server [UnityMemory] Configuration Parameters - Can be set up in boot.config
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-bucket-allocator-granularity=16"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-bucket-allocator-bucket-count=8"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-bucket-allocator-block-size=4194304"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-bucket-allocator-block-count=1"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-main-allocator-block-size=16777216"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-thread-allocator-block-size=16777216"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-gfx-main-allocator-block-size=16777216"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-gfx-thread-allocator-block-size=16777216"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-cache-allocator-block-size=4194304"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-typetree-allocator-block-size=2097152"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-profiler-bucket-allocator-granularity=16"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-profiler-bucket-allocator-bucket-count=8"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-profiler-bucket-allocator-block-size=4194304"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-profiler-bucket-allocator-block-count=1"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-profiler-allocator-block-size=16777216"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-profiler-editor-allocator-block-size=1048576"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-temp-allocator-size-main=4194304"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-job-temp-allocator-block-size=2097152"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-job-temp-allocator-block-size-background=1048576"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-job-temp-allocator-reduction-small-platforms=262144"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-allocator-temp-initial-block-size-main=262144"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-allocator-temp-initial-block-size-worker=262144"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-temp-allocator-size-background-worker=32768"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-temp-allocator-size-job-worker=262144"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-temp-allocator-size-preload-manager=262144"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-temp-allocator-size-nav-mesh-worker=65536"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-temp-allocator-size-audio-worker=65536"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-temp-allocator-size-cloud-worker=32768"
+Oct  9 22:27:56 supervisord: valheim-server     "memorysetup-temp-allocator-size-gfx=262144"
+Oct  9 22:27:56 supervisord: valheim-server Mono path[0] = '/opt/valheim/server/valheim_server_Data/Managed'
+Oct  9 22:27:56 supervisord: valheim-server Mono config path = '/opt/valheim/server/valheim_server_Data/MonoBleedingEdge/etc'
+Oct  9 22:27:56 supervisord: valheim-server Input System module state changed to: Initialized.
+Oct  9 22:27:56 supervisord: valheim-server [Physics::Module] Initialized fallback backend.
+Oct  9 22:27:56 supervisord: valheim-server [Physics::Module] Id: 0xdecafbad
+Oct  9 22:27:56 supervisord: valheim-server Unable to load player prefs
+Oct  9 22:27:56 supervisord: valheim-server Initialize engine version: 6000.0.75f1 (26349cd2a5c8)
+Oct  9 22:27:56 supervisord: valheim-server [Subsystems] Discovering subsystems at path /opt/valheim/server/valheim_server_Data/UnitySubsystems
+Oct  9 22:27:56 supervisord: valheim-server Forcing GfxDevice: Null
+Oct  9 22:27:56 supervisord: valheim-server GfxDevice: creating device client; kGfxThreadingModeNonThreaded
+Oct  9 22:27:56 supervisord: valheim-server NullGfxDevice:
+Oct  9 22:27:56 supervisord: valheim-server     Version:  NULL 1.0 [1.0]
+Oct  9 22:27:56 supervisord: valheim-server     Renderer: Null Device
+Oct  9 22:27:56 supervisord: valheim-server     Vendor:   Unity Technologies
+Oct  9 22:27:56 supervisord: valheim-server Begin MonoManager ReloadAssembly
+Oct  9 22:27:56 supervisord: valheim-server - Loaded All Assemblies, in  0.071 seconds
+Oct  9 22:27:56 supervisord: valheim-server - Finished resetting the current domain, in  0.001 seconds
+Oct  9 22:27:56 supervisord: valheim-server [Physics::Module] Selected backend.
+Oct  9 22:27:56 supervisord: valheim-server [Physics::Module] Name: PhysX
+Oct  9 22:27:56 supervisord: valheim-server [Physics::Module] Id: 0xf2b8ea05
+Oct  9 22:27:56 supervisord: valheim-server [Physics::Module] SDK Version: 4.1.2
+Oct  9 22:27:56 supervisord: valheim-server [Physics::Module] Integration Version: 1.0.0
+Oct  9 22:27:56 supervisord: valheim-server [Physics::Module] Threading Mode: Multi-Threaded
+Oct  9 22:27:56 supervisord: valheim-server UnloadTime: 0.479781 ms
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Set background loading budget to Low
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Loading first scene!
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Preferences initialized! Activating first scene!
+Oct  9 22:27:56 supervisord: valheim-server Unloading 4 Unused Serialized files (Serialized files now loaded: 8)
+Oct  9 22:27:56 supervisord: valheim-server UnloadTime: 0.036268 ms
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Loading: Starting to load scene: start.unity (169d7618616154c03be07e9ad3af5893)
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Set background loading budget to Normal
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Loaded localization file #0 - 'localization' language: 'English'
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Loaded localization file #1 - 'localization_extra' language: 'English'
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Loaded localization file #2 - 'heightmap_message' language: 'English'
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Loaded localization file #3 - 'localization_witch' language: 'English'
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Loaded localization file #4 - 'localization_ashlands' language: 'English'
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Loaded localization file #5 - 'localization_deepnorth' language: 'English'
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Loaded localization file #6 - 'localization_captions' language: 'English'
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Loaded localization file #7 - 'localization_warriortitles' language: 'English'
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Loaded localization file #8 - 'localization_combatupdate' language: 'English'
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Loaded localization file #9 - 'localization_ps' language: 'English'
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Loaded localization file #10 - 'localization_celebrationupdate' language: 'English'
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Loaded localization file #11 - 'localization_xbox' language: 'English'
+Oct  9 22:27:56 supervisord: valheim-server 10/09/2026 22:27:56: Loaded localization file #12 - 'localization_switch' language: 'English'
+Oct  9 22:27:56 supervisord: valheim-server Unloading 26 unused Assets to reduce memory usage. Loaded Objects now: 3044.
+Oct  9 22:27:56 supervisord: valheim-server Total: 2.553332 ms (FindLiveObjects: 0.163818 ms CreateObjectMapping: 0.031719 ms MarkObjects: 2.326206 ms  DeleteObjects: 0.031068 ms)
+Oct  9 22:27:58 supervisord: valheim-server The referenced script on this Behaviour (Game Object '<null>') is missing!
+Oct  9 22:27:58 supervisord: valheim-server The referenced script on this Behaviour (Game Object '') is missing!
+Oct  9 22:27:58 supervisord: valheim-server AsyncResourceUpload failed.
+Oct  9 22:27:58 supervisord: valheim-server AsyncResourceUpload failed.
+Oct  9 22:27:59 supervisord: valheim-server The referenced script on this Behaviour (Game Object '') is missing!
+Oct  9 22:27:59 supervisord: valheim-server The referenced script on this Behaviour (Game Object '') is missing!
+Oct  9 22:27:59 supervisord: valheim-server The referenced script on this Behaviour (Game Object '<null>') is missing!
+Oct  9 22:28:00 supervisord: valheim-server The referenced script on this Behaviour (Game Object '<null>') is missing!
+Oct  9 22:28:00 supervisord: valheim-server Unloading 2 Unused Serialized files (Serialized files now loaded: 19)
+Oct  9 22:28:00 supervisord: valheim-server DEBUG - [226] - Waiting for server to listen on UDP query port 2457
+Oct  9 22:28:01 supervisord: valheim-server 10/09/2026 22:28:01: Set background loading budget to High
+Oct  9 22:28:01 supervisord: valheim-server 10/09/2026 22:28:01: GPU Device: 0000:0000 (Unknown)
+Oct  9 22:28:01 supervisord: valheim-server 10/09/2026 22:28:01: Loading: Done, Total time: -4.229639
+2026-10-09 22:28:06,004 INFO success: valheim-server entered RUNNING state, process has stayed up for > than 10 seconds (startsecs)
+Oct  9 22:28:06 supervisord: valheim-server DEBUG - [226] - Waiting for server to listen on UDP query port 2457
+Oct  9 22:28:06 supervisord: valheim-updater valheim-server: started
+Oct  9 22:28:11 supervisord: valheim-server DEBUG - [226] - Waiting for server to listen on UDP query port 2457
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: Set background loading budget to Low
+Oct  9 22:28:11 supervisord: valheim-server UnloadTime: 6.895811 ms
+Oct  9 22:28:11 supervisord: valheim-server HDR Render Texture not supported, disabling HDR on reflection probe.
+Oct  9 22:28:11 supervisord: valheim-server This custom render path shader needs to have at least 1 passes.
+Oct  9 22:28:11 supervisord: valheim-server Could not find material Hidden/VideoDecode. Make sure the Video shaders are included in your build, in the Built-in Shader Settings section of the Graphics Settings.
+Oct  9 22:28:11 supervisord: valheim-server Could not find video decode shader pass YCbCr_To_RGB1 in shader <not found>
+Oct  9 22:28:11 supervisord: valheim-server Could not find video decode shader pass YCbCrA_To_RGBAFull in shader <not found>
+Oct  9 22:28:11 supervisord: valheim-server Could not find video decode shader pass YCbCrA_To_RGBA in shader <not found>
+Oct  9 22:28:11 supervisord: valheim-server Could not find video decode shader pass Flip_RGBA_To_RGBA in shader <not found>
+Oct  9 22:28:11 supervisord: valheim-server Could not find video decode shader pass Flip_RGBASplit_To_RGBA in shader <not found>
+Oct  9 22:28:11 supervisord: valheim-server This custom render path shader needs to have at least 1 passes.
+Oct  9 22:28:11 supervisord: valheim-server Could not find material Hidden/VideoComposite. Make sure the Video shaders are included in your build, in the Built-in Shader Settings section of the Graphics Settings.
+Oct  9 22:28:11 supervisord: valheim-server Could not find video decode shader pass Default in shader <not found>
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: Missing audio clip in music respawn
+Oct  9 22:28:11 supervisord: valheim-server OnGUI function detected on MonoBehaviour, but not called, because IMGUI module is stripped.
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: Get create world Midgard
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: SaveSystem.Reload for World is done [2ms]
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11:  creating
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: Using environment steamid 892970
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: Using steam APPID:892970
+Oct  9 22:28:11 supervisord: valheim-server flock /sys/devices/virtual/dmi/id/sys_vendor LOCK_SH failed. errno = 13flock /sys/devices/virtual/dmi/id/product_name LOCK_SH failed. errno = 13[S_API] SteamAPI_Init(): Loaded local 'steamclient.so' OK.
+Oct  9 22:28:11 supervisord: valheim-server Setting breakpad minidump AppID = 892970
+Oct  9 22:28:11 supervisord: valheim-server SteamInternal_SetMinidumpSteamID:  Caching Steam ID:  76561197960265728 [API loaded no]
+Oct  9 22:28:11 supervisord: valheim-server [S_API FAIL] Tried to access Steam interface SteamNetworkingUtils004 before SteamAPI_Init succeeded.
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: Server ID 90000000000000001
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: Authentication:k_ESteamNetworkingAvailability_Waiting
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: Steam game server initialized
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: Valheim version: l-1.0.17 (network version 40)
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: Worldgenerator version setup:2
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: Console: Valheim l-1.0.17 (network version 40)
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: Console: 
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: Console: type "help" - for commands
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: Console: 
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: Render threading mode:SingleThreaded
+Oct  9 22:28:11 supervisord: valheim-server OnGUI function detected on MonoBehaviour, but not called, because IMGUI module is stripped.
+Oct  9 22:28:11 supervisord: valheim-server [AmplifyOcclusion] System does not support CopyTexture. CacheAware will be disabled.
+Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: Builder started
+Oct  9 22:28:12 supervisord: valheim-server 10/09/2026 22:28:12: SaveSystem.Reload for Character is done [0ms]
+Oct  9 22:28:12 supervisord: valheim-server 10/09/2026 22:28:12: SaveSystem.Reload for World is done [17ms]
+Oct  9 22:28:12 supervisord: valheim-server 10/09/2026 22:28:12: Failed to play intro cinematic
+Oct  9 22:28:12 supervisord: valheim-server 10/09/2026 22:28:12: Sending PlayFab login request (attempt 1)
+Oct  9 22:28:12 supervisord: valheim-server 10/09/2026 22:28:12: Login postponed until ID has been set.
+Oct  9 22:28:12 supervisord: valheim-server The shader Hidden/Dof/DepthOfFieldHdr (UnityEngine.Shader) on effect Main Camera (UnityStandardAssets.ImageEffects.DepthOfField) is not supported on this platform!
+Oct  9 22:28:12 supervisord: valheim-server The image effect Main Camera (UnityStandardAssets.ImageEffects.DepthOfField) has been disabled as it's not supported on the current platform.
+Oct  9 22:28:12 supervisord: valheim-server The shader Hidden/SunShaftsComposite (UnityEngine.Shader) on effect Main Camera (UnityStandardAssets.ImageEffects.SunShafts) is not supported on this platform!
+Oct  9 22:28:12 supervisord: valheim-server The shader Hidden/SimpleClear (UnityEngine.Shader) on effect Main Camera (UnityStandardAssets.ImageEffects.SunShafts) is not supported on this platform!
+Oct  9 22:28:12 supervisord: valheim-server The image effect Main Camera (UnityStandardAssets.ImageEffects.SunShafts) has been disabled as it's not supported on the current platform.
+Oct  9 22:28:12 supervisord: valheim-server 10/09/2026 22:28:12: Starting music menu
+Oct  9 22:28:12 supervisord: valheim-server 10/09/2026 22:28:12: Found IPv6 address! Using 203.0.113.10.
+Oct  9 22:28:12 supervisord: valheim-server Found ipv address to be 203.0.113.10
+Oct  9 22:28:12 supervisord: valheim-server Unloading 106004 unused Assets to reduce memory usage. Loaded Objects now: 276713.
+Oct  9 22:28:12 supervisord: valheim-server Total: 128.503788 ms (FindLiveObjects: 19.217625 ms CreateObjectMapping: 26.800335 ms MarkObjects: 56.420112 ms  DeleteObjects: 26.064885 ms)
+Oct  9 22:28:12 supervisord: valheim-server The referenced script on this Behaviour (Game Object '<null>') is missing!
+Oct  9 22:28:12 supervisord: valheim-server The referenced script on this Behaviour (Game Object '<null>') is missing!
+Oct  9 22:28:12 supervisord: valheim-server The referenced script on this Behaviour (Game Object '<null>') is missing!
+Oct  9 22:28:12 supervisord: valheim-server The referenced script on this Behaviour (Game Object '<null>') is missing!
+Oct  9 22:28:12 supervisord: valheim-server The referenced script on this Behaviour (Game Object '<null>') is missing!
+Oct  9 22:28:12 supervisord: valheim-server The referenced script on this Behaviour (Game Object '<null>') is missing!
+Oct  9 22:28:12 supervisord: valheim-server The referenced script on this Behaviour (Game Object '<null>') is missing!
+Oct  9 22:28:12 supervisord: valheim-server Unloading 3 Unused Serialized files (Serialized files now loaded: 22)
+Oct  9 22:28:12 supervisord: valheim-server UnloadTime: 9.955433 ms
+Oct  9 22:28:12 supervisord: valheim-server HDR Render Texture not supported, disabling HDR on reflection probe.
+Oct  9 22:28:12 supervisord: valheim-server HDR Render Texture not supported, disabling HDR on reflection probe.
+Oct  9 22:28:12 supervisord: valheim-server 10/09/2026 22:28:12: Audioman already exist, destroying self
+Oct  9 22:28:12 supervisord: valheim-server OnGUI function detected on MonoBehaviour, but not called, because IMGUI module is stripped.
+Oct  9 22:28:12 supervisord: valheim-server 10/09/2026 22:28:12: Console: Valheim l-1.0.17 (network version 40)
+Oct  9 22:28:12 supervisord: valheim-server 10/09/2026 22:28:12: Console: 
+Oct  9 22:28:12 supervisord: valheim-server 10/09/2026 22:28:12: Console: type "help" - for commands
+Oct  9 22:28:12 supervisord: valheim-server 10/09/2026 22:28:12: Console: 
+Oct  9 22:28:12 supervisord: valheim-server 10/09/2026 22:28:12: isModded: False
+Oct  9 22:28:12 supervisord: valheim-server 10/09/2026 22:28:12: Zonesystem Awake 20497
+Oct  9 22:28:12 supervisord: valheim-server 10/09/2026 22:28:12: DungeonDB Awake 20497
+Oct  9 22:28:12 supervisord: valheim-server 10/09/2026 22:28:12: Worldgenerator version setup:2
+Oct  9 22:28:14 supervisord: valheim-server OnGUI function detected on MonoBehaviour, but not called, because IMGUI module is stripped.
+Oct  9 22:28:14 supervisord: valheim-server 10/09/2026 22:28:14: Console: /w [text] - Whisper
+Oct  9 22:28:14 supervisord: valheim-server 10/09/2026 22:28:14: Console: /s [text] - Shout
+Oct  9 22:28:14 supervisord: valheim-server 10/09/2026 22:28:14: Console: /die - Kill yourself
+Oct  9 22:28:14 supervisord: valheim-server 10/09/2026 22:28:14: Console: /resetspawn - Reset spawn point
+Oct  9 22:28:14 supervisord: valheim-server 10/09/2026 22:28:14: Console: /[emote]
+Oct  9 22:28:14 supervisord: valheim-server 10/09/2026 22:28:14: Console: Emotes: wave, sit, challenge, cheer, nonono, thumbsup, point, blowkiss, bow, cower, cry, despair, flex, comehere, headbang, kneel, laugh, roar, shrug, dance, relax, toast, rest, vibe, loveyou
+Oct  9 22:28:14 supervisord: valheim-server 10/09/2026 22:28:14: Console: 
+Oct  9 22:28:14 supervisord: valheim-server [AmplifyOcclusion] System does not support CopyTexture. CacheAware will be disabled.
+Oct  9 22:28:15 supervisord: valheim-server Unloading 302 unused Assets to reduce memory usage. Loaded Objects now: 277343.
+Oct  9 22:28:15 supervisord: valheim-server Total: 110.549174 ms (FindLiveObjects: 12.490901 ms CreateObjectMapping: 14.561808 ms MarkObjects: 83.044366 ms  DeleteObjects: 0.451467 ms)
+Oct  9 22:28:15 supervisord: valheim-server 10/09/2026 22:28:15: Zonesystem Start 20497
+Oct  9 22:28:15 supervisord: valheim-server 10/09/2026 22:28:15: Added 3 locations, 0 vegetations, 0 environments, 0 biome env-setups, 0 clutter  from main
+Oct  9 22:28:15 supervisord: valheim-server 10/09/2026 22:28:15: Added 2 locations, 0 vegetations, 2 environments, 0 biome env-setups, 0 clutter  from main
+Oct  9 22:28:15 supervisord: valheim-server 10/09/2026 22:28:15: Added 27 locations, 25 vegetations, 5 environments, 1 biome env-setups, 3 clutter  from main
+Oct  9 22:28:15 supervisord: valheim-server 10/09/2026 22:28:15: Added 4 locations, 0 vegetations, 1 environments, 0 biome env-setups, 0 clutter  from main
+Oct  9 22:28:15 supervisord: valheim-server 10/09/2026 22:28:15: Added 25 locations, 33 vegetations, 8 environments, 2 biome env-setups, 2 clutter  from main
+Oct  9 22:28:15 supervisord: valheim-server 10/09/2026 22:28:15: Added 25 locations, 35 vegetations, 12 environments, 1 biome env-setups, 2 clutter  from main
+Oct  9 22:28:15 supervisord: valheim-server 10/09/2026 22:28:15: DungeonDB Start 20497
+Oct  9 22:28:15 supervisord: valheim-server 10/09/2026 22:28:15: ZRpc timeout set to 30s 
+Oct  9 22:28:15 supervisord: valheim-server 10/09/2026 22:28:15: Loading: ZNet Start
+Oct  9 22:28:15 supervisord: valheim-server 10/09/2026 22:28:15: Load world: Midgard (Midgard)
+Oct  9 22:28:15 supervisord: valheim-server 10/09/2026 22:28:15:   missing /home/valheim/.config/unity3d/IronGate/Valheim/worlds_local/Midgard.db
+Oct  9 22:28:16 supervisord: valheim-server DEBUG - [226] - Server is now listening on UDP query port 2457
+Oct  9 22:28:18 supervisord: valheim-server 10/09/2026 22:28:18: Loading: Placed 0/1-2 of 'Fortress Mountain' altbiome. (Valid, sectors: 0, combos: 2)
+Oct  9 22:28:18 supervisord: valheim-server 10/09/2026 22:28:18: Setting up generating loading indicator
+Oct  9 22:28:18 supervisord: valheim-server The shader Hidden/Dof/DepthOfFieldHdr (UnityEngine.Shader) on effect Main Camera (UnityStandardAssets.ImageEffects.DepthOfField) is not supported on this platform!
+Oct  9 22:28:18 supervisord: valheim-server The image effect Main Camera (UnityStandardAssets.ImageEffects.DepthOfField) has been disabled as it's not supported on the current platform.
+Oct  9 22:28:18 supervisord: valheim-server The shader Hidden/SunShaftsComposite (UnityEngine.Shader) on effect Main Camera (UnityStandardAssets.ImageEffects.SunShafts) is not supported on this platform!
+Oct  9 22:28:18 supervisord: valheim-server The shader Hidden/SimpleClear (UnityEngine.Shader) on effect Main Camera (UnityStandardAssets.ImageEffects.SunShafts) is not supported on this platform!
+Oct  9 22:28:18 supervisord: valheim-server The image effect Main Camera (UnityStandardAssets.ImageEffects.SunShafts) has been disabled as it's not supported on the current platform.
+Oct  9 22:28:18 supervisord: valheim-server 10/09/2026 22:28:18: Game server connected
+Oct  9 22:28:18 supervisord: valheim-server [AmplifyOcclusion] GBuffer Normals only available in Camera Deferred Shading mode. Switched to Camera source.
+Oct  9 22:28:18 supervisord: valheim-server 10/09/2026 22:28:18: Loading: Generating locations
+Oct  9 22:28:19 supervisord: valheim-server 10/09/2026 22:28:19: Failed to place all SwampRuin1, placed 26 out of 30 with 0 tries in 00:00:00.0158980
+Oct  9 22:28:19 supervisord: valheim-server 10/09/2026 22:28:19: Failed to place all SwampRuin2, placed 2 out of 30 with 0 tries in 00:00:00.0129560
+Oct  9 22:28:20 supervisord: valheim-server 10/09/2026 22:28:20: Failed to place all FireHole, placed 30 out of 75 with 0 tries in 00:00:00.0435050
+Oct  9 22:28:21 supervisord: valheim-server 10/09/2026 22:28:21: Location GoblinCamp2 took more than 0.5 seconds to place, check spawn conditions to improve! (placed 200 out of 200 with 0)
+Oct  9 22:28:23 supervisord: valheim-server 10/09/2026 22:28:23: Location Crypt4 took more than 0.5 seconds to place, check spawn conditions to improve! (placed 170 out of 200 with 0)
+Oct  9 22:28:23 supervisord: valheim-server 10/09/2026 22:28:23: Failed to place all Crypt4, placed 170 out of 200 with 0 tries in 00:00:00.5052860
+Oct  9 22:28:23 supervisord: valheim-server 10/09/2026 22:28:23: Failed to place all SwampHut3, placed 45 out of 50 with 0 tries in 00:00:00.0746380
+Oct  9 22:28:25 supervisord: valheim-server 10/09/2026 22:28:25: Failed to place all MountainWell1, placed 12 out of 25 with 0 tries in 00:00:00.3829340
+Oct  9 22:28:26 supervisord: valheim-server 10/09/2026 22:28:26: Failed to place all Runestone_Mountains, placed 70 out of 100 with 0 tries in 00:00:00.3146070
+Oct  9 22:28:26 supervisord: valheim-server 10/09/2026 22:28:26: Failed to place all BigRockClearing, placed 9 out of 10 with 0 tries in 00:00:00.0654460
+Oct  9 22:28:26 supervisord: valheim-server 10/09/2026 22:28:26: Failed to place all TarPit1, placed 77 out of 100 with 0 tries in 00:00:00.3068270
+Oct  9 22:28:26 supervisord: valheim-server 10/09/2026 22:28:26: Failed to place all TarPit2, placed 5 out of 16 with 0 tries in 00:00:00.2917840
+Oct  9 22:28:27 supervisord: valheim-server 10/09/2026 22:28:27: Failed to place all TarPit3, placed 99 out of 100 with 0 tries in 00:00:00.2797310
+Oct  9 22:28:27 supervisord: valheim-server 10/09/2026 22:28:27: Failed to place all MountainCave02, placed 118 out of 120 with 0 tries in 00:00:00.2300010
+Oct  9 22:28:28 supervisord: valheim-server 10/09/2026 22:28:28: Failed to place all Mistlands_Giant1, placed 225 out of 250 with 0 tries in 00:00:00.3516380
+Oct  9 22:28:30 supervisord: valheim-server 10/09/2026 22:28:30: Failed to place all MorgenHole3, placed 30 out of 40 with 0 tries in 00:00:00.2602850
+Oct  9 22:28:31 supervisord: valheim-server 10/09/2026 22:28:31: Location NorthVillage took more than 0.5 seconds to place, check spawn conditions to improve! (placed 48 out of 135 with 0)
+Oct  9 22:28:31 supervisord: valheim-server 10/09/2026 22:28:31: Failed to place all NorthVillage, placed 48 out of 135 with 0 tries in 00:00:00.7242610
+Oct  9 22:28:32 supervisord: valheim-server 10/09/2026 22:28:32: Failed to place all WoodVillage2, placed 1 out of 15 with 0 tries in 00:00:00.1665570
+Oct  9 22:28:32 supervisord: valheim-server 10/09/2026 22:28:32: Failed to place all StoneTowerRuins08_sunk, placed 1 out of 10 with 0 tries in 00:00:00.2273410
+Oct  9 22:28:32 supervisord: valheim-server 10/09/2026 22:28:32: Failed to place all StoneTowerRuins09_sunk, placed 0 out of 10 with 0 tries in 00:00:00.2216200
+Oct  9 22:28:33 supervisord: valheim-server 10/09/2026 22:28:33: Failed to place all StoneTowerRuins10_sunk, placed 0 out of 10 with 0 tries in 00:00:00.2207850
+Oct  9 22:28:33 supervisord: valheim-server 10/09/2026 22:28:33: Failed to place all SwampHut1_1, placed 13 out of 50 with 0 tries in 00:00:00.1585590
+Oct  9 22:28:33 supervisord: valheim-server 10/09/2026 22:28:33: Failed to place all SwampHut2_1, placed 3 out of 50 with 0 tries in 00:00:00.1562980
+Oct  9 22:28:33 supervisord: valheim-server 10/09/2026 22:28:33: Failed to place all SwampHut3_1, placed 0 out of 50 with 0 tries in 00:00:00.1487960
+Oct  9 22:28:33 supervisord: valheim-server 10/09/2026 22:28:33: Failed to place all StoneTowerRuins05_leet, placed 0 out of 10 with 0 tries in 00:00:00.1562900
+Oct  9 22:28:33 supervisord: valheim-server 10/09/2026 22:28:33: Failed to place all GoblinCamp2_1, placed 0 out of 5 with 0 tries in 00:00:00.0155350
+Oct  9 22:28:34 supervisord: valheim-server 10/09/2026 22:28:34: Location GoblinHut02 took more than 0.5 seconds to place, check spawn conditions to improve! (placed 10 out of 30 with 0)
+Oct  9 22:28:34 supervisord: valheim-server 10/09/2026 22:28:34: Failed to place all GoblinHut02, placed 10 out of 30 with 0 tries in 00:00:00.7128930
+Oct  9 22:28:35 supervisord: valheim-server 10/09/2026 22:28:35: Location GoblinHut03 took more than 0.5 seconds to place, check spawn conditions to improve! (placed 1 out of 20 with 0)
+Oct  9 22:28:35 supervisord: valheim-server 10/09/2026 22:28:35: Failed to place all GoblinHut03, placed 1 out of 20 with 0 tries in 00:00:00.7209710
+Oct  9 22:28:35 supervisord: valheim-server 10/09/2026 22:28:35: Failed to place all TarPit1_1, placed 2 out of 50 with 0 tries in 00:00:00.3232850
+Oct  9 22:28:36 supervisord: valheim-server 10/09/2026 22:28:36: Failed to place all TarPit2_1, placed 1 out of 20 with 0 tries in 00:00:00.3197300
+Oct  9 22:28:36 supervisord: valheim-server 10/09/2026 22:28:36: Failed to place all TarPit3_1, placed 2 out of 100 with 0 tries in 00:00:00.3265250
+Oct  9 22:28:36 supervisord: valheim-server 10/09/2026 22:28:36: There are 5 that take a long time to generate (over 0.5 sec). Total slow location time is 3.5 seconds that could be saved on world gen!
+Oct  9 22:28:36 supervisord: valheim-server 10/09/2026 22:28:36: PlayFab custom ID set to "PlayFab_My Valheim_2456_REDACTED"
+Oct  9 22:28:36 supervisord: valheim-server 10/09/2026 22:28:36: Sending PlayFab login request (attempt 2)
+Oct  9 22:28:36 supervisord: valheim-server 10/09/2026 22:28:36: Semaphore type: ManualResetEventSlim
+Oct  9 22:28:36 supervisord: valheim-server 10/09/2026 22:28:36: Opened PlayFab server
+Oct  9 22:28:36 supervisord: valheim-server 10/09/2026 22:28:36: Loading: Done. Total seconds sinze ZNet start: 21.457775, Genloc duration: 17579.497 ms, (Total genloc time: 00:00:17.6850410, locations: 183, iterations: 0)
+Oct  9 22:28:36 supervisord: valheim-server 10/09/2026 22:28:36: Logged in PlayFab user via custom ID
+Oct  9 22:28:36 supervisord: valheim-server 10/09/2026 22:28:36: PlayFab logged in as "PlayFab_My Valheim_2456_REDACTED"
+Oct  9 22:28:36 supervisord: valheim-server 10/09/2026 22:28:36: PlayFab local entity ID is 0123456789ABCDEF
+Oct  9 22:28:36 supervisord: valheim-server IPv4, returning 203.0.113.10:2456
+Oct  9 22:28:36 supervisord: valheim-server 10/09/2026 22:28:36: New session server "My Valheim" that has join code , now 0 player(s)
+Oct  9 22:28:36 supervisord: valheim-server 10/09/2026 22:28:36: Register PlayFab server "My Valheim" with IP 203.0.113.10:2456
+Oct  9 22:28:36 supervisord: valheim-server 10/09/2026 22:28:36: Server 'My Valheim' begin PlayFab create and join network for server 
+Oct  9 22:28:39 supervisord: valheim-server 10/09/2026 22:28:39: Joined PlayFab Party network with ID "REDACTED"
+Oct  9 22:28:39 supervisord: valheim-server This is the serverIP used to register the server: 203.0.113.10:2456
+Oct  9 22:28:39 supervisord: valheim-server 10/09/2026 22:28:39: Created PlayFab lobby with ID "00000000-0000-4000-8000-000000000000.r-20260323", ConnectionString "REDACTED" and owned by "0123456789ABCDEF"
+Oct  9 22:28:39 supervisord: valheim-server 10/09/2026 22:28:39: Session "My Valheim" registered with join code 482915
+Oct  9 22:28:39 supervisord: valheim-server 10/09/2026 22:28:39: Retry join-code check 99
+Oct  9 22:28:40 supervisord: valheim-server 10/09/2026 22:28:40: Retry join-code check 98
+Oct  9 22:28:41 supervisord: valheim-server 10/09/2026 22:28:41: Retry join-code check 97
+Oct  9 22:28:43 supervisord: valheim-server 10/09/2026 22:28:43: Session "My Valheim" with join code 482915 and IP 203.0.113.10:2456 is active with 0 player(s)
+Oct  9 22:35:36 supervisord: valheim-server 10/09/2026 22:35:36: Update PlayFab entity token
