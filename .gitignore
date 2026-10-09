@@ -1,0 +1,15 @@
+node_modules/
+dist/
+bin/
+.omc/
+.env
+*.db
+*.db-shm
+*.db-wal
+*.log
+!agent/testdata/*.log
+*.test
+*.out
+.DS_Store
+# Real secrets for the Kubernetes example; only secrets.example.yaml is tracked.
+deploy/kubernetes/secrets.yaml
