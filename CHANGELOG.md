@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-10
+
 ### Added
 
 - World map. The agent builds it from the newest finished save (Valheim 1.0
