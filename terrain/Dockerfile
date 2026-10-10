@@ -7,7 +7,7 @@
 # /skald into a volume shared with the game container (see
 # deploy/kubernetes/terrain).
 #   docker buildx build --platform linux/amd64,linux/arm64 -t ghcr.io/krystianslowik/skald-terrain:dev terrain
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY plugin/ .
 RUN dotnet build -c Release -o /out && test -s /out/SkaldTerrain.dll
