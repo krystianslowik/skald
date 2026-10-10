@@ -4,13 +4,18 @@
 #   docker compose up -d
 #   open http://localhost:8080
 #
-# Three containers:
+# Three containers (plus a one-shot settings-init):
 #   valheim    the game (community-valheim-tools/valheim-server, amd64 only)
 #   agent      Skald's sidecar; shares the game's network namespace so the
 #              game's syslog (UDP 127.0.0.1:5140) and supervisord's XML-RPC
 #              (127.0.0.1:9001) stay on loopback
 #   skald-web  the dashboard; a separate container, so updating it never
 #              restarts the game (a game restart rotates the join code)
+#
+# Server settings (name, password, world modifiers) are edited on the
+# dashboard: the agent writes them to the skald-settings volume and the game
+# reads them through PRE_SERVER_RUN_HOOK each time it starts. The values in
+# .env are only the starting point; after the first save the dashboard wins.
 #
 # No game ports are published: with crossplay the server dials out to the
 # PlayFab relays and players join with the 6-digit code shown on the dashboard.
@@ -28,7 +33,8 @@ services:
     environment:
       SERVER_NAME: ${SERVER_NAME:-My Valheim}
       WORLD_NAME: ${WORLD_NAME:-Midgard}
-      SERVER_PASS: ${SERVER_PASS:?set SERVER_PASS in .env}
+      # A file, so the agent can read the same secret (PASSWORD_FILE below).
+      SERVER_PASS_FILE: /run/secrets/server_pass
       SERVER_PUBLIC: "true"
       SERVER_ARGS: ${SERVER_ARGS:-}
       CROSSPLAY: "true"
@@ -45,10 +51,24 @@ services:
       # supervisord XML-RPC for the agent's backup / update / restart actions.
       SUPERVISOR_HTTP: "true"
       SUPERVISOR_HTTP_PASS: ${SUPERVISOR_HTTP_PASS:?set SUPERVISOR_HTTP_PASS in .env}
+      # Reads the settings the dashboard saved (deploy/settings/pre-server-run-hook.sh;
+      # every $ is doubled for Compose). Parsed with an allow-list, never sourced.
+      PRE_SERVER_RUN_HOOK: >-
+        skald_f=/settings/server.env; if [ -r "$$skald_f" ]; then while IFS='=' read -r skald_k skald_v || [ -n "$$skald_k" ]; do case "$$skald_k" in SERVER_NAME) SERVER_NAME=$$skald_v;; SERVER_PASS) SERVER_PASS=$$skald_v;; SERVER_PUBLIC) SERVER_PUBLIC=$$skald_v;; SERVER_ARGS) SERVER_ARGS=$$skald_v;; esac; done < "$$skald_f"; valheim_server_args=(-password "$$SERVER_PASS"); if [ "$$CROSSPLAY" = true ]; then valheim_server_args+=(-crossplay); fi; info "Skald settings applied"; fi
+    secrets: [server_pass]
     volumes:
       - valheim-config:/config
       - valheim-data:/opt/valheim
       - valheim-run:/var/run/valheim
+      - skald-settings:/settings:ro
+
+  # The agent runs as uid 65532 on a distroless image and cannot chown; a new
+  # named volume is root-owned. Runs once per `up` and exits.
+  settings-init:
+    image: busybox:1.37
+    command: ["sh", "-c", "mkdir -p /settings && chown 65532:65532 /settings && chmod 0755 /settings"]
+    volumes:
+      - skald-settings:/settings
 
   agent:
     image: ghcr.io/krystianslowik/skald-agent:${SKALD_VERSION:-latest}
@@ -56,17 +76,28 @@ services:
     # Same network namespace as the game: loopback is shared. If the valheim
     # container is recreated, recreate this one too (`docker compose up -d`).
     network_mode: "service:valheim"
-    depends_on: [valheim]
+    depends_on:
+      valheim:
+        condition: service_started
+      settings-init:
+        condition: service_completed_successfully
     environment:
       AGENT_TOKEN: ${AGENT_TOKEN:?set AGENT_TOKEN in .env}
       SUPERVISOR_USER: admin
       SUPERVISOR_PASS: ${SUPERVISOR_HTTP_PASS}
+      # The game's starting values, mirrored: the settings sheet starts from
+      # them, so the first save changes only what you change.
       SERVER_NAME: ${SERVER_NAME:-My Valheim}
       WORLD_NAME: ${WORLD_NAME:-Midgard}
+      SERVER_PUBLIC: "true"
       SERVER_ARGS: ${SERVER_ARGS:-}
+      SETTINGS_DIR: /settings
+      PASSWORD_FILE: /run/secrets/server_pass
+    secrets: [server_pass]
     volumes:
       - valheim-config:/config:ro
       - valheim-run:/var/run/valheim:ro
+      - skald-settings:/settings
 
   skald-web:
     image: ghcr.io/krystianslowik/skald-web:${SKALD_VERSION:-latest}
@@ -99,3 +130,10 @@ volumes:
   valheim-data: # game install (~5 GB), re-downloadable
   valheim-run: # status file shared between the game and the agent
   skald-data: # Skald's SQLite event history
+  skald-settings: # server settings saved from the dashboard (agent rw, game ro)
+
+secrets:
+  # The password players type after the join code. Only the first value: once
+  # saved from the dashboard, the settings volume holds the current one.
+  server_pass:
+    environment: SERVER_PASS

@@ -32,6 +32,29 @@ spec:
       nodeSelector:
         kubernetes.io/arch: amd64
       initContainers:
+        # Server settings live on the config volume under skald/: the agent
+        # (uid 65532) writes them, the game reads them. Create the directory
+        # and hand it to the agent before the agent starts.
+        - name: settings-init
+          image: busybox:1.37
+          imagePullPolicy: IfNotPresent
+          command: [sh, -c, "mkdir -p /config/skald && chown 65532:65532 /config/skald && chmod 0755 /config/skald"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 8Mi
+            limits:
+              memory: 32Mi
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN, DAC_OVERRIDE, FOWNER]
+          volumeMounts:
+            - name: config
+              mountPath: /config
         # Native sidecar (restartPolicy: Always, Kubernetes 1.29+): starts
         # before the game so it catches the first syslog lines, and can crash
         # and restart on its own without taking the game down. Changing its
@@ -56,13 +79,22 @@ spec:
             - name: SUPERVISOR_PASS
               valueFrom:
                 secretKeyRef: {name: skald-agent, key: SUPERVISOR_HTTP_PASS}
-            # Keep these three in sync with the game container below.
+            # Keep these in sync with the game container below. Once settings
+            # are saved from the dashboard, only WORLD_NAME still matters.
             - name: WORLD_NAME
               value: "Midgard"
             - name: SERVER_NAME
               value: "My Valheim"
+            - name: SERVER_PUBLIC
+              value: "true"
             - name: SERVER_ARGS
               value: ""
+            # Server settings: written here, read by the game's pre-run hook.
+            - name: SETTINGS_DIR
+              value: /settings
+            # Seeds the password shown on the dashboard before the first save.
+            - name: PASSWORD_FILE
+              value: /secrets/server-pass
           resources:
             requests:
               cpu: 20m
@@ -82,6 +114,12 @@ spec:
               readOnly: true
             - name: run
               mountPath: /var/run/valheim
+              readOnly: true
+            - name: config
+              subPath: skald
+              mountPath: /settings
+            - name: server-pass-agent
+              mountPath: /secrets
               readOnly: true
           readinessProbe:
             httpGet: {path: /healthz, port: agent}
@@ -138,6 +176,18 @@ spec:
             - name: SUPERVISOR_HTTP_PASS
               valueFrom:
                 secretKeyRef: {name: skald-agent, key: SUPERVISOR_HTTP_PASS}
+            # Server settings saved from the dashboard override SERVER_NAME,
+            # SERVER_PASS(_FILE), SERVER_PUBLIC and SERVER_ARGS above on every
+            # start (deploy/settings/pre-server-run-hook.sh, verbatim). The
+            # file is parsed with an allow-list, never sourced.
+            - name: PRE_SERVER_RUN_HOOK
+              value: >-
+                skald_f=/settings/server.env; if [ -r "$skald_f" ]; then while IFS='=' read -r skald_k skald_v || [ -n "$skald_k" ]; do case "$skald_k" in SERVER_NAME) SERVER_NAME=$skald_v;; SERVER_PASS) SERVER_PASS=$skald_v;; SERVER_PUBLIC) SERVER_PUBLIC=$skald_v;; SERVER_ARGS) SERVER_ARGS=$skald_v;; esac; done < "$skald_f"; valheim_server_args=(-password "$SERVER_PASS"); if [ "$CROSSPLAY" = true ]; then valheim_server_args+=(-crossplay); fi; info "Skald settings applied"; fi
+            # The image chowns all of /config to its own user on every
+            # container start, which would lock the agent out of skald/.
+            # This runs right after that and hands the directory back.
+            - name: PRE_SUPERVISOR_HOOK
+              value: "chown -R 65532:65532 /config/skald && chmod 0755 /config/skald"
           resources:
             requests:
               cpu: "1"
@@ -159,6 +209,11 @@ spec:
             # Shared with the agent: valheim-server.status + pidfiles.
             - name: run
               mountPath: /var/run/valheim
+            # Settings from the dashboard (the agent writes, the game reads).
+            - name: config
+              subPath: skald
+              mountPath: /settings
+              readOnly: true
           # The status file goes starting -> running once the server is up.
           # First boot downloads ~2.4 GB and steamcmd may retry for minutes.
           startupProbe:
@@ -190,6 +245,12 @@ spec:
           secret:
             secretName: valheim-server-pass
             defaultMode: 0400
+        # The same secret for the agent, which runs as 65532 and cannot read
+        # a root-only 0400 file. Mounted in the agent container only.
+        - name: server-pass-agent
+          secret:
+            secretName: valheim-server-pass
+            defaultMode: 0444
         - name: run
           emptyDir: {}
 ---
