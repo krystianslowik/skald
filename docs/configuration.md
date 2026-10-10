@@ -20,6 +20,7 @@
 | `SETTINGS_DIR` | `/settings` | Where server settings are written (`server.json`, `server.env`). The feature is off (API 404, UI hidden) unless this directory exists and the agent can write to it |
 | `PASSWORD_FILE` | (empty) | The game's server password secret, mounted read-only; seeds the password shown on the dashboard before the first save |
 | `MAP_SHOW_NAMES` | `true` | Put grave and bed owners' names, portal tags and pin names on the world map. Platform ids (tag and pin authors, owner ids) are never sent either way. The map is behind the panel password, so this is on by default |
+| `ICONS_DIR` | (empty) | Where the opt-in `skald-icons` sidecar writes the item icon sheet (`/config/skald-icons` in Kubernetes, `/icons` in Compose). Empty turns the icon routes off; see [Item icons](#item-icons) |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 
 ## skald-web
@@ -154,3 +155,61 @@ The Terrain tab embeds [valheim-map.world](https://valheim-map.world/), a
 third-party site, for the seed's terrain. It loads only when that tab is
 opened; the "Open on full map" links in the map's popovers go there too,
 centred on the point (`offset=x,z`, `zoom=0.100`, `ver=1.0.7`).
+
+## Item icons
+
+Opt-in. Off, the storage views draw a small category mark for each item
+(logs, ore, an ingot, a sword, ...). On, they show each item's own icon.
+
+> Skald ships no game assets: no icons, textures or item art in the
+> repository, the images or any download. The `skald-icons` sidecar reads
+> **your own installed** Valheim dedicated server files, read-only, and writes
+> a sprite sheet to **your own** volume. Only the agent serves it, behind the
+> agent token, and the web tier only to signed-in viewers. Skald is not
+> affiliated with, endorsed by, or sponsored by Iron Gate Studio or Coffee
+> Stain; Valheim is a trademark of its owners. Turn this on only if your
+> panel is private to your community.
+
+How it works:
+
+- `skald-icons` (Python, UnityPy) reads the game's asset bundles under
+  `/opt/valheim` (`server/`, else `bepinex/`; never the steamcmd download
+  directory). Every item prefab's ItemDrop component names its inventory
+  icon; the extractor follows that reference, so no names are guessed. The
+  ~750 MB item bundle is read block by block: about 100 MB of it is touched.
+- Output, in `ICONS_DIR`: `sheet.<build>.webp` (64 px cells, about 1.3 MB for
+  ~1,000 items) and `map.json` (item prefab -> cell), written atomically,
+  `map.json` last. `<build>` is a hash of the game's SoftRef manifest and the
+  bundle sizes.
+- It checks every 10 minutes. An unchanged build costs a few `stat()` calls;
+  after a game update (the image updates in place) it rebuilds once, in a
+  child process at `nice 19`: about 20 s of one core and ~550 MiB at its
+  peak. A read that overlaps an update is thrown away and retried.
+- The agent serves `GET /icons/map.json` and `GET /icons/sheet.webp` with
+  the build as ETag (the sheet is immutable), and `/state` carries
+  `icons: {available, build, count}`. The web tier proxies them as
+  `/api/icons/*`. The browser loads the sheet once per game build.
+- Exit codes of a single run (`--every 0`): 0 done or already current, 2 no
+  game install found, 3 the game files could not be read (mid-update or an
+  unknown format; the previous sheet stays), 4 the output is not writable,
+  5 nothing to extract.
+
+**Compose**: set `COMPOSE_PROFILES=icons` in `.env` and `docker compose up -d`.
+The `icons` service mounts `valheim-data` read-only and the `skald-icons`
+volume read-write; the agent mounts `skald-icons` read-only with
+`ICONS_DIR=/icons`.
+
+**Kubernetes**: enable the `icons` component in
+[`kustomization.yaml`](../deploy/kubernetes/kustomization.yaml). It patches
+the game pod ([`icons/sidecar.yaml`](../deploy/kubernetes/icons/sidecar.yaml)):
+
+- an `icons` container (uid 65532, read-only root, limits 1 CPU / 1 GiB)
+  mounting the `data` volume read-only at `/opt/valheim` and the config PVC
+  with `subPath: skald-icons` at `/icons`;
+- `settings-init` also creates `skald-icons/` and hands it to 65532, and
+  `PRE_SUPERVISOR_HOOK` hands it back after the image's start-up `chown`, as
+  for `skald/`;
+- `ICONS_DIR=/config/skald-icons` on the agent, which already mounts `/config`
+  read-only.
+
+It changes the game pod, so applying it restarts the server once.

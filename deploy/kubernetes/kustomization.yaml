@@ -20,6 +20,10 @@ resources:
   - secrets.yaml
   # Needs the prometheus-operator CRDs (kube-prometheus-stack):
   # - servicemonitor.yaml
+# Optional: item icons from your own game files (restarts the game pod once;
+# see icons/kustomization.yaml and docs/configuration.md#item-icons).
+# components:
+#   - icons
 labels:
   - pairs:
       app.kubernetes.io/part-of: skald

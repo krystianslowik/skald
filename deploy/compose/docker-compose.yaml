@@ -4,13 +4,15 @@
 #   docker compose up -d
 #   open http://localhost:8080
 #
-# Three containers (plus a one-shot settings-init):
+# Three containers (plus a one-shot settings-init, and an opt-in icons):
 #   valheim    the game (community-valheim-tools/valheim-server, amd64 only)
 #   agent      Skald's sidecar; shares the game's network namespace so the
 #              game's syslog (UDP 127.0.0.1:5140) and supervisord's XML-RPC
 #              (127.0.0.1:9001) stay on loopback
 #   skald-web  the dashboard; a separate container, so updating it never
 #              restarts the game (a game restart rotates the join code)
+#   icons      opt-in (COMPOSE_PROFILES=icons): item icons extracted from
+#              your own game files, read-only; Skald ships no game assets
 #
 # Server settings (name, password, world modifiers) are edited on the
 # dashboard: the agent writes them to the skald-settings volume and the game
@@ -62,13 +64,34 @@ services:
       - valheim-run:/var/run/valheim
       - skald-settings:/settings:ro
 
-  # The agent runs as uid 65532 on a distroless image and cannot chown; a new
-  # named volume is root-owned. Runs once per `up` and exits.
+  # The agent and the icons extractor run as uid 65532 and cannot chown; a
+  # new named volume is root-owned. Runs once per `up` and exits.
   settings-init:
     image: busybox:1.37
-    command: ["sh", "-c", "mkdir -p /settings && chown 65532:65532 /settings && chmod 0755 /settings"]
+    command: ["sh", "-c", "chown 65532:65532 /settings /icons && chmod 0755 /settings /icons"]
     volumes:
       - skald-settings:/settings
+      - skald-icons:/icons
+
+  # Opt-in: item icons for the storage views, read from the game install the
+  # valheim service downloaded (read-only) and written to skald-icons. It
+  # rebuilds the sheet when the game updates and is idle otherwise. Turn it on
+  # with COMPOSE_PROFILES=icons in .env. See README, "Item icons".
+  icons:
+    image: ghcr.io/krystianslowik/skald-icons:${SKALD_VERSION:-latest}
+    profiles: [icons]
+    restart: unless-stopped
+    user: "65532:65532"
+    read_only: true
+    depends_on:
+      settings-init:
+        condition: service_completed_successfully
+    command: ["--game", "/opt/valheim", "--out", "/icons", "--every", "600", "--nice", "19"]
+    mem_limit: 1g
+    cpus: 1
+    volumes:
+      - valheim-data:/opt/valheim:ro
+      - skald-icons:/icons
 
   agent:
     image: ghcr.io/krystianslowik/skald-agent:${SKALD_VERSION:-latest}
@@ -93,11 +116,14 @@ services:
       SERVER_ARGS: ${SERVER_ARGS:-}
       SETTINGS_DIR: /settings
       PASSWORD_FILE: /run/secrets/server_pass
+      # Empty until the icons service has written a sheet; harmless without it.
+      ICONS_DIR: /icons
     secrets: [server_pass]
     volumes:
       - valheim-config:/config:ro
       - valheim-run:/var/run/valheim:ro
       - skald-settings:/settings
+      - skald-icons:/icons:ro
 
   skald-web:
     image: ghcr.io/krystianslowik/skald-web:${SKALD_VERSION:-latest}
@@ -131,6 +157,7 @@ volumes:
   valheim-run: # status file shared between the game and the agent
   skald-data: # Skald's SQLite event history
   skald-settings: # server settings saved from the dashboard (agent rw, game ro)
+  skald-icons: # item icon sheet from your own game files (icons rw, agent ro)
 
 secrets:
   # The password players type after the join code. Only the first value: once

@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valheim
+spec:
+  template:
+    spec:
+      initContainers:
+        # Also create skald-icons/ next to skald/ and hand it to uid 65532.
+        - name: settings-init
+          command: [sh, -c, "mkdir -p /config/skald /config/skald-icons && chown 65532:65532 /config/skald /config/skald-icons && chmod 0755 /config/skald /config/skald-icons"]
+        # The agent already mounts /config read-only.
+        - name: agent
+          env:
+            - name: ICONS_DIR
+              value: /config/skald-icons
+      containers:
+        - name: valheim
+          env:
+            # The image chowns all of /config on start; hand both directories back.
+            - name: PRE_SUPERVISOR_HOOK
+              value: "chown -R 65532:65532 /config/skald /config/skald-icons && chmod 0755 /config/skald /config/skald-icons"
+        # Reads the game install read-only and rebuilds the icon sheet when the
+        # game updates (it checks every 10 minutes; an unchanged build costs a
+        # few stat() calls). The extraction itself takes ~20 s of one core and
+        # ~550 MiB at its peak, once per game build.
+        - name: icons
+          image: ghcr.io/krystianslowik/skald-icons:0.7.0
+          imagePullPolicy: IfNotPresent
+          args: ["--game", "/opt/valheim", "--out", "/icons", "--every", "600", "--nice", "19"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /opt/valheim
+              readOnly: true
+            - name: config
+              subPath: skald-icons
+              mountPath: /icons

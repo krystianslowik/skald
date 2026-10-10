@@ -1,0 +1,15 @@
+# Item icons from your own game files (opt-in). Adds the skald-icons sidecar
+# to the game pod and points the agent at its output. Enable it in
+# ../kustomization.yaml:
+#
+#   components:
+#     - icons
+#
+# Applying it changes the game pod, so the server restarts once (and the join
+# code may change). Skald ships no game assets: the sidecar reads the game
+# install read-only and writes a sheet to the config volume (skald-icons/),
+# which only the agent serves, behind the panel password.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+  - path: sidecar.yaml

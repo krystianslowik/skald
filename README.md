@@ -59,6 +59,23 @@ two-finger taps (out). Places nobody has found stay hidden unless you set
 `MAP_SPOILERS=true`. Only what players built is read for storage: treasure,
 shipwreck and dungeon chests never show up, nor what is in them. Details in [docs/configuration.md](docs/configuration.md#world-map).
 
+## Item icons (opt-in)
+
+The chests, graves and village stores can show each item's own icon instead
+of a category mark. Skald does not ship them: an optional `skald-icons`
+sidecar makes an icon sheet from **your own** installed game server files,
+read-only, and keeps it on **your** volume, served only behind the panel
+password. It is off unless you turn it on (`COMPOSE_PROFILES=icons`, or the
+`icons` kustomize component), and it rebuilds by itself when the game
+updates. Details in [docs/configuration.md](docs/configuration.md#item-icons).
+
+> [!NOTE]
+> Skald contains no Valheim artwork, and neither do its images. The icons are
+> generated on your server from files you installed, and they stay there.
+> Valheim and its art belong to Iron Gate Studio and Coffee Stain; Skald is
+> not affiliated with or endorsed by them. Keep the panel private to your
+> community if you turn this on.
+
 ## Server settings
 
 <img src="docs/images/settings.webp" alt="The server settings sheet: world modifier presets as wooden slots with Custom lit in blue, stepped choices for combat, death penalty, resources and raids, and a footer counting four changes" width="100%" />
