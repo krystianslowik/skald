@@ -13,3 +13,15 @@ bin/
 .DS_Store
 # Real secrets for the Kubernetes example; only secrets.example.yaml is tracked.
 deploy/kubernetes/secrets.yaml
+__pycache__/
+*.pyc
+# Never commit game files or anything derived from them: reference DLLs for
+# the terrain plugin, extracted icon sheets, terrain grids and renders.
+terrain/refs/
+terrain/plugin/bin/
+terrain/plugin/obj/
+*.dll
+*.u8
+*.u16le
+skald-icons/
+skald-terrain/

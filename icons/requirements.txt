@@ -1,6 +1,7 @@
 # Install with: pip install --no-deps -r requirements.txt
 # --no-deps keeps UnityPy's fmod_toolkit (bundles the proprietary libfmod) out;
 # extract.py stubs that module because audio is never read.
+# Licences are listed in THIRD_PARTY_NOTICES.md.
 UnityPy==1.25.4
 astc_encoder_py==0.1.12
 archspec==0.2.6
