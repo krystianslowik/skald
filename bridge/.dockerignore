@@ -1,0 +1,6 @@
+refs
+out
+plugin/bin
+plugin/obj
+tests
+k8s

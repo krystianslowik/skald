@@ -1,0 +1,141 @@
+# Throwaway crossplay test server for the Skald bridge plugin.
+#
+# Separate namespace, separate throwaway world, never the real one. Players join
+# through the PlayFab relay with the join code from the logs (CROSSPLAY=true,
+# SERVER_PUBLIC=false), so there is no Service and no ingress.
+#
+# Out-of-band objects (not in this file, created by the commands in README.md):
+#   - Secret    skald-bridge       key SKALD_BRIDGE_TOKEN (random)
+#   - ConfigMap skald-bridge-plugin binaryData SkaldBridge.dll (built locally,
+#     never committed). The initContainer tolerates it being absent.
+#
+# Delete everything with: kubectl delete ns skald-bridge-test
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: skald-bridge-test
+  labels:
+    app.kubernetes.io/part-of: skald-bridge-test
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: valheim
+  namespace: skald-bridge-test
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  # No ingress at all. The plugin listens on 127.0.0.1 only; tests reach it with
+  # kubectl port-forward / an ephemeral debug container, neither of which is
+  # subject to NetworkPolicy.
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    # Same as the real server: PlayFab/Steam over 443, steamcmd CDN over 80,
+    # PlayFab relays and Steam CM over UDP. Public internet only.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+      ports:
+        - {protocol: TCP, port: 80}
+        - {protocol: TCP, port: 443}
+        - {protocol: UDP, port: 1024, endPort: 65535}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valheim
+  namespace: skald-bridge-test
+  labels:
+    app.kubernetes.io/name: valheim
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: valheim
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: valheim
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        memory-tier: high
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Drops the plugin into /config/bepinex/plugins; the image syncs that
+        # directory into the BepInEx install on every server start.
+        - name: plugin
+          image: busybox:1.37
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /config/bepinex/plugins
+              if [ -f /plugin/SkaldBridge.dll ]; then
+                cp /plugin/SkaldBridge.dll /config/bepinex/plugins/SkaldBridge.dll
+                echo "plugin installed"; md5sum /config/bepinex/plugins/SkaldBridge.dll
+              else
+                echo "no plugin in ConfigMap, starting without it"
+              fi
+          resources:
+            requests: {cpu: 10m, memory: 8Mi}
+            limits: {memory: 32Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - {name: config, mountPath: /config}
+            - {name: plugin, mountPath: /plugin, readOnly: true}
+      containers:
+        - name: valheim
+          image: ghcr.io/community-valheim-tools/valheim-server:1.4.0@sha256:f3ccde9a4e292663cf5096d502ff33cc9617015f6d70b6a9ca0968543f165ef2
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: SERVER_NAME, value: "skald-bridge-test"}
+            # A fresh throwaway world, generated on first start.
+            - {name: WORLD_NAME, value: "SkaldBridgeTest"}
+            - {name: SERVER_PASS, value: "change-me-test"}
+            - {name: SERVER_PUBLIC, value: "false"}
+            - {name: CROSSPLAY, value: "true"}
+            - {name: BEPINEX, value: "true"}
+            - {name: TZ, value: Europe/Berlin}
+            - {name: RESTART_CRON, value: ""}
+            - {name: UPDATE_CRON, value: ""}
+            - {name: BACKUPS, value: "false"}
+            # Plugin settings.
+            - {name: SKALD_BRIDGE, value: "on"}
+            - {name: SKALD_BRIDGE_PORT, value: "9010"}
+            - name: SKALD_BRIDGE_TOKEN
+              valueFrom:
+                secretKeyRef: {name: skald-bridge, key: SKALD_BRIDGE_TOKEN}
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              memory: 6Gi
+          volumeMounts:
+            - {name: config, mountPath: /config}
+            - {name: data, mountPath: /opt/valheim}
+      volumes:
+        # Throwaway: world and game files vanish with the pod.
+        - name: config
+          emptyDir: {sizeLimit: 2Gi}
+        - name: data
+          emptyDir: {sizeLimit: 8Gi}
+        - name: plugin
+          configMap:
+            name: skald-bridge-plugin
+            optional: true

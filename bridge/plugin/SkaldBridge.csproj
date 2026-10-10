@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>SkaldBridge</AssemblyName>
+    <RootNamespace>Skald.Bridge</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <Deterministic>true</Deterministic>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <!--
+      Game, Unity and BepInEx DLLs come from the operator's own install (see
+      fetch-refs.sh) and are never committed. GameRefs must contain the game's
+      Managed/ DLLs plus BepInEx.dll.
+    -->
+    <GameRefs Condition="'$(GameRefs)' == ''">$(MSBuildThisFileDirectory)../refs</GameRefs>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="assembly_valheim"><HintPath>$(GameRefs)/assembly_valheim.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="assembly_utils"><HintPath>$(GameRefs)/assembly_utils.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Splatform"><HintPath>$(GameRefs)/Splatform.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>$(GameRefs)/Newtonsoft.Json.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(GameRefs)/UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(GameRefs)/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="BepInEx"><HintPath>$(GameRefs)/BepInEx.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>
