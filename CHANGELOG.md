@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-10
+
 ### Added
 
 - Item icons (opt-in). A `skald-icons` sidecar (new image) builds an icon
