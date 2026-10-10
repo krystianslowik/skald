@@ -384,6 +384,8 @@ export interface MapTombstone extends MapPoint {
   owner: string;
   /** In-game day of the death; -1 when unknown. */
   day: number;
+  /** What the grave holds, in slot order (absent from older agents). */
+  items?: MapItem[];
 }
 
 export interface MapBed extends MapPoint {
@@ -391,7 +393,44 @@ export interface MapBed extends MapPoint {
 }
 
 export interface MapVehicle extends MapPoint {
+  /** Its entry in `storage` when a player built it. */
+  id?: string;
   kind: string;
+}
+
+/**
+ * One stack in a container. `name` is the item prefab ("#hash" when the agent
+ * does not know it), `type` the game's item type ("Material", "Helmet", ...).
+ * `quality` is absent at 1; `durability` is set only for things that wear;
+ * `crafter` only with MAP_SHOW_NAMES. `x`, `y` is the slot.
+ */
+export interface MapItem {
+  name: string;
+  type?: string;
+  stack: number;
+  quality?: number;
+  durability?: number;
+  crafter?: string;
+  x: number;
+  y: number;
+}
+
+export type MapContainerKind = "chest" | "cart" | "ship";
+
+/**
+ * A chest, cart or ship a player built, with its inventory. World chests are
+ * never listed. `id` is the prefab and rounded position; `width` x `height`
+ * the inventory grid (0 x 0 for a raft). `unreadable`: the inventory did not
+ * decode and `items` is empty.
+ */
+export interface MapContainer extends MapPoint {
+  id: string;
+  kind: MapContainerKind;
+  prefab: string;
+  width: number;
+  height: number;
+  items: MapItem[];
+  unreadable?: boolean;
 }
 
 export interface MapBase extends MapPoint {
@@ -441,13 +480,24 @@ export interface MapSnapshot {
   bases: MapBase[];
   locations: MapLocation[];
   terrainEdits: MapTerrainEdit[];
+  /** Player-built containers (absent from older agents). */
+  storage?: MapContainer[];
   stats: MapStats;
 }
 
 /** Web GET /api/map: the snapshot after the spoiler setting was applied. */
 export interface ApiMap extends MapSnapshot {
+  storage: MapContainer[];
   /** MAP_SPOILERS: unexplored locations are kept. */
   spoilers: boolean;
   /** Locations dropped because nobody has found them yet. */
   hiddenLocations: number;
+}
+
+/** Web GET /api/storage: the containers alone, for the village stores. */
+export interface ApiStorage {
+  generation: number;
+  savedAt: string;
+  showNames: boolean;
+  containers: MapContainer[];
 }

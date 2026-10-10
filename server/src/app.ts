@@ -4,7 +4,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { AgentSource } from "./agent";
 import { createSession, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS, verifySession } from "./auth";
 import type { Hub } from "./hub";
-import type { MapCache } from "./map";
+import type { MapCache, MapView } from "./map";
 import {
   ACTION_NAMES,
   BACKUP_NAME,
@@ -138,10 +138,11 @@ export function createApp(deps: AppDeps): Hono {
     }
   });
 
-  // The world map, gated by MAP_SPOILERS. Revalidated by ETag; gzip when accepted.
-  app.get("/api/map", async (c) => {
+  // The world map, gated by MAP_SPOILERS, and the village stores cut from it.
+  // Revalidated by ETag; gzip when accepted.
+  const serveMap = async (c: Context, view: MapView) => {
     if (!deps.map) return c.json({ error: "world map off" }, 404);
-    const res = await deps.map.get();
+    const res = await deps.map.get(view);
     if (!res.ok) return c.json({ error: res.message }, res.status as 404);
     const headers: Record<string, string> = { ETag: res.etag, "Cache-Control": "private, no-cache", Vary: "Accept-Encoding" };
     if (res.stale) headers["X-Skald-Stale"] = "1";
@@ -154,7 +155,9 @@ export function createApp(deps: AppDeps): Hono {
       return new Response(res.gzip, { status: 200, headers });
     }
     return new Response(res.json, { status: 200, headers });
-  });
+  };
+  app.get("/api/map", (c) => serveMap(c, "map"));
+  app.get("/api/storage", (c) => serveMap(c, "storage"));
 
   app.get("/api/players", (c) => {
     c.header("Cache-Control", "no-store");

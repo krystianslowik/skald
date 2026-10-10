@@ -5,10 +5,10 @@ import { loadConfig } from "../src/config";
 import { HistoryStore } from "../src/db";
 import { Hub } from "../src/hub";
 import { MAP_RECHECK_MS, MapCache } from "../src/map";
-import { gateMap } from "../src/mapgate";
+import { gateMap, storageOf } from "../src/mapgate";
 import { mockMap } from "../src/mapmock";
 import { MockAgent } from "../src/mock";
-import { emptyAgentState, type ApiMap, type MapSnapshot } from "../src/types";
+import { emptyAgentState, type ApiMap, type ApiStorage, type MapSnapshot } from "../src/types";
 
 const HASH = await Bun.password.hash("ognisko");
 
@@ -58,8 +58,25 @@ describe("mockMap", () => {
   it("drops names when asked", () => {
     const hidden = mockMap({ showNames: false });
     const j = JSON.stringify(hidden);
-    for (const n of ["Ragnar", "Bjorn", "Hearthstead", '"tag":"home"']) expect(j).not.toContain(n);
+    for (const n of ["Ragnar", "Bjorn", "Hearthstead", '"tag":"home"', "crafter"]) expect(j).not.toContain(n);
     expect(hidden.meta.showNames).toBe(false);
+  });
+
+  it("has stores: chests, a loaded cart and karve, graves with items, no world chests", () => {
+    const store = m.storage!;
+    expect(store.filter((c) => c.kind === "chest").length).toBeGreaterThan(8);
+    for (const v of m.vehicles) expect(store.some((c) => c.id === v.id && c.x === v.x && c.z === v.z)).toBe(true);
+    expect(store.find((c) => c.prefab === "Cart")!.items.length).toBeGreaterThan(0);
+    for (const c of store) {
+      expect(c.prefab).not.toMatch(/Treasure|shipwreck/);
+      expect(new Set(c.items.map((i) => `${i.x},${i.y}`)).size).toBe(c.items.length);
+      for (const i of c.items) expect(i.x < c.width && i.y < c.height).toBe(true);
+    }
+    expect(m.tombstones.every((g) => (g.items?.length ?? 0) > 0)).toBe(true);
+    const all = store.flatMap((c) => c.items);
+    expect(all.some((i) => i.quality && i.quality > 1)).toBe(true);
+    expect(all.some((i) => i.durability !== undefined)).toBe(true);
+    expect(all.every((i) => i.type)).toBe(true);
   });
 });
 
@@ -72,6 +89,14 @@ describe("gateMap", () => {
     expect(g.locations.every((l) => l.placed && l.explored)).toBe(true);
     expect(g.hiddenLocations).toBe(snap.locations.length - g.locations.length);
     expect(g.hiddenLocations).toBeGreaterThan(0);
+  });
+
+  it("gives an older agent's map an empty store", () => {
+    const { storage: _, ...old } = snap;
+    expect(gateMap(old, false).storage).toEqual([]);
+    const s = storageOf(gateMap(snap, false));
+    expect(s.containers).toBe(snap.storage!);
+    expect(Object.keys(s).sort()).toEqual(["containers", "generation", "savedAt", "showNames"]);
   });
 
   it("keeps everything with spoilers", () => {
@@ -190,6 +215,21 @@ describe("GET /api/map", () => {
   it("is 404 when the agent has no map", async () => {
     const { app, cookie } = await setup(false, null);
     expect((await app.request("/api/map", { headers: { cookie } })).status).toBe(404);
+    expect((await app.request("/api/storage", { headers: { cookie } })).status).toBe(404);
+  });
+
+  it("serves the stores alone, with their own ETag", async () => {
+    const { app, cookie } = await setup(false);
+    expect((await app.request("/api/storage")).status).toBe(401);
+    const res = await app.request("/api/storage", { headers: { cookie } });
+    expect(res.status).toBe(200);
+    const etag = res.headers.get("ETag")!;
+    const map = await app.request("/api/map", { headers: { cookie } });
+    expect(etag).not.toBe(map.headers.get("ETag"));
+    const body = (await res.json()) as ApiStorage;
+    expect(body.containers.length).toBe(mockMap().storage!.length);
+    expect(JSON.stringify(body)).not.toContain("locations");
+    expect((await app.request("/api/storage", { headers: { cookie, "If-None-Match": etag } })).status).toBe(304);
   });
 });
 

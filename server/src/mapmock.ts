@@ -1,4 +1,4 @@
-import type { MapLocation, MapLocationKind, MapSnapshot } from "./types";
+import type { MapContainer, MapItem, MapLocation, MapLocationKind, MapSnapshot } from "./types";
 
 /**
  * A made-up world map for MOCK_AGENT=1, the tests and the screenshots: an
@@ -103,6 +103,84 @@ const BASES = [
 const DUNGEONS = ["Crypt2", "Crypt3", "Crypt4", "SunkenCrypt4", "TrollCave02", "MountainCave02", "Mistlands_DvergrTownEntrance1", "Mistlands_DvergrTownEntrance2"];
 const BOSSES = ["Eikthyrnir", "GDKing", "Bonemass", "Dragonqueen", "GoblinKing", "Mistlands_DvergrBossEntrance1", "FaderLocation"];
 const TRADERS = ["Vendor_BlackForest", "Hildir_camp", "BogWitch_Camp"];
+
+/** Item prefab -> game item type, for the made-up stores. */
+const ITEM_TYPES: Record<string, string> = {
+  Wood: "Material", FineWood: "Material", RoundLog: "Material", ElderBark: "Material", Stone: "Material", Flint: "Material",
+  Resin: "Material", LeatherScraps: "Material", DeerHide: "Material", TrollHide: "Material", BoneFragments: "Material",
+  CopperOre: "Material", TinOre: "Material", Copper: "Material", Tin: "Material", Bronze: "Material", IronScrap: "Material",
+  Iron: "Material", Silver: "Material", Coal: "Material", SurtlingCore: "Material", Chitin: "Material", Guck: "Material",
+  GreydwarfEye: "Material", Feathers: "Material", Coins: "Material", Ruby: "Material", Amber: "Material",
+  WolfPelt: "Material", Obsidian: "Material", FreezeGland: "Material",
+  CarrotSeeds: "Material", TurnipSeeds: "Material", BeechSeeds: "Material", PineCone: "Material", BirchSeeds: "Material", AncientSeed: "Material",
+  Honey: "Consumable", Raspberry: "Consumable", Blueberries: "Consumable", Carrot: "Consumable", Turnip: "Consumable",
+  Mushroom: "Consumable", MushroomYellow: "Consumable", CookedMeat: "Consumable", CookedDeerMeat: "Consumable",
+  CarrotSoup: "Consumable", QueensJam: "Consumable", Sausages: "Consumable", SerpentStew: "Consumable", TurnipStew: "Consumable",
+  MeadHealthMinor: "Consumable", MeadStaminaMinor: "Consumable", MeadPoisonResist: "Consumable", MeadFrostResist: "Consumable",
+  RawMeat: "Consumable", DeerMeat: "Consumable",
+  SwordBronze: "OneHandedWeapon", AxeBronze: "OneHandedWeapon", MaceIron: "OneHandedWeapon", KnifeCopper: "OneHandedWeapon",
+  AtgeirBronze: "TwoHandedWeapon", BowFineWood: "Bow", ShieldBronzeBuckler: "Shield", ArrowWood: "Ammo", ArrowFlint: "Ammo", ArrowFire: "Ammo",
+  ArmorBronzeChest: "Chest", ArmorBronzeLegs: "Legs", HelmetBronze: "Helmet", ArmorTrollLeatherChest: "Chest", CapeDeerHide: "Shoulder",
+  PickaxeBronze: "Tool", Hammer: "Tool", Hoe: "Tool", Cultivator: "Tool", Torch: "Torch",
+  TrophyDeer: "Trophy", TrophyBoar: "Trophy", TrophyGreydwarf: "Trophy", TrophyTroll: "Trophy", TrophyEikthyr: "Trophy",
+  CryptKey: "Misc", Wishbone: "Misc", BronzeNails: "Material", IronNails: "Material",
+};
+
+/** A stack: [prefab, stack, quality?, durability?, crafter?]. Slots fill row by row. */
+type Stack = [name: string, stack: number, quality?: number, durability?: number, crafter?: string];
+
+function fill(width: number, stacks: Stack[], showNames: boolean): MapItem[] {
+  return stacks.map(([name, stack, quality, durability, crafter], i) => {
+    const it: MapItem = { name, type: ITEM_TYPES[name], stack, x: i % width, y: Math.floor(i / width) };
+    if (quality && quality > 1) it.quality = quality;
+    if (durability !== undefined) it.durability = durability;
+    if (crafter && showNames) it.crafter = crafter;
+    return it;
+  });
+}
+
+const GRID: Record<string, [number, number]> = { piece_chest_wood: [5, 2], piece_chest: [6, 4], piece_chest_private: [3, 2], piece_chest_barrel: [6, 2], Cart: [6, 3], Karve: [2, 2], Raft: [0, 0] };
+
+/**
+ * Made-up stores: a home base full of chests sorted the way people sort them
+ * (wood, ores, food, gear), a swamp outpost, a loaded cart and karve. No
+ * world chests, like the agent.
+ */
+function mockStorage(showNames: boolean): MapContainer[] {
+  const c = (prefab: string, x: number, z: number, stacks: Stack[]): MapContainer => {
+    const [width, height] = GRID[prefab] ?? [5, 2];
+    const kind = prefab === "Cart" ? "cart" : prefab === "Karve" || prefab === "Raft" ? "ship" : "chest";
+    return { id: `${prefab}@${x},${z}`, kind, prefab, x, z, width, height, items: fill(width, stacks, showNames) };
+  };
+  return [
+    c("piece_chest_wood", 208, -352, [["Wood", 50], ["Wood", 50], ["Wood", 50], ["Wood", 50], ["Wood", 37], ["FineWood", 50], ["FineWood", 22], ["RoundLog", 50], ["ElderBark", 31], ["Resin", 44]]),
+    c("piece_chest_wood", 211, -352, [["Stone", 50], ["Stone", 50], ["Stone", 18], ["Flint", 27], ["Coal", 50], ["Coal", 12], ["SurtlingCore", 9], ["BoneFragments", 36]]),
+    c("piece_chest", 214, -352, [
+      ["CopperOre", 30], ["CopperOre", 30], ["CopperOre", 11], ["TinOre", 30], ["TinOre", 4], ["Copper", 50], ["Copper", 23], ["Tin", 18],
+      ["Bronze", 34], ["IronScrap", 30], ["IronScrap", 30], ["IronScrap", 30], ["IronScrap", 7], ["Iron", 50], ["Iron", 41], ["Silver", 12],
+      ["BronzeNails", 80], ["IronNails", 54], ["Obsidian", 22], ["Chitin", 15],
+    ]),
+    c("piece_chest_wood", 217, -352, [["Honey", 50], ["Honey", 50], ["Honey", 12], ["Raspberry", 38], ["Blueberries", 44], ["Carrot", 27], ["Turnip", 19], ["Mushroom", 23], ["QueensJam", 8], ["Sausages", 6]]),
+    c("piece_chest_wood", 220, -352, [["CarrotSeeds", 46], ["TurnipSeeds", 31], ["BeechSeeds", 12], ["PineCone", 9], ["BirchSeeds", 17], ["AncientSeed", 3]]),
+    c("piece_chest_private", 223, -350, [
+      ["SwordBronze", 1, 3, 287.5, "Ragnar"], ["ShieldBronzeBuckler", 1, 2, 214, "Freya"], ["BowFineWood", 1, 2, 96.4, "Astrid"],
+      ["ArrowFire", 84], ["ArrowFlint", 100], ["Coins", 412],
+    ]),
+    c("piece_chest_wood", 226, -352, [
+      ["ArmorBronzeChest", 1, 2, 1200, "Ragnar"], ["ArmorBronzeLegs", 1, 1, 640.2, "Ragnar"], ["HelmetBronze", 1, 2, 1045, "Freya"],
+      ["CapeDeerHide", 1, 1, 400, "Astrid"], ["PickaxeBronze", 1, 2, 180.6, "Bjorn"], ["Hammer", 1, 1, 87.3], ["Cultivator", 1, 1, 200, "Freya"], ["Torch", 1, 1, 6.2],
+    ]),
+    c("piece_chest_wood", 229, -352, [["TrophyDeer", 6], ["TrophyBoar", 4], ["TrophyGreydwarf", 11], ["TrophyTroll", 2], ["TrophyEikthyr", 1], ["Wishbone", 1], ["CryptKey", 1], ["Ruby", 4], ["Amber", 7]]),
+    c("piece_chest_barrel", 236, -334, [["MeadHealthMinor", 10], ["MeadStaminaMinor", 10], ["MeadPoisonResist", 6], ["MeadFrostResist", 4], ["CarrotSoup", 9], ["TurnipStew", 5]]),
+    c("piece_chest_wood", 202, -330, []),
+    c("piece_chest_wood", -1466, 986, [["Guck", 14], ["Iron", 18], ["IronScrap", 30], ["IronScrap", 22], ["Chitin", 8], ["SerpentStew", 3], ["CookedDeerMeat", 7], ["Wood", 41]]),
+    c("piece_chest_wood", -1452, 990, [["TrollHide", 9], ["DeerHide", 26], ["LeatherScraps", 31], ["Feathers", 48], ["GreydwarfEye", 37], ["WolfPelt", 6], ["FreezeGland", 5]]),
+    c("piece_chest_wood", 1574, 1726, [["Silver", 30], ["Silver", 12], ["Obsidian", 40], ["WolfPelt", 11], ["FreezeGland", 13]]),
+    c("Cart", 160, -300, [["CopperOre", 30], ["CopperOre", 30], ["CopperOre", 30], ["TinOre", 30], ["TinOre", 18], ["Stone", 50], ["Wood", 50], ["Wood", 50], ["Resin", 12]]),
+    c("Karve", 420, -520, [["IronScrap", 30], ["IronScrap", 30], ["Wood", 50], ["CookedMeat", 8]]),
+    c("Raft", -980, 640, []),
+  ];
+}
 
 export function mockMap(opts: { generation?: number; netTime?: number; savedAt?: string; now?: number; showNames?: boolean } = {}): MapSnapshot {
   const rand = rng(20261010);
@@ -241,9 +319,9 @@ export function mockMap(opts: { generation?: number; netTime?: number; savedAt?:
     ],
     portals,
     tombstones: [
-      { x: -1290, z: 1050, owner: name("Bjorn"), day: 36 },
-      { x: -1520, z: 905, owner: name("Freya"), day: 38 },
-      { x: 1620, z: 1910, owner: name("Ragnar"), day: 40 },
+      { x: -1290, z: 1050, owner: name("Bjorn"), day: 36, items: fill(8, [["AxeBronze", 1, 2, 132.5, "Bjorn"], ["ArmorTrollLeatherChest", 1, 1, 380, "Freya"], ["Hoe", 1, 1, 100], ["Guck", 6], ["Torch", 1, 1, 14.8], ["RawMeat", 4]], showNames) },
+      { x: -1520, z: 905, owner: name("Freya"), day: 38, items: fill(8, [["KnifeCopper", 1, 2, 241, "Freya"], ["Bronze", 6], ["Blueberries", 12]], showNames) },
+      { x: 1620, z: 1910, owner: name("Ragnar"), day: 40, items: fill(8, [["MaceIron", 1, 3, 305, "Ragnar"], ["ArmorBronzeChest", 1, 2, 1180, "Ragnar"], ["Silver", 14], ["Obsidian", 9], ["MeadFrostResist", 2]], showNames) },
     ],
     beds: [
       { x: 228, z: -332, owner: name("Ragnar") },
@@ -252,9 +330,9 @@ export function mockMap(opts: { generation?: number; netTime?: number; savedAt?:
       { x: -1468, z: 972, owner: name("Bjorn") },
     ],
     vehicles: [
-      { kind: "Karve", x: 420, z: -520 },
-      { kind: "Raft", x: -980, z: 640 },
-      { kind: "Cart", x: 160, z: -300 },
+      { id: "Karve@420,-520", kind: "Karve", x: 420, z: -520 },
+      { id: "Raft@-980,640", kind: "Raft", x: -980, z: 640 },
+      { id: "Cart@160,-300", kind: "Cart", x: 160, z: -300 },
     ],
     bases: BASES.map(({ x, z, pieces, hasBed, stations }) => ({ x, z, pieces, zones: Math.max(1, Math.round(pieces / 300)), hasBed, stations })),
     locations,
@@ -267,6 +345,7 @@ export function mockMap(opts: { generation?: number; netTime?: number; savedAt?:
       { x: 1600, z: 1728, cells: 90 },
       { x: -768, z: 384, cells: 160 },
     ],
+    storage: mockStorage(showNames),
     stats: {
       zdos: 376000,
       chunks: 36,

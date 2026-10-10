@@ -1,4 +1,4 @@
-import type { ApiMap, MapSnapshot } from "./types";
+import type { ApiMap, ApiStorage, MapSnapshot } from "./types";
 
 /**
  * Spoiler gating. With spoilers off only locations someone has found stay:
@@ -8,5 +8,10 @@ import type { ApiMap, MapSnapshot } from "./types";
  */
 export function gateMap(snap: MapSnapshot, spoilers: boolean): ApiMap {
   const locations = spoilers ? snap.locations : snap.locations.filter((l) => l.placed && l.explored);
-  return { ...snap, locations, spoilers, hiddenLocations: snap.locations.length - locations.length };
+  return { ...snap, storage: snap.storage ?? [], locations, spoilers, hiddenLocations: snap.locations.length - locations.length };
+}
+
+/** The village stores: every player-built container, nothing else of the map. */
+export function storageOf(map: ApiMap): ApiStorage {
+  return { generation: map.meta.generation, savedAt: map.meta.savedAt, showNames: map.meta.showNames, containers: map.storage };
 }
