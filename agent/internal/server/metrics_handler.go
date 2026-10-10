@@ -19,7 +19,7 @@ import (
 const metricsProcMaxAge = 30 * time.Second
 
 // countedEvents are the event types exported as valheim_events_total.
-var countedEvents = []string{"player_join", "player_leave", "death", "world_saved", "raid", "join_code", "action", "settings_changed", "settings_apply"}
+var countedEvents = []string{"player_join", "player_leave", "death", "world_saved", "world_backup", "raid", "join_code", "action", "settings_changed", "settings_apply"}
 
 // metricsHandler renders the Prometheus text exposition format (0.0.4) by
 // hand from the same sources as /state.
