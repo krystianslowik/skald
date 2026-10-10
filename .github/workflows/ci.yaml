@@ -87,7 +87,7 @@ jobs:
         working-directory: terrain
     steps:
       - uses: actions/checkout@v4.2.2
-      - uses: actions/setup-dotnet@v4.3.1
+      - uses: actions/setup-dotnet@v6.0.0
         with:
           dotnet-version: 9.0.x
       # Bound to the game by reflection: builds against BepInEx and Unity
@@ -108,7 +108,7 @@ jobs:
         working-directory: bridge
     steps:
       - uses: actions/checkout@v4.2.2
-      - uses: actions/setup-dotnet@v4.3.1
+      - uses: actions/setup-dotnet@v6.0.0
         with:
           dotnet-version: 9.0.x
       - run: dotnet test tests
