@@ -71,3 +71,19 @@ export function shouldDismiss(offset: number, velocity: number, size: number): b
   if (Math.abs(velocity) >= FLICK_VELOCITY) return velocity > 0;
   return offset + project(velocity) > size / 2;
 }
+
+/**
+ * Where a released sheet with several resting points comes to rest. `detents`
+ * are offsets sorted ascending (0 = fully expanded); the last one is "gone". A
+ * flick moves one detent in its direction; a slow release goes to the detent
+ * nearest its projected resting point.
+ */
+export function pickDetent(offset: number, velocity: number, detents: readonly number[]): number {
+  if (detents.length === 0) return 0;
+  if (Math.abs(velocity) >= FLICK_VELOCITY) {
+    if (velocity > 0) return detents.find((d) => d > offset + 1) ?? detents.at(-1)!;
+    return [...detents].reverse().find((d) => d < offset - 1) ?? detents[0]!;
+  }
+  const rest = offset + project(velocity);
+  return detents.reduce((best, d) => (Math.abs(d - rest) < Math.abs(best - rest) ? d : best), detents[0]!);
+}

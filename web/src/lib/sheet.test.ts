@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dragOffset, FLICK_VELOCITY, project, rubberband, shouldDismiss, travelFor, velocityFrom } from "./sheet";
+import { dragOffset, FLICK_VELOCITY, pickDetent, project, rubberband, shouldDismiss, travelFor, velocityFrom } from "./sheet";
 
 describe("sheet drag math", () => {
   it("projects momentum with exponential decay (d = 0.998)", () => {
@@ -71,5 +71,18 @@ describe("sheet drag math", () => {
     expect(shouldDismiss(150, 200, size)).toBe(true);
     // 250 + project(-200) = 250 - 99.8 < 200
     expect(shouldDismiss(250, -200, size)).toBe(false);
+  });
+
+  it("rests a peeking sheet on the nearest detent, or the next one when flicked", () => {
+    const detents = [0, 500, 800];
+    // Slow releases: wherever the projection lands nearest.
+    expect(pickDetent(480, 0, detents)).toBe(500);
+    expect(pickDetent(180, 0, detents)).toBe(0);
+    expect(pickDetent(700, 0, detents)).toBe(800);
+    // A flick up from the peek expands, a flick down from it dismisses, wherever it starts.
+    expect(pickDetent(490, -FLICK_VELOCITY, detents)).toBe(0);
+    expect(pickDetent(510, FLICK_VELOCITY, detents)).toBe(800);
+    // A flick down from fully open lands on the peek first.
+    expect(pickDetent(20, FLICK_VELOCITY * 2, detents)).toBe(500);
   });
 });
