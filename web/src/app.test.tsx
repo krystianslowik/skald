@@ -58,7 +58,7 @@ describe("Dashboard", () => {
     }
     expect(screen.getByText((_, el) => el?.tagName === "SPAN" && el.textContent === "Ragnar falls in battle")).toBeInTheDocument();
     expect(screen.getByText("Raid: Eikthyr's herd")).toBeInTheDocument();
-    expect(screen.getByText("Day 1")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "World" })).getByText("Day 1")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Download backup worlds-20261009-180000.zip" })).toBeInTheDocument();
     expect(screen.getAllByText(/Prometheus is silent/).length).toBe(3);
     expect(screen.getByText("1 person")).toBeInTheDocument();
@@ -88,7 +88,7 @@ describe("Dashboard", () => {
     expect(dl).toHaveAttribute("href", "/api/backups/worlds-20261009-180000.zip");
     expect(dl).toHaveAttribute("download", "worlds-20261009-180000.zip");
     expect(screen.getByText("Najazd: stado Eikthyra")).toBeInTheDocument();
-    expect(screen.getByText("Dzień 1")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Świat" })).getByText("Dzień 1")).toBeInTheDocument();
     const map = screen.getByRole("link", { name: /Mapa świata/ });
     expect(map).toHaveAttribute("href", "https://valheim-map.world/?seed=ZbzIWkK5KK&offset=0,0&zoom=0.600&ver=1.0.7");
     expect(map).toHaveAttribute("target", "_blank");
@@ -228,7 +228,8 @@ describe("Server settings", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<Dashboard live={{ state: withSettings(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
     expect(screen.queryByText("hearth-77")).not.toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    // The map board fetches the map; the password is never fetched unasked.
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/settings/password", expect.anything());
     fireEvent.click(screen.getByRole("button", { name: "Show password" }));
     expect(await screen.findByText("hearth-77")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/settings/password", expect.anything());

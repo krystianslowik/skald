@@ -23,6 +23,35 @@ import { cancelApply } from "../lib/api";
 // Opened on demand; the chunk is preloaded as soon as a pointer reaches a player name.
 const ProfileSheet = lazy(() => import("./ProfileSheet"));
 const SettingsSheet = lazy(() => import("./SettingsSheet"));
+const MapView = lazy(() => import("./map/MapView"));
+const MapPreview = lazy(() => import("./map/MapPreview"));
+
+const MAP_HASH = "#map";
+
+/** The map is a place you can go Back from: it lives at #map. */
+function useMapRoute(): [boolean, () => void, () => void] {
+  const [open, setOpen] = useState(() => typeof location !== "undefined" && location.hash === MAP_HASH);
+  useEffect(() => {
+    const sync = () => setOpen(location.hash === MAP_HASH);
+    window.addEventListener("popstate", sync);
+    window.addEventListener("hashchange", sync);
+    return () => {
+      window.removeEventListener("popstate", sync);
+      window.removeEventListener("hashchange", sync);
+    };
+  }, []);
+  const show = useCallback(() => {
+    if (location.hash !== MAP_HASH) history.pushState(null, "", MAP_HASH);
+    setOpen(true);
+  }, []);
+  const hide = useCallback(() => {
+    // Opened from here: Back pops it. Landed on #map directly: drop the hash.
+    if (history.state === null && location.hash === MAP_HASH && history.length > 1) history.back();
+    else history.replaceState(null, "", location.pathname + location.search);
+    setOpen(false);
+  }, []);
+  return [open, show, hide];
+}
 
 function useNow(ms = 15_000): number {
   const [now, setNow] = useState(() => Date.now());
@@ -59,6 +88,16 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
     (settingsOpener.current as HTMLElement | null)?.focus?.();
   }, []);
   const cancelArmed = useCallback(() => void cancelApply().catch(() => undefined), []);
+  const [mapOpen, openMap, closeMapRoute] = useMapRoute();
+  const mapOpener = useRef<Element | null>(null);
+  const showMap = useCallback(() => {
+    mapOpener.current = document.activeElement;
+    openMap();
+  }, [openMap]);
+  const closeMap = useCallback(() => {
+    closeMapRoute();
+    (mapOpener.current as HTMLElement | null)?.focus?.();
+  }, [closeMapRoute]);
 
   const online7d = state?.history.online7d;
   const onlineChart = useMemo(
@@ -86,6 +125,8 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
   }
 
   const players = state.players;
+  // A new save is a new map.
+  const saveKey = state.world.meta?.savedAt ?? "";
   return (
     <ProfileProvider value={openProfile}>
       <div className="relative min-h-[100dvh]">
@@ -105,6 +146,9 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
             settings={state.settings}
             onSettings={openSettings}
             onCancelArmed={cancelArmed}
+            clock={state.world.clock}
+            day={state.world.meta?.day}
+            onMap={showMap}
           />
 
           <div className="grid gap-5 lg:grid-cols-12 lg:gap-6">
@@ -126,6 +170,12 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
               <Progress bosses={state.world.meta?.bosses ?? BOSSES} />
             </Plank>
           </div>
+
+          <Plank title={t("map.title")} id="map" aside={t("map.preview.aside")}>
+            <Suspense fallback={<div className="h-56 sm:h-64" />}>
+              <MapPreview saveKey={saveKey} onOpen={showMap} />
+            </Suspense>
+          </Plank>
 
           <div className="grid gap-5 lg:grid-cols-12 lg:gap-6">
             <Plank title={t("plank.saga")} id="saga" aside={t("plank.saga.aside")} className="lg:col-span-7">
@@ -171,6 +221,11 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
         {profile && (
           <Suspense fallback={null}>
             <ProfileSheet key={profile} name={profile} now={now} onClose={closeProfile} />
+          </Suspense>
+        )}
+        {mapOpen && (
+          <Suspense fallback={null}>
+            <MapView seedName={state.world.meta?.seedName ?? ""} saveKey={saveKey} now={now} onClose={closeMap} />
           </Suspense>
         )}
         {settingsOpen && state.settings?.enabled && (

@@ -5,6 +5,8 @@ import { gameVersion } from "../lib/format";
 import { LocaleToggle, useI18n, type TextKey } from "../i18n";
 import { Flame, type FlameLevel } from "./Flame";
 import { preloadSettingsSheet, SettingsGlyph } from "./SettingsGlyph";
+import { WorldClock } from "./WorldClock";
+import type { WorldClock as Clock } from "../types";
 
 export function flameLevel(s: ApiState["server"] | null, online: boolean): FlameLevel {
   if (!s || !online) return "embers";
@@ -37,6 +39,9 @@ export const Header = memo(function Header({
   settings,
   onSettings,
   onCancelArmed,
+  clock,
+  day,
+  onMap,
 }: {
   server: ApiState["server"];
   online: boolean;
@@ -47,6 +52,11 @@ export const Header = memo(function Header({
   /** Opens the settings sheet; `footer` lands on the apply choice. */
   onSettings?: (footer: boolean) => void;
   onCancelArmed?: () => void;
+  /** The world clock; without it the header shows the save's day alone. */
+  clock?: Clock | null;
+  day?: number | null;
+  /** Opens the world map. */
+  onMap?: () => void;
 }) {
   const { t, duration } = useI18n();
   const level = flameLevel(s, online);
@@ -78,7 +88,24 @@ export const Header = memo(function Header({
           <dt className="text-xs text-ash">{t("header.burning")}</dt>
           <dd className="whitespace-nowrap font-bold text-bone">{up ?? t("header.notBurning")}</dd>
         </div>
+        <WorldClock clock={clock} day={day} />
         <div className="ml-auto flex items-center gap-2 sm:ml-0 sm:gap-3">
+          {onMap && (
+            <button
+              type="button"
+              onClick={onMap}
+              onPointerEnter={preloadMap}
+              onFocus={preloadMap}
+              aria-haspopup="dialog"
+              aria-label={t("map.open")}
+              title={t("map.open")}
+              className="plaque press grid h-8 w-8 place-items-center"
+            >
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" aria-hidden>
+                <path d="M2 5l5-2 6 2 5-2v12l-5 2-6-2-5 2zM7 3v12M13 5v12" />
+              </svg>
+            </button>
+          )}
           {settings?.enabled && onSettings && (
             <button
               type="button"
@@ -167,6 +194,9 @@ function SoundToggle() {
     </button>
   );
 }
+
+/** Warms the map's chunk before the click lands. */
+export const preloadMap = () => void import("./map/MapView");
 
 export function OfflineBanner() {
   const { t } = useI18n();
