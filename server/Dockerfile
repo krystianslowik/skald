@@ -9,7 +9,7 @@
 #   docker buildx build --platform linux/amd64,linux/arm64 -f server/Dockerfile \
 #     -t ghcr.io/krystianslowik/skald-web:dev .
 
-FROM --platform=$BUILDPLATFORM node:22-alpine AS web-build
+FROM --platform=$BUILDPLATFORM node:25-alpine AS web-build
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --silent
