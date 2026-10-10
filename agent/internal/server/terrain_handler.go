@@ -50,7 +50,7 @@ type terrainDoc struct {
 }
 
 // terrainJSON serves GET /terrain.json: what the image shows and where it
-// sits, for the web to place it. Revalidated by the same ETag.
+// sits, for the web to place it. Small and sent fresh (no-cache, no ETag).
 func (s *Server) terrainJSON(w http.ResponseWriter, r *http.Request) {
 	img, info := s.opt.Terrain.Current()
 	if img == nil {
