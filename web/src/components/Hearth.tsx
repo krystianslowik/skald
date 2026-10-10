@@ -2,6 +2,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { memo } from "react";
 import type { Player } from "../types";
 import { useI18n } from "../i18n";
+import { PlatformGlyph } from "./PlatformGlyph";
 import { PlayerName } from "./PlayerName";
 import { Shield } from "./Shield";
 
@@ -26,7 +27,10 @@ export const Hearth = memo(function Hearth({ players, now }: { players: Player[]
               <Shield name={p.name} size={68} />
             </span>
             <figcaption className="mt-1.5 w-full">
-              <PlayerName name={p.name} className="block w-full truncate text-[0.9375rem] font-bold text-bone" />
+              <span className="flex w-full items-center justify-center gap-1">
+                <PlatformGlyph platform={p.platform} className="text-label" />
+                <PlayerName name={p.name} className="block min-w-0 truncate text-[0.9375rem] font-bold text-bone" />
+              </span>
               <span className="block text-xs text-flame/90">{duration(now - Date.parse(p.since))}</span>
             </figcaption>
           </motion.figure>

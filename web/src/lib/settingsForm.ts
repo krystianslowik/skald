@@ -1,4 +1,4 @@
-import { changedKeys, KEYS, MODIFIER_NAMES, SAVE_INTERVAL, validateSettings, type ModifierName, type SettingsErrors } from "@server/settings";
+import { changedKeys, KEYS, MODIFIER_NAMES, MODIFIERS, SAVE_INTERVAL, validateSettings, type ModifierName, type SettingsErrors } from "@server/settings";
 import type { SettingsCurrent, SettingsInput } from "../types";
 
 /** The settings sheet's working copy. `password` is null while untouched (keep the saved one). */
@@ -65,6 +65,23 @@ export function draftReducer(d: Draft, a: DraftAction): Draft {
     case "reset":
       return draftFrom(a.to);
   }
+}
+
+/**
+ * Modifiers the world was created with that the saved settings show as
+ * normal. Starting the server without -modifier does not remove a world's
+ * modifier keys (seen on 1.0.17), so a form that shows "normal" would lie,
+ * and a save would write arguments that do not match the world. Only
+ * without a preset: a preset sets every modifier on its own.
+ */
+export function worldOnly(saved: SettingsCurrent, world: Record<string, string> | null | undefined): Partial<Record<ModifierName, string>> {
+  const out: Partial<Record<ModifierName, string>> = {};
+  if (!world || (saved.preset && saved.preset !== "normal")) return out;
+  for (const m of MODIFIER_NAMES) {
+    const v = world[m];
+    if (v && !saved.modifiers[m] && (MODIFIERS[m] as readonly string[]).includes(v)) out[m] = v;
+  }
+  return out;
 }
 
 /** Any individual modifier set: the preset row shows "Custom". */

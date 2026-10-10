@@ -119,7 +119,21 @@ export const Forge = memo(function Forge({
     [m, t, number, clock],
   );
   const { hours, cores } = charts;
-  const mods = useMemo(() => modifiers(server.args), [modifiers, server.args]);
+  // The world's own modifiers when the save is readable: the launch
+  // arguments can leave them out and the world still plays with them.
+  const worldMods = world.meta?.modifiers;
+  const worldKeys = world.meta?.worldKeys;
+  const mods = useMemo(() => {
+    if (!worldMods) return modifiers(server.args);
+    const args = server.args.split(/\s+/);
+    const out = args.includes("-crossplay") ? ["crossplay"] : [];
+    for (const [k, v] of Object.entries(worldMods)) out.push(`${lookup(`mod.${k}`) ?? k}: ${lookup(`modv.${v}`) ?? v}`);
+    // resourcerate mirrors the resources modifier; the rest are plain keys.
+    const keys = new Set((worldKeys ?? []).filter((k) => !k.startsWith("resourcerate")));
+    args.forEach((w, i) => w === "-setkey" && args[i + 1] && keys.add(args[i + 1]!.toLowerCase()));
+    for (const key of keys) out.push(lookup(`worldkey.${key}`) ?? lookup(`setkey.${key}`)?.toLowerCase() ?? key);
+    return out;
+  }, [modifiers, lookup, server.args, worldMods, worldKeys]);
   return (
     <div className="grid gap-x-8 gap-y-7 lg:grid-cols-[1fr_1fr_1fr_17rem]">
       {metricsConfigured === false ? (

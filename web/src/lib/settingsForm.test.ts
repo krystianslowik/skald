@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SettingsCurrent } from "../types";
-import { diff, draftErrors, draftFrom, draftReducer, generatePassword, isCustom, strength, toInput, type Draft, type DraftAction } from "./settingsForm";
+import { diff, draftErrors, draftFrom, draftReducer, generatePassword, isCustom, strength, toInput, worldOnly, type Draft, type DraftAction } from "./settingsForm";
 
 const saved: SettingsCurrent = {
   name: "My Valheim",
@@ -94,5 +94,16 @@ describe("settings draft", () => {
     expect(strength("abc")).toBe(0);
     expect(strength("abcde")).toBe(1);
     expect(strength("torvakelin42")).toBe(3);
+  });
+});
+
+describe("worldOnly", () => {
+  it("names world modifiers the saved settings show as normal", () => {
+    expect(worldOnly(saved, { resources: "muchmore", portals: "casual", raids: "more", combat: "bogus", other: "x" })).toEqual({ resources: "muchmore", portals: "casual" });
+    expect(worldOnly(saved, null)).toEqual({});
+    expect(worldOnly(saved, undefined)).toEqual({});
+  });
+  it("stays quiet under a preset, which sets every modifier itself", () => {
+    expect(worldOnly({ ...saved, preset: "hard", modifiers: {} }, { resources: "muchmore" })).toEqual({});
   });
 });

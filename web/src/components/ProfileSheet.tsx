@@ -4,6 +4,7 @@ import type { Badge, DailyPlay, PlayerProfile } from "../types";
 import { getPlayer } from "../lib/api";
 import { useI18n } from "../i18n";
 import { Sheet, SheetClose, SETTLE } from "./Sheet";
+import { PlatformGlyph } from "./PlatformGlyph";
 import { Shield } from "./Shield";
 
 /** Intl formatters for the active language, built once per language. */
@@ -53,7 +54,14 @@ export default function ProfileSheet({ name, now, onClose }: { name: string; now
             <h2 id="profile-h" className="plank-title truncate text-2xl">
               {name}
             </h2>
-            <p className="text-xs text-ash">
+            <p className="flex items-center gap-1.5 text-xs text-ash">
+              {profile?.platform && profile.platform !== "unknown" && (
+                <>
+                  <PlatformGlyph platform={profile.platform} className="text-label" />
+                  <span>{t(`platform.${profile.platform}`)}</span>
+                  <span aria-hidden>·</span>
+                </>
+              )}
               {profile ? (profile.online ? <span className="text-flame">{t("profile.atFireNow")}</span> : t("profile.lastSeen", { ago: ago(profile.lastSeen, now) })) : " "}
             </p>
           </div>

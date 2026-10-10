@@ -123,7 +123,7 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
               <World meta={state.world.meta} now={now} />
             </Plank>
             <Plank title={t("plank.progress")} id="progress" aside={t("plank.progress.aside")} className="lg:col-span-5">
-              <Progress bosses={BOSSES} />
+              <Progress bosses={state.world.meta?.bosses ?? BOSSES} />
             </Plank>
           </div>
 
@@ -175,7 +175,7 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
         )}
         {settingsOpen && state.settings?.enabled && (
           <Suspense fallback={null}>
-            <SettingsSheet summary={state.settings} effectiveName={state.server.name} focusFooter={settingsOpen === "footer"} onClose={closeSettings} />
+            <SettingsSheet summary={state.settings} effectiveName={state.server.name} worldModifiers={state.world.meta?.modifiers} focusFooter={settingsOpen === "footer"} onClose={closeSettings} />
           </Suspense>
         )}
       </div>

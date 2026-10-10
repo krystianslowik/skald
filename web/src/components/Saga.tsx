@@ -69,6 +69,8 @@ export function describe(i: I18n, ev: AgentEvent): { text: string; tone: Tone; p
       return { text: t("saga.death", { name }), tone: "death", player: name };
     case "world_saved":
       return { text: d.ms ? t("saga.saved", { ms: String(d.ms) }) : t("saga.savedPlain"), tone: "save" };
+    case "world_backup":
+      return { text: t("saga.backup"), tone: "save" };
     case "server_state": {
       const key = SERVER_STATE[String(d.status)];
       return key ? { text: t(key), tone: "server" } : null;

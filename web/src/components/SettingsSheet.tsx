@@ -4,7 +4,7 @@ import { KEYS, MODIFIER_NAMES, MODIFIERS, NAME_LEN, NEUTRAL_AT, normalize, PRESE
 import type { SettingsCurrent, SettingsSummary, SettingsView } from "../types";
 import { applySettings, cancelApply, getServerPassword, getSettings, putSettings, type SettingsFailure } from "../lib/api";
 import { crackle } from "../lib/campfire";
-import { diff, draftErrors, draftReducer, generatePassword, isCustom, strength, toInput, type Draft } from "../lib/settingsForm";
+import { diff, draftErrors, draftReducer, generatePassword, isCustom, strength, toInput, worldOnly, type Draft } from "../lib/settingsForm";
 import { useI18n, type TextKey } from "../i18n";
 import { SETTINGS_PATH, SettingsGlyph } from "./SettingsGlyph";
 import { Sheet, SheetClose, SETTLE } from "./Sheet";
@@ -23,11 +23,14 @@ const SWAP = { type: "spring" as const, bounce: 0, visualDuration: 0.3 };
 export default function SettingsSheet({
   summary,
   effectiveName,
+  worldModifiers,
   focusFooter,
   onClose,
 }: {
   summary: SettingsSummary;
   effectiveName: string;
+  /** The modifiers the world save was created with; null when unknown. */
+  worldModifiers?: Record<string, string> | null;
   /** Opened from the "restart pending" chip: land on the apply choice. */
   focusFooter: boolean;
   onClose: () => void;
@@ -57,11 +60,16 @@ export default function SettingsSheet({
         setView(r.body);
         setSaved(r.body.current);
         dispatch({ type: "reset", to: r.body.current });
+        // Preselect what the world really plays with, so a save keeps it.
+        for (const [name, value] of Object.entries(worldOnly(r.body.current, worldModifiers))) {
+          dispatch({ type: "modifier", name: name as ModifierName, value });
+        }
       })
       .catch(() => live && setFailed(true));
     return () => {
       live = false;
     };
+    // Read once on open: a later state push must not reset the draft.
   }, []);
 
   // The live summary takes over from local guesses as soon as it moves.
@@ -155,6 +163,8 @@ export default function SettingsSheet({
   };
 
   const ready = view && saved && draft;
+  // Shown until a save carries the world's modifiers into the settings.
+  const worldNote = useMemo(() => (saved ? worldOnly(saved, worldModifiers) : {}), [saved, worldModifiers]);
   return (
     <Sheet
       labelledBy="settings-h"
@@ -206,7 +216,7 @@ export default function SettingsSheet({
         <motion.div initial={{ opacity: 0, y: reduced ? 0 : 8 }} animate={{ opacity: 1, y: 0 }} transition={SETTLE} className="space-y-8 pt-1">
           <Identity name={draft.name} isPublic={draft.public} error={errors.name} savedName={saved.name} edit={edit} />
           <Password password={draft.password} name={draft.name} error={errors.password} passwordSet={passwordSet} known={known} setKnown={setKnown} edit={edit} />
-          <WorldModifiers preset={draft.preset} modifiers={draft.modifiers} edit={edit} />
+          <WorldModifiers preset={draft.preset} modifiers={draft.modifiers} worldNote={worldNote} edit={edit} />
           <WorldKeys keys={draft.keys} edit={edit} />
           <Advanced saveInterval={draft.saveInterval} unmanaged={saved.unmanaged} hookMissing={view.hook === "missing"} edit={edit} />
         </motion.div>
@@ -581,8 +591,20 @@ function PresetGlyph({ id, selected }: { id: string; selected: boolean }) {
   );
 }
 
-const WorldModifiers = memo(function WorldModifiers({ preset, modifiers, edit }: { preset: string; modifiers: Draft["modifiers"]; edit: Edit }) {
+const WorldModifiers = memo(function WorldModifiers({
+  preset,
+  modifiers,
+  worldNote,
+  edit,
+}: {
+  preset: string;
+  modifiers: Draft["modifiers"];
+  /** World modifiers the saved settings lack; preselected in the draft. */
+  worldNote: Partial<Record<ModifierName, string>>;
+  edit: Edit;
+}) {
   const { t, lookup } = useI18n();
+  const noted = Object.entries(worldNote).map(([k, v]) => `${lookup(`mod.${k}`) ?? k} ${lookup(`modv.${v}`) ?? v}`);
   const custom = isCustom({ modifiers });
   const presetName = lookup(`preset.${preset}`) ?? preset;
   const description = custom
@@ -604,6 +626,14 @@ const WorldModifiers = memo(function WorldModifiers({ preset, modifiers, edit }:
   return (
     <Section id="settings-world" title={t("settings.world")}>
       <p className="-mt-1 mb-3 text-xs leading-snug text-ash">{t("settings.worldHint")}</p>
+      {noted.length > 0 && (
+        <p role="note" className="mb-3 flex items-start gap-2 rounded-[3px] border border-ember/40 bg-black/20 px-3 py-2 text-xs leading-snug text-bone">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#ecc212" strokeWidth="1.6" strokeLinecap="round" className="mt-px shrink-0" aria-hidden>
+            <path d="M8 2l6.5 11.5h-13zM8 6.5v3.2M8 11.6v.2" />
+          </svg>
+          {t("settings.worldNote", { list: noted.join(", ") })}
+        </p>
+      )}
       <div className="grid grid-cols-4 gap-1.5">
         <div role="radiogroup" aria-label={t("settings.presets")} className="contents">
           {PRESETS.map((p, i) => {

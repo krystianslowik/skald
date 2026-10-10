@@ -112,6 +112,33 @@ describe("Dashboard", () => {
     expect(screen.getAllByText("nieznane")).toHaveLength(7);
   });
 
+  it("lights the boss path, shows the world's modifiers and each player's platform", () => {
+    const s = fixture();
+    s.server.args = "-crossplay";
+    s.players = [
+      { name: "Ragnar", since: "2026-10-09T19:30:00Z", platform: "xbox" },
+      { name: "Freya", since: "2026-10-09T19:40:00Z", platform: "steam" },
+      { name: "Bjorn", since: "2026-10-09T19:50:00Z", platform: "unknown" },
+    ];
+    s.world.meta = {
+      ...s.world.meta!,
+      modifiers: { portals: "casual", resources: "muchmore" },
+      worldKeys: ["resourcerate 200", "teleportall"],
+      bosses: ["eikthyr", "gdking", "bonemass", "dragon", "goblinking", "queen", "fader"].map((b, i) => ({ key: `defeated_${b}`, defeated: i < 2 })),
+    };
+    render(<Dashboard live={{ state: s, logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    // Two trophies, plus the readout under the strip naming the last one down.
+    expect(screen.getAllByText("defeated")).toHaveLength(3);
+    expect(screen.getByText("The Elder", { selector: ".boss-title" })).toBeInTheDocument();
+    expect(screen.getAllByText("waiting")).toHaveLength(5);
+    expect(screen.queryByText(/Lights up once/)).not.toBeInTheDocument();
+    for (const m of ["crossplay", "portals: casual", "resources: much more", "teleport everything"]) expect(screen.getByText(m)).toBeInTheDocument();
+    expect(screen.queryByText(/resourcerate/)).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Xbox" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "PC (Steam)" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Unknown platform" })).not.toBeInTheDocument();
+  });
+
   it("shows the outage banner and sleeps the runes when offline", () => {
     render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: false, lastAction: null }} onLogout={() => {}} />);
     expect(screen.getByText("The fire has dimmed.")).toBeInTheDocument();
@@ -125,6 +152,7 @@ function profile(): PlayerProfile {
   return {
     name: "Ragnar",
     online: false,
+    platform: "xbox",
     firstSeen: "2026-09-12T18:00:00Z",
     lastSeen: "2026-10-09T19:30:00Z",
     playtimeMs: 12 * 3_600_000,
@@ -281,6 +309,30 @@ describe("Server settings", () => {
     expect(within(dialog).getByRole("button", { name: /Apply when the server is empty/ })).toBeInTheDocument();
   });
 
+  it("preselects the world's own modifiers and says so", async () => {
+    const puts: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        puts.push(JSON.parse(String(init.body)));
+        return Response.json({ ...settingsView(), pending: true });
+      }
+      return String(url) === "/api/settings" ? Response.json(settingsView()) : new Response("{}", { status: 404 });
+    }));
+    const s = withSettings();
+    s.world.meta = { ...s.world.meta!, modifiers: { resources: "muchmore", portals: "casual", raids: "less" } };
+    render(<Dashboard live={{ state: s, logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Server settings" }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    // raids is already in the settings; only what they lack is named.
+    expect(await within(dialog).findByText("This world was created with: resources much more, portals casual. They are selected below so a save keeps them.")).toBeInTheDocument();
+    const resources = within(dialog).getByRole("radiogroup", { name: "resources" });
+    expect(within(resources).getByRole("radio", { name: "much more" })).toHaveAttribute("aria-checked", "true");
+    expect(within(dialog).getByText("2 changes")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect((puts[0] as { modifiers: Record<string, string> }).modifiers).toEqual({ raids: "less", resources: "muchmore", portals: "casual" });
+  });
+
   it("rolls back an optimistic save the agent refuses", async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === "PUT") return Response.json({ ok: false, message: "invalid settings", errors: { name: "chars" } }, { status: 400 });
@@ -433,8 +485,9 @@ describe("helpers", () => {
   it("applies live events to state", () => {
     let s = fixture();
     s = applyEvent(s, { seq: 9, ts: "2026-10-09T20:01:00Z", type: "join_code", data: { code: "123456" } });
-    s = applyEvent(s, { seq: 10, ts: "2026-10-09T20:01:00Z", type: "player_join", data: { name: "Freya" } });
+    s = applyEvent(s, { seq: 10, ts: "2026-10-09T20:01:00Z", type: "player_join", data: { name: "Freya", platform: "steam" } });
     expect(s.server.joinCode).toBe("123456");
+    expect(s.players.find((p) => p.name === "Freya")?.platform).toBe("steam");
     expect(s.players.map((p) => p.name)).toEqual(["Ragnar", "Freya"]);
     s = applyEvent(s, { seq: 11, ts: "2026-10-09T20:02:00Z", type: "player_count", data: { count: 0 } });
     expect(s.players).toEqual([]);
