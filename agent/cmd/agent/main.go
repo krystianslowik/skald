@@ -16,6 +16,7 @@ import (
 	"github.com/krystianslowik/skald/agent/internal/state"
 	"github.com/krystianslowik/skald/agent/internal/supervisor"
 	"github.com/krystianslowik/skald/agent/internal/syslog"
+	"github.com/krystianslowik/skald/agent/internal/world"
 )
 
 func main() {
@@ -31,12 +32,16 @@ func main() {
 	hub := events.New(events.DefaultRingSize, events.DefaultLogSize)
 	tracker := state.New(hub)
 
-	store, err := settings.Open(cfg.SettingsDir, settings.Seed{
+	seed := settings.Seed{
 		Name:         cfg.ServerName,
 		Public:       settings.ParsePublic(cfg.ServerPublic),
 		Args:         cfg.ServerArgs,
 		PasswordFile: cfg.PasswordFile,
-	}, nil)
+	}
+	if m := world.NewReader(cfg.ConfigDir, cfg.WorldName).Meta(); m != nil {
+		seed.WorldModifiers = m.Modifiers
+	}
+	store, err := settings.Open(cfg.SettingsDir, seed, nil)
 	if err != nil {
 		logger.Info("server settings disabled", "dir", cfg.SettingsDir, "reason", err.Error())
 		store = nil

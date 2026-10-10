@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,16 @@ type Seed struct {
 	Args   string
 	// PasswordFile is the game's SERVER_PASS_FILE secret, mounted read-only.
 	PasswordFile string
+	// WorldModifiers are the modifiers the world was created with (from its
+	// .fwl2 starting keys), used when Args set no preset or modifier.
+	//
+	// -modifier arguments at start set the world's keys again, but leaving
+	// them out does not remove keys the world already has: a live 1.0.17
+	// world kept resources x2 and portals casual with an empty SERVER_ARGS,
+	// as the in-game F2 panel confirmed. No primary source documents this.
+	// Seeding from the world keeps a first save from writing arguments that
+	// look like "normal" while the world plays otherwise.
+	WorldModifiers map[string]string
 }
 
 // Effective is what the running server was started with.
@@ -103,6 +114,13 @@ func Open(dir string, seed Seed, now func() time.Time) (*Store, error) {
 		}
 	case errors.Is(err, os.ErrNotExist):
 		cur := ParseArgs(seed.Args)
+		if cur.Preset == "normal" && len(cur.Modifiers) == 0 {
+			for k, v := range seed.WorldModifiers {
+				if m, ok := modifier(k); ok && slices.Contains(m.Values, v) {
+					cur.Modifiers[k] = v
+				}
+			}
+		}
 		cur.Name = seedName
 		cur.Public = seed.Public
 		if seed.PasswordFile != "" {

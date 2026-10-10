@@ -279,6 +279,19 @@ func TestOpenDisabled(t *testing.T) {
 	}
 }
 
+func TestSeedFromWorldModifiers(t *testing.T) {
+	world := map[string]string{"resources": "muchmore", "portals": "casual", "combat": "nonsense", "unknown": "x"}
+	s, _, _ := openStore(t, Seed{Name: "My Valheim", Args: "-crossplay", WorldModifiers: world})
+	if got := s.View(nil).Current.Modifiers; !reflect.DeepEqual(got, map[string]string{"resources": "muchmore", "portals": "casual"}) {
+		t.Errorf("seeded modifiers = %v", got)
+	}
+	// Arguments that set modifiers win over the world.
+	s2, _, _ := openStore(t, Seed{Name: "My Valheim", Args: "-modifier raids less", WorldModifiers: world})
+	if got := s2.View(nil).Current.Modifiers; !reflect.DeepEqual(got, map[string]string{"raids": "less"}) {
+		t.Errorf("args modifiers = %v", got)
+	}
+}
+
 func TestSeedFromEnvironment(t *testing.T) {
 	pwFile := filepath.Join(t.TempDir(), "server-pass")
 	os.WriteFile(pwFile, []byte("ognisko\n"), 0o400)
