@@ -167,7 +167,8 @@ func TestRaidAndNetStats(t *testing.T) {
 
 // TestSessionLog replays a redacted 1.0.17 crossplay session: Ragnar (Xbox)
 // joins, drops, reconnects from the same console as Freya; Bjorn (Steam)
-// joins and later leaves. No ghost of Ragnar may remain.
+// joins and later leaves; Freya dies and respawns. No ghost of Ragnar may
+// remain and the respawn is not a second join.
 func TestSessionLog(t *testing.T) {
 	f, err := os.Open("../../testdata/session-1.0.17.log")
 	if err != nil {
@@ -215,7 +216,7 @@ func TestSessionLog(t *testing.T) {
 			}
 		}
 	}
-	want := []string{"+Ragnar/xbox", "-Ragnar", "+Freya/xbox", "+Bjorn/steam", "world_backup", "world_saved", "-Bjorn"}
+	want := []string{"+Ragnar/xbox", "-Ragnar", "+Freya/xbox", "+Bjorn/steam", "world_backup", "world_saved", "-Bjorn", "death"}
 	if strings.Join(seq, " ") != strings.Join(want, " ") {
 		t.Errorf("sequence\n got %v\nwant %v", seq, want)
 	}

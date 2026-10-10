@@ -353,3 +353,5 @@ Oct 10 11:54:39 supervisord: valheim-server ZPlayFabSocket::Dispose. leave lobby
 Oct 10 11:54:39 supervisord: valheim-server ZPlayFabSocket::Dispose. State: CLOSED
 Oct 10 11:54:39 supervisord: valheim-server 10/10/2026 11:54:39: Player connection lost server "Midgard" that has join code 482915, now 1 player(s)
 Oct 10 11:55:08 supervisord: valheim-server 10/10/2026 11:55:08:  Connections 1 ZDOS:374680  sent:0 recv:469
+Oct 10 12:08:00 supervisord: valheim-server 10/10/2026 12:08:00: Got character ZDOID from Freya : 0:0
+Oct 10 12:08:08 supervisord: valheim-server 10/10/2026 12:08:08: Got character ZDOID from Freya : -22222222:20111

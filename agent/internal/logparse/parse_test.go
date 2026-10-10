@@ -109,7 +109,6 @@ func TestMatchMsg(t *testing.T) {
 			[]Match{{Kind: KindCharacter, Name: "Ragnar", UID: "-123456"}}},
 		{"zdoid name with spaces", `Got character ZDOID from Ole Bjorn : 98765:4`,
 			[]Match{{Kind: KindCharacter, Name: "Ole Bjorn", UID: "98765"}}},
-		// Synthetic, unconfirmed for 1.0: no death in the captured session.
 		{"zdoid death", `Got character ZDOID from Ragnar : 0:0`,
 			[]Match{{Kind: KindCharacter, Name: "Ragnar", Death: true}}},
 		{"world saved with ms", `World saved ( 123.456ms )`, []Match{{Kind: KindWorldSaved, Ms: 123.456}}},
@@ -205,7 +204,7 @@ func TestRedact(t *testing.T) {
 }
 
 // TestSessionLog runs a redacted 1.0.17 crossplay session (three players,
-// one reconnect with another character) through Parse.
+// one reconnect with another character, one death and respawn) through Parse.
 func TestSessionLog(t *testing.T) {
 	f, err := os.Open("../../testdata/session-1.0.17.log")
 	if err != nil {
@@ -235,7 +234,7 @@ func TestSessionLog(t *testing.T) {
 	if err := sc.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"Ragnar@111111111", "Freya@-22222222", "Bjorn@333333333"}; !reflect.DeepEqual(chars, want) {
+	if want := []string{"Ragnar@111111111", "Freya@-22222222", "Bjorn@333333333", "Freya@", "Freya@-22222222"}; !reflect.DeepEqual(chars, want) {
 		t.Errorf("characters = %v, want %v", chars, want)
 	}
 	if want := []string{"xbox", "xbox", "steam"}; !reflect.DeepEqual(platforms, want) {

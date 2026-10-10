@@ -141,6 +141,11 @@ var table = []rule{
 	{regexp.MustCompile(`received local Platform ID ([A-Za-z]+)_`), func(s []string) []Match {
 		return []Match{{Kind: KindPlatform, Platform: PlatformOf(s[1])}}
 	}},
+	// A death: the character ZDOID is reset to 0:0 while the player is dead.
+	// The respawn about 8 s later is a new ZDOID with the same peer id.
+	{regexp.MustCompile(`Got character ZDOID from (.+) : 0:0\s*$`), func(s []string) []Match {
+		return []Match{{Kind: KindCharacter, Name: s[1], Death: true}}
+	}},
 	// A spawned character: UID is the peer's session id, new on every connect.
 	{regexp.MustCompile(`Got character ZDOID from (.+) : (-?\d+):(\d+)`), func(s []string) []Match {
 		if s[2] == "0" && s[3] == "0" {
@@ -181,12 +186,6 @@ var table = []rule{
 		return []Match{{Kind: KindPlayfab, State: PlayfabError}}
 	}},
 
-	// Unconfirmed for 1.0: the pre-1.0 death form (the character ZDOID is
-	// reset to 0:0 while the player is dead). No death happened in the
-	// 1.0.17 session captured so far.
-	{regexp.MustCompile(`Got character ZDOID from (.+) : 0:0\s*$`), func(s []string) []Match {
-		return []Match{{Kind: KindCharacter, Name: s[1], Death: true}}
-	}},
 	// Pre-1.0 save line, kept for older servers.
 	{regexp.MustCompile(`World saved(?: \( ?([\d.]+) ?ms ?\))?`), func(s []string) []Match {
 		ms, _ := strconv.ParseFloat(s[1], 64)
