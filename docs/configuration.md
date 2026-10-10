@@ -48,7 +48,8 @@
 | `BIND` | `0.0.0.0:8080` | Listen address |
 | `WEB_ROOT` | `../web/dist` | Built SPA, relative to the working directory |
 | `MAP_SPOILERS` | `false` | `true` shows every boss altar, trader and dungeon of the seed on the world map. Off, only places someone has been to are sent to the browser |
-| `MOCK_AGENT` | (unset) | `1` runs against a built-in fake server (development) |
+| `MOCK_AGENT` | (unset) | `1` runs against a built-in fake server (development). It also turns `COOKIE_SECURE` off and keeps the history in memory unless `DB_PATH` is set |
+| `MOCK_BRIDGE` | `on` | With `MOCK_AGENT=1`: the fake bridge's state, `on`, `off`, `untested` or `disabled` |
 
 The resource charts query cAdvisor series as kube-prometheus-stack scrapes
 them (`container_cpu_usage_seconds_total`, `container_memory_working_set_bytes`,
@@ -250,7 +251,10 @@ How it works:
   the agent's terrain is current. Or set `SKALD_TERRAIN_SEED`,
   `SKALD_TERRAIN_SEED_HASH` and `SKALD_TERRAIN_WORLDGEN_VERSION` yourself.
   `SKALD_TERRAIN_RES` (2048, up to 4096), `SKALD_TERRAIN_THREADS` (4),
-  `SKALD_TERRAIN_FORCE=true` (run even when current).
+  `SKALD_TERRAIN_FORCE=true` (run even when current), `SKALD_TERRAIN_RADIUS`
+  (half the grid's width in metres, 10500), `SKALD_TERRAIN_NICE` (nice level
+  of the sampling run, 10), `SKALD_TERRAIN_OUT` (output directory,
+  `/config/skald-terrain`).
 - Output in `TERRAIN_DIR`: `biomes.u8`, `height.u16le` and `manifest.json`
   (format, seed hash, generator version, game build, resolution, radius),
   manifest last. A run whose seed, generator, game build and resolution match
@@ -267,7 +271,7 @@ How it works:
   11 the game's API is not what the plugin expects (a game update changed
   it: the last good terrain stays); 12 sampling failed or timed out; 13 the
   output is not writable; 20 the agent is unreachable; 21 the agent cannot
-  read the world.
+  read the world; 70 the game never ran the hook.
 - The terrain shows the whole seed's land to signed-in viewers who open
   `/api/terrain.png` directly, as the seed shown on the dashboard already
   does. The map itself only draws it where the world has been generated.
@@ -340,7 +344,7 @@ browser --cookie--> skald-web --X-Agent-Token--> agent --X-Skald-Token--> plugin
 
 | Where | Setting |
 |---|---|
-| Game container | `BEPINEX=true`, `SKALD_BRIDGE=on` (kill switch: `off`), `SKALD_BRIDGE_TOKEN` (16+ characters, from a Secret) |
+| Game container | `BEPINEX=true`, `SKALD_BRIDGE=on` (kill switch: `off`), `SKALD_BRIDGE_TOKEN` (16+ characters, from a Secret), `SKALD_BRIDGE_PORT` (`9010`, must match `BRIDGE_URL`) |
 | Plugin | the `skald-bridge` initContainer (Kubernetes) or the `bridge-plugin` service (Compose), before the game starts |
 | Agent | `BRIDGE_TOKEN`, the same value; `BRIDGE_URL` stays at its default |
 | Web | nothing; `ADMIN_PASSWORD_HASH` is recommended (see [Roles](#roles)) |

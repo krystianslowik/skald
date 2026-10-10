@@ -28,7 +28,7 @@ The agent serves the Prometheus text format on `:9464/metrics`:
 | `valheim_map_build_seconds` | gauge | | How long the last world map build took. Only once a map was built |
 | `valheim_map_generation` | gauge | | Save generation the world map was last built from |
 
-[`deploy/monitoring`](deploy/monitoring) has:
+[`deploy/monitoring`](../deploy/monitoring) has:
 
 - **`prometheusrule.yaml`**: `ValheimMetricsAbsent`, `ValheimServerDown`,
   `ValheimPlayFabError`, `ValheimProcessNotRunning`, `ValheimBackupStale`. The

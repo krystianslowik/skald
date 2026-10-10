@@ -2,7 +2,9 @@
 
 > Implemented in Skald 0.8.0; the current setup is in
 > [docs/configuration.md](../docs/configuration.md#admin-bridge). Kept as the
-> design notes the integration followed.
+> design notes the integration followed. The Xbox checks in sections 5 and 6
+> have since been run; the results are under "Verification status" in
+> [README.md](README.md#verification-status-l-1017-2026-10-10).
 
 This is a plan for whoever owns `agent/`, `server/`, `web/` and `deploy/`. The
 bridge itself (`bridge/plugin`) is done and runs on the test server. Nothing

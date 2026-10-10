@@ -28,7 +28,7 @@ bridge/
     MapData.cs           cartography-table blob codec (pure .NET, unit-tested)
   tests/                 xunit tests for MapData (`dotnet test bridge/tests`)
   k8s/test-server.yaml   throwaway crossplay test server (namespace skald-bridge-test)
-  INTEGRATION.md         plan for wiring this into the Skald agent, web UI and deploy
+  INTEGRATION.md         design notes for the agent, web UI and deploy side (implemented in Skald 0.8.0)
 ```
 
 ## Build
@@ -90,7 +90,7 @@ kubectl apply -f bridge/k8s/test-server.yaml
 Success looks like this in the server log:
 
 ```
-[Info   :Skald Bridge] [SkaldBridge] loaded v0.1.0, listening on 127.0.0.1:9010, game build l-1.0.17
+[Info   :Skald Bridge] [SkaldBridge] loaded v0.1.1, listening on 127.0.0.1:9010, game build l-1.0.17
 ```
 
 ## Configuration (environment of the game container)
@@ -277,10 +277,11 @@ joined over crossplay with BepInEx loaded.
 - `player/heal`
 - `player/status` `Rested`
 - `creatures/spawn`: a Troll, and a Wolf with `tamed:true`
+- `creatures/tame`
 - `build/fill`: a charcoal kiln filled
 - `build/repair`: 2 pieces repaired
 
-**Fixed in v0.1.1** (staged in the ConfigMap, not yet loaded on the test server):
+**Changed in v0.1.1** (the plugin in Skald 0.8.0's `skald-bridge` image):
 - `broadcast type=chat` was accepted, but the Xbox player never saw it. It now
   answers 501 with the reason.
 - `map/reveal` and `map/pins` threw a NullReferenceException even on a table the
@@ -318,7 +319,6 @@ joined over crossplay with BepInEx loaded.
 - teleport `to` coordinates and `toPlayer`
 - `build/grow`
 - `map/reveal` and `map/pins` with v0.1.1
-- a cross-check that the creatures `tame` touched really behave tamed in game
 
 **Not possible server-side (answers 501):**
 - weather: clients pick their environment

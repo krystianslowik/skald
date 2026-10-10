@@ -1,5 +1,7 @@
 # Valheim UI: visual research for a Valheim-flavoured dashboard
 
+> A research snapshot from 2026-10-10, kept for reference. It is not updated as the dashboard changes.
+
 Purpose: restyle the skald web dashboard (React + Tailwind, dark "campfire" theme)
 so it reads as Valheim **without shipping any Iron Gate / Coffee Stain asset**.
 Research date: 2026-10-10. Read-only research; no game files were extracted.

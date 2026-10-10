@@ -62,7 +62,7 @@ Setup for both is in [docs/configuration.md](docs/configuration.md).
 ## Admin bridge (opt-in)
 
 Run game night from your phone. Put a message on every screen, drop items or a
-saved kit next to a player, teleport someone home, skip to morning, start or stop
+saved kit next to a player, teleport someone to a boss altar, skip to morning, start or stop
 a raid, spawn a troll for fun, repair the base. Players move on the map in real
 time, and every action lands in the Saga ("Sigrun spawned 20 Wood for Ragnar").
 
@@ -201,8 +201,9 @@ To add a language, copy `web/src/i18n/en.ts` and register it in
 - Two players joining within the same few seconds can swap platform marks.
 - The Deep North boss isn't on the boss path yet.
 - One game server per Skald instance.
-- Some bridge commands still need a test with a real player: kicking someone
-  who's online, teleporting to coordinates, crop growth, and map pins.
+- Some bridge commands still need a test with a real player: kicking or banning
+  someone who's online, teleporting to coordinates or to another player, crop
+  growth, and map reveal and pins.
 
 ## Contributing
 
