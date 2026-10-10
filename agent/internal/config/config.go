@@ -33,6 +33,9 @@ type Config struct {
 	// IconsDir is where skald-icons writes map.json and the icon sheet; empty
 	// turns the item icon routes off.
 	IconsDir string
+	// TerrainDir is where the skald-terrain Job writes the world generator's
+	// grids; empty turns the terrain image off (its request is still in /state).
+	TerrainDir string
 }
 
 func Load() (Config, error) {
@@ -55,6 +58,7 @@ func Load() (Config, error) {
 		PasswordFile:   os.Getenv("PASSWORD_FILE"),
 		MapShowNames:   parseBool(os.Getenv("MAP_SHOW_NAMES"), true),
 		IconsDir:       os.Getenv("ICONS_DIR"),
+		TerrainDir:     os.Getenv("TERRAIN_DIR"),
 	}
 	if c.AgentToken == "" {
 		return c, errors.New("AGENT_TOKEN is required")

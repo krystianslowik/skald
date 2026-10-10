@@ -18,6 +18,7 @@ import (
 	"github.com/krystianslowik/skald/agent/internal/state"
 	"github.com/krystianslowik/skald/agent/internal/supervisor"
 	"github.com/krystianslowik/skald/agent/internal/syslog"
+	"github.com/krystianslowik/skald/agent/internal/terrain"
 	"github.com/krystianslowik/skald/agent/internal/world"
 	"github.com/krystianslowik/skald/agent/internal/worldmap"
 )
@@ -73,6 +74,14 @@ func main() {
 	worldMap := worldmap.New(worldmap.Options{Dir: worldDir, ShowNames: cfg.MapShowNames, Logger: logger})
 	go worldMap.Run(ctx, worldmap.RebuildEvery)
 
+	terr := terrain.New(terrain.Options{
+		Dir:         cfg.TerrainDir,
+		Meta:        world.NewReader(cfg.ConfigDir, cfg.WorldName).Meta,
+		GameVersion: func() string { return tracker.Snapshot().Version },
+		Logger:      logger,
+	})
+	go terr.Run(ctx, terrain.RefreshEvery)
+
 	s := server.New(server.Options{
 		Token:      cfg.AgentToken,
 		ConfigDir:  cfg.ConfigDir,
@@ -85,6 +94,7 @@ func main() {
 		Settings:   store,
 		Map:        worldMap,
 		Icons:      icons.New(cfg.IconsDir),
+		Terrain:    terr,
 		Logger:     logger,
 	})
 	go s.RunSettingsWatcher(ctx)

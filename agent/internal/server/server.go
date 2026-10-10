@@ -13,6 +13,7 @@ import (
 	"github.com/krystianslowik/skald/agent/internal/settings"
 	"github.com/krystianslowik/skald/agent/internal/state"
 	"github.com/krystianslowik/skald/agent/internal/supervisor"
+	"github.com/krystianslowik/skald/agent/internal/terrain"
 	"github.com/krystianslowik/skald/agent/internal/world"
 	"github.com/krystianslowik/skald/agent/internal/worldmap"
 )
@@ -41,8 +42,11 @@ type Options struct {
 	// Map is the world map builder; nil or disabled answers GET /map with 404.
 	Map *worldmap.Builder
 	// Icons is ICONS_DIR; nil answers the /icons routes with 404.
-	Icons  *icons.Dir
-	Logger *slog.Logger
+	Icons *icons.Dir
+	// Terrain is the world generator's terrain from TERRAIN_DIR; nil leaves
+	// /state.terrain null and answers /terrain.* with 404.
+	Terrain *terrain.Terrain
+	Logger  *slog.Logger
 	// PingEvery is the SSE keepalive interval; 15 s when zero.
 	PingEvery time.Duration
 	// ActionTimeout bounds stop/start during a restart; 5 min when zero.
@@ -88,6 +92,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /map", s.mapHandler)
 	mux.HandleFunc("GET /icons/map.json", s.iconsMap)
 	mux.HandleFunc("GET /icons/sheet.webp", s.iconsSheet)
+	mux.HandleFunc("GET /terrain.png", s.terrainPNG)
+	mux.HandleFunc("GET /terrain.json", s.terrainJSON)
 	if s.opt.Settings != nil {
 		mux.HandleFunc("GET /settings", s.settingsGet)
 		mux.HandleFunc("GET /settings/password", s.settingsPassword)

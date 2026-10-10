@@ -10,6 +10,7 @@ import (
 	"github.com/krystianslowik/skald/agent/internal/icons"
 	"github.com/krystianslowik/skald/agent/internal/settings"
 	"github.com/krystianslowik/skald/agent/internal/state"
+	"github.com/krystianslowik/skald/agent/internal/terrain"
 	"github.com/krystianslowik/skald/agent/internal/world"
 )
 
@@ -26,6 +27,9 @@ type stateResponse struct {
 	Settings *settings.Summary `json:"settings"`
 	// Icons is null when ICONS_DIR is not set.
 	Icons *icons.Info `json:"icons"`
+	// Terrain is null without TERRAIN_DIR and a readable save; its request
+	// says what a terrain run must sample for this world.
+	Terrain *terrain.Info `json:"terrain"`
 }
 
 type serverState struct {
@@ -106,6 +110,7 @@ func (s *Server) stateHandler(w http.ResponseWriter, r *http.Request) {
 		Agent:    agentState{StartedAt: s.startedAt, LastLogAt: snap.LastLogAt},
 		Settings: sum,
 		Icons:    s.opt.Icons.Info(),
+		Terrain:  terrainInfo(s.opt.Terrain),
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

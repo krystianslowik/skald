@@ -23,8 +23,8 @@ func TestLoadDefaults(t *testing.T) {
 	if c.SettingsDir != "/settings" || c.PasswordFile != "" {
 		t.Errorf("settings defaults: dir %q, password file %q", c.SettingsDir, c.PasswordFile)
 	}
-	if c.IconsDir != "" {
-		t.Errorf("IconsDir defaults to off, got %q", c.IconsDir)
+	if c.IconsDir != "" || c.TerrainDir != "" {
+		t.Errorf("icons and terrain default to off, got %q, %q", c.IconsDir, c.TerrainDir)
 	}
 }
 
