@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -92,7 +93,9 @@ func (s *Server) Handler() http.Handler {
 	return requireToken(s.opt.Token, mux)
 }
 
-func (s *Server) ListenAndServe(addr string) error {
+// ListenAndServe serves the API on addr until ctx is cancelled, then shuts
+// down gracefully so a pod rollout does not wait out the grace period.
+func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           s.Handler(),
@@ -101,7 +104,7 @@ func (s *Server) ListenAndServe(addr string) error {
 		// /events clears its own write deadline; everything else is small.
 		WriteTimeout: 30 * time.Second,
 	}
-	return srv.ListenAndServe()
+	return serveUntil(ctx, srv)
 }
 
 // MetricsHandler serves GET /metrics without a token. It is meant for a
@@ -112,8 +115,8 @@ func (s *Server) MetricsHandler() http.Handler {
 	return mux
 }
 
-// ListenAndServeMetrics serves MetricsHandler on addr.
-func (s *Server) ListenAndServeMetrics(addr string) error {
+// ListenAndServeMetrics serves MetricsHandler on addr until ctx is cancelled.
+func (s *Server) ListenAndServeMetrics(ctx context.Context, addr string) error {
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           s.MetricsHandler(),
@@ -121,7 +124,21 @@ func (s *Server) ListenAndServeMetrics(addr string) error {
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      30 * time.Second,
 	}
-	return srv.ListenAndServe()
+	return serveUntil(ctx, srv)
+}
+
+// serveUntil runs srv until ctx is done. Open SSE streams get 5 s to finish.
+func serveUntil(ctx context.Context, srv *http.Server) error {
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {

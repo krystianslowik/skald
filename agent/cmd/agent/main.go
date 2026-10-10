@@ -87,12 +87,12 @@ func main() {
 	})
 	go s.RunSettingsWatcher(ctx)
 	go func() {
-		if err := s.ListenAndServeMetrics(cfg.MetricsAddr); err != nil {
+		if err := s.ListenAndServeMetrics(ctx, cfg.MetricsAddr); err != nil {
 			fail(fmt.Errorf("metrics listen %s: %w", cfg.MetricsAddr, err))
 		}
 	}()
 	logger.Info("starting skald-agent", "addr", cfg.ListenAddr, "metrics", cfg.MetricsAddr, "syslog", cfg.SyslogAddr)
-	if err := s.ListenAndServe(cfg.ListenAddr); err != nil {
+	if err := s.ListenAndServe(ctx, cfg.ListenAddr); err != nil {
 		fail(err)
 	}
 }
