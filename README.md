@@ -23,6 +23,7 @@ to the server and puts it all on one password-protected page:
 - the world: in-game day, seed, a link to the map, last save
 - backups you can download, plus backup / update / restart buttons (press and hold, so nobody restarts by accident)
 - player profiles with streaks and badges
+- server settings: name, password, public listing and world modifiers, applied now or once everyone has left
 - the live server log
 - Prometheus metrics, alert rules and a Grafana dashboard
 
@@ -37,6 +38,16 @@ optional campfire crackle if you want it.
     <td width="50%"><img src="docs/images/profile.webp" alt="A player profile: playtime, deaths, streak, 30-day chart and badges" /></td>
   </tr>
 </table>
+
+## Server settings
+
+<img src="docs/images/settings.webp" alt="The server settings sheet: world modifier presets as wooden slots with Custom lit in blue, stepped choices for combat, death penalty, resources and raids, and a footer counting four changes" width="100%" />
+
+The settings sheet changes the server name, password, public listing, world
+modifiers and save interval, and the dashboard shows the password next to the
+join code. The game picks the settings up through a small pre-run hook when it
+restarts, so a save never restarts anything by itself. Setup and the
+Kubernetes details are in [docs/configuration.md](docs/configuration.md#server-settings).
 
 ## How it works
 
@@ -56,8 +67,9 @@ flowchart LR
 The agent runs in the game's network namespace (a native sidecar in Kubernetes,
 `network_mode: service:valheim` in Compose). The image's syslogd forwards every
 log line to it, and supervisord's XML-RPC lets it trigger backups, update checks
-and restarts. It reads `/config` read-only for world info and backup zips. No
-Docker socket, no exec.
+and restarts. It reads `/config` read-only for world info and backup zips, and
+writes server settings only to its own settings directory. No Docker socket, no
+exec.
 
 The web tier is a separate container, and in Kubernetes a separate pod. Anything
 that touches the game pod restarts the game and kicks everyone, so you can
@@ -130,6 +142,10 @@ Metrics, alert rules and the Grafana dashboard are in [docs/metrics.md](docs/met
   ports to forward or scan.
 - The agent and the web container run as non-root on read-only root filesystems.
 - The metrics port (`:9464`) has no token. Keep it on your monitoring network.
+- Server settings accept only allow-listed launch options from structured
+  input, and the game parses the settings file instead of running it. The
+  settings volume holds the server password in plain text, for the agent and
+  the game only.
 
 Report issues as described in [SECURITY.md](SECURITY.md).
 

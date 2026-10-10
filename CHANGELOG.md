@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Server settings from the dashboard: name, password, public listing, world
+  modifier presets and individual modifiers, world keys and save interval, in
+  a sheet modelled on the game's World Modifiers screen. Only the launch
+  options from Iron Gate's dedicated server guide are accepted; other
+  `SERVER_ARGS` stay untouched and are shown read-only. Changes are validated
+  as you type, saved optimistically, and applied with a restart now (press and
+  hold) or once the server has been empty for a minute. A header chip shows
+  pending and armed states.
+- The server password next to the join code, masked until revealed.
+- Agent: `/settings` API, `SETTINGS_DIR` and `PASSWORD_FILE`, the
+  `valheim_settings_pending` metric and `settings_changed` / `settings_apply`
+  events (never carrying the password).
+- `deploy/settings/pre-server-run-hook.sh`: the game-side hook that reads the
+  settings with an allow-list, with a bash test. Compose and Kubernetes
+  examples wire it up.
+
 ## [0.2.0] - 2026-10-10
 
 ### Changed
