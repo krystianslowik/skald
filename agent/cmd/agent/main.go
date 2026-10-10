@@ -12,6 +12,7 @@ import (
 
 	"github.com/krystianslowik/skald/agent/internal/config"
 	"github.com/krystianslowik/skald/agent/internal/events"
+	"github.com/krystianslowik/skald/agent/internal/icons"
 	"github.com/krystianslowik/skald/agent/internal/server"
 	"github.com/krystianslowik/skald/agent/internal/settings"
 	"github.com/krystianslowik/skald/agent/internal/state"
@@ -83,6 +84,7 @@ func main() {
 		Supervisor: supervisor.New(cfg.SupervisorURL, cfg.SupervisorUser, cfg.SupervisorPass),
 		Settings:   store,
 		Map:        worldMap,
+		Icons:      icons.New(cfg.IconsDir),
 		Logger:     logger,
 	})
 	go s.RunSettingsWatcher(ctx)

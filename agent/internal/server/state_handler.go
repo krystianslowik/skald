@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/krystianslowik/skald/agent/internal/files"
+	"github.com/krystianslowik/skald/agent/internal/icons"
 	"github.com/krystianslowik/skald/agent/internal/settings"
 	"github.com/krystianslowik/skald/agent/internal/state"
 	"github.com/krystianslowik/skald/agent/internal/world"
@@ -23,6 +24,8 @@ type stateResponse struct {
 	Agent   agentState     `json:"agent"`
 	// Settings is null when the settings feature is off.
 	Settings *settings.Summary `json:"settings"`
+	// Icons is null when ICONS_DIR is not set.
+	Icons *icons.Info `json:"icons"`
 }
 
 type serverState struct {
@@ -102,6 +105,7 @@ func (s *Server) stateHandler(w http.ResponseWriter, r *http.Request) {
 		Backups:  files.Backups(s.opt.ConfigDir),
 		Agent:    agentState{StartedAt: s.startedAt, LastLogAt: snap.LastLogAt},
 		Settings: sum,
+		Icons:    s.opt.Icons.Info(),
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
