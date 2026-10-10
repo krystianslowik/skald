@@ -22,6 +22,7 @@ to the server and puts it all on one password-protected page:
 - who is online, who played when, and how often they died
 - the world: in-game day and time of day, seed, last save
 - a world map drawn from the save: explored land, bases, portals and where they lead, graves, beds, ships, map pins, and the bosses and dungeons someone has found
+- the village stores: what is in every chest, cart and ship players built, added up and searchable ("where is our iron?"), one tap from the spot on the map
 - backups you can download, plus backup / update / restart buttons (press and hold, so nobody restarts by accident)
 - player profiles with streaks and badges
 - server settings: name, password, public listing and world modifiers, applied now or once everyone has left
@@ -43,17 +44,20 @@ optional campfire crackle if you want it.
 
 ## World map
 
-<img src="docs/images/map.webp" alt="The world map: an inked archipelago on parchment, fog over the unexplored, bases, paired portals with a dashed line between them, graves and places found, crowded spots gathered into counted clusters, a layer panel with counts and a popover for an unconnected portal" width="100%" />
+<img src="docs/images/map.webp" alt="The world map: an inked archipelago on parchment, bases, portals, graves and places found, crowded spots gathered into counted clusters, a layer panel with counts including Storage, and a personal chest open as a grid of slots: a three-star bronze sword picked out with its quality, durability and maker, arrows and coins" width="100%" />
 
 The map is drawn from the world save itself: the land, sea and coasts the
 world has generated, the area your cartography tables have explored, and
-what people built and left behind. Each layer can be switched off, the search
-finds portal tags, names and places, and every mark links to the same spot
+what people built and left behind. Chests, carts and ships open as a grid of
+slots like the game's own, graves show what was left in them, each layer can
+be switched off, the search finds portal tags, names, places and items, and
+every mark links to the same spot
 on [valheim-map.world](https://valheim-map.world/), which also fills the
 Terrain tab. It opens on the explored area, gathers crowded spots into
 clusters you tap to open, and on a phone takes pinches, double taps (in) and
 two-finger taps (out). Places nobody has found stay hidden unless you set
-`MAP_SPOILERS=true`. Details in [docs/configuration.md](docs/configuration.md#world-map).
+`MAP_SPOILERS=true`. Only what players built is read for storage: treasure,
+shipwreck and dungeon chests never show up, nor what is in them. Details in [docs/configuration.md](docs/configuration.md#world-map).
 
 ## Server settings
 

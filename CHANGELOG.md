@@ -8,6 +8,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Player storage. The agent reads what is in every chest, cart and ship a
+  player built (Valheim 1.0's compact inventory format, documented in
+  `agent/internal/worldmap/inventory.go`) and in graves, and adds it to the
+  map snapshot; world-generated chests (treasure, shipwreck, dungeon loot) are
+  never read. Crafter names follow `MAP_SHOW_NAMES`; crafter ids are never
+  read. An inventory in a layout the agent does not know is marked unreadable
+  rather than guessed at.
+- `/api/storage`: the containers alone, cut from the cached map with their own
+  ETag.
+- Map: a Storage layer with the chests; chests, carts, ships and graves open as
+  a slot grid (stack counts, quality stars, durability and maker on tap);
+  carts and ships say what they are loaded with; the map search finds items.
+- Village stores (the Saga tab on phones, a board on wider screens):
+  everything in the stores added up by kind, searchable in English and
+  Polish whatever the UI language ("iron" and "żelazo" both work); an item
+  lists where it is, most first, and "Show on map" opens that container with
+  every place holding it ringed.
+
 - Phone layout (up to 639 px wide, and landscape phones): a bottom tab bar
   with Fire, Map, Saga (saga, ranking, who sat by the fire) and Settings
   (server settings, language, campfire sound, log out, runes, forge,

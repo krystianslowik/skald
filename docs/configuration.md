@@ -134,10 +134,16 @@ new save. It reads:
 - portals (paired by their connection, else by a tag exactly two share),
   graves, beds, ships and carts, bases (zones with built pieces that touch),
   terrain edits, and the seed's locations from the `.db2`.
+- what is in the chests, carts and ships players built (pieces that carry a
+  creator), and in graves. Chests the world generated (treasure, shipwreck
+  and dungeon chests) are never read, so neither they nor their loot show
+  up anywhere. Crafter names follow `MAP_SHOW_NAMES`; crafter ids are never
+  read. An inventory in a layout the agent does not know is shown as
+  unreadable rather than guessed at.
 
 On the real 1.0 world used to work out the format (about 376,000 objects
 in 35 chunks) a full build takes about 0.04 s and 22 MB of allocations, and
-the map is 26 KB gzipped.
+the map is 26 KB gzipped (30 KB with the 47 containers and their items).
 
 Spoilers: the agent marks a location explored when it is inside the
 explored area or within 64 m of a built piece. The web tier drops everything
