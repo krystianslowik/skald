@@ -4,7 +4,17 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { AgentSource } from "./agent";
 import { createSession, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS, verifySession } from "./auth";
 import type { Hub } from "./hub";
-import { ACTION_NAMES, BACKUP_NAME, type ActionName, type ApiState, type Locale, type Metrics, type PublicConfig } from "./types";
+import {
+  ACTION_NAMES,
+  BACKUP_NAME,
+  type ActionName,
+  type ApiState,
+  type ApplyMode,
+  type Locale,
+  type Metrics,
+  type PublicConfig,
+  type SettingsRequest,
+} from "./types";
 
 export interface AppDeps {
   sessionSecret: string;
@@ -174,5 +184,46 @@ export function createApp(deps: AppDeps): Hono {
     }
   });
 
+  // Server settings, passed through to the agent with its status codes (400
+  // with per-field `errors`, 404 when the feature is off, 409 when busy).
+  const settings = async (c: Context, req: SettingsRequest) => {
+    if (!deps.hub.online) return c.json({ ok: false, message: "agent unreachable" }, 503);
+    c.header("Cache-Control", "no-store");
+    try {
+      const res = await deps.agent.settings(req);
+      return c.json(res.body as object, res.status as 200);
+    } catch {
+      return c.json({ ok: false, message: "agent unreachable" }, 502);
+    }
+  };
+
+  app.get("/api/settings", (c) => settings(c, { op: "get" }));
+  // Separate on purpose: the password only travels when someone asks to see it.
+  app.get("/api/settings/password", (c) => settings(c, { op: "password" }));
+  app.put("/api/settings", async (c) => {
+    if (Number(c.req.header("Content-Length") ?? 0) > 16_384) return c.json({ ok: false, message: "body too large" }, 413);
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ ok: false, message: "bad request body" }, 400);
+    }
+    if (typeof body !== "object" || body === null || Array.isArray(body)) return c.json({ ok: false, message: "bad request body" }, 400);
+    return settings(c, { op: "put", body });
+  });
+  app.post("/api/settings/apply", async (c) => {
+    let mode: unknown;
+    try {
+      mode = ((await c.req.json()) as { mode?: unknown }).mode;
+    } catch {
+      mode = undefined;
+    }
+    if (!APPLY_MODES.includes(mode as ApplyMode)) return c.json({ ok: false, message: 'mode must be "now" or "when_empty"' }, 400);
+    return settings(c, { op: "apply", mode: mode as ApplyMode });
+  });
+  app.delete("/api/settings/apply", (c) => settings(c, { op: "cancel" }));
+
   return app;
 }
+
+const APPLY_MODES: readonly ApplyMode[] = ["now", "when_empty"];

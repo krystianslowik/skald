@@ -40,6 +40,18 @@ export function applyEvent<S extends AgentState>(s: S, ev: AgentEvent): S {
       };
     case "playfab":
       return { ...s, server: { ...s.server, playfab: String(d.state) as AgentState["server"]["playfab"] } };
+    case "settings_changed":
+      if (!s.settings) return s;
+      return { ...s, settings: { ...s.settings, pending: true, passwordSet: s.settings.passwordSet || (Array.isArray(d.changedKeys) && d.changedKeys.includes("password")) } };
+    case "settings_apply": {
+      if (!s.settings) return s;
+      const st = String(d.state);
+      if (st === "armed") return { ...s, settings: { ...s.settings, armed: true } };
+      if (st === "cancelled" || st === "applying" || st === "failed") return { ...s, settings: { ...s.settings, armed: false } };
+      // applied: the restart picked the files up; /state brings the new name.
+      if (st === "applied") return { ...s, settings: { ...s.settings, armed: false, pending: false } };
+      return s;
+    }
     default:
       return s;
   }

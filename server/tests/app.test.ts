@@ -5,13 +5,16 @@ import { RateLimiter } from "../src/auth";
 import { HistoryStore } from "../src/db";
 import { Hub } from "../src/hub";
 import { MockAgent } from "../src/mock";
-import { emptyAgentState, type ActionName, type PlayerProfile } from "../src/types";
+import { emptyAgentState, type ActionName, type PlayerProfile, type SettingsRequest } from "../src/types";
 
 const HASH = await Bun.password.hash("ognisko");
 
-function setup(opts: { online?: boolean; actionStatus?: number; backup?: AgentSource["backup"]; trustedIpHeader?: string } = {}) {
+function setup(
+  opts: { online?: boolean; actionStatus?: number; backup?: AgentSource["backup"]; trustedIpHeader?: string; settings?: AgentSource["settings"] } = {},
+) {
   const actions: ActionName[] = [];
   const backups: string[] = [];
+  const settingsCalls: SettingsRequest[] = [];
   const agent: AgentSource = {
     async getState() {
       return emptyAgentState();
@@ -28,6 +31,10 @@ function setup(opts: { online?: boolean; actionStatus?: number; backup?: AgentSo
       return opts.backup ? opts.backup(name, signal) : new Response(null, { status: 404 });
     },
     async stream() {},
+    async settings(req) {
+      settingsCalls.push(req);
+      return opts.settings ? opts.settings(req) : { status: 404, body: { ok: false, message: "not found" } };
+    },
   };
   const hub = new Hub(agent, new HistoryStore(":memory:"));
   Object.defineProperty(hub, "online", { get: () => opts.online ?? true });
@@ -43,7 +50,7 @@ function setup(opts: { online?: boolean; actionStatus?: number; backup?: AgentSo
     trustedIpHeader: opts.trustedIpHeader ?? "CF-Connecting-IP",
     limiter: new RateLimiter(5, 60_000, 900_000, () => t),
   });
-  return { app, actions, backups, advance: (ms: number) => (t += ms) };
+  return { app, actions, backups, settingsCalls, advance: (ms: number) => (t += ms) };
 }
 
 const login = (app: ReturnType<typeof setup>["app"], password: string, ip = "9.9.9.9") =>
@@ -190,6 +197,58 @@ describe("app", () => {
     const list = (await (await s.app.request("/api/players", { headers: { cookie } })).json()) as { players: unknown[] };
     expect(list.players).toEqual([]);
     expect((await s.app.request("/api/players/Nikt", { headers: { cookie } })).status).toBe(404);
+  });
+});
+
+describe("settings proxy", () => {
+  it("needs a session and passes agent status codes and bodies through", async () => {
+    const s = setup({
+      settings: async (req) => {
+        if (req.op === "put") return { status: 400, body: { ok: false, message: "invalid settings", errors: { name: "length" } } };
+        if (req.op === "apply") return { status: 409, body: { ok: false, message: "another action is in progress" } };
+        if (req.op === "password") return { status: 200, body: { password: "hearth-77" } };
+        return { status: 200, body: { pending: true } };
+      },
+    });
+    expect((await s.app.request("/api/settings")).status).toBe(401);
+    expect((await s.app.request("/api/settings/password")).status).toBe(401);
+    const cookie = await sessionCookie(s.app);
+    const get = await s.app.request("/api/settings", { headers: { cookie } });
+    expect(get.status).toBe(200);
+    expect(get.headers.get("cache-control")).toBe("no-store");
+    expect(await get.json()).toEqual({ pending: true });
+    const pw = await s.app.request("/api/settings/password", { headers: { cookie } });
+    expect(await pw.json()).toEqual({ password: "hearth-77" });
+    const put = await s.app.request("/api/settings", {
+      method: "PUT",
+      headers: { cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "x" }),
+    });
+    expect(put.status).toBe(400);
+    expect(((await put.json()) as { errors: Record<string, string> }).errors).toEqual({ name: "length" });
+    const apply = await s.app.request("/api/settings/apply", { method: "POST", headers: { cookie, "Content-Type": "application/json" }, body: JSON.stringify({ mode: "now" }) });
+    expect(apply.status).toBe(409);
+    expect((await s.app.request("/api/settings/apply", { method: "DELETE", headers: { cookie } })).status).toBe(200);
+    expect(s.settingsCalls).toEqual([{ op: "get" }, { op: "password" }, { op: "put", body: { name: "x" } }, { op: "apply", mode: "now" }, { op: "cancel" }]);
+  });
+
+  it("rejects bad bodies and modes before the agent sees them", async () => {
+    const s = setup();
+    const cookie = await sessionCookie(s.app);
+    const h = { cookie, "Content-Type": "application/json" };
+    expect((await s.app.request("/api/settings", { method: "PUT", headers: h, body: "nope" })).status).toBe(400);
+    expect((await s.app.request("/api/settings", { method: "PUT", headers: h, body: "[1]" })).status).toBe(400);
+    expect((await s.app.request("/api/settings/apply", { method: "POST", headers: h, body: JSON.stringify({ mode: "later" }) })).status).toBe(400);
+    expect(s.settingsCalls).toHaveLength(0);
+    // Feature off in the agent: its 404 comes through.
+    expect((await s.app.request("/api/settings", { headers: { cookie } })).status).toBe(404);
+  });
+
+  it("answers 503 while the agent is offline", async () => {
+    const s = setup({ online: false });
+    const cookie = await sessionCookie(s.app);
+    expect((await s.app.request("/api/settings", { headers: { cookie } })).status).toBe(503);
+    expect(s.settingsCalls).toHaveLength(0);
   });
 });
 

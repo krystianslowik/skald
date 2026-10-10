@@ -37,6 +37,9 @@ function fakeAgent(startedAt: string, sinces: number[]): AgentSource {
     async backup() {
       return new Response(null, { status: 404 });
     },
+    async settings() {
+      return { status: 404, body: {} };
+    },
     async stream(since, onEvent, signal) {
       sinces.push(since);
       for (const e of BUFFER) if (e.seq > since) onEvent(e);
@@ -110,5 +113,31 @@ describe("Hub high-frequency events", () => {
     expect(store.all().every((e) => e.type === "raid")).toBe(true);
     expect(hub.getState().server.netStats).toEqual({ connections: 1, zdos: 512, sent: 1, recv: 2 });
     expect(hub.history().events.map((e) => e.type)).toEqual(["raid", "raid"]);
+  });
+});
+
+describe("Hub settings events", () => {
+  it("stores settings events in history and keeps the header summary current", () => {
+    const store = new HistoryStore(":memory:");
+    const hub = new Hub(fakeAgent("A", []), store);
+    const s = emptyAgentState(new Date("2026-10-09T17:00:00Z"));
+    s.settings = { enabled: true, pending: false, armed: false, passwordSet: true };
+    (hub as unknown as { state: typeof s }).state = s;
+    hub.ingest("A", ev(1, "settings_changed", { changedKeys: ["name", "password"] }));
+    expect(hub.getState().settings).toEqual({ enabled: true, pending: true, armed: false, passwordSet: true });
+    hub.ingest("A", ev(2, "settings_apply", { state: "armed", mode: "when_empty" }));
+    expect(hub.getState().settings?.armed).toBe(true);
+    hub.ingest("A", ev(3, "settings_apply", { state: "applying", mode: "when_empty" }));
+    hub.ingest("A", ev(4, "settings_apply", { state: "applied", mode: "when_empty" }));
+    expect(hub.getState().settings).toEqual({ enabled: true, pending: false, armed: false, passwordSet: true });
+    expect(store.all().map((e) => e.type)).toEqual(["settings_changed", "settings_apply", "settings_apply", "settings_apply"]);
+    expect(hub.history().events).toHaveLength(4);
+  });
+
+  it("ignores settings events while the feature is off", () => {
+    const hub = new Hub(fakeAgent("A", []), new HistoryStore(":memory:"));
+    (hub as unknown as { state: ReturnType<typeof emptyAgentState> }).state = emptyAgentState(new Date("2026-10-09T17:00:00Z"));
+    hub.ingest("A", ev(1, "settings_changed", { changedKeys: ["name"] }));
+    expect(hub.getState().settings).toBeNull();
   });
 });

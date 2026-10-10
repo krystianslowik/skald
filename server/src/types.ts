@@ -63,7 +63,70 @@ export interface AgentState {
   world: { sizeBytes: number; lastSaveAt: string | null; lastSaveMs: number; meta: WorldMeta | null };
   backups: Backup[];
   agent: { startedAt: string; lastLogAt: string | null };
+  /** null when the agent has no writable SETTINGS_DIR (or predates the feature). */
+  settings?: SettingsSummary | null;
 }
+
+/** The settings part of the agent's /state: enough for the header chips. */
+export interface SettingsSummary {
+  enabled: boolean;
+  /** Saved after the running server started: a restart applies it. */
+  pending: boolean;
+  /** An apply-when-empty is waiting for the last player to leave. */
+  armed: boolean;
+  passwordSet: boolean;
+}
+
+/** Saved server settings without the password (agent GET /settings `current`). */
+export interface SettingsCurrent {
+  name: string;
+  public: boolean;
+  /** One of PRESETS in settings.ts; "normal" for none. */
+  preset: string;
+  /** Overrides on top of the preset, by modifier name. Absent = preset's value. */
+  modifiers: Partial<Record<string, string>>;
+  keys: string[];
+  /** Seconds; 1800 is the game's default. */
+  saveInterval: number;
+  /** SERVER_ARGS tokens Skald does not manage; read-only, kept on save. */
+  unmanaged: string[];
+}
+
+/** Body of PUT /api/settings. Leave `password` out to keep the current one. */
+export interface SettingsInput {
+  name: string;
+  password?: string;
+  public: boolean;
+  preset: string;
+  modifiers: Record<string, string>;
+  keys: string[];
+  saveInterval: number;
+}
+
+export type HookStatus = "ok" | "missing" | "unknown";
+
+/** GET /api/settings. */
+export interface SettingsView {
+  current: SettingsCurrent;
+  pending: boolean;
+  /** What the running server was started with. */
+  effective: { name: string; public: boolean; args: string };
+  password: { set: boolean };
+  apply: { armed: boolean; since: string | null };
+  /** Whether the game confirmed reading the settings at its last start. */
+  hook: HookStatus;
+  updatedAt: string | null;
+}
+
+export type ApplyMode = "now" | "when_empty";
+
+/** One settings call, proxied to the agent (or answered by the mock). */
+export type SettingsRequest =
+  | { op: "get" }
+  | { op: "password" }
+  | { op: "put"; body: unknown }
+  | { op: "apply"; mode: ApplyMode }
+  | { op: "cancel" };
 
 export type AgentEventType =
   | "log"
@@ -78,7 +141,9 @@ export type AgentEventType =
   | "playfab"
   | "action"
   | "raid"
-  | "net_stats";
+  | "net_stats"
+  | "settings_changed"
+  | "settings_apply";
 
 /** High-frequency types that are broadcast live but never stored in history. */
 export const UNSTORED_EVENTS: readonly AgentEventType[] = ["log", "net_stats"];
@@ -203,5 +268,6 @@ export function emptyAgentState(now = new Date()): AgentState {
     world: { sizeBytes: 0, lastSaveAt: null, lastSaveMs: 0, meta: null },
     backups: [],
     agent: { startedAt: now.toISOString(), lastLogAt: null },
+    settings: null,
   };
 }

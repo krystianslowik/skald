@@ -1,6 +1,20 @@
-import type { ActionResponse, AgentSource } from "./agent";
+import type { ActionResponse, AgentSource, Proxied } from "./agent";
 import { addDays, calendar } from "./profiles";
-import type { ActionName, AgentEvent, AgentEventType, AgentState, LogLine, Metrics, SeriesPoint } from "./types";
+import { buildArgs, changedKeys, normalize, parseArgs, validateSettings } from "./settings";
+import type {
+  ActionName,
+  AgentEvent,
+  AgentEventType,
+  AgentState,
+  ApplyMode,
+  LogLine,
+  Metrics,
+  SeriesPoint,
+  SettingsCurrent,
+  SettingsInput,
+  SettingsRequest,
+  SettingsView,
+} from "./types";
 
 /**
  * Fake agent for `MOCK_AGENT=1`: a living server with a week of seeded history,
@@ -11,6 +25,8 @@ import type { ActionName, AgentEvent, AgentEventType, AgentState, LogLine, Metri
 const NAMES = ["Ragnar", "Freya", "Bjorn", "Astrid"];
 const MIN = 60_000;
 const HOUR = 60 * MIN;
+/** The real agent waits 60 s of an empty server; the mock waits a few seconds so the flow can be watched. */
+const MOCK_EMPTY_MS = 6_000;
 
 const NOISE = [
   "Dungeon loaded 0",
@@ -91,6 +107,14 @@ export class MockAgent implements AgentSource {
   private busy = false;
   private readonly startedAt = new Date().toISOString();
   private state: AgentState;
+  // Server settings, as the agent keeps them in server.json.
+  private settingsCur: SettingsCurrent;
+  private serverPass = "hearth-77";
+  private settingsUpdatedAt: string | null = null;
+  private armedSince: string | null = null;
+  private emptySince: number | null = null;
+  private lastLeave = 0;
+  private effective: SettingsView["effective"];
 
   constructor(
     private readonly clock: () => number = Date.now,
@@ -140,7 +164,10 @@ export class MockAgent implements AgentSource {
         return { name: `worlds-${stamp}.zip`, sizeBytes: 41_000_000 - i * 1_350_000, modifiedAt: d.toISOString() };
       }),
       agent: { startedAt: this.startedAt, lastLogAt: null },
+      settings: { enabled: true, pending: false, armed: false, passwordSet: true },
     };
+    this.settingsCur = { name: this.state.server.name, public: true, ...parseArgs(this.state.server.args) };
+    this.effective = { name: this.state.server.name, public: true, args: this.state.server.args };
     this.seedHistory(now);
   }
 
@@ -158,6 +185,7 @@ export class MockAgent implements AgentSource {
     this.loop(10000, () => this.netStats());
     this.loop(60000, () => this.save());
     this.loop(14000, () => this.drift());
+    this.loop(1000, () => this.watchEmpty());
   }
 
   stop(): void {
@@ -197,19 +225,152 @@ export class MockAgent implements AgentSource {
         this.emit("action", { name, ok: true, message: "sent HUP to valheim-updater" });
       });
     } else {
-      this.setStatus("stopping");
-      this.timers.push(setTimeout(() => {
-        for (const p of [...this.state.players]) this.leave(p.name);
-        this.setStatus("stopped");
-      }, 1500));
-      this.timers.push(setTimeout(() => this.setStatus("starting"), 3500));
-      done(6500, () => {
-        this.state.server.serverStartedAt = new Date(this.clock()).toISOString();
-        this.bootComplete(newJoinCode());
-        this.emit("action", { name, ok: true, message: "restart complete" });
-      });
+      this.restart(done);
     }
     return { status: 200, body: { ok: true, message: name === "restart" ? "restart started" : `sent HUP to valheim-${name === "backup" ? "backup" : "updater"}` } };
+  }
+
+  /** Stop, start, new join code; any saved settings take effect on the way. */
+  private restart(done: (ms: number, fn: () => void) => void, mode?: ApplyMode): void {
+    this.setStatus("stopping");
+    this.timers.push(setTimeout(() => {
+      for (const p of [...this.state.players]) this.leave(p.name);
+      this.setStatus("stopped");
+    }, 1500));
+    this.timers.push(setTimeout(() => {
+      this.setStatus("starting");
+      if (this.settingsUpdatedAt) this.log("INFO - Skald settings applied");
+    }, 3500));
+    done(6500, () => {
+      this.state.server.serverStartedAt = new Date(this.clock()).toISOString();
+      const applied = this.state.settings?.pending ?? false;
+      if (applied) {
+        this.effective = { name: this.settingsCur.name, public: this.settingsCur.public, args: buildArgs(this.settingsCur) };
+        this.state.server.name = this.effective.name;
+        this.state.server.args = this.effective.args;
+        this.state.settings = { ...this.state.settings!, pending: false };
+      }
+      this.bootComplete(newJoinCode());
+      this.emit("action", { name: "restart", ok: true, message: "restart complete" });
+      if (mode) this.emit("settings_apply", { state: "applied", mode });
+      else if (applied && this.armedSince) {
+        // Applied by the restart rune while an apply-when-empty waited.
+        this.disarm();
+        this.emit("settings_apply", { state: "applied", mode: "when_empty" });
+      }
+    });
+  }
+
+  async settings(req: SettingsRequest): Promise<Proxied> {
+    switch (req.op) {
+      case "get":
+        return { status: 200, body: this.settingsView() };
+      case "password":
+        return { status: 200, body: { password: this.serverPass } };
+      case "put":
+        return this.putSettings(req.body);
+      case "apply":
+        return this.applySettings(req.mode);
+      case "cancel":
+        if (this.armedSince) {
+          this.disarm();
+          this.emit("settings_apply", { state: "cancelled", mode: "when_empty" });
+        }
+        return { status: 200, body: this.settingsView() };
+    }
+  }
+
+  private settingsView(): SettingsView {
+    return {
+      current: structuredClone(this.settingsCur),
+      pending: this.state.settings?.pending ?? false,
+      effective: { ...this.effective },
+      password: { set: true },
+      apply: { armed: this.armedSince !== null, since: this.armedSince },
+      hook: this.settingsUpdatedAt && !this.state.settings?.pending ? "ok" : "unknown",
+      updatedAt: this.settingsUpdatedAt,
+    };
+  }
+
+  private putSettings(raw: unknown): Proxied {
+    const b = raw as Partial<SettingsInput>;
+    if (typeof b.name !== "string" || typeof b.public !== "boolean" || (b.password !== undefined && typeof b.password !== "string")) {
+      return { status: 400, body: { ok: false, message: "bad request body" } };
+    }
+    const input: SettingsInput = {
+      name: b.name,
+      password: b.password,
+      public: b.public,
+      preset: typeof b.preset === "string" ? b.preset : "normal",
+      modifiers: b.modifiers && typeof b.modifiers === "object" ? b.modifiers : {},
+      keys: Array.isArray(b.keys) ? b.keys.map(String) : [],
+      saveInterval: Number(b.saveInterval) || 0,
+    };
+    const errors = validateSettings(this.settingsCur, this.serverPass, input);
+    if (Object.keys(errors).length > 0) return { status: 400, body: { ok: false, message: "invalid settings", errors } };
+    const next = normalize(input, this.settingsCur.unmanaged);
+    const pwChanged = input.password !== undefined && input.password !== this.serverPass;
+    const changed = changedKeys(this.settingsCur, next, pwChanged);
+    if (changed.length > 0) {
+      this.settingsCur = next;
+      if (pwChanged) this.serverPass = input.password!;
+      this.settingsUpdatedAt = new Date(this.clock()).toISOString();
+      this.state.settings = { ...this.state.settings!, pending: true };
+      this.emit("settings_changed", { changedKeys: changed });
+    }
+    return { status: 200, body: this.settingsView() };
+  }
+
+  private applySettings(mode: ApplyMode): Proxied {
+    if (mode === "now") {
+      if (this.busy) return { status: 409, body: { ok: false, message: "another action is in progress" } };
+      this.disarm();
+      this.fireApply("now");
+      return { status: 200, body: { ok: true, message: "restart started" } };
+    }
+    if (!this.state.settings?.pending) return { status: 409, body: { ok: false, message: "nothing to apply" } };
+    if (!this.armedSince) {
+      this.armedSince = new Date(this.clock()).toISOString();
+      this.state.settings = { ...this.state.settings, armed: true };
+      this.emit("settings_apply", { state: "armed", mode: "when_empty", since: this.armedSince });
+      this.lastLeave = this.clock();
+    }
+    return { status: 200, body: this.settingsView() };
+  }
+
+  private fireApply(mode: ApplyMode): void {
+    this.busy = true;
+    this.emit("settings_apply", { state: "applying", mode });
+    this.emit("action", { name: "restart", ok: true, message: "restart started" });
+    this.restart((ms, fn) => this.timers.push(setTimeout(() => {
+      fn();
+      this.busy = false;
+    }, ms)), mode);
+  }
+
+  private disarm(): void {
+    this.armedSince = null;
+    this.emptySince = null;
+    if (this.state.settings) this.state.settings = { ...this.state.settings, armed: false };
+  }
+
+  /** The agent's apply-when-empty watcher, on a short mock window. */
+  private watchEmpty(): void {
+    if (!this.armedSince) return;
+    const now = this.clock();
+    if (this.state.server.status !== "running" || this.state.players.length > 0) {
+      this.emptySince = null;
+      // The evening winds down while it waits: someone walks off every few seconds.
+      if (this.state.players.length > 0 && now - this.lastLeave >= 2500) {
+        this.lastLeave = now;
+        this.leave(this.state.players[0]!.name);
+      }
+      return;
+    }
+    this.emptySince ??= now;
+    if (now - this.emptySince < MOCK_EMPTY_MS || this.busy) return;
+    this.disarm();
+    this.fireApply("when_empty");
   }
 
   async backup(name: string): Promise<Response> {
@@ -255,7 +416,7 @@ export class MockAgent implements AgentSource {
     this.state.server.joinCode = code;
     this.state.server.joinCodeAt = new Date(this.clock()).toISOString();
     this.state.server.playfab = "ok";
-    this.log(`Session "My Valheim" registered with join code ${code}`);
+    this.log(`Session "${this.state.server.name}" registered with join code ${code}`);
     this.emit("playfab", { state: "ok" });
     this.emit("join_code", { code });
     this.setStatus("running");
@@ -270,12 +431,13 @@ export class MockAgent implements AgentSource {
   private count(): void {
     const n = this.state.players.length;
     this.state.server.playersReported = n;
-    this.log(`Session "My Valheim" with join code ${this.state.server.joinCode} and IP 203.0.113.10:2456 is active with ${n} player(s)`);
+    this.log(`Session "${this.state.server.name}" with join code ${this.state.server.joinCode} and IP 203.0.113.10:2456 is active with ${n} player(s)`);
     this.emit("player_count", { count: n });
   }
 
   private join(name: string): void {
-    if (this.state.server.status !== "running" || this.state.players.some((p) => p.name === name)) return;
+    // Nobody new sits down while the server waits to empty for new settings.
+    if (this.state.server.status !== "running" || this.armedSince || this.state.players.some((p) => p.name === name)) return;
     this.state.players.push({ name, since: new Date(this.clock()).toISOString() });
     this.log(`Got character ZDOID from ${name} : ${1000000 + Math.floor(Math.random() * 9000000)}:1`);
     this.emit("player_join", { name });

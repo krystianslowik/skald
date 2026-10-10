@@ -1,9 +1,15 @@
 import { SseParser } from "./sse";
-import type { ActionName, ActionResult, AgentEvent, AgentState, LogLine } from "./types";
+import type { ActionName, ActionResult, AgentEvent, AgentState, LogLine, SettingsRequest } from "./types";
 
 export interface ActionResponse {
   status: number;
   body: ActionResult;
+}
+
+/** An agent answer passed through as is: status and JSON body. */
+export interface Proxied {
+  status: number;
+  body: unknown;
 }
 
 /** Everything the web tier needs from the agent; implemented over HTTP and by the mock. */
@@ -15,7 +21,17 @@ export interface AgentSource {
   backup(name: string, signal: AbortSignal): Promise<Response>;
   /** Streams events with seq > since until the stream ends, errors, or `signal` aborts. */
   stream(since: number, onEvent: (e: AgentEvent) => void, signal: AbortSignal): Promise<void>;
+  /** Server settings: 404 when the agent has the feature off. */
+  settings(req: SettingsRequest): Promise<Proxied>;
 }
+
+const SETTINGS_ROUTE: Record<SettingsRequest["op"], [method: string, path: string]> = {
+  get: ["GET", "/settings"],
+  password: ["GET", "/settings/password"],
+  put: ["PUT", "/settings"],
+  apply: ["POST", "/settings/apply"],
+  cancel: ["DELETE", "/settings/apply"],
+};
 
 const TIMEOUT_MS = 10_000;
 
@@ -61,6 +77,24 @@ export class HttpAgent implements AgentSource {
       body = { ok: res.ok, message: `HTTP ${res.status}` };
     }
     return { status: res.status, body };
+  }
+
+  async settings(req: SettingsRequest): Promise<Proxied> {
+    const [method, path] = SETTINGS_ROUTE[req.op];
+    const body = req.op === "put" ? JSON.stringify(req.body) : req.op === "apply" ? JSON.stringify({ mode: req.mode }) : undefined;
+    const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      method,
+      headers: body ? { ...this.headers(), "Content-Type": "application/json" } : this.headers(),
+      body,
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch {
+      json = { ok: res.ok, message: `HTTP ${res.status}` };
+    }
+    return { status: res.status, body: json };
   }
 
   backup(name: string, signal: AbortSignal): Promise<Response> {
