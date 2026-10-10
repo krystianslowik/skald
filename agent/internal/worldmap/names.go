@@ -31,6 +31,7 @@ var (
 	keyTimeOfDeath = stableHash("timeOfDeath")
 	keyData        = stableHash("data")
 	keyTCData      = stableHash("TCData")
+	keyItems       = stableHash("items")
 )
 
 // What a prefab means for the map.
@@ -45,6 +46,7 @@ const (
 	roleVehicle
 	roleStation
 	roleTerrain
+	roleContainer
 )
 
 type prefabInfo struct {
@@ -62,6 +64,17 @@ var prefabNames = map[string]prefabInfo{
 	"piece_bed02":            {roleBed, ""},
 	"piece_cartographytable": {roleTable, ""},
 	"_TerrainCompiler":       {roleTerrain, ""},
+
+	// Containers players build. World chests (TreasureChest_*,
+	// shipwreck_karve_chest, dungeon loot) are deliberately not listed.
+	"piece_chest_wood":       {roleContainer, "piece_chest_wood"},
+	"piece_chest":            {roleContainer, "piece_chest"},
+	"piece_chest_private":    {roleContainer, "piece_chest_private"},
+	"piece_chest_barrel":     {roleContainer, "piece_chest_barrel"},
+	"piece_chest_blackmetal": {roleContainer, "piece_chest_blackmetal"},
+	"piece_chest_grausten":   {roleContainer, "piece_chest_grausten"},
+	"piece_chest_treasure":   {roleContainer, "piece_chest_treasure"},
+	"piece_chest_warderobe":  {roleContainer, "piece_chest_warderobe"},
 
 	"Raft":                {roleVehicle, "Raft"},
 	"Karve":               {roleVehicle, "Karve"},

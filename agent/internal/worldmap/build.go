@@ -1,7 +1,8 @@
 // Package worldmap builds the dashboard's world map from a Valheim 1.0 save:
 // land and water from where the save has objects, the explored area and pins
 // of the cartography tables, portals, graves, beds, ships, carts, bases,
-// generated locations and terrain edits. See chunk.go and db2.go for the
+// generated locations, terrain edits and what players keep in the chests,
+// carts and ships they built. See chunk.go, db2.go and inventory.go for the
 // file layouts.
 //
 // A build reads the newest generation with an `.ok` marker. Chunk files are
@@ -324,6 +325,7 @@ func assemble(snap *Snapshot, chunks []*chunkData, db *db2Data, showNames bool) 
 	terrain := map[zoneKey]int{}
 	var explored []uint64
 	var portals []rawPortal
+	var stores []rawStore
 	for _, c := range chunks {
 		snap.Stats.ZDOs += c.zdos
 		for k, v := range c.density {
@@ -364,14 +366,19 @@ func assemble(snap *Snapshot, chunks []*chunkData, db *db2Data, showNames bool) 
 			if t.ticks > 0 {
 				day = int64(math.Floor(float64(t.ticks) / 1e7 / world.DayLengthSec))
 			}
-			snap.Tombstones = append(snap.Tombstones, Tombstone{X: iround(t.x), Z: iround(t.z), Owner: name(t.owner), Day: day})
+			snap.Tombstones = append(snap.Tombstones, Tombstone{X: iround(t.x), Z: iround(t.z), Owner: name(t.owner), Day: day, Items: exportItems(t.items, showNames)})
 		}
 		for _, bd := range c.beds {
 			snap.Beds = append(snap.Beds, Bed{X: iround(bd.x), Z: iround(bd.z), Owner: name(bd.owner)})
 		}
 		for _, v := range c.vehicles {
-			snap.Vehicles = append(snap.Vehicles, Vehicle{Kind: v.kind, X: iround(v.x), Z: iround(v.z)})
+			id := ""
+			if v.built {
+				id = storeID(v.kind, v.x, v.z)
+			}
+			snap.Vehicles = append(snap.Vehicles, Vehicle{ID: id, Kind: v.kind, X: iround(v.x), Z: iround(v.z)})
 		}
+		stores = append(stores, c.stores...)
 		for _, p := range c.pins {
 			snap.Pins = append(snap.Pins, Pin{Type: int(p.typ), Kind: pinKind(p.typ), Name: name(p.name), X: iround(p.x), Z: iround(p.z)})
 		}
@@ -406,6 +413,7 @@ func assemble(snap *Snapshot, chunks []*chunkData, db *db2Data, showNames bool) 
 	}
 
 	snap.Portals = pairPortals(portals, showNames)
+	snap.Storage = exportStorage(stores, snap.Vehicles, showNames)
 	snap.Bases = clusterBases(pieces)
 	for _, zp := range pieces {
 		snap.Stats.Pieces += zp.count
@@ -424,6 +432,65 @@ func assemble(snap *Snapshot, chunks []*chunkData, db *db2Data, showNames bool) 
 		}
 	}
 	sortSnapshot(snap)
+}
+
+func storeID(prefab string, x, z float32) string {
+	return fmt.Sprintf("%s@%d,%d", prefab, iround(x), iround(z))
+}
+
+func storeKind(prefab string) string {
+	switch prefabByHash[stableHash(prefab)].role {
+	case roleVehicle:
+		if prefab == "Cart" {
+			return KindCart
+		}
+		return KindShip
+	default:
+		return KindChest
+	}
+}
+
+// exportStorage turns the built containers into Snapshot.Storage, in a
+// stable order. Two containers on the same metre get "#n" suffixes, and the
+// vehicles' ids are renamed to match.
+func exportStorage(stores []rawStore, vehicles []Vehicle, showNames bool) []Container {
+	sort.Slice(stores, func(i, j int) bool {
+		a, b := stores[i], stores[j]
+		if ax, bx := iround(a.x), iround(b.x); ax != bx {
+			return ax < bx
+		}
+		if az, bz := iround(a.z), iround(b.z); az != bz {
+			return az < bz
+		}
+		return a.prefab < b.prefab
+	})
+	out := make([]Container, 0, len(stores))
+	seen := map[string]int{}
+	renamed := map[string][]string{}
+	for _, s := range stores {
+		base := storeID(s.prefab, s.x, s.z)
+		id := base
+		if n := seen[base]; n > 0 {
+			id = fmt.Sprintf("%s#%d", base, n)
+		}
+		seen[base]++
+		renamed[base] = append(renamed[base], id)
+		items := exportItems(s.items, showNames)
+		w, h := gridOf(s.prefab, s.items)
+		out = append(out, Container{
+			ID: id, Kind: storeKind(s.prefab), Prefab: s.prefab, X: iround(s.x), Z: iround(s.z),
+			Width: w, Height: h, Items: items, Unreadable: s.unreadable,
+		})
+	}
+	// Vehicles carry the base id; hand out the suffixed ones in order.
+	for i := range vehicles {
+		base := vehicles[i].ID
+		if ids := renamed[base]; base != "" && len(ids) > 0 {
+			vehicles[i].ID = ids[0]
+			renamed[base] = ids[1:]
+		}
+	}
+	return out
 }
 
 // densityLevel maps an object count to 2..255 on a log scale (0 objects is 1).
@@ -674,6 +741,14 @@ func sortSnapshot(s *Snapshot) {
 	}
 	if s.TerrainEdits == nil {
 		s.TerrainEdits = []TerrainEdit{}
+	}
+	if s.Storage == nil {
+		s.Storage = []Container{}
+	}
+	for i := range s.Tombstones {
+		if s.Tombstones[i].Items == nil {
+			s.Tombstones[i].Items = []Item{}
+		}
 	}
 	if s.Explored.RLE == nil {
 		s.Explored.RLE = []byte{}

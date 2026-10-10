@@ -271,6 +271,62 @@ func terrainData(levelled, painted, both int) []byte {
 	return gz(raw.Bytes())
 }
 
+// item is one stack of an inventory blob (see internal/worldmap/inventory.go
+// for the layout); the flags say which optional fields are written.
+type item struct {
+	name       string
+	x, y       byte
+	flags      byte
+	stack      uint16
+	quality    uint16
+	durability int32 // x 100; 0 writes 10000
+	crafterID  int64
+	crafter    string
+	worldLevel byte
+}
+
+func inventory(items ...item) []byte {
+	var b bytes.Buffer
+	i32(&b, 109)
+	_ = binary.Write(&b, binary.LittleEndian, uint16(len(items)))
+	for _, it := range items {
+		dur := it.durability
+		if dur == 0 {
+			dur = 10000
+		}
+		i32(&b, dur)
+		b.Write([]byte{it.x, it.y, 0, it.flags})
+		if it.flags&0x08 != 0 {
+			_ = binary.Write(&b, binary.LittleEndian, it.stack)
+		}
+		if it.flags&0x04 != 0 {
+			_ = binary.Write(&b, binary.LittleEndian, it.quality)
+		}
+		if it.flags&0x20 != 0 {
+			i64(&b, it.crafterID)
+			str(&b, it.crafter)
+		}
+		i32(&b, stableHash(it.name))
+		b.WriteByte(it.worldLevel)
+	}
+	return b.Bytes()
+}
+
+// fakeCrafterID stands in for a crafter's platform id; it must never show up.
+const fakeCrafterID = int64(76561190000000099)
+
+// chest is a container; built ones carry a creator.
+func chest(prefab string, x, z float32, built bool, blob []byte) zdo {
+	c := zdo{prefab: prefab, x: x, y: 31, z: z, rot: 4}
+	if built {
+		c.longs = []kv[int64]{{"creator", fakeOwnerID}}
+	}
+	if blob != nil {
+		c.byts = []kv[[]byte]{{"items", blob}}
+	}
+	return c
+}
+
 func onIsland(zx, zz int) bool { return zx*zx+zz*zz <= 16 }
 
 func writeMapWorld(dir string) {
@@ -315,11 +371,36 @@ func writeMapWorld(dir string) {
 			floats: []kv[float32]{{"health", 1}},
 			longs:  []kv[int64]{{"owner", fakeOwnerID}, {"timeOfDeath", int64((12*1800 + 400) * 1e7)}},
 			strs:   []kv[string]{{"ownerName", "Bjorn"}},
-			byts:   []kv[[]byte]{{"items", []byte{1, 2, 3}}}},
+			byts: []kv[[]byte]{{"items", inventory(
+				item{name: "HelmetBronze", flags: 0x61, durability: 87367, crafterID: fakeCrafterID, crafter: "Bjorn"},
+				item{name: "Feathers", y: 2, flags: 0x49, stack: 41},
+			)}}},
 		zdo{prefab: "Karve", x: -150, y: 30, z: 250, rot: 4,
 			floats: []kv[float32]{{"rudder", 0.1}},
 			longs:  []kv[int64]{{"creator", fakeOwnerID}, {"user", fakeOwnerID}}},
-		zdo{prefab: "Cart", x: 90, y: 34, z: 40, rot: 4, longs: []kv[int64]{{"creator", fakeOwnerID}}},
+		zdo{prefab: "Cart", x: 90, y: 34, z: 40, rot: 4, longs: []kv[int64]{{"creator", fakeOwnerID}},
+			byts: []kv[[]byte]{{"items", inventory(
+				item{name: "Wood", flags: 0x49, stack: 20},
+				item{name: "CopperOre", x: 5, y: 2, flags: 0x41},
+			)}}},
+		// Storage: a wood chest with one item per flag set seen in real
+		// saves, an empty one (no items key), a reinforced chest whose
+		// inventory has a flag bit nobody has seen, a chest nobody built
+		// and two world chests. Only the first three may be exported.
+		chest("piece_chest_wood", 110, -200, true, inventory(
+			item{name: "SwordBronze", flags: 0x65, quality: 2, durability: 25000, crafterID: fakeCrafterID, crafter: "Hakon"},
+			item{name: "Stone", x: 1, flags: 0x41},
+			item{name: "Honey", x: 2, flags: 0x48, stack: 50},
+			item{name: "Wood", x: 3, flags: 0x49, stack: 427, worldLevel: 1},
+			item{name: "Torch", x: 4, flags: 0x61, durability: 444, crafterID: -1, crafter: "Sigrun"},
+			item{name: "AxeHead1", y: 1, flags: 0x40},
+			item{name: "ArrowWood", x: 1, y: 1, flags: 0x69, stack: 65, crafterID: fakeCrafterID, crafter: "Ulfgar"},
+		)),
+		chest("piece_chest_wood", 112, -200, true, nil),
+		chest("piece_chest", 114, -200, true, inventory(item{name: "Iron", flags: 0x49 | 0x10, stack: 30})),
+		chest("piece_chest_wood", 300, 280, false, inventory(item{name: "Coins", flags: 0x49, stack: 99})),
+		chest("TreasureChest_meadows", 320, 300, false, inventory(item{name: "Ruby", flags: 0x48, stack: 2})),
+		chest("shipwreck_karve_chest", -300, 320, false, inventory(item{name: "Ruby", flags: 0x48, stack: 3})),
 		zdo{prefab: "_TerrainCompiler", x: 128, y: 0, z: -192, byts: []kv[[]byte]{{"TCData", terrainData(40, 20, 10)}}},
 		zdo{prefab: "_TerrainCompiler", x: 0, y: 0, z: 0, byts: []kv[[]byte]{{"TCData", terrainData(0, 5, 0)}}},
 		// An object with a map of 130 entries: the count takes two bytes.

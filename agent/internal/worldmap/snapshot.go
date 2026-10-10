@@ -5,8 +5,10 @@ import "time"
 // Snapshot is GET /map. Coordinates are world metres rounded to whole
 // metres: x east, z north, origin at the world centre. Platform ids (portal
 // tag authors, pin authors, bed and grave owner ids) are never read into it.
-// Names (grave and bed owners, portal tags, pin names) are empty when the
-// builder runs with ShowNames off.
+// Names (grave and bed owners, portal tags, pin names, crafters) are empty
+// when the builder runs with ShowNames off. Storage lists only containers a
+// player built: world-generated chests (treasure, shipwreck, dungeon loot)
+// and their contents are never read into it.
 type Snapshot struct {
 	Meta         Meta          `json:"meta"`
 	Land         Land          `json:"land"`
@@ -19,6 +21,7 @@ type Snapshot struct {
 	Bases        []Base        `json:"bases"`
 	Locations    []Location    `json:"locations"`
 	TerrainEdits []TerrainEdit `json:"terrainEdits"`
+	Storage      []Container   `json:"storage"`
 	Stats        Stats         `json:"stats"`
 }
 
@@ -86,6 +89,8 @@ type Tombstone struct {
 	Owner string `json:"owner"`
 	// Day is the in-game day of the death; -1 when unknown.
 	Day int64 `json:"day"`
+	// Items is what the grave holds, in slot order.
+	Items []Item `json:"items"`
 }
 
 type Bed struct {
@@ -94,8 +99,10 @@ type Bed struct {
 	Owner string `json:"owner"`
 }
 
-// Vehicle is a ship or a cart.
+// Vehicle is a ship or a cart. ID names its entry in Snapshot.Storage when a
+// player built it.
 type Vehicle struct {
+	ID   string `json:"id,omitempty"`
 	Kind string `json:"kind"`
 	X    int    `json:"x"`
 	Z    int    `json:"z"`
@@ -130,6 +137,39 @@ type TerrainEdit struct {
 	X     int `json:"x"`
 	Z     int `json:"z"`
 	Cells int `json:"cells"`
+}
+
+// Container is a chest, cart or ship a player built (it carries a creator),
+// with its inventory. ID is the prefab and the rounded position, stable for
+// as long as it stays put. Width x Height is the inventory grid: the game's
+// size where known, never smaller than the slots in use. Unreadable is set
+// when the inventory did not decode; Items is then empty.
+type Container struct {
+	ID         string `json:"id"`
+	Kind       string `json:"kind"`
+	Prefab     string `json:"prefab"`
+	X          int    `json:"x"`
+	Z          int    `json:"z"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+	Items      []Item `json:"items"`
+	Unreadable bool   `json:"unreadable,omitempty"`
+}
+
+// Item is one stack in a container. Name is the item prefab ("#hash" when
+// unknown), Type the game's item type ("Material", "Helmet", ...; empty when
+// unknown). Quality is omitted at 1; Durability is set only for things that
+// wear (weapons, armour, tools). Crafter is the crafter's name, only with
+// ShowNames; the crafter id is never read.
+type Item struct {
+	Name       string   `json:"name"`
+	Type       string   `json:"type,omitempty"`
+	Stack      int      `json:"stack"`
+	Quality    int      `json:"quality,omitempty"`
+	Durability *float64 `json:"durability,omitempty"`
+	Crafter    string   `json:"crafter,omitempty"`
+	X          int      `json:"x"`
+	Y          int      `json:"y"`
 }
 
 type Stats struct {

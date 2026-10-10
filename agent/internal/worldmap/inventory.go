@@ -1,0 +1,205 @@
+package worldmap
+
+import (
+	_ "embed"
+	"errors"
+	"fmt"
+	"math"
+	"sort"
+	"strings"
+)
+
+// A container's inventory is the byte array under ZDO key "items" (the 0x80
+// map). Valheim 1.0 writes it compactly (inventory version 109):
+//
+//	i32 version (109) | u16 count | count x item
+//
+//	item: i32 durability x 100 (10000 for anything without wear)
+//	      u8 slot x | u8 slot y
+//	      u8 reserved (0 in every save seen)
+//	      u8 flags
+//	      flags&0x08: u16 stack       (absent: a stack of 1)
+//	      flags&0x04: u16 quality     (absent: quality 1)
+//	      flags&0x20: i64 crafter id, string crafter name (.NET 7-bit length)
+//	      i32 item prefab hash (GetStableHashCode of the prefab name)
+//	      u8 world level (0, or the world level the item was made at)
+//
+//	flags: 0x01 picked up by a player (set on everything a player has held;
+//	            clear on the loot the game puts into world chests)
+//	       0x04 quality follows      0x08 stack follows
+//	       0x20 crafter follows      0x40 set on every item seen
+//	       0x02, 0x10, 0x80 never seen: a blob with any of them is refused
+//	            rather than guessed at (equipped, variant and custom data,
+//	            which the pre-1.0 format carried, are the likely owners)
+//
+// Derived from 647 real inventories (41 player chests, a cart, 5 graves, 600
+// world treasure chests): flag sets 0x40 0x41 0x48 0x49 0x61 0x65 0x69, every
+// blob read to its last byte and every prefab hash resolved. The quality
+// field may as well be u8 quality + u8 (0); no save tells the two apart.
+//
+// The crafter id is a platform id: it is read past and never kept.
+
+const (
+	inventoryVersion = 109
+	maxItems         = 1024
+
+	itemPickedUp = 0x01
+	itemQuality  = 0x04
+	itemStack    = 0x08
+	itemCrafter  = 0x20
+	itemAlways   = 0x40
+	itemKnown    = itemPickedUp | itemQuality | itemStack | itemCrafter | itemAlways
+)
+
+// rawItem is one decoded stack; the crafter name is gated at assembly.
+type rawItem struct {
+	name, typ  string
+	stack      int
+	quality    int
+	durability float32
+	crafter    string
+	x, y       int
+}
+
+var errInventory = errors.New("worldmap: unreadable inventory")
+
+// parseInventory decodes an "items" blob. A blob that does not match the
+// layout above exactly (unknown version or flag bits, trailing bytes) is an
+// error; nothing is half-read.
+func parseInventory(blob []byte) ([]rawItem, error) {
+	r := &buf{b: blob}
+	if v := r.i32(); r.err == nil && v != inventoryVersion {
+		return nil, fmt.Errorf("%w: version %d", errInventory, v)
+	}
+	n := int(r.u16())
+	if r.err != nil {
+		return nil, r.err
+	}
+	if n > maxItems {
+		return nil, fmt.Errorf("%w: %d items", errInventory, n)
+	}
+	items := make([]rawItem, 0, n)
+	for i := 0; i < n; i++ {
+		dur := r.i32()
+		x, y := r.u8(), r.u8()
+		r.u8()
+		flags := r.u8()
+		if r.err != nil {
+			return nil, r.err
+		}
+		if flags&^itemKnown != 0 || flags&itemAlways == 0 {
+			return nil, fmt.Errorf("%w: item flags %#02x", errInventory, flags)
+		}
+		it := rawItem{stack: 1, quality: 1, durability: float32(dur) / 100, x: int(x), y: int(y)}
+		if flags&itemStack != 0 {
+			it.stack = int(r.u16())
+		}
+		if flags&itemQuality != 0 {
+			it.quality = int(r.u16())
+		}
+		if flags&itemCrafter != 0 {
+			r.i64() // crafter id: platform id, dropped
+			it.crafter = r.str(maxNameBytes)
+		}
+		hash := r.i32()
+		r.u8() // world level
+		if r.err != nil {
+			return nil, r.err
+		}
+		if info, ok := itemByHash[hash]; ok {
+			it.name, it.typ = info.name, info.typ
+		} else {
+			it.name = fmt.Sprintf("#%08x", uint32(hash))
+		}
+		items = append(items, it)
+	}
+	if r.p != len(blob) {
+		return nil, fmt.Errorf("%w: %d trailing bytes", errInventory, len(blob)-r.p)
+	}
+	return items, nil
+}
+
+// items.tsv is every item prefab name with its game item type (from the
+// Jotunn item list), so the hashes in an inventory can be named.
+//
+//go:embed items.tsv
+var itemList string
+
+type itemInfo struct{ name, typ string }
+
+var itemByHash = map[int32]itemInfo{}
+
+func init() {
+	for _, line := range strings.Split(itemList, "\n") {
+		name, typ, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if ok && name != "" {
+			itemByHash[stableHash(name)] = itemInfo{name: name, typ: typ}
+		}
+	}
+}
+
+// wears is the item types that lose durability; for everything else the
+// stored value is a constant and not exported.
+var wears = map[string]bool{
+	"OneHandedWeapon": true, "TwoHandedWeapon": true, "TwoHandedWeaponLeft": true, "Bow": true,
+	"Shield": true, "Helmet": true, "Chest": true, "Legs": true, "Shoulder": true,
+	"Utility": true, "Tool": true, "Torch": true,
+}
+
+// Container kinds.
+const (
+	KindChest = "chest"
+	KindCart  = "cart"
+	KindShip  = "ship"
+)
+
+// storageSize is the inventory grid (columns, rows) of the containers whose
+// size is known. A grid is never smaller than the slots in use, so an
+// unknown or wrong entry only changes how empty slots are drawn.
+var storageSize = map[string][2]int{
+	"piece_chest_wood":       {5, 2},
+	"piece_chest":            {6, 4},
+	"piece_chest_private":    {3, 2},
+	"piece_chest_barrel":     {6, 2},
+	"piece_chest_blackmetal": {8, 4},
+	"Cart":                   {6, 3},
+	"Karve":                  {2, 2},
+	"VikingShip":             {6, 3},
+	"Player_tombstone":       {8, 4},
+}
+
+// gridOf is the container's grid: the known size, grown to fit every slot.
+func gridOf(prefab string, items []rawItem) (w, h int) {
+	s := storageSize[prefab]
+	w, h = s[0], s[1]
+	for _, it := range items {
+		w, h = max(w, it.x+1), max(h, it.y+1)
+	}
+	return w, h
+}
+
+func exportItems(raw []rawItem, showNames bool) []Item {
+	out := make([]Item, 0, len(raw))
+	for _, r := range raw {
+		it := Item{Name: r.name, Type: r.typ, Stack: r.stack, X: r.x, Y: r.y}
+		if r.quality > 1 {
+			it.Quality = r.quality
+		}
+		if wears[r.typ] && !math.IsNaN(float64(r.durability)) {
+			d := math.Round(float64(r.durability)*10) / 10
+			it.Durability = &d
+		}
+		if showNames {
+			it.Crafter = r.crafter
+		}
+		out = append(out, it)
+	}
+	// Slot order: row by row, as the game draws the grid.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Y != out[j].Y {
+			return out[i].Y < out[j].Y
+		}
+		return out[i].X < out[j].X
+	})
+	return out
+}

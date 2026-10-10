@@ -68,6 +68,7 @@ type rawTomb struct {
 	x, z  float32
 	owner string
 	ticks int64
+	items []rawItem
 }
 
 type rawBed struct {
@@ -76,8 +77,17 @@ type rawBed struct {
 }
 
 type rawVehicle struct {
-	kind string
-	x, z float32
+	kind  string
+	x, z  float32
+	built bool
+}
+
+// rawStore is a player-built container with its decoded inventory.
+type rawStore struct {
+	prefab     string
+	x, z       float32
+	items      []rawItem
+	unreadable bool
 }
 
 type rawPin struct {
@@ -95,6 +105,7 @@ type chunkData struct {
 	tombs    []rawTomb
 	beds     []rawBed
 	vehicles []rawVehicle
+	stores   []rawStore
 	tables   int
 	explored []uint64 // exploredWords words, nil when the chunk holds no table
 	pins     []rawPin
@@ -122,6 +133,7 @@ type zdoFields struct {
 	timeOfDeath int64
 	data        []byte
 	tcdata      []byte
+	items       []byte
 }
 
 // parseChunk decodes a whole chunk file. A panic is turned into an error as a
@@ -205,11 +217,22 @@ func parseChunk(b []byte) (cd *chunkData, err error) {
 		case rolePortal:
 			cd.portals = append(cd.portals, rawPortal{kind: info.name, x: x, z: z, tag: f.tag, connType: connType, connHash: connHash, hasConn: flags&flagConn != 0})
 		case roleTombstone:
-			cd.tombs = append(cd.tombs, rawTomb{x: x, z: z, owner: f.ownerName, ticks: f.timeOfDeath})
+			// A grave whose inventory does not decode is still a grave.
+			items, _ := inventoryOf(f.items)
+			cd.tombs = append(cd.tombs, rawTomb{x: x, z: z, owner: f.ownerName, ticks: f.timeOfDeath, items: items})
 		case roleBed:
 			cd.beds = append(cd.beds, rawBed{x: x, z: z, owner: f.ownerName})
 		case roleVehicle:
-			cd.vehicles = append(cd.vehicles, rawVehicle{kind: info.name, x: x, z: z})
+			cd.vehicles = append(cd.vehicles, rawVehicle{kind: info.name, x: x, z: z, built: f.creator})
+			if f.creator {
+				cd.addStore(info.name, x, z, f.items)
+			}
+		case roleContainer:
+			// Only what a player built: a listed prefab without a creator is
+			// not exported, contents or not.
+			if f.creator {
+				cd.addStore(info.name, x, z, f.items)
+			}
 		case roleTable:
 			cd.tables++
 			if f.data != nil {
@@ -282,10 +305,26 @@ func readMaps(r *buf, flags uint16, keep bool, f *zdoFields) {
 					f.data = v
 				} else if keep && key == keyTCData {
 					f.tcdata = v
+				} else if keep && key == keyItems {
+					f.items = v
 				}
 			}
 		}
 	}
+}
+
+// inventoryOf decodes an "items" blob; no blob is an empty inventory. The
+// result holds no reference into the chunk file, which may be cached.
+func inventoryOf(blob []byte) ([]rawItem, error) {
+	if len(blob) == 0 {
+		return nil, nil
+	}
+	return parseInventory(blob)
+}
+
+func (cd *chunkData) addStore(prefab string, x, z float32, blob []byte) {
+	items, err := inventoryOf(blob)
+	cd.stores = append(cd.stores, rawStore{prefab: prefab, x: x, z: z, items: items, unreadable: err != nil})
 }
 
 // The cartography table's explored mask: 2048 x 2048 pixels of 12 m.
