@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-10
+
 ### Added
 
 - Admin bridge (opt-in): live admin commands through the Skald bridge, a
