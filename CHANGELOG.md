@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- World map. The agent builds it from the newest finished save (Valheim 1.0
+  chunk files): land and water per 64 m zone, the cartography tables'
+  explored area and pins, portals and their pairs, graves with the day of
+  death, beds, ships and carts, bases, terrain edits and the seed's boss,
+  trader and dungeon locations. Rebuilt at most once a minute, only after a
+  new save, and only the chunks the game rewrote are parsed again. Served as
+  `GET /map` (agent) and `GET /api/map` (web), with an ETag and gzip.
+- A full-screen map at `#map` and a map board on the dashboard: parchment
+  look, fog over the unexplored, pan, zoom, pinch and fling, layer toggles
+  with counts, legend, search, popovers with a link to the same spot on
+  valheim-map.world, and a Terrain tab that embeds the seed's terrain from
+  that site.
+- `MAP_SHOW_NAMES` (agent, default on) and `MAP_SPOILERS` (web, default off).
+- `world.clock` in `/state` and the header: the time of day, and "world
+  asleep" when nobody is on and time stands still.
+- Metrics `valheim_map_build_seconds` and `valheim_map_generation`.
+
 ## [0.4.0] - 2026-10-10
 
 ### Added

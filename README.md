@@ -20,7 +20,8 @@ to the server and puts it all on one password-protected page:
 
 - the 6-digit crossplay join code, one click to copy
 - who is online, who played when, and how often they died
-- the world: in-game day, seed, a link to the map, last save
+- the world: in-game day and time of day, seed, last save
+- a world map drawn from the save: explored land, bases, portals and where they lead, graves, beds, ships, map pins, and the bosses and dungeons someone has found
 - backups you can download, plus backup / update / restart buttons (press and hold, so nobody restarts by accident)
 - player profiles with streaks and badges
 - server settings: name, password, public listing and world modifiers, applied now or once everyone has left
@@ -38,6 +39,18 @@ optional campfire crackle if you want it.
     <td width="50%"><img src="docs/images/profile.webp" alt="A player profile: platform, playtime, deaths, streak, 30-day chart and badges" /></td>
   </tr>
 </table>
+
+## World map
+
+<img src="docs/images/map.webp" alt="The world map: an inked archipelago on parchment, fog over the unexplored, bases, paired portals with a dashed line between them, graves and places found, a layer panel with counts and a popover for an unconnected portal" width="100%" />
+
+The map is drawn from the world save itself: the land, sea and coasts the
+world has generated, the area your cartography tables have explored, and
+what people built and left behind. Each layer can be switched off, the search
+finds portal tags, names and places, and every mark links to the same spot
+on [valheim-map.world](https://valheim-map.world/), which also fills the
+Terrain tab. Places nobody has found stay hidden unless you set
+`MAP_SPOILERS=true`. Details in [docs/configuration.md](docs/configuration.md#world-map).
 
 ## Server settings
 

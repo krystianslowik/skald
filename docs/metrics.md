@@ -25,6 +25,8 @@ The agent serves the Prometheus text format on `:9464/metrics`:
 | `valheim_events_total` | counter | `type` | Events since agent start: `player_join`, `player_leave`, `death`, `world_saved`, `world_backup`, `raid`, `join_code`, `action`, `settings_changed`, `settings_apply` |
 | `valheim_settings_pending` | gauge | | 1 when server settings were saved after the server process started (a restart applies them). Only with server settings enabled |
 | `valheim_agent_last_log_timestamp_seconds` | gauge | | Last log line the agent received |
+| `valheim_map_build_seconds` | gauge | | How long the last world map build took. Only once a map was built |
+| `valheim_map_generation` | gauge | | Save generation the world map was last built from |
 
 [`deploy/monitoring`](deploy/monitoring) has:
 

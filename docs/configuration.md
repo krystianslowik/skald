@@ -19,6 +19,7 @@
 | `SERVER_PUBLIC` | (empty = public) | The game's `SERVER_PUBLIC` (`true`/`false`/`1`/`0`); seeds the server settings |
 | `SETTINGS_DIR` | `/settings` | Where server settings are written (`server.json`, `server.env`). The feature is off (API 404, UI hidden) unless this directory exists and the agent can write to it |
 | `PASSWORD_FILE` | (empty) | The game's server password secret, mounted read-only; seeds the password shown on the dashboard before the first save |
+| `MAP_SHOW_NAMES` | `true` | Put grave and bed owners' names, portal tags and pin names on the world map. Platform ids (tag and pin authors, owner ids) are never sent either way. The map is behind the panel password, so this is on by default |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 
 ## skald-web
@@ -40,6 +41,7 @@
 | `DB_PATH` | `/data/skald.db` | SQLite file for the event history |
 | `BIND` | `0.0.0.0:8080` | Listen address |
 | `WEB_ROOT` | `../web/dist` | Built SPA, relative to the working directory |
+| `MAP_SPOILERS` | `false` | `true` shows every boss altar, trader and dungeon of the seed on the world map. Off, only places someone has been to are sent to the browser |
 | `MOCK_AGENT` | (unset) | `1` runs against a built-in fake server (development) |
 
 The resource charts query cAdvisor series as kube-prometheus-stack scrapes
@@ -116,3 +118,33 @@ settings live on the `valheim-config` PVC under `skald/`.
   `TRUSTED_IP_HEADER` to the header your proxy uses so the login rate limit sees
   real client addresses, and narrow the `skald-web` NetworkPolicy ingress rule to
   the proxy's namespace.
+
+## World map
+
+The agent builds the map from the newest finished save (`_main.N.ok`) in
+`CONFIG_DIR/worlds_local/WORLD_NAME`, at most once a minute and only after a
+new save. It reads:
+
+- the chunk files (`*.chunk`, Valheim 1.0), indexed by `_main.N.chunks`. Only
+  chunks whose revision changed are parsed again; a chunk that does not parse
+  keeps its last good contents. Land and water come from where objects are:
+  a 64 m zone the world generated without objects is open water.
+- every cartography table's explored area and shared pins. Without a table
+  the map has no fog.
+- portals (paired by their connection, else by a tag exactly two share),
+  graves, beds, ships and carts, bases (zones with built pieces that touch),
+  terrain edits, and the seed's locations from the `.db2`.
+
+On the real 1.0 world used to work out the format (about 376,000 objects
+in 35 chunks) a full build takes about 0.04 s and 22 MB of allocations, and
+the map is 26 KB gzipped.
+
+Spoilers: the agent marks a location explored when it is inside the
+explored area or within 64 m of a built piece. The web tier drops everything
+else unless `MAP_SPOILERS=true`. The seed alone tells where every boss is, so
+this is off by default.
+
+The Terrain tab embeds [valheim-map.world](https://valheim-map.world/), a
+third-party site, for the seed's terrain. It loads only when that tab is
+opened; the "Open on full map" links in the map's popovers go there too,
+centred on the point (`offset=x,z`, `zoom=0.100`, `ver=1.0.7`).
