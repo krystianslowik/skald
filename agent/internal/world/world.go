@@ -1,11 +1,25 @@
 // Package world reads world metadata from the Valheim 1.0 save files under
-// CONFIG_DIR/worlds_local/<world>/. It decodes only the small fixed headers
-// (.fwl2 names + seed, .db2 netTime); the gzip ZDO blob is never touched.
-// Every failure degrades to "no metadata", never to a panic.
+// CONFIG_DIR/worlds_local/<world>/: names, seed and the starting keys (world
+// modifiers) from .fwl2, netTime and the current global keys (boss progress)
+// from .db2. ZDOs live in the chunk files and are never touched. Every
+// failure degrades to "no metadata" (or a null field), never to a panic.
+//
+// Layouts, verified against a fresh 1.0.17 world and a played one (gen 63):
+//
+//	.fwl2: int32 payloadLen, int32 version (41), string name, string seedName,
+//	       int32 seed, int64 uid, int32 worldGenVersion, bool needsDB,
+//	       int32 n + n strings (starting keys), int32 m + m x 4 strings
+//	       (known players: platform id, name, name, hex id; never exposed)
+//	.db2:  int32 version, float64 netTime, int32 gzipLen, gzip blob, trailer.
+//	       The blob starts: int32 zoneCount, zoneCount x (int16 x, int16 y),
+//	       int32 (32 in both samples), int32 k + k strings (global keys),
+//	       bool locationsGenerated, ...
 package world
 
 import (
+	"bufio"
 	"bytes"
+	"compress/gzip"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -16,6 +30,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // DayLengthSec is Valheim's default day length in seconds of netTime.
@@ -37,7 +52,49 @@ type Meta struct {
 	NetTime         float64   `json:"netTime"`
 	Day             int64     `json:"day"`
 	SavedAt         time.Time `json:"savedAt"`
+	// Modifiers are the world's non-default modifiers from its starting
+	// "preset" key (combat, deathpenalty, resources, raids, portals), e.g.
+	// {"resources": "muchmore"}. The key stores values, not a preset name.
+	// null when the starting keys could not be read.
+	Modifiers map[string]string `json:"modifiers"`
+	// WorldKeys are the other starting keys ("teleportall", "resourcerate 200").
+	WorldKeys []string `json:"worldKeys"`
+	// KnownPlayers counts the world's player list; the list itself holds
+	// platform ids and stays private.
+	KnownPlayers int `json:"knownPlayers"`
+	// GlobalKeys are the current global keys (defeated_eikthyr, killedtroll,
+	// ...); null when the .db2 blob did not match the expected layout.
+	GlobalKeys []string `json:"globalKeys"`
+	// Bosses is the boss path in order; null with GlobalKeys.
+	Bosses []Boss `json:"bosses"`
 }
+
+// Boss is one step of the boss path.
+type Boss struct {
+	Key      string `json:"key"`
+	Defeated bool   `json:"defeated"`
+}
+
+// BossKeys are the vanilla boss global keys in path order: Eikthyr, The
+// Elder, Bonemass, Moder, Yagluth, The Queen, Fader. eikthyr and gdking are
+// confirmed in a 1.0.17 save; the rest follow the game's key naming.
+var BossKeys = []string{
+	"defeated_eikthyr",
+	"defeated_gdking",
+	"defeated_bonemass",
+	"defeated_dragon",
+	"defeated_goblinking",
+	"defeated_queen",
+	"defeated_fader",
+}
+
+// Caps that keep a corrupt file from making the reader loop or allocate much.
+const (
+	maxKeys    = 1024
+	maxPlayers = 10000
+	maxZones   = 1 << 22
+	maxFWL2    = 1 << 20
+)
 
 // Reader caches Read results for CacheFor.
 type Reader struct {
@@ -89,7 +146,7 @@ func Read(dir string) (*Meta, error) {
 	}
 	base := filepath.Join(dir, "_main."+strconv.Itoa(n))
 
-	fwl, err := readHead(base+".fwl2", 4096)
+	fwl, err := readHead(base+".fwl2", maxFWL2)
 	if err != nil {
 		return nil, err
 	}
@@ -107,19 +164,29 @@ func Read(dir string) (*Meta, error) {
 	if err != nil {
 		return nil, err
 	}
-	head := make([]byte, 12)
-	if _, err := io.ReadFull(db, head); err != nil {
+	head := make([]byte, 16)
+	got, err := io.ReadFull(db, head)
+	if got < 12 {
+		if err == nil {
+			err = errShort
+		}
 		return nil, err
 	}
-	netTime, err := parseDB2Head(head)
+	netTime, err := parseDB2Head(head[:12])
 	if err != nil {
 		return nil, err
 	}
 	m.NetTime = netTime
-	// Day mapping is unverified against the in-game day counter: Valheim
-	// shows day N starting from 1 and may offset netTime; treat this as an
-	// approximation until checked against a live world.
+	// Checked against a live 1.0.17 world: the game logged "day:48" at
+	// netTime 87897, and floor(87897 / 1800) = 48.
 	m.Day = int64(math.Floor(netTime / DayLengthSec))
+	if got == 16 {
+		gzLen := int64(binary.LittleEndian.Uint32(head[12:16]))
+		if keys, err := readGlobalKeys(io.LimitReader(db, gzLen)); err == nil {
+			m.GlobalKeys = keys
+			m.Bosses = bosses(keys)
+		}
+	}
 	m.SavedAt = fi.ModTime().UTC()
 	return m, nil
 }
@@ -160,8 +227,7 @@ func readHead(path string, limit int64) ([]byte, error) {
 
 var errShort = errors.New("truncated save header")
 
-// parseFWL2 decodes: int32 payloadLen, int32 version, string worldName,
-// string seedName, int32 seed, int64 uid, int32 worldGenVersion. Strings are
+// parseFWL2 decodes the .fwl2 layout in the package comment. Strings are
 // .NET BinaryWriter strings (7-bit-encoded length, UTF-8).
 func parseFWL2(b []byte) (*Meta, error) {
 	rd := bytes.NewReader(b)
@@ -185,7 +251,136 @@ func parseFWL2(b []byte) (*Meta, error) {
 	if err := binary.Read(rd, binary.LittleEndian, &tail); err != nil {
 		return nil, errShort
 	}
-	return &Meta{Name: name, SeedName: seedName, Seed: tail.Seed, WorldGenVersion: tail.WorldGenVersion}, nil
+	m := &Meta{Name: name, SeedName: seedName, Seed: tail.Seed, WorldGenVersion: tail.WorldGenVersion}
+	// The rest is optional: a world whose starting keys do not decode still
+	// has a name, seed and day.
+	if keys, players, err := parseFWL2Keys(rd); err == nil {
+		m.Modifiers, m.WorldKeys = splitStartingKeys(keys)
+		m.KnownPlayers = players
+	}
+	return m, nil
+}
+
+// parseFWL2Keys reads bool needsDB, the starting keys and the player list
+// (counted, then skipped).
+func parseFWL2Keys(rd *bytes.Reader) ([]string, int, error) {
+	if _, err := rd.ReadByte(); err != nil {
+		return nil, 0, errShort
+	}
+	keys, err := readStrings(rd, maxKeys)
+	if err != nil {
+		return nil, 0, err
+	}
+	var players int32
+	if err := binary.Read(rd, binary.LittleEndian, &players); err != nil {
+		return nil, 0, errShort
+	}
+	if players < 0 || players > maxPlayers {
+		return nil, 0, errors.New("bad player count")
+	}
+	for i := 0; i < int(players)*4; i++ {
+		if _, err := readString(rd); err != nil {
+			return nil, 0, err
+		}
+	}
+	return keys, int(players), nil
+}
+
+// splitStartingKeys turns "preset combat_default:resources_muchmore:..."
+// into {"resources": "muchmore"} and returns every other key as is.
+func splitStartingKeys(keys []string) (map[string]string, []string) {
+	mods := map[string]string{}
+	other := []string{}
+	for _, k := range keys {
+		name, val, _ := strings.Cut(k, " ")
+		if strings.ToLower(name) != "preset" {
+			other = append(other, k)
+			continue
+		}
+		for _, part := range strings.Split(val, ":") {
+			mod, v, ok := strings.Cut(strings.ToLower(part), "_")
+			if !ok || mod == "" || v == "" || v == "default" {
+				continue
+			}
+			mods[mod] = v
+		}
+	}
+	return mods, other
+}
+
+// readGlobalKeys walks the start of the .db2 gzip blob to its global-key
+// list. Any mismatch with the layout in the package comment is an error.
+func readGlobalKeys(gz io.Reader) ([]string, error) {
+	zr, err := gzip.NewReader(gz)
+	if err != nil {
+		return nil, err
+	}
+	defer zr.Close()
+	br := bufio.NewReader(zr)
+	var zones int32
+	if err := binary.Read(br, binary.LittleEndian, &zones); err != nil {
+		return nil, errShort
+	}
+	if zones < 0 || zones > maxZones {
+		return nil, errors.New("bad zone count")
+	}
+	if _, err := io.CopyN(io.Discard, br, int64(zones)*4); err != nil {
+		return nil, errShort
+	}
+	var version int32
+	if err := binary.Read(br, binary.LittleEndian, &version); err != nil {
+		return nil, errShort
+	}
+	// The next 1024+ bytes are the keys and the start of the location list;
+	// that is enough for any sane key list.
+	rest := make([]byte, 64*1024)
+	n, _ := io.ReadFull(br, rest)
+	rd := bytes.NewReader(rest[:n])
+	keys, err := readStrings(rd, maxKeys)
+	if err != nil {
+		return nil, err
+	}
+	// locationsGenerated is a bool: anything else means we are misaligned.
+	if b, err := rd.ReadByte(); err != nil || b > 1 {
+		return nil, errors.New("global keys not followed by a bool")
+	}
+	return keys, nil
+}
+
+func bosses(keys []string) []Boss {
+	have := map[string]bool{}
+	for _, k := range keys {
+		name, _, _ := strings.Cut(k, " ")
+		have[strings.ToLower(name)] = true
+	}
+	out := make([]Boss, len(BossKeys))
+	for i, k := range BossKeys {
+		out[i] = Boss{Key: k, Defeated: have[k]}
+	}
+	return out
+}
+
+// readStrings reads an int32 count and that many strings.
+func readStrings(rd *bytes.Reader, max int32) ([]string, error) {
+	var n int32
+	if err := binary.Read(rd, binary.LittleEndian, &n); err != nil {
+		return nil, errShort
+	}
+	if n < 0 || n > max {
+		return nil, errors.New("bad string count")
+	}
+	out := make([]string, 0, n)
+	for i := int32(0); i < n; i++ {
+		s, err := readString(rd)
+		if err != nil {
+			return nil, err
+		}
+		if !utf8.ValidString(s) {
+			return nil, errors.New("bad string")
+		}
+		out = append(out, s)
+	}
+	return out, nil
 }
 
 // parseDB2Head decodes int32 version + float64 netTime.

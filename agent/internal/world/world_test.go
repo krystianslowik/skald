@@ -1,9 +1,12 @@
 package world
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -38,9 +41,98 @@ func TestReadFixture(t *testing.T) {
 	if m.NetTime != 2040 || m.Day != 1 {
 		t.Errorf("netTime = %v day = %d", m.NetTime, m.Day)
 	}
+	// A fresh world: no starting keys, nobody known, no boss down.
+	if m.Modifiers == nil || len(m.Modifiers) != 0 || len(m.WorldKeys) != 0 || m.KnownPlayers != 0 {
+		t.Errorf("starting keys = %v %v %d", m.Modifiers, m.WorldKeys, m.KnownPlayers)
+	}
+	if m.GlobalKeys == nil || len(m.GlobalKeys) != 0 || len(m.Bosses) != 7 || m.Bosses[0].Defeated {
+		t.Errorf("global keys = %v bosses = %v", m.GlobalKeys, m.Bosses)
+	}
 	fi, _ := os.Stat(filepath.Join(fixture, "_main.1.db2"))
 	if !m.SavedAt.Equal(fi.ModTime().UTC()) {
 		t.Errorf("savedAt = %v", m.SavedAt)
+	}
+}
+
+// progressFixture is written by testdata/gen-world with the layout of a
+// played 1.0.17 world: resources much more, portals casual, two bosses down.
+const progressFixture = "../../testdata/world-progress"
+
+func TestReadProgressFixture(t *testing.T) {
+	m, err := Read(progressFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Name != "Midgard" || m.SeedName != "Yggdrasil1" || m.Seed != 123456789 || m.Day != 48 {
+		t.Errorf("header = %+v", m)
+	}
+	if want := map[string]string{"resources": "muchmore", "portals": "casual"}; !reflect.DeepEqual(m.Modifiers, want) {
+		t.Errorf("modifiers = %v", m.Modifiers)
+	}
+	if want := []string{"resourcerate 200", "teleportall"}; !reflect.DeepEqual(m.WorldKeys, want) {
+		t.Errorf("world keys = %v", m.WorldKeys)
+	}
+	if m.KnownPlayers != 2 {
+		t.Errorf("known players = %d", m.KnownPlayers)
+	}
+	if want := []string{"activebosses 0", "defeated_eikthyr", "killedtroll", "defeated_gdking", "killed_surtling"}; !reflect.DeepEqual(m.GlobalKeys, want) {
+		t.Errorf("global keys = %v", m.GlobalKeys)
+	}
+	var down []string
+	for _, b := range m.Bosses {
+		if b.Defeated {
+			down = append(down, b.Key)
+		}
+	}
+	if len(m.Bosses) != len(BossKeys) || !reflect.DeepEqual(down, []string{"defeated_eikthyr", "defeated_gdking"}) {
+		t.Errorf("bosses = %v", m.Bosses)
+	}
+	raw, _ := json.Marshal(m)
+	if bytes.Contains(raw, []byte("Xbox_")) || bytes.Contains(raw, []byte("ragnar#")) || bytes.Contains(raw, []byte("AAAA0000")) {
+		t.Errorf("player list leaked into JSON: %s", raw)
+	}
+}
+
+// TestKeysDegrade: a blob or key list that does not match the layout leaves
+// the header readable and the key fields null.
+func TestKeysDegrade(t *testing.T) {
+	fwl, _ := os.ReadFile(filepath.Join(progressFixture, "_main.1.fwl2"))
+	db, _ := os.ReadFile(filepath.Join(progressFixture, "_main.1.db2"))
+	notGzip := append([]byte{}, db...)
+	notGzip[16] = 0
+	hugeKeys := append([]byte{}, fwl[:0x2c]...)
+	hugeKeys = append(hugeKeys, 0xff, 0xff, 0xff, 0x7f)
+	cases := []struct {
+		name     string
+		fwl, db  []byte
+		mods     bool
+		keysNull bool
+	}{
+		{"db2 without blob", fwl, db[:12], true, true},
+		{"db2 blob not gzip", fwl, notGzip, true, true},
+		{"fwl2 key count absurd", hugeKeys, db, false, false},
+		{"fwl2 cut after header", fwl[:0x2b], db, false, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			_ = os.WriteFile(filepath.Join(dir, "_main.1.fwl2"), c.fwl, 0o644)
+			_ = os.WriteFile(filepath.Join(dir, "_main.1.db2"), c.db, 0o644)
+			_ = os.WriteFile(filepath.Join(dir, "_main.1.ok"), nil, 0o644)
+			m, err := Read(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if m.Name != "Midgard" || m.Day != 48 {
+				t.Errorf("header = %+v", m)
+			}
+			if (m.Modifiers != nil) != c.mods {
+				t.Errorf("modifiers = %v", m.Modifiers)
+			}
+			if (m.GlobalKeys == nil) != c.keysNull || (m.Bosses == nil) != c.keysNull {
+				t.Errorf("global keys = %v bosses = %v", m.GlobalKeys, m.Bosses)
+			}
+		})
 	}
 }
 
@@ -157,4 +249,22 @@ func TestReaderCache(t *testing.T) {
 	if NewReader(cfg, "").Meta() != nil {
 		t.Error("empty world name should yield nil")
 	}
+}
+
+// TestRealWorld reads a played world when SKALD_REAL_WORLD points at its
+// directory. Real saves hold private player data and never enter the repo.
+func TestRealWorld(t *testing.T) {
+	dir := os.Getenv("SKALD_REAL_WORLD")
+	if dir == "" {
+		t.Skip("SKALD_REAL_WORLD not set")
+	}
+	m, err := Read(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Modifiers == nil || m.GlobalKeys == nil || m.Bosses == nil {
+		t.Fatalf("keys not decoded: %+v", m)
+	}
+	t.Logf("day %d, modifiers %v, world keys %v, known players %d, global keys %v, bosses %v",
+		m.Day, m.Modifiers, m.WorldKeys, m.KnownPlayers, m.GlobalKeys, m.Bosses)
 }
