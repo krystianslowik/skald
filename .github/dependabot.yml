@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: monthly}
+  - package-ecosystem: gomod
+    directory: /agent
+    schedule: {interval: monthly}
+  - package-ecosystem: npm
+    directory: /web
+    schedule: {interval: monthly}
+    groups:
+      web: {patterns: ["*"]}
+  - package-ecosystem: bun
+    directory: /server
+    schedule: {interval: monthly}
+  - package-ecosystem: pip
+    directory: /icons
+    schedule: {interval: monthly}
+  - package-ecosystem: docker
+    directories: [/agent, /server, /icons, /terrain, /bridge]
+    schedule: {interval: monthly}

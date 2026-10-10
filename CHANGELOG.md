@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-11
+
+### Changed
+
+- Shorter, plainer README; the admin bridge caveats moved to the configuration guide.
+- Releases now publish their GitHub release automatically after the images, with notes from this changelog.
+- CI cancels superseded runs, caches Go modules, Docker layers and the bridge reference assemblies, and Dependabot watches dependencies.
+
 ## [0.8.0] - 2026-10-10
 
 ### Added

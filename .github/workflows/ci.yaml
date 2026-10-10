@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same branch or PR cancels the run it replaces.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   agent:
     name: agent (Go)
@@ -20,7 +25,7 @@ jobs:
       - uses: actions/setup-go@v5.5.0
         with:
           go-version-file: agent/go.mod
-          cache: false
+          cache-dependency-path: agent/go.sum
       - name: gofmt
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - run: go vet ./...
@@ -107,6 +112,12 @@ jobs:
         with:
           dotnet-version: 9.0.x
       - run: dotnet test tests
+      # The reference DLLs only change with a game build, so keep them between
+      # runs instead of fetching them from Steam every time.
+      - uses: actions/cache@v4.2.3
+        with:
+          path: bridge/refs
+          key: bridge-refs-${{ hashFiles('bridge/build.sh') }}
       # Compiled against the game's own assemblies: build.sh fetches the six
       # it needs (about 2 MB, anonymous) and BepInEx.dll, never committed.
       - run: sh build.sh
@@ -130,6 +141,8 @@ jobs:
           context: agent
           platforms: linux/amd64
           push: false
+          cache-from: type=gha,scope=skald-agent
+          cache-to: type=gha,mode=max,scope=skald-agent
       - name: skald-web
         uses: docker/build-push-action@v6.18.0
         with:
@@ -137,21 +150,29 @@ jobs:
           file: server/Dockerfile
           platforms: linux/amd64
           push: false
+          cache-from: type=gha,scope=skald-web
+          cache-to: type=gha,mode=max,scope=skald-web
       - name: skald-icons
         uses: docker/build-push-action@v6.18.0
         with:
           context: icons
           platforms: linux/amd64
           push: false
+          cache-from: type=gha,scope=skald-icons
+          cache-to: type=gha,mode=max,scope=skald-icons
       - name: skald-terrain
         uses: docker/build-push-action@v6.18.0
         with:
           context: terrain
           platforms: linux/amd64
           push: false
+          cache-from: type=gha,scope=skald-terrain
+          cache-to: type=gha,mode=max,scope=skald-terrain
       - name: skald-bridge
         uses: docker/build-push-action@v6.18.0
         with:
           context: bridge
           platforms: linux/amd64
           push: false
+          cache-from: type=gha,scope=skald-bridge
+          cache-to: type=gha,mode=max,scope=skald-bridge
