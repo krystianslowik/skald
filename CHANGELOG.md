@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-10
+
+### Changed
+
+- The dashboard now looks like Valheim's own UI: Averia Serif Libre (the game's
+  UI font, OFL), wood boards with torn edges, inventory-style slots, blue
+  selection, HUD-style meters, the join code as a centre-screen message, a boss
+  trophy strip and a misty world backdrop. No game assets are used.
+- The player profile is a draggable sheet (bottom on phones, side on desktop)
+  with momentum, rubber-banding and velocity handoff.
+- Press feedback on pointer-down and critically damped springs throughout.
+- About 5x fewer re-renders per live message; the profile sheet is lazy-loaded.
+
+### Fixed
+
+- A 7 px sideways scroll on narrow phones.
+
 ## [0.1.0] - 2026-10-10
 
 First public release.
