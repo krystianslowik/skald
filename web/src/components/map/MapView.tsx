@@ -1,12 +1,13 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
-import { buildMarkers, decodeRLE, DEFAULT_LAYERS, layerCounts, LAYERS, type LayerId, type Marker } from "../../lib/mapgeo";
+import { buildMarkers, decodeRLE, DEFAULT_LAYERS, layerCounts, LAYERS, mainBase, type Insets, type LayerId, type Marker } from "../../lib/mapgeo";
+import { COARSE, PHONE, useMedia } from "../../lib/useMedia";
 import { useWorldMap } from "../../lib/useWorldMap";
 import { terrainUrl } from "../../lib/world";
 import { Sheet, SheetClose } from "../Sheet";
 import { MapCanvas, type MapCanvasHandle } from "./MapCanvas";
-import { MapDetails, markerTitle } from "./MapDetails";
+import { DetailsBody, DetailsHead, MapDetails, markerTitle } from "./MapDetails";
 import { MapLayers } from "./MapLayers";
 
 const LAYERS_KEY = "skald.map.layers";
@@ -28,9 +29,10 @@ function storedLayers(): Record<LayerId, boolean> {
 /**
  * The full-screen world map: the save's map on parchment (Map) or the seed's
  * terrain from valheim-map.world (Terrain). Opened from the header or the
- * dashboard's map board; Escape, the close button or Back closes it.
+ * dashboard's map board; Escape, the close button or Back closes it. On
+ * phones it is the Map tab: it stops above the tab bar and has no back button.
  */
-export default function MapView({ seedName, saveKey, now, onClose }: { seedName: string; saveKey: string; now: number; onClose: () => void }) {
+export default function MapView({ seedName, saveKey, now, onClose, asTab = false }: { seedName: string; saveKey: string; now: number; onClose: () => void; asTab?: boolean }) {
   const { t } = useI18n();
   const [load, retry] = useWorldMap(saveKey);
   const [tab, setTab] = useState<"map" | "terrain">("map");
@@ -38,7 +40,7 @@ export default function MapView({ seedName, saveKey, now, onClose }: { seedName:
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    closeRef.current?.focus();
+    closeRef.current?.focus({ preventScroll: true });
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
@@ -54,14 +56,14 @@ export default function MapView({ seedName, saveKey, now, onClose }: { seedName:
       role="dialog"
       aria-modal="true"
       aria-labelledby="worldmap-h"
-      className="fixed inset-0 z-50 flex flex-col bg-coal"
+      className={`fixed inset-x-0 top-0 flex flex-col bg-coal ${asTab ? "z-30 h-[calc(100dvh-var(--tabbar-h))]" : "z-50 h-[100dvh]"}`}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.18 }}
     >
-      <header className="plank plank-smooth relative z-20 flex shrink-0 items-center gap-3 rounded-none px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] sm:gap-5 sm:px-5">
-        <button ref={closeRef} type="button" onClick={onClose} aria-label={t("map.close")} title={t("map.close")} className="plaque press grid h-9 w-9 shrink-0 place-items-center">
+      <header className="plank plank-smooth relative z-20 flex shrink-0 items-center gap-3 rounded-none py-2 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-[max(0.5rem,env(safe-area-inset-top))] sm:gap-5 sm:pl-[max(1.25rem,env(safe-area-inset-left))] sm:pr-[max(1.25rem,env(safe-area-inset-right))]">
+        <button ref={closeRef} type="button" onClick={onClose} aria-label={t("map.close")} title={t("map.close")} className={`plaque press grid h-9 w-9 shrink-0 place-items-center coarse:h-11 coarse:w-11 ${asTab ? "hidden" : ""}`}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M10 3L5 8l5 5" />
           </svg>
@@ -81,7 +83,7 @@ export default function MapView({ seedName, saveKey, now, onClose }: { seedName:
                 setTab(id);
                 if (id === "terrain") setTerrainSeen(true);
               }}
-              className="plaque press px-3 py-1.5 text-xs font-bold sm:text-sm"
+              className="plaque press px-3 py-1.5 text-xs font-bold coarse:min-h-11 coarse:px-4 coarse:text-sm sm:text-sm"
             >
               {t(id === "map" ? "map.tab.map" : "map.tab.terrain")}
             </button>
@@ -113,7 +115,7 @@ function EscapeCloses({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // An open popover or the layers sheet takes Escape first.
-      if (e.key === "Escape" && !e.defaultPrevented && !document.getElementById("map-layers-h")) onClose();
+      if (e.key === "Escape" && !e.defaultPrevented && !document.getElementById("map-layers-h") && !document.getElementById("map-details-h")) onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -138,22 +140,40 @@ function MapMessage({ load, onRetry }: { load: string; onRetry: () => void }) {
   );
 }
 
+/** A mark, or a pile of marks too close to zoom apart, that the details are about. */
+type Selection = { m: Marker; group?: readonly Marker[] };
+
 function SaveMap({ map, stale, seed, now }: { map: import("../../types").ApiMap; stale: boolean; seed: string; now: number }) {
-  const { t, lookup, number } = useI18n();
+  const { t, tn, lookup, number } = useI18n();
+  const coarse = useMedia(COARSE);
+  // Phones get the details as a bottom sheet; wider screens a popover on the mark.
+  const phone = useMedia(PHONE);
   const canvas = useRef<MapCanvasHandle>(null);
   const [layers, setLayers] = useState(storedLayers);
-  const [selected, setSelected] = useState<Marker | null>(null);
+  const [sel, setSel] = useState<Selection | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const pop = useRef<HTMLDivElement>(null);
   const coords = useRef<HTMLSpanElement>(null);
+  const closeSheet = useRef<(() => void) | null>(null);
+  const sheetHeight = useRef(0);
+  // The details sheet is on its way out; a new pick meanwhile gets a fresh sheet.
+  const leaving = useRef(false);
+  const [sheetEpoch, setSheetEpoch] = useState(0);
 
   const markers = useMemo(() => buildMarkers(map, lookup), [map, lookup]);
   const mask = useMemo(() => (map.explored.available ? decodeRLE(map.explored.rle, map.explored.size) : null), [map]);
   const counts = useMemo(() => layerCounts(markers, map), [markers, map]);
+  const home = useMemo(() => mainBase(markers), [markers]);
+  const selected = sel?.m ?? null;
 
   // Keep the selection when a new save arrives, by id.
   useEffect(() => {
-    setSelected((s) => (s ? (markers.find((m) => m.id === s.id) ?? null) : null));
+    setSel((s) => {
+      if (!s) return null;
+      const m = markers.find((x) => x.id === s.m.id);
+      if (!m) return null;
+      return s.group ? { m, group: s.group.map((g) => markers.find((x) => x.id === g.id)).filter((x): x is Marker => !!x) } : { m };
+    });
   }, [markers]);
 
   const toggle = useCallback((l: LayerId) => {
@@ -166,27 +186,79 @@ function SaveMap({ map, stale, seed, now }: { map: import("../../types").ApiMap;
       }
       return next;
     });
-    setSelected((s) => (s && s.layer === l ? null : s));
+    setSel((s) => (s && s.m.layer === l ? null : s));
   }, []);
 
-  const pickResult = useCallback((m: Marker) => {
-    setPanelOpen(false);
-    setSelected(m);
-    canvas.current?.flyTo(m.x, m.z, 0.35);
+  const choose = useCallback((next: Selection) => {
+    if (leaving.current) {
+      leaving.current = false;
+      setSheetEpoch((e) => e + 1);
+    }
+    setSel(next);
+  }, []);
+  const onSheetDismiss = useCallback(() => {
+    leaving.current = true;
+  }, []);
+  const onSheetClosed = useCallback(() => {
+    if (!leaving.current) return;
+    leaving.current = false;
+    setSel(null);
   }, []);
 
-  // Escape closes the popover before it closes the map.
+  /** Bring a mark into view: above the sheet on phones, centred on wider screens. */
+  const show = useCallback(
+    (m: Marker) => {
+      if (phone) canvas.current?.reveal(m.x, m.z, sheetHeight.current);
+      else canvas.current?.flyTo(m.x, m.z);
+    },
+    [phone],
+  );
+
+  const pickResult = useCallback(
+    (m: Marker) => {
+      setPanelOpen(false);
+      choose({ m });
+      canvas.current?.flyTo(m.x, m.z, 0.35);
+    },
+    [choose],
+  );
+
+  const onSelect = useCallback(
+    (m: Marker | null) => {
+      if (m) return choose({ m });
+      // A tap on empty map lets the sheet slide away the way a swipe would.
+      if (phone && closeSheet.current) closeSheet.current();
+      else setSel(null);
+    },
+    [phone, choose],
+  );
+  const onGroup = useCallback((group: readonly Marker[]) => choose({ m: group[0]!, group }), [choose]);
+  const pickFromGroup = useCallback((m: Marker) => choose({ m }), [choose]);
+
+  // The other end of a portal: select it there, so its details follow.
+  const goTo = useCallback(
+    (x: number, z: number) => {
+      const other = markers.find((m) => m.data.type === "portal" && m.x === x && m.z === z);
+      if (other) {
+        choose({ m: other });
+        show(other);
+      } else canvas.current?.flyTo(x, z);
+    },
+    [markers, show, choose],
+  );
+
+  // Escape closes the popover before it closes the map (the sheet handles its own).
   useEffect(() => {
-    if (!selected) return;
+    if (!sel || phone) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !document.getElementById("map-layers-h")) {
         e.preventDefault();
-        setSelected(null);
+        setSel(null);
       }
     };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [selected]);
+  }, [sel, phone]);
 
   // The popover follows its mark frame by frame without re-rendering React.
   const onAnchor = useCallback((p: { x: number; y: number } | null) => {
@@ -218,7 +290,20 @@ function SaveMap({ map, stale, seed, now }: { map: import("../../types").ApiMap;
     [t, number],
   );
 
+  const onSheetHeight = useCallback(
+    (px: number) => {
+      sheetHeight.current = px;
+      if (sel) canvas.current?.reveal(sel.m.x, sel.m.z, px);
+    },
+    [sel],
+  );
+
+  // Clear of the controls: the side board on wide screens, the buttons along the bottom.
+  const [wide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1024);
+  const insets = useMemo<Insets>(() => ({ top: 12, right: coarse ? 12 : 64, bottom: coarse ? 72 : 20, left: wide ? 300 : 12 }), [coarse, wide]);
+
   const panel = <MapLayers map={map} markers={markers} layers={layers} counts={counts} onToggle={toggle} onPick={pickResult} now={now} />;
+  const bottom = "bottom-[max(0.75rem,env(safe-area-inset-bottom))]";
 
   return (
     <div className="relative h-full">
@@ -229,9 +314,12 @@ function SaveMap({ map, stale, seed, now }: { map: import("../../types").ApiMap;
         markers={markers}
         layers={layers}
         selected={selected}
-        onSelect={setSelected}
-        onAnchor={onAnchor}
-        onPointerWorld={onPointerWorld}
+        onSelect={onSelect}
+        onGroup={onGroup}
+        onAnchor={phone ? undefined : onAnchor}
+        onPointerWorld={coarse ? undefined : onPointerWorld}
+        remember
+        insets={insets}
         className="absolute inset-0"
       />
 
@@ -239,7 +327,12 @@ function SaveMap({ map, stale, seed, now }: { map: import("../../types").ApiMap;
       <aside aria-label={t("map.layers")} className="plank plank-smooth scroll-quiet absolute bottom-3 left-3 top-3 z-10 hidden w-[17.5rem] overflow-y-auto px-4 py-4 lg:block">
         {panel}
       </aside>
-      <button type="button" onClick={() => setPanelOpen(true)} className="plaque press absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-3 z-10 flex items-center gap-2 px-3 py-2 text-sm font-bold lg:hidden" aria-haspopup="dialog">
+      <button
+        type="button"
+        onClick={() => setPanelOpen(true)}
+        className={`plaque press absolute ${bottom} left-[max(0.75rem,env(safe-area-inset-left))] z-10 flex items-center gap-2 px-3 py-2 text-sm font-bold coarse:min-h-11 coarse:px-4 lg:hidden`}
+        aria-haspopup="dialog"
+      >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden>
           <path d="M8 2l6 3-6 3-6-3zM2 8l6 3 6-3M2 11l6 3 6-3" />
         </svg>
@@ -262,13 +355,15 @@ function SaveMap({ map, stale, seed, now }: { map: import("../../types").ApiMap;
         </Sheet>
       )}
 
-      <div className="absolute bottom-[max(1rem,env(safe-area-inset-bottom))] right-3 z-10 flex flex-col gap-1.5">
-        <ZoomButton label={t("map.zoomIn")} onClick={() => canvas.current?.zoomBy(1.8)} d="M8 3v10M3 8h10" />
-        <ZoomButton label={t("map.zoomOut")} onClick={() => canvas.current?.zoomBy(1 / 1.8)} d="M3 8h10" />
+      <div className={`absolute ${bottom} right-[max(0.75rem,env(safe-area-inset-right))] z-10 flex flex-col gap-1.5 coarse:gap-2`}>
+        {/* A finger pinches and double taps; +/- are for mice and trackpads. */}
+        {!coarse && <ZoomButton label={t("map.zoomIn")} onClick={() => canvas.current?.zoomBy(1.8)} d="M8 3v10M3 8h10" />}
+        {!coarse && <ZoomButton label={t("map.zoomOut")} onClick={() => canvas.current?.zoomBy(1 / 1.8)} d="M3 8h10" />}
+        {home && <ZoomButton label={t("map.mainBase")} onClick={() => canvas.current?.flyTo(home.x, home.z, 0.9)} d="M2.5 8L8 3.5 13.5 8M4 7v6.5h8V7M6.5 13.5v-3h3v3" />}
         <ZoomButton label={t("map.fit")} onClick={() => canvas.current?.fit()} d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" />
       </div>
 
-      <div className="pointer-events-none absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-10 -translate-x-1/2 lg:left-[calc(50%+9rem)]">
+      <div className={`pointer-events-none absolute ${bottom} left-1/2 z-10 -translate-x-1/2 lg:left-[calc(50%+9rem)]`}>
         <span ref={coords} aria-hidden className="material rounded-[2px] px-2.5 py-1 font-mono text-xs text-bone empty:hidden" />
       </div>
       {stale && (
@@ -277,32 +372,50 @@ function SaveMap({ map, stale, seed, now }: { map: import("../../types").ApiMap;
         </p>
       )}
 
-      {/* The outer box is placed by the canvas each frame; the inner one only fades and scales. */}
-      <div ref={pop} className="pointer-events-none absolute left-0 top-0 z-20" style={{ visibility: "hidden" }}>
-        <AnimatePresence>
-          {selected && (
-            <motion.div
-              key={selected.id}
-              role="dialog"
-              aria-label={markerTitle(selected, t, lookup)}
-              className="plank plank-smooth pointer-events-auto origin-bottom px-4 py-3.5 shadow-[0_10px_30px_rgba(0,0,0,0.55)]"
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-              transition={{ type: "spring", bounce: 0, visualDuration: 0.2 }}
-            >
-              <MapDetails marker={selected} seedName={seed} onGo={(x, z) => canvas.current?.flyTo(x, z)} onClose={() => setSelected(null)} />
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+      {phone ? (
+        sel && (
+          <Sheet
+            key={sheetEpoch}
+            labelledBy="map-details-h"
+            modal={false}
+            peek
+            closeRef={closeSheet}
+            onHeight={onSheetHeight}
+            onDismiss={onSheetDismiss}
+            onClose={onSheetClosed}
+            header={(close) => <DetailsHead marker={sel.m} group={sel.group} onClose={close} headingId="map-details-h" />}
+          >
+            <DetailsBody marker={sel.m} group={sel.group} seedName={seed} onGo={goTo} onPick={pickFromGroup} roomy />
+          </Sheet>
+        )
+      ) : (
+        // The outer box is placed by the canvas each frame; the inner one only fades and scales.
+        <div ref={pop} className="pointer-events-none absolute left-0 top-0 z-20" style={{ visibility: "hidden" }}>
+          <AnimatePresence>
+            {sel && (
+              <motion.div
+                key={sel.group ? `g:${sel.m.id}` : sel.m.id}
+                role="dialog"
+                aria-label={sel.group ? tn("map.group.title", sel.group.length) : markerTitle(sel.m, t, lookup)}
+                className="plank plank-smooth pointer-events-auto origin-bottom px-4 py-3.5 shadow-[0_10px_30px_rgba(0,0,0,0.55)]"
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                transition={{ type: "spring", bounce: 0, visualDuration: 0.2 }}
+              >
+                <MapDetails marker={sel.m} group={sel.group} seedName={seed} onGo={goTo} onPick={pickFromGroup} onClose={() => setSel(null)} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
     </div>
   );
 }
 
 function ZoomButton({ label, onClick, d }: { label: string; onClick: () => void; d: string }) {
   return (
-    <button type="button" onClick={onClick} aria-label={label} title={label} className="plaque press grid h-10 w-10 place-items-center">
+    <button type="button" onClick={onClick} aria-label={label} title={label} className="plaque press grid h-10 w-10 place-items-center coarse:h-11 coarse:w-11">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d={d} />
       </svg>

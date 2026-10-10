@@ -260,6 +260,30 @@ export function fitView(w: number, h: number, x0: number, z0: number, x1: number
   return clampView({ cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, scale, w, h });
 }
 
+export interface Insets {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/**
+ * A view that shows the box [x0, z0, x1, z1] inside the screen minus `insets`
+ * (CSS px kept clear for controls), with `pad` of the box's size around it.
+ */
+export function fitBounds(w: number, h: number, box: readonly [number, number, number, number], insets: Insets, pad = 0.06): View {
+  const [x0, z0, x1, z1] = box;
+  const bw = Math.max(400, x1 - x0) * (1 + pad * 2);
+  const bh = Math.max(400, z1 - z0) * (1 + pad * 2);
+  const iw = Math.max(1, w - insets.left - insets.right);
+  const ih = Math.max(1, h - insets.top - insets.bottom);
+  const scale = Math.min(iw / bw, ih / bh);
+  // The box's centre lands in the middle of the clear area, not of the screen.
+  const dx = (insets.left - insets.right) / 2;
+  const dy = (insets.top - insets.bottom) / 2;
+  return clampView({ cx: (x0 + x1) / 2 - dx / scale, cz: (z0 + z1) / 2 + dy / scale, scale, w, h });
+}
+
 // ---- markers ---------------------------------------------------------------
 
 export type LayerId = "fog" | "bases" | "portals" | "graves" | "beds" | "vehicles" | "pins" | "locations" | "terrain" | "grid";
@@ -299,7 +323,7 @@ export type IconId =
   | "loc-start";
 
 export type MarkerData =
-  | { type: "base"; pieces: number; hasBed: boolean; stations: string[]; zones: number }
+  | { type: "base"; pieces: number; hasBed: boolean; stations: string[]; zones: number; name?: string }
   | { type: "portal"; tag: string; pairedWith?: string; partnerTag?: string; partner?: { x: number; z: number } }
   | { type: "grave"; owner: string; day: number }
   | { type: "bed"; owner: string }
@@ -313,8 +337,12 @@ export interface Marker {
   icon: IconId;
   x: number;
   z: number;
-  /** Higher draws later and wins label space. */
+  /** Higher draws later. */
   priority: number;
+  /** Who leads a cluster: bases, portals and graves (2) over ships and beds (1) over pins and places (0). */
+  tier: number;
+  /** Who gets label space first when labels collide. */
+  rank: number;
   /** Text shown next to the icon at closer zoom (already translated). */
   label: string;
   /** Scale above which the label shows. */
@@ -343,10 +371,37 @@ export function locationFamily(name: string): string {
   return name.replace(/\d+$/, "").replace(/_new$/, "");
 }
 
+/** Within this many metres of a base, a named home pin names the base. */
+export const BASE_NAME_REACH = 120;
+
+/** The name of the nearest named home pin in reach of each base, and which pins gave a name. */
+function baseNames(map: ApiMap): { names: (string | undefined)[]; used: Set<number> } {
+  const used = new Set<number>();
+  const names = map.bases.map((b) => {
+    let best = -1;
+    let bestD = BASE_NAME_REACH ** 2;
+    for (const [i, p] of map.pins.entries()) {
+      if (p.kind !== "home" || !p.name) continue;
+      const d = (p.x - b.x) ** 2 + (p.z - b.z) ** 2;
+      if (d < bestD) {
+        best = i;
+        bestD = d;
+      }
+    }
+    if (best < 0) return undefined;
+    used.add(best);
+    return map.pins[best]!.name;
+  });
+  return { names, used };
+}
+
 export function buildMarkers(map: ApiMap, lookup: (key: string) => string | undefined): Marker[] {
   const out: Marker[] = [];
   const byId = new Map(map.portals.map((p) => [p.id, p]));
+  const { names, used } = baseNames(map);
+  // Label scales: portal tags, base names and graves read from the first view, even on a phone.
   for (const [i, b] of map.bases.entries()) {
+    const name = names[i];
     out.push({
       id: `base:${i}`,
       layer: "bases",
@@ -354,9 +409,11 @@ export function buildMarkers(map: ApiMap, lookup: (key: string) => string | unde
       x: b.x,
       z: b.z,
       priority: 50 + Math.min(40, Math.log2(b.pieces + 1) * 4),
-      label: "",
-      labelScale: Infinity,
-      data: { type: "base", pieces: b.pieces, hasBed: b.hasBed, stations: b.stations, zones: b.zones },
+      tier: 2,
+      rank: 280 + Math.min(19, Math.log2(b.pieces + 1)),
+      label: name ?? "",
+      labelScale: name ? 0.02 : Infinity,
+      data: { type: "base", pieces: b.pieces, hasBed: b.hasBed, stations: b.stations, zones: b.zones, name },
     });
   }
   for (const p of map.portals) {
@@ -368,16 +425,18 @@ export function buildMarkers(map: ApiMap, lookup: (key: string) => string | unde
       x: p.x,
       z: p.z,
       priority: 70,
+      tier: 2,
+      rank: 300,
       label: p.tag,
-      labelScale: 0.07,
+      labelScale: 0.02,
       data: { type: "portal", tag: p.tag, pairedWith: p.pairedWith, partnerTag: partner?.tag, partner: partner ? { x: partner.x, z: partner.z } : undefined },
     });
   }
   for (const [i, g] of map.tombstones.entries()) {
-    out.push({ id: `grave:${i}`, layer: "graves", icon: "grave", x: g.x, z: g.z, priority: 60, label: g.owner, labelScale: 0.3, data: { type: "grave", owner: g.owner, day: g.day } });
+    out.push({ id: `grave:${i}`, layer: "graves", icon: "grave", x: g.x, z: g.z, priority: 60, tier: 2, rank: 260, label: g.owner, labelScale: 0.04, data: { type: "grave", owner: g.owner, day: g.day } });
   }
   for (const [i, b] of map.beds.entries()) {
-    out.push({ id: `bed:${i}`, layer: "beds", icon: "bed", x: b.x, z: b.z, priority: 30, label: b.owner, labelScale: 1.2, data: { type: "bed", owner: b.owner } });
+    out.push({ id: `bed:${i}`, layer: "beds", icon: "bed", x: b.x, z: b.z, priority: 30, tier: 1, rank: 50, label: b.owner, labelScale: 1.2, data: { type: "bed", owner: b.owner } });
   }
   for (const [i, v] of map.vehicles.entries()) {
     out.push({
@@ -387,6 +446,8 @@ export function buildMarkers(map: ApiMap, lookup: (key: string) => string | unde
       x: v.x,
       z: v.z,
       priority: 40,
+      tier: 1,
+      rank: 100,
       label: lookup(`map.vehicle.${v.kind}`) ?? v.kind,
       labelScale: 0.6,
       data: { type: "vehicle", kind: v.kind },
@@ -400,7 +461,10 @@ export function buildMarkers(map: ApiMap, lookup: (key: string) => string | unde
       x: p.x,
       z: p.z,
       priority: 55,
-      label: p.name,
+      tier: 0,
+      rank: 150,
+      // A home pin that names a base lends it the label; the pin keeps its name in the details.
+      label: used.has(i) ? "" : p.name,
       labelScale: 0.1,
       data: { type: "pin", kind: p.kind, name: p.name },
     });
@@ -415,6 +479,8 @@ export function buildMarkers(map: ApiMap, lookup: (key: string) => string | unde
       x: l.x,
       z: l.z,
       priority: important ? 65 : 20,
+      tier: 0,
+      rank: important ? 200 : 20,
       label: locationName(l.name, l.kind, lookup),
       labelScale: important ? 0.08 : 0.5,
       data: { type: "location", kind: l.kind, name: l.name, placed: l.placed, explored: l.explored },
@@ -422,6 +488,13 @@ export function buildMarkers(map: ApiMap, lookup: (key: string) => string | unde
   }
   // Draw order: low priority first.
   return out.sort((a, b) => a.priority - b.priority);
+}
+
+/** The biggest base: the one people call home. */
+export function mainBase(markers: readonly Marker[]): Marker | null {
+  let best: Marker | null = null;
+  for (const m of markers) if (m.data.type === "base" && (!best || m.data.pieces > (best.data as { pieces: number }).pieces)) best = m;
+  return best;
 }
 
 export function layerCounts(markers: readonly Marker[], map: ApiMap): Record<LayerId, number> {
@@ -450,10 +523,17 @@ export interface ScreenMarker {
   m: Marker;
   sx: number;
   sy: number;
+  /** Set when the mark stands for a cluster: every member, the mark itself included. */
+  members?: readonly Marker[];
 }
 
 /** The marker closest to (sx, sy) within `radius` CSS px, preferring higher priority on ties. */
 export function pick(items: readonly ScreenMarker[], sx: number, sy: number, radius = 16): Marker | null {
+  return pickItem(items, sx, sy, radius)?.m ?? null;
+}
+
+/** Like `pick`, but returns the drawn item, so a cluster comes back with its members. */
+export function pickItem(items: readonly ScreenMarker[], sx: number, sy: number, radius = 16): ScreenMarker | null {
   let best: ScreenMarker | null = null;
   let bestD = radius * radius;
   for (const it of items) {
@@ -463,7 +543,77 @@ export function pick(items: readonly ScreenMarker[], sx: number, sy: number, rad
       bestD = d;
     }
   }
-  return best?.m ?? null;
+  return best;
+}
+
+// ---- clusters ---------------------------------------------------------------
+
+export interface Cluster {
+  /** The mark drawn for the cluster: the highest tier, then the highest priority. */
+  lead: Marker;
+  /** Every mark it stands for, the lead first. */
+  members: Marker[];
+}
+
+/** Marks of another layer join a cluster only when this much closer: they would sit on its icon. */
+const CROSS_LAYER = 0.6;
+
+/**
+ * Greedy clustering in world space: marks in order of tier and priority each
+ * join the nearest cluster within `radius` metres (of the same layer, or a
+ * little closer for another layer), or start their own. Computed per zoom
+ * level rather than per frame, so a pan never reshuffles it.
+ */
+export function clusterMarkers(markers: readonly Marker[], radius: number): Cluster[] {
+  const order = [...markers].sort((a, b) => b.tier - a.tier || b.priority - a.priority);
+  const clusters: Cluster[] = [];
+  if (radius <= 0) return order.map((m) => ({ lead: m, members: [m] }));
+  const cell = radius;
+  const grid = new Map<string, Cluster[]>();
+  const key = (cx: number, cz: number) => `${cx},${cz}`;
+  for (const m of order) {
+    const cx = Math.floor(m.x / cell);
+    const cz = Math.floor(m.z / cell);
+    let best: Cluster | null = null;
+    let bestD = Infinity;
+    for (let i = cx - 1; i <= cx + 1; i++) {
+      for (let j = cz - 1; j <= cz + 1; j++) {
+        for (const c of grid.get(key(i, j)) ?? []) {
+          const reach = c.lead.layer === m.layer ? radius : radius * CROSS_LAYER;
+          const d = Math.hypot(c.lead.x - m.x, c.lead.z - m.z);
+          if (d <= reach && d < bestD) {
+            best = c;
+            bestD = d;
+          }
+        }
+      }
+    }
+    if (best) best.members.push(m);
+    else {
+      const c = { lead: m, members: [m] };
+      clusters.push(c);
+      const k = key(cx, cz);
+      const list = grid.get(k);
+      if (list) list.push(c);
+      else grid.set(k, [c]);
+    }
+  }
+  return clusters;
+}
+
+/** World bounds of some marks. */
+export function markerBounds(ms: readonly Marker[]): [number, number, number, number] {
+  let x0 = Infinity;
+  let z0 = Infinity;
+  let x1 = -Infinity;
+  let z1 = -Infinity;
+  for (const m of ms) {
+    x0 = Math.min(x0, m.x);
+    z0 = Math.min(z0, m.z);
+    x1 = Math.max(x1, m.x);
+    z1 = Math.max(z1, m.z);
+  }
+  return [x0, z0, x1, z1];
 }
 
 export interface Box {
@@ -483,16 +633,15 @@ const overlaps = (a: Box, b: Box) => a.x < b.x + b.w && b.x < a.x + a.w && a.y <
 
 /**
  * Greedy label placement: highest priority first, each tries right, left,
- * above and below its icon and takes the first spot that collides with no
+ * above and below its icon, then three corners, and takes the first spot that collides with no
  * placed label and no icon. `measure` returns a text width in CSS px.
  */
 export function placeLabels(
-  items: readonly { sx: number; sy: number; text: string; priority: number }[],
+  items: readonly { sx: number; sy: number; text: string; priority: number; r?: number }[],
   icons: readonly Box[],
   measure: (text: string) => number,
-  opts: { iconRadius?: number; lineHeight?: number; max?: number } = {},
+  opts: { iconRadius?: number; lineHeight?: number; max?: number; bounds?: { w: number; h: number } } = {},
 ): PlacedLabel[] {
-  const r = opts.iconRadius ?? 11;
   const lh = opts.lineHeight ?? 15;
   const placed: PlacedLabel[] = [];
   // A coarse grid keeps collision checks near-constant per label.
@@ -520,13 +669,21 @@ export function placeLabels(
     if (opts.max !== undefined && placed.length >= opts.max) break;
     if (!it.text) continue;
     const w = measure(it.text) + 6;
+    // Each label clears its own icon: bigger bases and counted clusters reach further.
+    const r = it.r ?? opts.iconRadius ?? 11;
     const tries: PlacedLabel[] = [
       { x: it.sx + r + 2, y: it.sy - lh / 2, w, h: lh, text: it.text, align: "left" },
       { x: it.sx - r - 2 - w, y: it.sy - lh / 2, w, h: lh, text: it.text, align: "right" },
       { x: it.sx - w / 2, y: it.sy - r - lh - 1, w, h: lh, text: it.text, align: "center" },
       { x: it.sx - w / 2, y: it.sy + r + 1, w, h: lh, text: it.text, align: "center" },
+      // Then the corners, for crowded spots.
+      { x: it.sx + r - 2, y: it.sy + r * 0.4, w, h: lh, text: it.text, align: "left" },
+      { x: it.sx - r + 2 - w, y: it.sy + r * 0.4, w, h: lh, text: it.text, align: "right" },
+      { x: it.sx - r + 2 - w, y: it.sy - r * 0.4 - lh, w, h: lh, text: it.text, align: "right" },
     ];
-    const spot = tries.find(free);
+    const b = opts.bounds;
+    // On screen, or it might as well not be placed (a label cut by the edge reads as noise).
+    const spot = tries.find((t) => (!b || (t.x >= 2 && t.y >= 2 && t.x + t.w <= b.w - 2 && t.y + t.h <= b.h - 2)) && free(t));
     if (spot) {
       placed.push(spot);
       add(spot);
@@ -555,24 +712,52 @@ export function searchMarkers(markers: readonly Marker[], query: string, kindNam
   return scored.sort((a, b) => b[0] - a[0]).slice(0, limit).map(([, m]) => m);
 }
 
-/** Bounds of everything people made or found, for the first view. */
+/**
+ * Bounds of what people made and where they fell (bases, portals, graves), for
+ * the first view when there is no fog to go by. Pins only when there is
+ * nothing else: they are often far-flung notes.
+ */
 export function interestBounds(map: ApiMap): [number, number, number, number] | null {
-  const pts: [number, number][] = [
-    ...map.bases.map((b) => [b.x, b.z] as [number, number]),
-    ...map.portals.map((p) => [p.x, p.z] as [number, number]),
-    ...map.tombstones.map((p) => [p.x, p.z] as [number, number]),
-    ...map.pins.map((p) => [p.x, p.z] as [number, number]),
-  ];
+  let pts: { x: number; z: number }[] = [...map.bases, ...map.portals, ...map.tombstones];
+  if (pts.length === 0) pts = map.pins;
   if (pts.length === 0) return null;
   let x0 = Infinity;
   let z0 = Infinity;
   let x1 = -Infinity;
   let z1 = -Infinity;
-  for (const [x, z] of pts) {
+  for (const { x, z } of pts) {
     x0 = Math.min(x0, x);
     z0 = Math.min(z0, z);
     x1 = Math.max(x1, x);
     z1 = Math.max(z1, z);
   }
   return [x0, z0, x1, z1];
+}
+
+/** World bounds of the explored area (the mask is row-major from the south-west), or null when nothing is. */
+export function exploredBounds(mask: Uint8Array | null, size: number, mpp: number): [number, number, number, number] | null {
+  if (!mask) return null;
+  let c0 = Infinity;
+  let r0 = Infinity;
+  let c1 = -Infinity;
+  let r1 = -Infinity;
+  for (let r = 0; r < size; r++) {
+    const row = r * size;
+    let first = -1;
+    let last = -1;
+    for (let c = 0; c < size; c++) {
+      if (mask[row + c]) {
+        if (first < 0) first = c;
+        last = c;
+      }
+    }
+    if (first < 0) continue;
+    r0 = Math.min(r0, r);
+    r1 = r;
+    c0 = Math.min(c0, first);
+    c1 = Math.max(c1, last);
+  }
+  if (r0 === Infinity) return null;
+  const w = (i: number) => (i - size / 2) * mpp;
+  return [w(c0), w(r0), w(c1), w(r1)];
 }

@@ -8,7 +8,7 @@ export function markerTitle(m: Marker, t: ReturnType<typeof useI18n>["t"], looku
   const d = m.data;
   switch (d.type) {
     case "base":
-      return t("map.base.title");
+      return d.name || t("map.base.title");
     case "portal":
       return d.tag ? t("map.portal.tagged", { tag: d.tag }) : t("map.portal.title");
     case "grave":
@@ -37,27 +37,12 @@ export function markerKind(m: Marker, t: ReturnType<typeof useI18n>["t"], lookup
   }
 }
 
-/**
- * The details of one mark: what it is, the facts the save holds about it,
- * and a link to the same spot on valheim-map.world.
- */
-export function MapDetails({
-  marker,
-  seedName,
-  onGo,
-  onClose,
-}: {
-  marker: Marker;
-  seedName: string;
-  /** Moves the map to a world point (the other end of a portal). */
-  onGo?: (x: number, z: number) => void;
-  onClose: () => void;
-}) {
-  const { t, tn, lookup } = useI18n();
+function marksLines(marker: Marker, t: ReturnType<typeof useI18n>["t"], tn: ReturnType<typeof useI18n>["tn"], lookup: ReturnType<typeof useI18n>["lookup"]): string[] {
   const d = marker.data;
   const lines: string[] = [];
   switch (d.type) {
     case "base":
+      if (d.name) lines.push(t("map.base.title"));
       lines.push(tn("map.base.pieces", d.pieces));
       lines.push(d.hasBed ? t("map.base.bed") : t("map.base.noBed"));
       if (d.stations.length) lines.push(d.stations.map((s) => lookup(`map.station.${s}`) ?? s).join(", "));
@@ -83,21 +68,73 @@ export function MapDetails({
       lines.push(d.explored ? t("map.loc.found") : d.placed ? t("map.loc.unfound") : t("map.loc.unplaced"));
       break;
   }
-  const partner = d.type === "portal" ? d.partner : undefined;
+  return lines;
+}
+
+/** Icon, title, where, and the close button: the popover's top row and the sheet's header. */
+export function DetailsHead({ marker, group, onClose, headingId }: { marker: Marker; group?: readonly Marker[]; onClose: () => void; headingId?: string }) {
+  const { t, tn, lookup } = useI18n();
   return (
-    <div className="w-[16.5rem] max-w-[calc(100vw-2rem)] text-sm">
-      <div className="flex items-start gap-2.5">
-        <MapIcon icon={marker.icon} size={30} />
-        <div className="min-w-0 flex-1">
-          <h3 className="font-bold leading-tight text-flame">{markerTitle(marker, t, lookup)}</h3>
-          <p className="mt-0.5 text-xs text-ash">{t("map.at", { x: marker.x, z: marker.z })}</p>
-        </div>
-        <button type="button" onClick={onClose} aria-label={t("map.closeDetails")} className="plaque press -mr-1 -mt-1 grid h-7 w-7 shrink-0 place-items-center">
-          <svg width="11" height="11" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-            <path d="M3 3l10 10M13 3L3 13" />
-          </svg>
-        </button>
+    <div className="flex items-start gap-2.5">
+      <MapIcon icon={marker.icon} size={30} />
+      <div className="min-w-0 flex-1">
+        <h3 id={headingId} className="font-bold leading-tight text-flame">
+          {group ? tn("map.group.title", group.length) : markerTitle(marker, t, lookup)}
+        </h3>
+        <p className="mt-0.5 text-xs text-ash">{t("map.at", { x: marker.x, z: marker.z })}</p>
       </div>
+      <button data-autofocus type="button" onClick={onClose} aria-label={t("map.closeDetails")} className="plaque press tap -mr-1 -mt-1 grid h-7 w-7 shrink-0 place-items-center coarse:h-9 coarse:w-9">
+        <svg width="11" height="11" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+          <path d="M3 3l10 10M13 3L3 13" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The facts the save holds about a mark, "Go to the other end" for a portal
+ * and a link to the same spot on valheim-map.world; for a pile of marks too
+ * close to zoom apart, the list of them to pick from.
+ */
+export function DetailsBody({
+  marker,
+  group,
+  seedName,
+  onGo,
+  onPick,
+  roomy = false,
+}: {
+  marker: Marker;
+  group?: readonly Marker[];
+  seedName: string;
+  onGo?: (x: number, z: number) => void;
+  onPick?: (m: Marker) => void;
+  /** Phone sheet: full-width, finger-sized actions. */
+  roomy?: boolean;
+}) {
+  const { t, tn, lookup } = useI18n();
+  if (group) {
+    return (
+      <ul className="mt-1 space-y-0.5">
+        {group.map((m) => (
+          <li key={m.id}>
+            <button type="button" onClick={() => onPick?.(m)} className="press-soft flex min-h-11 w-full items-center gap-2.5 rounded-[2px] px-1.5 text-left hover:bg-black/25">
+              <MapIcon icon={m.icon} size={22} />
+              <span className="min-w-0 flex-1 truncate text-bone">{markerTitle(m, t, lookup)}</span>
+              <span className="shrink-0 text-xs text-ash">{markerKind(m, t, lookup) === markerTitle(m, t, lookup) ? "" : markerKind(m, t, lookup)}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  const lines = marksLines(marker, t, tn, lookup);
+  const d = marker.data;
+  const partner = d.type === "portal" ? d.partner : undefined;
+  const action = roomy ? "min-h-11 px-4 py-2.5 text-sm" : "px-2.5 py-1 text-xs";
+  return (
+    <>
       {lines.length > 0 && (
         <ul className="mt-2 space-y-0.5 text-bone">
           {lines.map((l) => (
@@ -105,9 +142,9 @@ export function MapDetails({
           ))}
         </ul>
       )}
-      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+      <div className={`mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 ${roomy ? "gap-x-3" : ""}`}>
         {partner && onGo && (
-          <button type="button" onClick={() => onGo(partner.x, partner.z)} className="plaque press px-2.5 py-1 text-xs font-bold">
+          <button type="button" onClick={() => onGo(partner.x, partner.z)} className={`plaque press font-bold ${action}`}>
             {t("map.portal.goOther")}
           </button>
         )}
@@ -117,7 +154,7 @@ export function MapDetails({
             target="_blank"
             rel="noopener noreferrer"
             title={t("map.openFullHint")}
-            className="inline-flex items-center gap-1 text-xs font-bold text-flame underline decoration-flame/40 underline-offset-4 hover:text-gold"
+            className={`inline-flex items-center gap-1 font-bold text-flame underline decoration-flame/40 underline-offset-4 hover:text-gold ${roomy ? "min-h-11 text-sm" : "text-xs"}`}
           >
             {t("map.openFull")}
             <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
@@ -126,6 +163,31 @@ export function MapDetails({
           </a>
         )}
       </div>
+    </>
+  );
+}
+
+/** The popover over a mark (wider screens): head and body in one small board. */
+export function MapDetails({
+  marker,
+  group,
+  seedName,
+  onGo,
+  onPick,
+  onClose,
+}: {
+  marker: Marker;
+  group?: readonly Marker[];
+  seedName: string;
+  /** Moves the map to a world point (the other end of a portal). */
+  onGo?: (x: number, z: number) => void;
+  onPick?: (m: Marker) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="w-[16.5rem] max-w-[calc(100vw-2rem)] text-sm">
+      <DetailsHead marker={marker} group={group} onClose={onClose} />
+      <DetailsBody marker={marker} group={group} seedName={seedName} onGo={onGo} onPick={onPick} />
     </div>
   );
 }

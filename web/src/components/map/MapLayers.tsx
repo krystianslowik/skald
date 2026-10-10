@@ -105,7 +105,7 @@ export function MapLayers({
             {results.length === 0 && <li className="text-xs text-ash">{t("map.searchEmpty")}</li>}
             {results.map((m) => (
               <li key={m.id}>
-                <button type="button" onClick={() => onPick(m)} className="press-soft flex w-full items-center gap-2 rounded-[2px] px-1.5 py-1 text-left hover:bg-black/25">
+                <button type="button" onClick={() => onPick(m)} className="press-soft flex w-full items-center gap-2 rounded-[2px] px-1.5 py-1 text-left hover:bg-black/25 coarse:min-h-11">
                   <MapIcon icon={m.icon} size={20} />
                   <span className="min-w-0 flex-1 truncate text-bone">{markerTitle(m, t, lookup)}</span>
                   <span className="shrink-0 text-xs text-ash">{markerKind(m, t, lookup) === markerTitle(m, t, lookup) ? "" : markerKind(m, t, lookup)}</span>
@@ -131,13 +131,16 @@ export function MapLayers({
                   disabled={disabled}
                   onClick={() => onToggle(l)}
                   aria-label={t("map.layerToggle", { layer: label, state: on ? t("map.on") : t("map.off.state") })}
-                  className={`press-soft flex w-full items-center gap-2.5 rounded-[2px] px-1.5 py-1.5 text-left transition-opacity hover:bg-black/25 disabled:cursor-not-allowed ${on && !disabled ? "" : "opacity-45"}`}
+                  className={`press-soft flex w-full items-center gap-2.5 rounded-[2px] px-1.5 py-1.5 text-left transition-opacity hover:bg-black/25 disabled:cursor-not-allowed coarse:min-h-12 coarse:gap-3 coarse:text-base ${on && !disabled ? "" : "opacity-45"}`}
                 >
                   <Swatch layer={l} />
                   <span className="flex-1 text-bone">{label}</span>
                   {l !== "grid" && l !== "fog" && <span className="text-xs tabular-nums text-ash">{number(counts[l])}</span>}
-                  <span aria-hidden className={`h-3.5 w-6 rounded-full p-[2px] transition-colors ${on && !disabled ? "bg-select" : "bg-black/50"}`}>
-                    <span className={`block h-2.5 w-2.5 rounded-full bg-bone transition-transform ${on && !disabled ? "translate-x-2.5" : ""}`} />
+                  {/* A wider switch for a thumb. */}
+                  <span aria-hidden className={`h-3.5 w-6 rounded-full p-[2px] transition-colors coarse:h-7 coarse:w-12 coarse:p-[3px] ${on && !disabled ? "bg-select" : "bg-black/50"}`}>
+                    <span
+                      className={`block h-2.5 w-2.5 rounded-full bg-bone shadow-[0_1px_2px_rgba(0,0,0,0.5)] transition-transform duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none coarse:h-[1.375rem] coarse:w-[1.375rem] ${on && !disabled ? "translate-x-2.5 coarse:translate-x-5" : ""}`}
+                    />
                   </span>
                 </button>
               </li>

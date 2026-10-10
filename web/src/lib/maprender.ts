@@ -7,15 +7,18 @@
 
 import type { ApiMap } from "../types";
 import {
+  clusterMarkers,
   isoPolygons,
   isoSegments,
   landFields,
+  LAYERS,
   LAND_LEVEL,
   placeLabels,
   portalLinks,
   WORLD_RADIUS,
   worldToScreen,
   type Box,
+  type Cluster,
   type IconId,
   type LayerId,
   type Marker,
@@ -267,7 +270,16 @@ export interface FrameState {
   markers: readonly Marker[];
   selected: string | null;
   hovered: string | null;
+  /** Marks closer than this on screen (CSS px) cluster; 0 draws every mark. */
+  cluster?: number;
+  /** Label budget and size: phones get fewer, larger labels. */
+  labels?: { max: number; px: number };
+  /** No split animation. */
+  reduced?: boolean;
 }
+
+/** How long a mark takes to leave its cluster when the map zooms in. */
+const SPLIT_MS = 280;
 
 export class MapRenderer {
   private ctx: CanvasRenderingContext2D | null;
@@ -281,6 +293,10 @@ export class MapRenderer {
   private base: { canvas: HTMLCanvasElement | OffscreenCanvas; key: string; cx: number; cz: number; scale: number; w: number; h: number } | null = null;
   /** Markers drawn in the last frame, in screen space, for picking. */
   visible: ScreenMarker[] = [];
+  /** Clusters for one zoom level, layer set and marker list; a pan reuses them. */
+  private clusters: { key: string; markers: readonly Marker[]; list: Cluster[]; leadOf: Map<string, Marker> } | null = null;
+  /** Marks on their way out of a cluster: where they started and when. */
+  private splits = new Map<string, { x: number; z: number; t0: number }>();
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext("2d");
@@ -347,12 +363,13 @@ export class MapRenderer {
     return c;
   }
 
-  private measure(g: CanvasRenderingContext2D, text: string): number {
-    let w = this.measureCache.get(text);
+  /** Text width under the current font, cached by `key` (which must include the font size). */
+  private measure(g: CanvasRenderingContext2D, key: string, text: string): number {
+    let w = this.measureCache.get(key);
     if (w === undefined) {
       w = g.measureText(text).width;
       if (this.measureCache.size > 4000) this.measureCache.clear();
-      this.measureCache.set(text, w);
+      this.measureCache.set(key, w);
     }
     return w;
   }
@@ -364,9 +381,9 @@ export class MapRenderer {
    * settle, re-renders it at the exact view. Marks and labels are always
    * drawn fresh, so they stay crisp.
    */
-  draw(f: FrameState, quality: "fast" | "full" = "full"): void {
+  draw(f: FrameState, quality: "fast" | "full" = "full"): boolean {
     const g = this.ctx;
-    if (!g) return;
+    if (!g) return false;
     const v = f.view;
     const key = `${f.layers.fog ? 1 : 0}${f.layers.terrain ? 1 : 0}:${this.version}:${v.w}x${v.h}:${this.dpr}`;
     let b = this.base;
@@ -394,7 +411,7 @@ export class MapRenderer {
     this.screen(g);
     if (f.layers.grid) this.drawGrid(g, v);
     if (this.prep && f.layers.portals) this.drawLinks(g, v, this.prep);
-    this.drawMarkers(g, f);
+    return this.drawMarkers(g, f);
   }
 
   private renderBase(f: FrameState, key: string): MapRenderer["base"] {
@@ -562,26 +579,81 @@ export class MapRenderer {
     g.restore();
   }
 
-  private drawMarkers(g: CanvasRenderingContext2D, f: FrameState) {
+  /**
+   * Clusters for this frame. Recomputed only when the zoom crosses a
+   * half-octave, the layers or the marks change; marks that a new level frees
+   * from a cluster start a short split from where their old cluster stood.
+   */
+  private clustersFor(f: FrameState, crowd: boolean): Cluster[] {
+    const v = f.view;
+    const radiusPx = f.cluster ?? 0;
+    const level = Math.round(Math.log2(v.scale) * 2);
+    const layerKey = LAYERS.map((l) => (f.layers[l] ? 1 : 0)).join("");
+    const key = `${level}:${layerKey}:${radiusPx}:${crowd ? 1 : 0}`;
+    const c = this.clusters;
+    if (c && c.key === key && c.markers === f.markers) return c.list;
+    const shown = f.markers.filter((m) => {
+      if (!f.layers[m.layer]) return false;
+      // Dungeons are many: zoomed out, only the ones someone found show.
+      return !(crowd && m.data.type === "location" && m.data.kind === "dungeon" && !m.data.explored);
+    });
+    const list = clusterMarkers(shown, radiusPx > 0 ? radiusPx / 2 ** (level / 2) : 0);
+    const leadOf = new Map<string, Marker>();
+    for (const cl of list) for (const m of cl.members) leadOf.set(m.id, cl.lead);
+    if (c && c.markers === f.markers && !f.reduced) {
+      const now = performance.now();
+      for (const cl of list) {
+        const before = c.leadOf.get(cl.lead.id);
+        if (before && before.id !== cl.lead.id) this.splits.set(cl.lead.id, { x: before.x, z: before.z, t0: now });
+      }
+    } else this.splits.clear();
+    this.clusters = { key, markers: f.markers, list, leadOf };
+    return list;
+  }
+
+  private drawMarkers(g: CanvasRenderingContext2D, f: FrameState): boolean {
     const v = f.view;
     const pad = 30;
     const visible: ScreenMarker[] = [];
     const icons: Box[] = [];
-    const labels: { sx: number; sy: number; text: string; priority: number }[] = [];
-    // Dungeons are many: below this scale only every place someone found shows.
+    const labels: { sx: number; sy: number; text: string; priority: number; r: number }[] = [];
     const crowd = v.scale < 0.06;
-    for (const m of f.markers) {
-      if (!f.layers[m.layer]) continue;
-      const [sx, sy] = worldToScreen(v, m.x, m.z);
+    const now = performance.now();
+    let animating = false;
+    const list = this.clustersFor(f, crowd);
+    const selectedMember = f.selected ? list.find((c) => c.lead.id !== f.selected && c.members.some((m) => m.id === f.selected)) : undefined;
+    // Draw order: low priority first, so the important marks sit on top.
+    const items: { m: Marker; members: readonly Marker[] }[] = list.map((c) => ({ m: c.lead, members: c.members }));
+    if (selectedMember) items.push({ m: selectedMember.members.find((m) => m.id === f.selected)!, members: [] });
+    items.sort((a, b) => a.m.priority - b.m.priority);
+    for (const { m, members } of items) {
+      let wx = m.x;
+      let wz = m.z;
+      let alpha = 1;
+      const split = this.splits.get(m.id);
+      if (split) {
+        const t = Math.min(1, (now - split.t0) / SPLIT_MS);
+        if (t >= 1) this.splits.delete(m.id);
+        else {
+          // Ease out: quick to leave the cluster, gentle to land.
+          const e = 1 - (1 - t) ** 3;
+          wx = split.x + (m.x - split.x) * e;
+          wz = split.z + (m.z - split.z) * e;
+          alpha = 0.35 + 0.65 * e;
+          animating = true;
+        }
+      }
+      const [sx, sy] = worldToScreen(v, wx, wz);
       if (sx < -pad || sy < -pad || sx > v.w + pad || sy > v.h + pad) continue;
       const loc = m.data.type === "location" ? m.data : null;
-      if (crowd && loc && loc.kind === "dungeon" && !loc.explored) continue;
       const px = m.data.type === "base" ? Math.round(18 + Math.min(12, Math.log2(m.data.pieces + 1))) : loc?.kind === "dungeon" ? 18 : ICON_PX;
       const dim = loc !== null && !loc.explored;
       const sp = this.sprite(m.icon, px, dim);
       if (!sp) continue;
       const size = px + 8;
+      g.globalAlpha = alpha;
       g.drawImage(sp as CanvasImageSource, sx - size / 2, sy - size / 2, size, size);
+      g.globalAlpha = 1;
       if (m.id === f.selected || m.id === f.hovered) {
         g.strokeStyle = m.id === f.selected ? "#c2812f" : "rgba(43, 29, 18, 0.55)";
         g.lineWidth = m.id === f.selected ? 2.5 : 1.5;
@@ -589,16 +661,24 @@ export class MapRenderer {
         g.arc(sx, sy, px / 2 + 5, 0, Math.PI * 2);
         g.stroke();
       }
-      visible.push({ m, sx, sy });
+      const count = members.length;
+      if (count > 1) {
+        const badge = this.drawBadge(g, sx + px / 2 - 1, sy - px / 2 + 1, count);
+        icons.push(badge);
+      }
+      visible.push(count > 1 ? { m, sx, sy, members } : { m, sx, sy });
       icons.push({ x: sx - px / 2, y: sy - px / 2, w: px, h: px });
-      if (m.label && (v.scale >= m.labelScale || m.id === f.selected)) {
-        labels.push({ sx, sy, text: m.label, priority: m.id === f.selected ? 1000 : m.priority });
+      // A cluster whose lead has no name borrows the best one inside it (a portal's tag, a grave).
+      const named = m.label ? m : count > 1 ? members.filter((x) => x.label && x.tier >= 2).sort((a, b) => b.rank - a.rank)[0] : undefined;
+      if (named && (v.scale >= named.labelScale || m.id === f.selected)) {
+        labels.push({ sx, sy, text: named.label, priority: m.id === f.selected ? 1000 : named.rank, r: px / 2 + (count > 1 ? 9 : 1) });
       }
     }
     this.visible = visible;
-    if (labels.length === 0) return;
-    g.font = `700 12px ${FONT}`;
-    const placed = placeLabels(labels, icons, (t) => this.measure(g, t), { max: 160 });
+    if (labels.length === 0) return animating;
+    const lp = f.labels ?? { max: 160, px: 12 };
+    g.font = `700 ${lp.px}px ${FONT}`;
+    const placed = placeLabels(labels, icons, (t) => this.measure(g, `${lp.px}:${t}`, t), { max: lp.max, lineHeight: lp.px + 4, iconRadius: 12, bounds: v });
     g.textBaseline = "middle";
     g.lineJoin = "round";
     for (const l of placed) {
@@ -611,5 +691,28 @@ export class MapRenderer {
       g.fillText(l.text, tx, l.y + l.h / 2);
     }
     g.textAlign = "left";
+    return animating;
+  }
+
+  /** A cluster's count: a small dark seal on the icon's shoulder. */
+  private drawBadge(g: CanvasRenderingContext2D, x: number, y: number, n: number): Box {
+    const text = n > 99 ? "99+" : String(n);
+    g.font = `700 10px ${FONT}`;
+    const w = Math.max(15, this.measure(g, `10:${text}`, text) + 8);
+    const h = 15;
+    g.fillStyle = "#2b1d12";
+    g.strokeStyle = "rgba(240, 228, 200, 0.95)";
+    g.lineWidth = 1.5;
+    g.beginPath();
+    if (typeof g.roundRect === "function") g.roundRect(x - w / 2, y - h / 2, w, h, h / 2);
+    else g.rect(x - w / 2, y - h / 2, w, h);
+    g.fill();
+    g.stroke();
+    g.fillStyle = "#f3b867";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText(text, x, y + 0.5);
+    g.textAlign = "left";
+    return { x: x - w / 2, y: y - h / 2, w, h };
   }
 }

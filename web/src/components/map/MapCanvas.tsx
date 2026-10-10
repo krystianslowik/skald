@@ -1,7 +1,24 @@
 import { useReducedMotion } from "motion/react";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useI18n } from "../../i18n";
-import { clampView, fitView, interestBounds, pick, screenToWorld, WORLD_RADIUS, worldToScreen, zoomAt, type LayerId, type Marker, type View } from "../../lib/mapgeo";
+import {
+  clampView,
+  exploredBounds,
+  fitBounds,
+  interestBounds,
+  markerBounds,
+  MAX_SCALE,
+  pickItem,
+  screenToWorld,
+  WORLD_RADIUS,
+  worldToScreen,
+  zoomAt,
+  type Insets,
+  type LayerId,
+  type Marker,
+  type View,
+} from "../../lib/mapgeo";
+import { COARSE, useMedia } from "../../lib/useMedia";
 import { inertiaStep, releaseVelocity, REST_SPEED, springStep } from "../../lib/mapmotion";
 import { MapRenderer } from "../../lib/maprender";
 import type { ApiMap } from "../../types";
@@ -9,12 +26,41 @@ import type { ApiMap } from "../../types";
 export interface MapCanvasHandle {
   /** Glide (or jump, with reduced motion) to a world point, zooming in to at least `minScale`. */
   flyTo(x: number, z: number, minScale?: number): void;
+  /** Glide just enough to show a world point above the bottom `hidden` px (a sheet), or not at all. */
+  reveal(x: number, z: number, hidden: number): void;
   zoomBy(factor: number): void;
+  /** The explored area, or what people built, or the whole world. */
   fit(): void;
 }
 
 /** Pointer travel before a press becomes a pan, so taps stay taps. */
 const SLOP = 5;
+/** A second tap within this time and distance is a double tap. */
+const DOUBLE_TAP_MS = 300;
+const DOUBLE_TAP_PX = 30;
+/** Two fingers down and up within this time, barely moving, are a two-finger tap. */
+const TWO_TAP_MS = 300;
+/** The view is remembered for the browser session (per tab). */
+const VIEW_KEY = "skald.map.view";
+const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
+
+function storedView(): Pick<View, "cx" | "cz" | "scale"> | null {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(VIEW_KEY) ?? "null") as Partial<View> | null;
+    if (v && [v.cx, v.cz, v.scale].every((n) => typeof n === "number" && Number.isFinite(n)) && v.scale! > 0) return { cx: v.cx!, cz: v.cz!, scale: v.scale! };
+  } catch {
+    // storage blocked or garbage: fit instead
+  }
+  return null;
+}
+
+function storeView(v: View): void {
+  try {
+    sessionStorage.setItem(VIEW_KEY, JSON.stringify({ cx: Math.round(v.cx), cz: Math.round(v.cz), scale: +v.scale.toFixed(5) }));
+  } catch {
+    // not remembered; fine
+  }
+}
 
 /**
  * The interactive map surface: pan with one pointer (1:1, then momentum),
@@ -30,6 +76,12 @@ export const MapCanvas = forwardRef<
     layers: Record<LayerId, boolean>;
     selected: Marker | null;
     onSelect: (m: Marker | null) => void;
+    /** A tap on a cluster that cannot be zoomed apart any further (marks a few metres apart). */
+    onGroup?: (members: readonly Marker[]) => void;
+    /** Remember the view for this browser session and start from it next time. */
+    remember?: boolean;
+    /** Screen space kept clear of the fitted area (controls over the map). */
+    insets?: Insets;
     /** Receives the selected mark's screen position after every frame (null when off screen). */
     onAnchor?: (p: { x: number; y: number } | null) => void;
     /** Shows the world coordinates under the pointer. */
@@ -37,9 +89,10 @@ export const MapCanvas = forwardRef<
     interactive?: boolean;
     className?: string;
   }
->(function MapCanvas({ map, mask, markers, layers, selected, onSelect, onAnchor, onPointerWorld, interactive = true, className = "relative" }, ref) {
+>(function MapCanvas({ map, mask, markers, layers, selected, onSelect, onGroup, onAnchor, onPointerWorld, remember = false, insets = NO_INSETS, interactive = true, className = "relative" }, ref) {
   const { t } = useI18n();
   const reduced = useReducedMotion() ?? false;
+  const coarse = useMedia(COARSE);
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const renderer = useRef<MapRenderer | null>(null);
@@ -51,18 +104,30 @@ export const MapCanvas = forwardRef<
   const fling = useRef<{ vx: number; vy: number } | null>(null);
   const glide = useRef<{ cx: number; cz: number; ls: number; v: [number, number, number] } | null>(null);
   const last = useRef(0);
-  const props = useRef({ markers, layers, selected, onAnchor });
-  props.current = { markers, layers, selected, onAnchor };
+  const props = useRef({ markers, layers, selected, onAnchor, coarse, reduced, remember });
+  props.current = { markers, layers, selected, onAnchor, coarse, reduced, remember };
 
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draw = useCallback((quality: "fast" | "full" = "fast") => {
     const r = renderer.current;
     if (!r) return;
     const p = props.current;
-    r.draw({ view: view.current, layers: p.layers, markers: p.markers, selected: p.selected?.id ?? null, hovered: hovered.current }, quality);
+    const v = view.current;
+    // Fingers need wider clusters and fewer, larger labels on a small screen.
+    const labels = p.coarse ? { max: Math.round(Math.max(8, Math.min(40, (v.w * v.h) / 9000))), px: 13 } : { max: 160, px: 12 };
+    const animating = r.draw(
+      { view: v, layers: p.layers, markers: p.markers, selected: p.selected?.id ?? null, hovered: hovered.current, cluster: p.coarse ? 30 : 24, labels, reduced: p.reduced },
+      quality,
+    );
+    // A mark leaving its cluster keeps the frames coming.
+    if (animating && frame.current === null) frame.current = requestAnimationFrame(() => {
+      frame.current = null;
+      draw();
+    });
     // Once nothing has moved for a moment, redraw the map itself at full detail.
     if (idle.current) clearTimeout(idle.current);
     if (quality === "fast") idle.current = setTimeout(() => draw("full"), 140);
+    else if (p.remember) storeView(v);
     if (p.onAnchor) {
       const sel = p.selected;
       if (!sel) p.onAnchor(null);
@@ -130,14 +195,14 @@ export const MapCanvas = forwardRef<
     [schedule],
   );
 
-  /** Everything people made or marked, or the whole world when there is nothing yet. */
-  const fitFor = useCallback(
-    (w: number, h: number) => {
-      const b = interestBounds(map);
-      return b ? fitView(w, h, b[0] - 300, b[1] - 300, b[2] + 300, b[3] + 300) : fitView(w, h, -WORLD_RADIUS, -WORLD_RADIUS, WORLD_RADIUS, WORLD_RADIUS, 0);
-    },
-    [map],
+  /** The explored area; without fog what people built; with nothing yet the whole world. */
+  const bounds = useMemo(
+    () => exploredBounds(mask, map.explored.size, map.explored.metersPerPixel) ?? interestBounds(map) ?? ([-WORLD_RADIUS, -WORLD_RADIUS, WORLD_RADIUS, WORLD_RADIUS] as const),
+    [map, mask],
   );
+  const fitInsets = useRef(insets);
+  fitInsets.current = insets;
+  const fitFor = useCallback((w: number, h: number) => fitBounds(w, h, bounds, fitInsets.current), [bounds]);
   const fit = useCallback(() => fitFor(view.current.w, view.current.h), [fitFor]);
 
   const glideTo = useCallback(
@@ -162,6 +227,14 @@ export const MapCanvas = forwardRef<
     () => ({
       flyTo(x, z, minScale) {
         glideTo({ ...view.current, cx: x, cz: z, scale: Math.max(view.current.scale, minScale ?? 0) });
+      },
+      reveal(x, z, hidden) {
+        const v = glide.current ? { ...view.current, cx: glide.current.cx, cz: glide.current.cz, scale: Math.exp(glide.current.ls) } : view.current;
+        const [sx, sy] = worldToScreen(v, x, z);
+        const clear = v.h - hidden;
+        if (sx > 24 && sx < v.w - 24 && sy > 24 && sy < clear - 24) return;
+        // Into the middle of what the sheet leaves free.
+        glideTo({ ...v, cx: x, cz: z - (v.h / 2 - clear / 2) / v.scale });
       },
       zoomBy(factor) {
         const base = glide.current ? { ...view.current, cx: glide.current.cx, cz: glide.current.cz, scale: Math.exp(glide.current.ls) } : view.current;
@@ -199,7 +272,8 @@ export const MapCanvas = forwardRef<
       const v = view.current;
       if (!fitted.current && w > 1 && h > 1) {
         fitted.current = true;
-        view.current = fitFor(w, h);
+        const kept = props.current.remember ? storedView() : null;
+        view.current = kept ? clampView({ ...kept, w, h }) : fitFor(w, h);
       } else {
         view.current = clampView({ ...v, w, h });
       }
@@ -219,7 +293,26 @@ export const MapCanvas = forwardRef<
     [],
   );
 
-  // Pointers: one pans, two pinch. Wheel zooms around the cursor.
+  /** Zoom into a cluster until it splits; a pile that never would (a portal hub) opens as a list. */
+  const openCluster = useCallback(
+    (members: readonly Marker[]) => {
+      const v = view.current;
+      const [x0, z0, x1, z1] = markerBounds(members);
+      // At the closest zoom, clusters are a few metres wide: beyond that, zooming cannot help.
+      const apartAtMax = Math.hypot(x1 - x0, z1 - z0) * MAX_SCALE > 40;
+      if (!apartAtMax || v.scale >= MAX_SCALE * 0.95) {
+        onGroup?.(members);
+        return;
+      }
+      const fitted = fitBounds(v.w, v.h, [x0, z0, x1, z1], fitInsets.current, 0.35);
+      // Far enough to split it (2x to 4x), not so far that the neighbourhood is lost.
+      const scale = Math.min(MAX_SCALE, v.scale * 4, Math.max(v.scale * 2, fitted.scale));
+      glideTo({ ...v, cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, scale });
+    },
+    [glideTo, onGroup],
+  );
+
+  // Pointers: one pans, two pinch; a double tap zooms in, a two-finger tap out. Wheel zooms around the cursor.
   useEffect(() => {
     const el = canvas.current;
     if (!el || !interactive) return;
@@ -228,6 +321,10 @@ export const MapCanvas = forwardRef<
     let moved = false;
     let downAt: { x: number; y: number } | null = null;
     let pinch: { d: number; mx: number; my: number } | null = null;
+    // The last tap on empty map, for a double tap.
+    let lastTap: { x: number; y: number; t: number } | null = null;
+    // Two fingers down together: when, where, and how far they have wandered.
+    let two: { t: number; start: Map<number, { x: number; y: number }>; travel: number; mx: number; my: number } | null = null;
     const local = (e: PointerEvent | WheelEvent) => {
       const r = el.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -236,6 +333,10 @@ export const MapCanvas = forwardRef<
       const [a, b] = [...pts.values()];
       if (!a || !b) return null;
       return { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+    };
+    const zoomTo = (x: number, y: number, factor: number) => {
+      const base = glide.current ? { ...view.current, cx: glide.current.cx, cz: glide.current.cz, scale: Math.exp(glide.current.ls) } : view.current;
+      glideTo(zoomAt(base, x, y, factor));
     };
 
     const down = (e: PointerEvent) => {
@@ -249,9 +350,12 @@ export const MapCanvas = forwardRef<
       if (pts.size === 1) {
         moved = false;
         downAt = p;
+        two = null;
       } else {
         moved = true;
         pinch = pinchState();
+        if (pts.size === 2 && pinch) two = { t: e.timeStamp, start: new Map(pts), travel: 0, mx: pinch.mx, my: pinch.my };
+        else two = null;
       }
     };
     const move = (e: PointerEvent) => {
@@ -259,8 +363,8 @@ export const MapCanvas = forwardRef<
       if (!pts.has(e.pointerId)) {
         // Hover: coordinates and the mark under the mouse.
         onPointerWorld?.(((w) => ({ x: Math.round(w[0]), z: Math.round(w[1]) }))(screenToWorld(view.current, p.x, p.y)));
-        const hit = renderer.current ? pick(renderer.current.visible, p.x, p.y) : null;
-        const id = hit?.id ?? null;
+        const hit = renderer.current ? pickItem(renderer.current.visible, p.x, p.y) : null;
+        const id = hit?.m.id ?? null;
         el.style.cursor = id ? "pointer" : "grab";
         if (id !== hovered.current) {
           hovered.current = id;
@@ -270,6 +374,10 @@ export const MapCanvas = forwardRef<
       }
       const prev = pts.get(e.pointerId)!;
       pts.set(e.pointerId, p);
+      if (two) {
+        const s0 = two.start.get(e.pointerId);
+        if (s0) two.travel = Math.max(two.travel, Math.hypot(p.x - s0.x, p.y - s0.y));
+      }
       if (pts.size >= 2) {
         const now = pinchState();
         if (now && pinch && pinch.d > 0) {
@@ -305,9 +413,30 @@ export const MapCanvas = forwardRef<
       if (pts.size > 0) return;
       el.style.cursor = "grab";
       if (e.type === "pointercancel") return;
+      if (two) {
+        const t2 = two;
+        two = null;
+        // Two fingers that tapped together without pinching: zoom out around them.
+        if (e.timeStamp - t2.t < TWO_TAP_MS && t2.travel < SLOP * 2) zoomTo(t2.mx, t2.my, 0.5);
+        return;
+      }
       if (!moved) {
-        const hit = renderer.current ? pick(renderer.current.visible, p.x, p.y, e.pointerType === "touch" ? 24 : 16) : null;
-        onSelect(hit);
+        const touch = e.pointerType !== "mouse";
+        const hit = renderer.current ? pickItem(renderer.current.visible, p.x, p.y, touch ? 28 : 16) : null;
+        if (hit) {
+          lastTap = null;
+          if (hit.members && hit.members.length > 1) openCluster(hit.members);
+          else onSelect(hit.m);
+          return;
+        }
+        // Empty map: a second tap close by zooms in; the first one only clears the selection.
+        if (lastTap && e.timeStamp - lastTap.t < DOUBLE_TAP_MS && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < DOUBLE_TAP_PX) {
+          lastTap = null;
+          zoomTo(p.x, p.y, 2);
+          return;
+        }
+        lastTap = { ...p, t: e.timeStamp };
+        onSelect(null);
         return;
       }
       const [vx, vy] = releaseVelocity(samples);
@@ -346,7 +475,7 @@ export const MapCanvas = forwardRef<
       el.removeEventListener("pointerleave", leave);
       el.removeEventListener("wheel", wheel);
     };
-  }, [interactive, onPointerWorld, onSelect, reduced, schedule, setView]);
+  }, [interactive, onPointerWorld, onSelect, openCluster, glideTo, reduced, schedule, setView]);
 
   const onKey = (e: ReactKeyboardEvent) => {
     const v = view.current;

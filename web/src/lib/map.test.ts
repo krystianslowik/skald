@@ -5,13 +5,20 @@ import { makeI18n } from "../i18n";
 import {
   buildMarkers,
   clampView,
+  clusterMarkers,
   decodeRLE,
+  exploredBounds,
+  fitBounds,
   fitView,
+  interestBounds,
+  mainBase,
+  type Marker,
   isExplored,
   isoPolygons,
   isoSegments,
   layerCounts,
   pick,
+  pickItem,
   placeLabels,
   portalLinks,
   screenToWorld,
@@ -150,6 +157,94 @@ describe("picking and labels", () => {
         expect(a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h).toBe(false);
       }
     }
+  });
+});
+
+describe("first view", () => {
+  it("fits the explored area, clear of the controls", () => {
+    const mask = decodeRLE(snap.explored.rle, snap.explored.size);
+    const b = exploredBounds(mask, snap.explored.size, snap.explored.metersPerPixel)!;
+    expect(b[0]).toBeLessThan(b[2]);
+    expect(b[1]).toBeLessThan(b[3]);
+    // Every explored location sits inside the bounds.
+    for (const l of snap.locations.filter((x) => x.explored && x.placed)) {
+      expect(l.x).toBeGreaterThanOrEqual(b[0] - 12);
+      expect(l.x).toBeLessThanOrEqual(b[2] + 12);
+      expect(l.z).toBeGreaterThanOrEqual(b[1] - 12);
+      expect(l.z).toBeLessThanOrEqual(b[3] + 12);
+    }
+    // A phone: the box fills the width and stays above the bottom controls.
+    const v = fitBounds(390, 700, b, { top: 12, right: 12, bottom: 72, left: 12 });
+    const [ax, ay] = worldToScreen(v, b[0], b[3]);
+    const [bx, by] = worldToScreen(v, b[2], b[1]);
+    expect(ax).toBeGreaterThanOrEqual(11.9);
+    expect(bx).toBeLessThanOrEqual(378.1);
+    expect(ay).toBeGreaterThanOrEqual(11.9);
+    expect(by).toBeLessThanOrEqual(628.1);
+    expect(Math.max(bx - ax, by - ay)).toBeGreaterThan(300);
+    expect(exploredBounds(new Uint8Array(16), 4, 12)).toBeNull();
+  });
+
+  it("falls back to bases, portals and graves, not far-flung pins", () => {
+    const map = { ...gateMap(snap, false), bases: [{ ...snap.bases[0]!, x: 100, z: 100 }], portals: [], tombstones: [], pins: [{ ...snap.pins[0]!, x: 9000, z: -9000 }] };
+    expect(interestBounds(map)).toEqual([100, 100, 100, 100]);
+    expect(interestBounds({ ...map, bases: [] })).toEqual([9000, -9000, 9000, -9000]);
+  });
+});
+
+describe("clusters", () => {
+  const all = buildMarkers(gateMap(snap, false), lookup);
+  const mk = (id: string, layer: Marker["layer"], tier: number, priority: number, x: number, z: number) => ({ id, layer, tier, priority, x, z }) as Marker;
+
+  it("lets bases, portals and graves lead piles of pins and places", () => {
+    const pin = mk("pin", "pins", 0, 99, 0, 0);
+    const base = mk("base", "bases", 2, 50, 5, 0);
+    const far = mk("far", "pins", 0, 10, 500, 0);
+    const c = clusterMarkers([pin, base, far], 20);
+    expect(c).toHaveLength(2);
+    expect(c[0]!.lead.id).toBe("base");
+    expect(c[0]!.members.map((m) => m.id)).toEqual(["base", "pin"]);
+    expect(c[1]!.members).toHaveLength(1);
+  });
+
+  it("clusters the same layer wider than marks of another", () => {
+    const a = mk("a", "portals", 2, 70, 0, 0);
+    const b = mk("b", "portals", 2, 70, 18, 0);
+    const g = mk("g", "graves", 2, 60, 18, 0);
+    const c = clusterMarkers([a, b, g], 20);
+    expect(c.find((x) => x.lead.id === "a")!.members.map((m) => m.id)).toEqual(["a", "b"]);
+    expect(c.some((x) => x.lead.id === "g")).toBe(true);
+  });
+
+  it("splits apart as the radius shrinks, and keeps every mark exactly once", () => {
+    const wide = clusterMarkers(all, 800);
+    const near = clusterMarkers(all, 5);
+    expect(wide.length).toBeLessThan(near.length);
+    for (const list of [wide, near]) expect(list.reduce((n, c) => n + c.members.length, 0)).toBe(all.length);
+    expect(clusterMarkers(all, 0)).toHaveLength(all.length);
+  });
+
+  it("picks a cluster with its members", () => {
+    const members = [mk("a", "pins", 0, 1, 0, 0), mk("b", "pins", 0, 1, 1, 1)];
+    const hit = pickItem([{ m: members[0]!, sx: 50, sy: 50, members }], 60, 55, 28);
+    expect(hit?.members).toHaveLength(2);
+  });
+});
+
+describe("names", () => {
+  const markers = buildMarkers(gateMap(snap, false), lookup);
+  it("names a base after the home pin next to it and finds the main base", () => {
+    const home = mainBase(markers)!;
+    expect(home.data.type === "base" && home.data.name).toBe("Hearthstead");
+    expect(home.label).toBe("Hearthstead");
+    // The pin lends its name rather than repeating it on the map.
+    const pin = markers.find((m) => m.data.type === "pin" && m.data.name === "Hearthstead")!;
+    expect(pin.label).toBe("");
+    // Portal tags read from the first view on a phone, before pins do.
+    const portal = markers.find((m) => m.layer === "portals")!;
+    const anyPin = markers.find((m) => m.layer === "pins" && m.label)!;
+    expect(portal.labelScale).toBeLessThan(0.05);
+    expect(portal.rank).toBeGreaterThan(anyPin.rank);
   });
 });
 
