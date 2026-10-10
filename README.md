@@ -10,7 +10,7 @@
 [![CI](https://github.com/krystianslowik/skald/actions/workflows/ci.yaml/badge.svg)](https://github.com/krystianslowik/skald/actions/workflows/ci.yaml)
 [![Release](https://img.shields.io/github/v/release/krystianslowik/skald?include_prereleases&color=ffb347)](https://github.com/krystianslowik/skald/releases)
 
-<img src="docs/images/dashboard.webp" alt="The Skald dashboard: a burning six-digit join code, four players at the fire as painted shields with platform marks, the world day and the boss path with three bosses down" width="100%" />
+<img src="docs/images/dashboard.webp" alt="The Skald dashboard: a burning six-digit join code with a Share button, four players at the fire as painted shields with platform marks, the world day and the boss path with three bosses down" width="100%" />
 
 </div>
 
@@ -18,7 +18,7 @@ Running a Valheim server for friends means someone asks "what's the code again?"
 every evening, and nobody knows if last night's backup happened. Skald sits next
 to the server and puts it all on one password-protected page:
 
-- the 6-digit crossplay join code, one click to copy
+- the 6-digit crossplay join code, one tap to copy or share (with the password, if you like)
 - who is online, who played when, and how often they died
 - the world: in-game day and time of day, seed, last save
 - a world map drawn from the save: explored land, bases, portals and where they lead, graves, beds, ships, map pins, and the bosses and dungeons someone has found
@@ -30,7 +30,8 @@ to the server and puts it all on one password-protected page:
 
 It works with the [community Valheim server image](https://github.com/community-valheim-tools/valheim-server-docker)
 with crossplay on, so Xbox, PlayStation, Switch and PC players join without port
-forwarding. The UI is in English and Polish. It installs as a PWA, and there's an
+forwarding. The UI is in English and Polish. On a phone it becomes an app with
+a tab bar (fire, map, saga, settings) and installs as a PWA, and there's an
 optional campfire crackle if you want it.
 
 <table>
@@ -42,14 +43,16 @@ optional campfire crackle if you want it.
 
 ## World map
 
-<img src="docs/images/map.webp" alt="The world map: an inked archipelago on parchment, fog over the unexplored, bases, paired portals with a dashed line between them, graves and places found, a layer panel with counts and a popover for an unconnected portal" width="100%" />
+<img src="docs/images/map.webp" alt="The world map: an inked archipelago on parchment, fog over the unexplored, bases, paired portals with a dashed line between them, graves and places found, crowded spots gathered into counted clusters, a layer panel with counts and a popover for an unconnected portal" width="100%" />
 
 The map is drawn from the world save itself: the land, sea and coasts the
 world has generated, the area your cartography tables have explored, and
 what people built and left behind. Each layer can be switched off, the search
 finds portal tags, names and places, and every mark links to the same spot
 on [valheim-map.world](https://valheim-map.world/), which also fills the
-Terrain tab. Places nobody has found stay hidden unless you set
+Terrain tab. It opens on the explored area, gathers crowded spots into
+clusters you tap to open, and on a phone takes pinches, double taps (in) and
+two-finger taps (out). Places nobody has found stay hidden unless you set
 `MAP_SPOILERS=true`. Details in [docs/configuration.md](docs/configuration.md#world-map).
 
 ## Server settings

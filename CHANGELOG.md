@@ -6,6 +6,42 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Phone layout (up to 639 px wide, and landscape phones): a bottom tab bar
+  with Fire, Map, Saga (saga, ranking, who sat by the fire) and Settings
+  (server settings, language, campfire sound, log out, runes, forge,
+  treasury, chronicle). Tabs are URL hashes (`#map`, `#saga`, `#settings`),
+  so Back returns to the fire. Wider screens keep the full dashboard.
+- Share for the join code: the phone's share sheet gets "Join <server> in
+  Valheim: code 123456, password ...", with an "Include password" switch
+  (on by default, remembered per device); where there is no share sheet the
+  same text is copied. The password is fetched only when Share is pressed.
+- A compact bar with the code, copy and share slides down on phones once the
+  join code has scrolled away.
+- Map clusters: crowded marks gather per zoom level into one mark with a
+  count, bases, portals and graves leading pins and places; a tap zooms in
+  until they split, and a pile that never splits (a portal hub) opens as a
+  list. Bases take the name of a home pin next to them.
+- Map on touch screens: double tap zooms in, a two-finger tap zooms out,
+  "go to the main base" and "fit" replace the +/- buttons, mark details open
+  as a bottom sheet that peeks at its content and drags up to full height,
+  and "Go to the other end" selects the portal there. The view is remembered
+  for the browser session.
+
+### Changed
+
+- The map opens on the explored area (or, without a cartography table, on
+  bases, portals and graves; far-flung pins no longer stretch it), clear of
+  its controls, on every screen size.
+- Labels: portal tags, base names and graves show from the first view;
+  labels never leave the screen, and phones get fewer, larger ones.
+- The header on phones is one line of status and one row of facts.
+- Touch screens get 44 pt targets throughout, 16 px fields (no iOS zoom on
+  focus), larger layer switches, and safe-area insets (`viewport-fit=cover`)
+  for notches and the home indicator, in the browser and installed.
+- The theme colour matches the night sky behind the header.
+
 ## [0.5.0] - 2026-10-10
 
 ### Added
