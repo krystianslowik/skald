@@ -318,7 +318,7 @@ const Check = memo(function Check({ checked, onChange, label, hint }: { checked:
         aria-labelledby={`${id}-l`}
         aria-describedby={`${id}-d`}
         onClick={() => onChange(!checked)}
-        className={`press grid h-7 w-7 shrink-0 place-items-center ${checked ? "slot-selected" : "slot"}`}
+        className={`press tap grid h-7 w-7 shrink-0 place-items-center ${checked ? "slot-selected" : "slot"}`}
       >
         <motion.svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#10161d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <motion.path d="M3 8.5l3.2 3L13 4.5" initial={false} animate={{ pathLength: checked ? 1 : 0, opacity: checked ? 1 : 0 }} transition={SWAP} />

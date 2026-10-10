@@ -37,7 +37,7 @@ export const World = memo(function World({ meta, now }: { meta: WorldMeta | null
               type="button"
               onClick={copy}
               aria-label={t("world.copySeed", { seed: meta.seedName })}
-              className="plaque press px-2 py-0.5 text-[0.6875rem] font-bold"
+              className="plaque press tap px-2 py-0.5 text-[0.6875rem] font-bold"
             >
               {copied ? t("world.copied") : t("world.copy")}
             </button>
@@ -52,7 +52,7 @@ export const World = memo(function World({ meta, now }: { meta: WorldMeta | null
             href={mapUrl(meta.seedName)}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm font-bold text-flame underline decoration-flame/40 underline-offset-4 transition-colors hover:text-gold hover:decoration-gold"
+            className="inline-flex items-center gap-1.5 text-sm font-bold text-flame underline coarse:min-h-11 decoration-flame/40 underline-offset-4 transition-colors hover:text-gold hover:decoration-gold"
           >
             {t("world.map")}
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>

@@ -208,7 +208,7 @@ export function LocaleToggle({ className = "" }: { className?: string }) {
           aria-pressed={locale === l}
           aria-label={fill(DICTS[l]["lang.switchTo"], { lang: LOCALE_NAMES[l] })}
           onClick={() => setLocale(l)}
-          className="plaque press px-2 py-1 uppercase tracking-wider"
+          className="plaque press px-2 py-1 uppercase tracking-wider coarse:min-h-11 coarse:min-w-11 coarse:text-sm"
         >
           {l}
         </button>

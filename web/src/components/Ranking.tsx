@@ -35,7 +35,7 @@ export const Ranking = memo(function Ranking({ players, now }: { players: Player
             role="tab"
             aria-selected={by === k}
             onClick={() => setBy(k)}
-            className="plaque press px-3 py-1 font-bold uppercase tracking-[0.06em]"
+            className="plaque press px-3 py-1 font-bold uppercase tracking-[0.06em] coarse:min-h-11"
           >
             {label}
           </button>

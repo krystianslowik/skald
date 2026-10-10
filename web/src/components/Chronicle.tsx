@@ -60,10 +60,10 @@ export const Chronicle = memo(function Chronicle({ source }: { source: LogStore 
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder={t("chronicle.search")}
-            className="slot w-full border border-transparent px-3 py-1.5 text-sm text-bone placeholder:text-ash/80 focus:border-select-hi focus:outline-none"
+            className="slot w-full border border-transparent px-3 py-1.5 text-sm coarse:min-h-11 text-bone placeholder:text-ash/80 focus:border-select-hi focus:outline-none"
           />
         </label>
-        <label className="press flex cursor-pointer items-center gap-2 text-xs text-ash">
+        <label className="press flex cursor-pointer items-center gap-2 text-xs text-ash coarse:min-h-11">
           <input type="checkbox" checked={onlyNotable} onChange={(e) => setOnlyNotable(e.target.checked)} className="accent-[#5e97cc]" />
           {t("chronicle.notable")}
         </label>

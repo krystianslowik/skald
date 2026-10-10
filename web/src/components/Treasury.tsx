@@ -36,7 +36,7 @@ export const Treasury = memo(function Treasury({ backups, now }: { backups: Back
             download={b.name}
             aria-label={t("treasury.downloadAria", { name: b.name })}
             title={t("treasury.download")}
-            className="plaque press grid h-9 w-9 shrink-0 place-items-center"
+            className="plaque press grid h-9 w-9 shrink-0 place-items-center coarse:h-11 coarse:w-11"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M8 2.5v8M4.5 7L8 10.5 11.5 7M3 13.5h10" />
