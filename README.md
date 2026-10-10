@@ -10,7 +10,7 @@
 [![CI](https://github.com/krystianslowik/skald/actions/workflows/ci.yaml/badge.svg)](https://github.com/krystianslowik/skald/actions/workflows/ci.yaml)
 [![Release](https://img.shields.io/github/v/release/krystianslowik/skald?include_prereleases&color=ffb347)](https://github.com/krystianslowik/skald/releases)
 
-<img src="docs/images/dashboard.webp" alt="The Skald dashboard: a burning six-digit join code, four players at the fire as painted shields, the world day and the boss path" width="100%" />
+<img src="docs/images/dashboard.webp" alt="The Skald dashboard: a burning six-digit join code, four players at the fire as painted shields with platform marks, the world day and the boss path with three bosses down" width="100%" />
 
 </div>
 
@@ -35,7 +35,7 @@ optional campfire crackle if you want it.
 <table>
   <tr>
     <td width="50%"><img src="docs/images/login.webp" alt="Login screen: a dying campfire and one field" /></td>
-    <td width="50%"><img src="docs/images/profile.webp" alt="A player profile: playtime, deaths, streak, 30-day chart and badges" /></td>
+    <td width="50%"><img src="docs/images/profile.webp" alt="A player profile: platform, playtime, deaths, streak, 30-day chart and badges" /></td>
   </tr>
 </table>
 
