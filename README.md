@@ -62,6 +62,8 @@ shipwreck and dungeon chests never show up, nor what is in them. Details in [doc
 
 ## Terrain (opt-in)
 
+<img src="docs/images/map-terrain.webp" alt="The world map with terrain: meadows, forest, mountains and shallows painted onto the parchment where the world has been explored, fog over the rest, bases, portals and places on top (development mock data)" width="100%" />
+
 The map can draw the land with the game's **own** world generator: biomes,
 mountains and water depth for your seed, inked onto the parchment under the
 explored fog. A small terrain job runs your own dedicated server image once
@@ -71,6 +73,8 @@ world or a game update. Details in
 [docs/configuration.md](docs/configuration.md#terrain).
 
 ## Item icons (opt-in)
+
+<img src="docs/images/icons.webp" alt="A chest opened on the map with an icon in every slot, and the map search listing which containers hold scrap iron (development mock with generated placeholder icons, not game art)" width="100%" />
 
 The chests, graves and village stores can show each item's own icon instead
 of a category mark. Skald does not ship them: an optional `skald-icons`
