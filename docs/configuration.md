@@ -297,6 +297,29 @@ mounts the `skald-terrain` volume read-only with `TERRAIN_DIR=/terrain`.
 
 ## Admin bridge
 
+### Before you turn it on
+
+- The server runs modded (`BEPINEX=true`). Crossplay with BepInEx was tested
+  with an Xbox client on game build `l-1.0.17`. Joining, live positions,
+  broadcasts, items and kits with quality, teleport to a named place, time,
+  raids, creatures, heal, Rested, kiln fill and repair all worked. Not yet
+  confirmed in game: kicking or banning a connected player, teleport to
+  coordinates or to another player, crop growth, and the cartography table
+  reveal and pins (reworked in plugin 0.1.1).
+- A game patch can break it. The plugin checks what it needs when it loads and
+  switches itself, or a single command, off with one log line instead of
+  crashing the game, and the panel says so. A renamed network call fails
+  silently, so on a build that isn't on the tested list the commands stay off
+  until an admin confirms the build in the panel. A Unity upgrade can also
+  break BepInEx itself until a new pack is out.
+- Kill switches: `SKALD_BRIDGE=off` keeps BepInEx but the plugin serves
+  nothing; `BEPINEX=false` puts the server back to vanilla. Both need a restart.
+- Without `ADMIN_PASSWORD_HASH`, anyone with the panel password is an admin.
+  With it, the panel password only views and admin actions need a separate,
+  rate-limited admin session that ends after 30 idle minutes.
+- Not possible from the server: chat lines (consoles don't show them), god
+  mode, flying, weather and food. Those live on the client.
+
 Opt-in. Live admin commands from the panel: broadcasts, items and kits,
 teleport, heal and Rested, time of day, raids, creatures, world keys, base
 helpers (repair, fill kilns and smelters, grow crops, reveal the map and pin

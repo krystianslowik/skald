@@ -14,26 +14,20 @@
 
 </div>
 
-Running a Valheim server for friends means someone asks "what's the code again?"
-every evening, and nobody knows if last night's backup happened. Skald sits next
-to the server and puts it all on one password-protected page:
+Every evening someone asks "what's the code again?", and nobody knows if last
+night's backup happened. Skald sits next to your Valheim server and answers both
+on one password-protected page your friends can open on their phones:
 
-- the 6-digit crossplay join code, one tap to copy or share (with the password, if you like)
-- who is online, who played when, and how often they died
-- the world: in-game day and time of day, seed, last save
-- a world map drawn from the save: explored land, bases, portals and where they lead, graves, beds, ships, map pins, and the bosses and dungeons someone has found
-- the village stores: what is in every chest, cart and ship players built, added up and searchable ("where is our iron?"), one tap from the spot on the map
-- backups you can download, plus backup / update / restart buttons (press and hold, so nobody restarts by accident)
-- player profiles with streaks and badges
-- server settings: name, password, public listing and world modifiers, applied now or once everyone has left
-- the live server log
-- Prometheus metrics, alert rules and a Grafana dashboard
+- the crossplay join code, one tap to copy or share
+- who's online, who played when, how often they died, streaks and badges
+- a world map drawn from the save: bases, portals, graves, ships, pins and the bosses you've found
+- what's in every chest, cart and ship you built, searchable ("where's our iron?")
+- backups, restarts and server settings, behind press-and-hold buttons
+- the live server log, plus Prometheus metrics and a Grafana dashboard
 
 It works with the [community Valheim server image](https://github.com/community-valheim-tools/valheim-server-docker)
-with crossplay on, so Xbox, PlayStation, Switch and PC players join without port
-forwarding. The UI is in English and Polish. On a phone it becomes an app with
-a tab bar (fire, map, saga, settings) and installs as a PWA, and there's an
-optional campfire crackle if you want it.
+with crossplay on, so Xbox, PlayStation, Switch and PC players get in without
+port forwarding. English and Polish. It installs as an app on your phone.
 
 <table>
   <tr>
@@ -42,104 +36,47 @@ optional campfire crackle if you want it.
   </tr>
 </table>
 
-## World map
+## The map
 
-<img src="docs/images/map.webp" alt="The world map: an inked archipelago on parchment, bases, portals, graves and places found, crowded spots gathered into counted clusters, a layer panel with counts including Storage, and a personal chest open as a grid of slots: a three-star bronze sword picked out with its quality, durability and maker, arrows and coins" width="100%" />
+<img src="docs/images/map.webp" alt="The world map: an inked archipelago on parchment, bases, portals, graves and places found, crowded spots gathered into counted clusters, a layer panel with counts including Storage, and a personal chest open as a grid of slots" width="100%" />
 
-The map is drawn from the world save itself: the land, sea and coasts the
-world has generated, the area your cartography tables have explored, and
-what people built and left behind. Chests, carts and ships open as a grid of
-slots like the game's own, graves show what was left in them, each layer can
-be switched off, the search finds portal tags, names, places and items, and
-every mark links to the same spot
-on [valheim-map.world](https://valheim-map.world/), which also fills the
-Terrain tab. With the opt-in [terrain job](#terrain-opt-in) the land itself
-comes from the game's own world generator. It opens on the explored area, gathers crowded spots into
-clusters you tap to open, and on a phone takes pinches, double taps (in) and
-two-finger taps (out). Places nobody has found stay hidden unless you set
-`MAP_SPOILERS=true`. Only what players built is read for storage: treasure,
-shipwreck and dungeon chests never show up, nor what is in them. Details in [docs/configuration.md](docs/configuration.md#world-map).
+Skald reads the world save and draws what's in it on parchment: the land, the
+part your cartography tables have explored, and everything people built or left
+behind. Tap a chest and it opens as a slot grid like the game's. Tap a portal and
+it shows where it leads. Places nobody has found stay hidden, and so do dungeon
+and shipwreck chests.
 
-## Terrain (opt-in)
+Two extras are opt-in, because they use your own copy of the game:
 
-<img src="docs/images/map-terrain.webp" alt="The world map with terrain: meadows, forest, mountains and shallows painted onto the parchment where the world has been explored, fog over the rest, bases, portals and places on top (development mock data)" width="100%" />
-
-The map can draw the land with the game's **own** world generator: biomes,
-mountains and water depth for your seed, inked onto the parchment under the
-explored fog. A small terrain job runs your own dedicated server image once
-with a Skald plugin that samples the generator and quits (no server is
-started), and the agent paints the result. It reruns by itself after a new
-world or a game update. Details in
-[docs/configuration.md](docs/configuration.md#terrain).
-
-## Item icons (opt-in)
-
-<img src="docs/images/icons.webp" alt="A chest opened on the map with an icon in every slot, and the map search listing which containers hold scrap iron (development mock with generated placeholder icons, not game art)" width="100%" />
-
-The chests, graves and village stores can show each item's own icon instead
-of a category mark. Skald does not ship them: an optional `skald-icons`
-sidecar makes an icon sheet from **your own** installed game server files,
-read-only, and keeps it on **your** volume, served only behind the panel
-password. It is off unless you turn it on (`COMPOSE_PROFILES=icons`, or the
-`icons` kustomize component), and it rebuilds by itself when the game
-updates. Details in [docs/configuration.md](docs/configuration.md#item-icons).
+- **Terrain.** A small job runs the game's own world generator for your seed and
+  the agent paints real biomes and mountains under the fog.
+- **Item icons.** A sidecar builds an icon sheet from your installed server files
+  so chests show real items instead of category marks.
 
 > [!NOTE]
-> Skald contains no Valheim artwork, and neither do its images. The icons are
-> generated on your server from files you installed, and they stay there.
-> Valheim and its art belong to Iron Gate Studio and Coffee Stain; Skald is
-> not affiliated with or endorsed by them. Keep the panel private to your
-> community if you turn this on.
+> Skald ships no Valheim art or game code. Icons and terrain are made on your
+> server from files you installed, and they stay there, behind the panel password.
+
+Setup for both is in [docs/configuration.md](docs/configuration.md).
 
 ## Admin bridge (opt-in)
 
-Run the evening from your phone: broadcast to every screen (centre or the
-narrator's gold italics), drop items and saved kits next to a player with
-quality, teleport someone home or to Eikthyr's altar, heal and rest them, set
-the time of day, start or stop a raid, spawn or clear creatures, toggle world
-keys, repair and refill the base, pin the cartography tables, save, kick and
-ban. Players move on the map live, every 2 seconds, and every admin action is
-written into the Saga ("Sigrun spawned 20 Wood for Ragnar"). A long press on
-the map offers "teleport a player here", "spawn here" and "pin here".
+Run game night from your phone. Put a message on every screen, drop items or a
+saved kit next to a player, teleport someone home, skip to morning, start or stop
+a raid, spawn a troll for fun, repair the base. Players move on the map in real
+time, and every action lands in the Saga ("Sigrun spawned 20 Wood for Ragnar").
 
-It needs a small **server-side BepInEx plugin**, the Skald bridge
-([`bridge/`](bridge/README.md)), which the deploy examples install with an
-initContainer. Clients install nothing. Setup in
+This one needs a small server-side BepInEx plugin, the [Skald bridge](bridge/README.md).
+Players install nothing. Before you turn it on, know three things:
+
+- Your server runs modded. Crossplay was tested with an Xbox player on game build
+  `l-1.0.17` and everything listed above worked.
+- A game patch can break it. The plugin turns itself off instead of crashing, and
+  on an untested build the panel waits for an admin to say it's fine.
+- Without `ADMIN_PASSWORD_HASH`, everyone with the panel password is an admin.
+
+Kill switches, the full command list and what's still untested are in
 [docs/configuration.md](docs/configuration.md#admin-bridge).
-
-> [!WARNING]
-> **What turning it on means.**
-> - The server runs **modded** (`BEPINEX=true`). Crossplay with BepInEx was
->   verified with an Xbox client on game build `l-1.0.17`: joining, live
->   positions, broadcasts, items and kits with quality, teleport to a place,
->   time, raids, creatures, heal, Rested, kiln fill and repair all worked.
->   Kick and ban of a connected player, teleport to coordinates or to another
->   player, crop growth and the map reveal and pins (reworked in plugin
->   0.1.1) are not confirmed in game yet.
-> - **Game patches can disable it.** The plugin checks what it uses when it
->   loads and switches itself (or one command) off with one log line instead
->   of crashing the game; the panel then says so. A renamed network call
->   fails silently, so on a game build that is not on the tested list,
->   commands stay off until an admin confirms the build in the panel.
->   A Unity upgrade can break BepInEx itself before a new pack is out.
-> - **Kill switches:** `SKALD_BRIDGE=off` keeps BepInEx but makes the plugin
->   serve nothing; `BEPINEX=false` returns the server to vanilla. Both need a
->   restart.
-> - **Privilege:** without `ADMIN_PASSWORD_HASH`, anyone with the panel
->   password is an admin. With it, the panel password only views and admin
->   actions need a separate, rate-limited admin session (30 minutes idle).
-> - Chat lines from the server are not possible (consoles do not show them),
->   nor are god mode, flying, weather or food: those live on the client.
-
-## Server settings
-
-<img src="docs/images/settings.webp" alt="The server settings sheet: world modifier presets as wooden slots with Custom lit in blue, stepped choices for combat, death penalty, resources and raids, and a footer counting four changes" width="100%" />
-
-The settings sheet changes the server name, password, public listing, world
-modifiers and save interval, and the dashboard shows the password next to the
-join code. The game picks the settings up through a small pre-run hook when it
-restarts, so a save never restarts anything by itself. Setup and the
-Kubernetes details are in [docs/configuration.md](docs/configuration.md#server-settings).
 
 ## How it works
 
@@ -156,17 +93,13 @@ flowchart LR
   V -- "outbound only" --> R(["PlayFab relays"])
 ```
 
-The agent runs in the game's network namespace (a native sidecar in Kubernetes,
-`network_mode: service:valheim` in Compose). The image's syslogd forwards every
-log line to it, and supervisord's XML-RPC lets it trigger backups, update checks
-and restarts. It reads `/config` read-only for world info and backup zips, and
-writes server settings only to its own settings directory. No Docker socket, no
-exec.
+A small Go agent shares the game's network namespace. The game's syslog feeds it
+every log line, supervisord lets it run backups and restarts, and it reads the
+save files read-only. No Docker socket, no exec.
 
-The web tier is a separate container, and in Kubernetes a separate pod. Anything
-that touches the game pod restarts the game and kicks everyone, so you can
-redeploy the dashboard as often as you like and nobody in game notices. It keeps
-event history in SQLite and pushes updates to browsers over a WebSocket.
+The web app lives in its own container, or its own pod in Kubernetes. Touching
+the game pod restarts the game and kicks everyone, so the dashboard is kept out
+of it and you can redeploy it whenever you want.
 
 ## Quick start (Docker Compose)
 
@@ -194,15 +127,15 @@ docker compose up -d
 docker compose logs -f valheim   # first boot downloads ~2.4 GB
 ```
 
-Open <http://localhost:8080>. Players join with Join Game, Add server, the
-6-digit code and the server password.
+Open <http://localhost:8080>. Players join with Join Game, Add server, the code
+and the server password.
 
 > [!IMPORTANT]
-> Compose sets `COOKIE_SECURE=false` so login works on plain `http://localhost`.
-> If Skald is reachable from anywhere else, put it behind HTTPS and set it to `true`.
+> Compose sets `COOKIE_SECURE=false` so you can log in on plain `http://localhost`.
+> Anywhere else, put Skald behind HTTPS and set it to `true`.
 
-Already running the community image? Add the `SYSLOG_*` and `SUPERVISOR_*`
-variables from [`docker-compose.yaml`](deploy/compose/docker-compose.yaml) to
+Already running the community image? Copy the `SYSLOG_*` and `SUPERVISOR_*`
+variables from [`docker-compose.yaml`](deploy/compose/docker-compose.yaml) into
 your `valheim` service and add the `agent` and `skald-web` services.
 
 ## Kubernetes
@@ -217,51 +150,32 @@ kubectl apply -k .
 kubectl -n valheim port-forward svc/skald-web 8080:8080
 ```
 
-How you expose `skald-web` (Ingress, Gateway, a tunnel) is up to you. Set
-`TRUSTED_IP_HEADER` to whatever header your proxy uses so the login rate limit
-sees real client IPs.
-
-All environment variables are listed in [docs/configuration.md](docs/configuration.md).
-Metrics, alert rules and the Grafana dashboard are in [docs/metrics.md](docs/metrics.md).
+Expose `skald-web` however you like and set `TRUSTED_IP_HEADER` to your proxy's
+client IP header, so the login rate limit sees real addresses. Every setting is
+in [docs/configuration.md](docs/configuration.md), metrics and alerts in
+[docs/metrics.md](docs/metrics.md).
 
 ## Security
 
-- One panel password, stored only as an argon2id hash. Login is limited to 5
-  tries a minute, then a 15-minute lockout. An optional admin password
-  (`ADMIN_PASSWORD_HASH`) makes the panel password view-only; admin sessions
-  are rate-limited the same way and end after 30 idle minutes.
-- The admin bridge plugin listens on the pod's loopback only, behind its own
-  token, and the agent forwards an allow-list of commands. Player platform ids
-  never leave the agent.
-- Sessions are signed `HttpOnly`, `SameSite=Strict` cookies.
-- The two tiers share a token. Backup downloads are name-checked and refuse symlinks.
-- With crossplay the server only dials out to PlayFab, so there are no game
-  ports to forward or scan.
-- The agent and the web container run as non-root on read-only root filesystems.
-- The metrics port (`:9464`) has no token. Keep it on your monitoring network.
-- Server settings accept only allow-listed launch options from structured
-  input, and the game parses the settings file instead of running it. The
-  settings volume holds the server password in plain text, for the agent and
-  the game only.
-
-Report issues as described in [SECURITY.md](SECURITY.md).
+The panel password is stored only as an argon2id hash, and login locks for 15
+minutes after 5 bad tries. With crossplay the server only dials out, so there are
+no game ports to forward or scan. The containers run as non-root on read-only
+filesystems, and player platform IDs never leave the agent. Two things to keep
+private: the metrics port has no token, and the settings volume holds the server
+password in plain text. More in [SECURITY.md](SECURITY.md).
 
 ## Crossplay notes
 
-- The server joins PlayFab and players come in through Microsoft's relays. It
-  needs outbound HTTPS and outbound UDP 1024-65535, and nothing inbound.
-- The join code can change when the server restarts, so the dashboard always
-  shows the current one.
-- Clients need the same game version as the server. Console patches can lag PC by days.
-- Xbox players need "You can join cross-network play" allowed in their privacy settings.
+- Players come in through Microsoft's PlayFab relays. The server needs outbound
+  HTTPS and UDP 1024-65535, nothing inbound.
+- The join code can change on restart. The dashboard always shows the current one.
+- Everyone needs the same game version. Console patches can lag PC by days.
+- Xbox players have to allow "You can join cross-network play" in their privacy settings.
 
 ## Development
 
-Needs Go 1.26+, Bun 1.3+ and Node 22+. A built-in mock server fakes a month of
-history, players coming and going, deaths and raids (password: `ognisko`),
-and a fake bridge with players walking around the map. `MOCK_ADMIN=1` adds an
-admin password (`jarl`); `MOCK_BRIDGE=off|disabled|untested` plays a bridge
-that is missing, switched off by a patch, or on an untested game build.
+You need Go 1.26+, Bun 1.3+ and Node 22+. A built-in mock fakes a month of
+history and players walking around the map (password `ognisko`).
 
 ```sh
 cd web && npm install && npm run build
@@ -272,30 +186,23 @@ Tests:
 
 ```sh
 cd agent  && go vet ./... && go test -race ./...
-cd bridge && dotnet test tests && sh build.sh   # build.sh fetches reference DLLs anonymously
+cd bridge && dotnet test tests && sh build.sh
 cd server && bun run typecheck && bun test
 cd web    && npm run typecheck && npm test
 ```
 
-To add a language, copy `web/src/i18n/en.ts`, register it in
+To add a language, copy `web/src/i18n/en.ts` and register it in
 `web/src/i18n/index.tsx` and in `LOCALES` in `server/src/config.ts`.
 
 ## Known gaps
 
-- Joins, leaves, deaths, platforms, saves and the network summary are
-  confirmed against a Valheim 1.0.17 crossplay session, as are boss progress
-  and world modifiers read from a 1.0.17 save. Raid detection still uses a
-  pre-1.0 pattern; if you have a real 1.0 raid line, please open an issue.
-- Xbox and Steam are the only platforms seen so far. PlayStation and Switch
-  players may show without a platform mark until their ID prefix is known.
-- A player's platform is matched to their character by arrival order, so two
-  people connecting within the same few seconds could swap marks.
-- Boss slots follow the seven vanilla bosses up to Fader; a Deep North boss
-  key isn't known yet.
-- One game server and one panel password (plus an optional admin password) per Skald instance.
-- Admin bridge: kick and ban of a connected player, teleport to coordinates
-  or to another player, crop growth and the cartography table reveal and pins
-  are not yet confirmed with a player in game.
+- Only Xbox and Steam players have been seen so far, so PlayStation and Switch
+  players may show up without a platform mark.
+- Two players joining within the same few seconds can swap platform marks.
+- The Deep North boss isn't on the boss path yet.
+- One game server per Skald instance.
+- Some bridge commands still need a test with a real player: kicking someone
+  who's online, teleporting to coordinates, crop growth, and map pins.
 
 ## Contributing
 
