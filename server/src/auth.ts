@@ -27,6 +27,43 @@ export function verifySession(secret: string, token: string | undefined, now = D
   return Number.isFinite(exp) && exp > now;
 }
 
+export const ADMIN_COOKIE = "skald_admin";
+/** An admin session ends after this long without an admin call. */
+export const ADMIN_IDLE_MS = 30 * 60 * 1000;
+
+/** The part of a session token that ties an admin token to it. */
+function sessionTag(session: string): string {
+  return b64url(createHmac("sha256", "skald-admin-tag").update(session).digest()).slice(0, 16);
+}
+
+/**
+ * Admin token: `a1.<expiresAtMs>.<sessionTag>.<hmac>`. Valid only next to the
+ * session it was issued with, and only until it has been idle for
+ * ADMIN_IDLE_MS: every admin call issues a fresh one.
+ */
+export function createAdminSession(secret: string, session: string, now = Date.now()): string {
+  const payload = `a1.${now + ADMIN_IDLE_MS}.${sessionTag(session)}`;
+  return `${payload}.${sign(secret, payload)}`;
+}
+
+export function verifyAdminSession(secret: string, token: string | undefined, session: string | undefined, now = Date.now()): boolean {
+  if (!token || !session) return false;
+  const parts = token.split(".");
+  if (parts.length !== 4 || parts[0] !== "a1") return false;
+  const payload = parts.slice(0, 3).join(".");
+  const expected = Buffer.from(sign(secret, payload));
+  const given = Buffer.from(parts[3] ?? "");
+  if (expected.length !== given.length || !timingSafeEqual(expected, given)) return false;
+  if (parts[2] !== sessionTag(session)) return false;
+  const exp = Number(parts[1]);
+  return Number.isFinite(exp) && exp > now;
+}
+
+/** A short, stable, non-reversible name for a session in the audit log. */
+export function sessionHash(session: string): string {
+  return createHmac("sha256", "skald-actor").update(session).digest("hex").slice(0, 6);
+}
+
 /** Reads one cookie out of a Cookie header (used for the WebSocket upgrade). */
 export function readCookie(header: string | null, name: string): string | undefined {
   if (!header) return undefined;

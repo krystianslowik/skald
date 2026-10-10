@@ -3,7 +3,12 @@ import { applyEvent } from "./apply";
 import type { HistoryStore } from "./db";
 import { deriveHistory } from "./history";
 import { deriveProfiles } from "./profiles";
-import { emptyAgentState, UNSTORED_EVENTS, type AgentEvent, type AgentEventType, type AgentState, type History, type LiveMessage, type PlayerProfile } from "./types";
+import { emptyAgentState, UNSTORED_EVENTS, type AgentEvent, type AgentEventType, type AgentState, type History, type LiveMessage, type LivePlayer, type PlayerProfile } from "./types";
+
+/** Live positions go out at most this often, whatever the agent sends. */
+const POSITIONS_EVERY_MS = 2_000;
+/** A positions sample older than this is not handed to a new socket. */
+const POSITIONS_FRESH_MS = 10_000;
 
 /** Types the agent re-emits without a change; stored only when the value moves. */
 const ON_CHANGE: Partial<Record<AgentEventType, (d: Record<string, unknown>) => string>> = {
@@ -40,6 +45,9 @@ export class Hub {
   private stopped = false;
   private timers: ReturnType<typeof setInterval>[] = [];
   private historyCache: { at: number; value: History } | null = null;
+  private positions: { at: number; msg: Extract<LiveMessage, { type: "positions" }> } | null = null;
+  private positionsSentAt = 0;
+  private positionsTimer: ReturnType<typeof setTimeout> | null = null;
   private profilesCache: { at: number; value: PlayerProfile[] } | null = null;
   private readonly opts: Required<HubOptions>;
 
@@ -99,10 +107,39 @@ export class Hub {
     this.stopped = true;
     this.abort?.abort();
     for (const t of this.timers) clearInterval(t);
+    if (this.positionsTimer) clearTimeout(this.positionsTimer);
+  }
+
+  /** The latest live positions, for a socket that just opened; null when stale or none. */
+  latestPositions(): LiveMessage | null {
+    if (!this.positions || this.opts.clock() - this.positions.at > POSITIONS_FRESH_MS) return null;
+    return this.positions.msg;
+  }
+
+  /**
+   * Live positions: never stored, never part of the replay, and passed on at
+   * most every 2 s (a newer sample replaces one still waiting).
+   */
+  private positionsEvent(ev: AgentEvent): void {
+    const players = Array.isArray(ev.data.players) ? (ev.data.players as LivePlayer[]) : [];
+    const t = Number(ev.data.t) || Date.parse(ev.ts) || this.opts.clock();
+    const now = this.opts.clock();
+    this.positions = { at: now, msg: { type: "positions", t, players } };
+    if (this.positionsTimer) return;
+    const wait = this.positionsSentAt + POSITIONS_EVERY_MS - now;
+    const send = () => {
+      this.positionsTimer = null;
+      this.positionsSentAt = this.opts.clock();
+      if (this.positions) this.emit(this.positions.msg);
+    };
+    if (wait <= 0) send();
+    else this.positionsTimer = setTimeout(send, wait);
   }
 
   /** Persists + broadcasts one agent event. Exposed for tests. */
   ingest(epoch: string, ev: AgentEvent): void {
+    // Volatile (seq 0): not part of the sequence the stream resumes from.
+    if (ev.type === "positions") return this.positionsEvent(ev);
     if (epoch === this.epoch && ev.seq <= this.lastSeq) return;
     this.epoch = epoch;
     this.lastSeq = ev.seq;

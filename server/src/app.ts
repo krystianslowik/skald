@@ -2,13 +2,20 @@ import { Hono, type Context } from "hono";
 import { getConnInfo } from "hono/bun";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { AgentAsset, AgentSource } from "./agent";
-import { createSession, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS, verifySession } from "./auth";
+import { ADMIN_COOKIE, ADMIN_IDLE_MS, createAdminSession, createSession, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS, sessionHash, verifyAdminSession, verifySession } from "./auth";
 import type { Hub } from "./hub";
 import type { MapCache, MapView } from "./map";
 import {
   ACTION_NAMES,
+  ADMIN_COMMANDS,
+  ADMIN_READS,
   BACKUP_NAME,
   type ActionName,
+  type AdminCatalog,
+  type AdminCommand,
+  type AdminRead,
+  type AdminStatus,
+  type BridgeStatus,
   type ApiState,
   type ApplyMode,
   type Locale,
@@ -31,6 +38,10 @@ export interface AppDeps {
   /** Header holding the real client IP behind a trusted proxy; empty = socket address. */
   trustedIpHeader?: string;
   limiter?: RateLimiter;
+  /** argon2id hash of the admin password; empty or unset: everyone signed in is an admin. */
+  adminPasswordHash?: string;
+  /** Limits admin unlocks like logins (separate buckets). */
+  adminLimiter?: RateLimiter;
   /** The world map; without it /api/map answers 404. */
   map?: MapCache;
   verifyPassword?: (password: string, hash: string) => Promise<boolean>;
@@ -107,6 +118,7 @@ export function createApp(deps: AppDeps): Hono {
 
   app.post("/api/logout", (c) => {
     deleteCookie(c, SESSION_COOKIE, { path: "/", secure: deps.secureCookie });
+    deleteCookie(c, ADMIN_COOKIE, { path: "/", secure: deps.secureCookie });
     return c.json({ ok: true });
   });
 
@@ -116,6 +128,34 @@ export function createApp(deps: AppDeps): Hono {
     if (!authed(c)) return c.json({ error: "unauthorized" }, 401);
     await next();
   });
+
+  // ---- roles ---------------------------------------------------------------
+  // With ADMIN_PASSWORD_HASH, changing anything (actions, settings, admin
+  // commands) needs an admin session on top of the panel session; without
+  // it, everyone signed in may, as before 0.8.0.
+  const adminRequired = Boolean(deps.adminPasswordHash);
+  const adminLimiter = deps.adminLimiter ?? new RateLimiter();
+  const isAdmin = (c: Context) =>
+    !adminRequired || verifyAdminSession(deps.sessionSecret, getCookie(c, ADMIN_COOKIE), getCookie(c, SESSION_COOKIE), clock());
+  /** Issues a fresh admin token: each admin call restarts the idle timeout. */
+  const touchAdmin = (c: Context) => {
+    if (!adminRequired) return;
+    setCookie(c, ADMIN_COOKIE, createAdminSession(deps.sessionSecret, getCookie(c, SESSION_COOKIE) ?? "", clock()), {
+      httpOnly: true,
+      secure: deps.secureCookie,
+      sameSite: "Strict",
+      path: "/",
+      maxAge: Math.floor(ADMIN_IDLE_MS / 1000),
+    });
+  };
+  /** null when the caller may change things; otherwise the 403 to return. */
+  const needAdmin = (c: Context) => {
+    if (isAdmin(c)) {
+      touchAdmin(c);
+      return null;
+    }
+    return c.json({ ok: false, error: "admin_required", message: "admin session required" }, 403);
+  };
 
   app.get("/api/state", async (c) => {
     const body: ApiState = {
@@ -232,6 +272,8 @@ export function createApp(deps: AppDeps): Hono {
   app.post("/api/action/:name", async (c) => {
     const name = c.req.param("name") as ActionName;
     if (!ACTION_NAMES.includes(name)) return c.json({ ok: false, message: "unknown action" }, 404);
+    const denied = needAdmin(c);
+    if (denied) return denied;
     if (!deps.hub.online) return c.json({ ok: false, message: "agent unreachable" }, 503);
     try {
       const res = await deps.agent.action(name);
@@ -258,6 +300,8 @@ export function createApp(deps: AppDeps): Hono {
   // Separate on purpose: the password only travels when someone asks to see it.
   app.get("/api/settings/password", (c) => settings(c, { op: "password" }));
   app.put("/api/settings", async (c) => {
+    const denied = needAdmin(c);
+    if (denied) return denied;
     if (Number(c.req.header("Content-Length") ?? 0) > 16_384) return c.json({ ok: false, message: "body too large" }, 413);
     let body: unknown;
     try {
@@ -269,6 +313,8 @@ export function createApp(deps: AppDeps): Hono {
     return settings(c, { op: "put", body });
   });
   app.post("/api/settings/apply", async (c) => {
+    const denied = needAdmin(c);
+    if (denied) return denied;
     let mode: unknown;
     try {
       mode = ((await c.req.json()) as { mode?: unknown }).mode;
@@ -278,9 +324,180 @@ export function createApp(deps: AppDeps): Hono {
     if (!APPLY_MODES.includes(mode as ApplyMode)) return c.json({ ok: false, message: 'mode must be "now" or "when_empty"' }, 400);
     return settings(c, { op: "apply", mode: mode as ApplyMode });
   });
-  app.delete("/api/settings/apply", (c) => settings(c, { op: "cancel" }));
+  app.delete("/api/settings/apply", (c) => needAdmin(c) ?? settings(c, { op: "cancel" }));
+
+  // ---- admin: the bridge plugin, through the agent ---------------------------
+
+  let statusCache: { at: number; value: BridgeStatus } | null = null;
+  const bridgeStatus = async (): Promise<BridgeStatus> => {
+    const now = clock();
+    if (statusCache && now - statusCache.at < 3_000) return statusCache.value;
+    let value: BridgeStatus;
+    try {
+      const res = await deps.agent.bridge({ op: "status" });
+      if (res.status === 404) value = offStatus("off");
+      else if (res.status !== 200) value = offStatus("agent");
+      else value = res.body as BridgeStatus;
+    } catch {
+      value = offStatus("agent");
+    }
+    statusCache = { at: now, value };
+    return value;
+  };
+
+  /** Who clicked, for the plugin's audit line: the name this device gave, or a session hash. */
+  const actorFor = (c: Context) => {
+    // URI-encoded by the browser: header values are bytes, names are not.
+    let raw = c.req.header("X-Skald-Name") ?? "";
+    try {
+      raw = decodeURIComponent(raw);
+    } catch {
+      // not encoded; use it as it is
+    }
+    const name = foldActor(raw);
+    return name || `dashboard-${sessionHash(getCookie(c, SESSION_COOKIE) ?? "")}`;
+  };
+
+  /** A bridge answer passed on: the plugin's own status, 502 when unreachable. */
+  const passBridge = async (c: Context, req: Parameters<AgentSource["bridge"]>[0]) => {
+    c.header("Cache-Control", "no-store");
+    try {
+      const res = await deps.agent.bridge(req);
+      if (req.op === "run") statusCache = null;
+      return c.json(res.body as object, res.status as 200);
+    } catch {
+      return c.json({ ok: false, error: "agent unreachable" }, 502);
+    }
+  };
+
+  app.get("/api/admin/status", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const body: AdminStatus = { bridge: await bridgeStatus(), required: adminRequired, unlocked: isAdmin(c), idleMs: ADMIN_IDLE_MS };
+    return c.json(body);
+  });
+
+  app.post("/api/admin/unlock", async (c) => {
+    if (!adminRequired) return c.json({ ok: true });
+    const key = `${clientIp(c, deps.trustedIpHeader ?? "")}:admin`;
+    const wait = adminLimiter.hit(key);
+    if (wait > 0) {
+      c.header("Retry-After", String(wait));
+      return c.json({ ok: false, error: "locked", retryAfter: wait }, 429);
+    }
+    let password = "";
+    try {
+      const body = (await c.req.json()) as { password?: unknown };
+      if (typeof body.password === "string") password = body.password;
+    } catch {
+      // empty or malformed body counts as a wrong password
+    }
+    let ok = false;
+    if (password) {
+      try {
+        ok = await verify(password, deps.adminPasswordHash!);
+      } catch {
+        ok = false;
+      }
+    }
+    if (!ok) return c.json({ ok: false, error: "invalid" }, 401);
+    adminLimiter.reset(key);
+    touchAdmin(c);
+    return c.json({ ok: true });
+  });
+
+  app.post("/api/admin/lock", (c) => {
+    deleteCookie(c, ADMIN_COOKIE, { path: "/", secure: deps.secureCookie });
+    return c.json({ ok: true });
+  });
+
+  // Everything else under /api/admin is for admins only, reads included.
+  app.use("/api/admin/*", async (c, next) => {
+    const denied = needAdmin(c);
+    if (denied) return denied;
+    await next();
+  });
+
+  app.get("/api/admin/players", (c) => passBridge(c, { op: "players" }));
+
+  app.get("/api/admin/read/:name", (c) => {
+    const name = c.req.param("name") as AdminRead;
+    if (!ADMIN_READS.includes(name)) return c.json({ ok: false, error: "unknown read" }, 404);
+    return passBridge(c, { op: "read", name });
+  });
+
+  // Event names, global keys and teleport spots, for the pickers.
+  let catalogCache: { at: number; value: AdminCatalog } | null = null;
+  app.get("/api/admin/catalog", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const now = clock();
+    if (catalogCache && now - catalogCache.at < 60_000 && c.req.query("fresh") === undefined) return c.json(catalogCache.value);
+    try {
+      const [ev, keys, locs] = await Promise.all([
+        deps.agent.bridge({ op: "read", name: "events" }),
+        deps.agent.bridge({ op: "read", name: "globalkeys" }),
+        deps.agent.bridge({ op: "read", name: "locations" }),
+      ]);
+      if (ev.status !== 200) return c.json(ev.body as object, ev.status as 200);
+      const evd = (ev.body as { data?: { current?: { name: string; elapsed: number; duration: number } | null; available?: string[] } }).data;
+      const keyd = (keys.body as { data?: string[] }).data;
+      const locd = (locs.body as { data?: { aliases?: string[] } }).data;
+      const value: AdminCatalog = {
+        events: evd?.available ?? [],
+        currentEvent: evd?.current ? { name: evd.current.name, elapsed: evd.current.elapsed, duration: evd.current.duration } : null,
+        globalKeys: keys.status === 200 && Array.isArray(keyd) ? keyd : [],
+        spots: locs.status === 200 && Array.isArray(locd?.aliases) ? locd.aliases : [],
+      };
+      catalogCache = { at: now, value };
+      return c.json(value);
+    } catch {
+      return c.json({ ok: false, error: "agent unreachable" }, 502);
+    }
+  });
+
+  app.post("/api/admin/:command", async (c) => {
+    const command = c.req.param("command") as AdminCommand;
+    if (!ADMIN_COMMANDS.includes(command)) return c.json({ ok: false, error: "unknown command" }, 404);
+    if (!deps.hub.online) return c.json({ ok: false, error: "agent unreachable" }, 503);
+    if (Number(c.req.header("Content-Length") ?? 0) > 4096) return c.json({ ok: false, error: "body too large" }, 413);
+    let raw = "";
+    try {
+      raw = await c.req.text();
+    } catch {
+      raw = "";
+    }
+    if (raw.length > 4096) return c.json({ ok: false, error: "body too large" }, 413);
+    let body: unknown = {};
+    if (raw.trim()) {
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        return c.json({ ok: false, error: "bad request body" }, 400);
+      }
+    }
+    if (typeof body !== "object" || body === null || Array.isArray(body)) return c.json({ ok: false, error: "bad request body" }, 400);
+    // The world changed: the next catalog read goes to the plugin.
+    catalogCache = null;
+    return passBridge(c, { op: "run", command, body: body as Record<string, unknown>, actor: actorFor(c) });
+  });
 
   return app;
+}
+
+function offStatus(reason: BridgeStatus["reason"]): BridgeStatus {
+  return { available: false, reason, worldLoaded: false, timeFrozen: false, tested: false, acknowledged: false, testedBuilds: [], commands: [] };
+}
+
+/** A device's name for the audit line: ASCII letters, digits and -_.@ only (the plugin's rule). */
+export function foldActor(name: string): string {
+  return name
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ł/g, "l")
+    .replace(/Ł/g, "L")
+    .replace(/\s+/g, "-")
+    .replace(/[^A-Za-z0-9_.@-]/g, "")
+    .slice(0, 40);
 }
 
 const APPLY_MODES: readonly ApplyMode[] = ["now", "when_empty"];

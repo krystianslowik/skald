@@ -37,6 +37,9 @@ function setup(
     async asset(path, etag, signal) {
       return opts.asset ? opts.asset(path, etag, signal) : new Response(null, { status: 404 });
     },
+    async bridge() {
+      return { status: 404, body: { ok: false, message: "not found" } };
+    },
     async settings(req) {
       settingsCalls.push(req);
       return opts.settings ? opts.settings(req) : { status: 404, body: { ok: false, message: "not found" } };

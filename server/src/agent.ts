@@ -1,5 +1,5 @@
 import { SseParser } from "./sse";
-import type { ActionName, ActionResult, AgentEvent, AgentState, LogLine, MapSnapshot, SettingsRequest } from "./types";
+import type { ActionName, ActionResult, AdminCommand, AdminRead, AgentEvent, AgentState, LogLine, MapSnapshot, SettingsRequest } from "./types";
 
 export interface ActionResponse {
   status: number;
@@ -22,6 +22,13 @@ export interface MapSourceResult {
 /** Files the agent serves as they are: the item icon sheet and its map, the terrain image and its facts. */
 export type AgentAsset = "icons/map.json" | "icons/sheet.webp" | "terrain.png" | "terrain.json";
 
+/** One bridge call, proxied to the agent (or answered by the mock). */
+export type BridgeRequest =
+  | { op: "status" }
+  | { op: "players" }
+  | { op: "read"; name: AdminRead }
+  | { op: "run"; command: AdminCommand; body: Record<string, unknown>; actor: string };
+
 /** Everything the web tier needs from the agent; implemented over HTTP and by the mock. */
 export interface AgentSource {
   getState(): Promise<AgentState>;
@@ -37,6 +44,8 @@ export interface AgentSource {
   map(etag: string | null): Promise<MapSourceResult>;
   /** Raw agent file response (200 with a body, 304, 404, 503); the caller owns the body. */
   asset(path: AgentAsset, etag: string | null, signal: AbortSignal): Promise<Response>;
+  /** The admin bridge: 404 when the agent has no BRIDGE_TOKEN. */
+  bridge(req: BridgeRequest): Promise<Proxied>;
 }
 
 const SETTINGS_ROUTE: Record<SettingsRequest["op"], [method: string, path: string]> = {
@@ -127,6 +136,26 @@ export class HttpAgent implements AgentSource {
     const headers: Record<string, string> = this.headers();
     if (etag) headers["If-None-Match"] = etag;
     return this.fetchImpl(`${this.baseUrl}/${path}`, { headers, signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]) });
+  }
+
+  async bridge(req: BridgeRequest): Promise<Proxied> {
+    const path = req.op === "status" ? "/bridge/status" : req.op === "players" ? "/bridge/players" : req.op === "read" ? `/bridge/${req.name}` : `/bridge/${req.command}`;
+    const headers: Record<string, string> = this.headers();
+    let body: string | undefined;
+    if (req.op === "run") {
+      headers["Content-Type"] = "application/json";
+      headers["X-Skald-Actor"] = req.actor;
+      body = JSON.stringify(req.body);
+    }
+    // The agent gives the plugin 8 s; this leaves room for its answer.
+    const res = await this.fetchImpl(`${this.baseUrl}${path}`, { method: body ? "POST" : "GET", headers, body, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch {
+      json = { ok: false, error: `HTTP ${res.status}` };
+    }
+    return { status: res.status, body: json };
   }
 
   backup(name: string, signal: AbortSignal): Promise<Response> {

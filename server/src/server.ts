@@ -12,7 +12,7 @@ import { mountStatic } from "./static";
 import type { LiveMessage } from "./types";
 
 // `skald-web hash-password`: reads a password on stdin, prints an argon2id hash
-// for PANEL_PASSWORD_HASH. Handled before loadConfig, which needs the secrets.
+// for PANEL_PASSWORD_HASH or ADMIN_PASSWORD_HASH. Handled before loadConfig, which needs the secrets.
 if (process.argv[2] === "hash-password") {
   try {
     console.log(await hashPassword(await Bun.stdin.text()));
@@ -27,13 +27,18 @@ const cfg = loadConfig();
 
 let agent: AgentSource;
 let passwordHash = cfg.passwordHash;
+let adminPasswordHash = cfg.adminPasswordHash;
 if (cfg.mock) {
-  const mock = new MockAgent(Date.now, cfg.timeZone);
+  const mock = new MockAgent(Date.now, cfg.timeZone, cfg.mockBridge);
   mock.start();
   agent = mock;
   if (!passwordHash) {
     passwordHash = await Bun.password.hash("ognisko");
     console.log('MOCK_AGENT=1: fake agent, dev password is "ognisko"');
+  }
+  if (!adminPasswordHash && process.env.MOCK_ADMIN === "1") {
+    adminPasswordHash = await Bun.password.hash("jarl");
+    console.log('MOCK_ADMIN=1: admin actions need the admin password "jarl"');
   }
 } else {
   agent = new HttpAgent(cfg.agentUrl, cfg.agentToken);
@@ -53,6 +58,7 @@ const metrics = cachedMetrics(async () => {
 const app = createApp({
   sessionSecret: cfg.sessionSecret,
   passwordHash,
+  adminPasswordHash,
   secureCookie: cfg.cookieSecure,
   agent,
   hub,
@@ -87,6 +93,8 @@ const server = Bun.serve<WsData>({
     open(ws) {
       const send = (m: LiveMessage) => ws.send(JSON.stringify(m));
       send({ type: "state", state: hub.getState(), online: hub.online });
+      const positions = hub.latestPositions();
+      if (positions) send(positions);
       ws.data.unsubscribe = hub.subscribe(send);
     },
     close(ws) {
@@ -99,5 +107,5 @@ const server = Bun.serve<WsData>({
 });
 
 console.log(
-  `skald-web listening on ${server.hostname}:${server.port} (locale ${cfg.locale}, tz ${cfg.timeZone}, metrics ${metricsConfigured ? "on" : "off"}, map spoilers ${cfg.mapSpoilers ? "on" : "off"})${cfg.mock ? " (mock agent)" : ""}`,
+  `skald-web listening on ${server.hostname}:${server.port} (locale ${cfg.locale}, tz ${cfg.timeZone}, metrics ${metricsConfigured ? "on" : "off"}, map spoilers ${cfg.mapSpoilers ? "on" : "off"}, admin password ${adminPasswordHash ? "on" : "off"})${cfg.mock ? " (mock agent)" : ""}`,
 );

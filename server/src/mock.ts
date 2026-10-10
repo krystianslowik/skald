@@ -1,4 +1,4 @@
-import type { ActionResponse, AgentAsset, AgentSource, MapSourceResult, Proxied } from "./agent";
+import type { ActionResponse, AgentAsset, AgentSource, BridgeRequest, MapSourceResult, Proxied } from "./agent";
 import { mockMap } from "./mapmock";
 import { mockIcons, type MockIcons } from "./mockicons";
 import { MOCK_TERRAIN_RADIUS, mockTerrain } from "./mockterrain";
@@ -10,6 +10,7 @@ import type {
   AgentEventType,
   AgentState,
   ApplyMode,
+  BridgeStatus,
   LogLine,
   MapSnapshot,
   Metrics,
@@ -40,6 +41,42 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 /** The real agent waits 60 s of an empty server; the mock waits a few seconds so the flow can be watched. */
 const MOCK_EMPTY_MS = 6_000;
+
+/** Where the mock's players roam: the mock map's bases and a few landmarks. */
+const HAUNTS: [number, number][] = [
+  [220, -340],
+  [260, -300],
+  [330, 140],
+  [-860, 420],
+  [-1460, 980],
+  [0, 0],
+  [1580, 1720],
+];
+const SPOTS: Record<string, [number, number]> = {
+  spawn: [0, 0],
+  eikthyr: [330, 140],
+  elder: [-1180, 760],
+  bonemass: [-2100, 1500],
+  moder: [2400, 2900],
+  yagluth: [-3900, -3100],
+  queen: [4100, -2600],
+  fader: [-5200, 4400],
+  haldor: [-860, 420],
+  hildir: [1900, -1200],
+  bogwitch: [-2600, 2200],
+};
+const MOCK_EVENTS = ["army_bonemass", "army_eikthyr", "army_goblin", "army_moder", "army_theelder", "blobs", "bats", "foresttrolls", "skeletons", "surtlings", "wolves"];
+/** What the mock's "plugin" says it was tested on. */
+const MOCK_BUILD = "l-1.0.17";
+
+interface MockPos {
+  x: number;
+  z: number;
+  tx: number;
+  tz: number;
+  health: number;
+  maxHealth: number;
+}
 
 const NOISE = [
   "Dungeon loaded 0",
@@ -135,10 +172,19 @@ export class MockAgent implements AgentSource {
   private mapBase: MapSnapshot | null = null;
   private iconSet: MockIcons | null = null;
   private mapGeneration = 1;
+  // The fake bridge plugin.
+  private pos = new Map<string, MockPos>();
+  private bans: { id: string; platform: Platform; name?: string }[] = [{ id: "5e1d0c3b2a190807", platform: "steam", name: "Hrafn" }, { id: "0f9e8d7c6b5a4f3e", platform: "xbox" }];
+  private event: { name: string; at: number; duration: number } | null = null;
+  private frozen = false;
+  private acked = false;
+  private lastPositions = "";
 
   constructor(
     private readonly clock: () => number = Date.now,
     private readonly timeZone = "UTC",
+    /** How the fake bridge behaves: on, off (not installed), disabled (after a patch), untested (unknown build). */
+    private readonly bridgeMode = "on",
   ) {
     const now = this.clock();
     this.state = {
@@ -221,10 +267,17 @@ export class MockAgent implements AgentSource {
     this.loop(60000, () => this.save());
     this.loop(14000, () => this.drift());
     this.loop(1000, () => this.watchEmpty());
+    // Live positions every 2 s, like the agent's poll; the walk is stepped every half second.
+    const walk = setInterval(() => this.walk(0.5), 500);
+    const sample = setInterval(() => this.samplePositions(), 2000);
+    this.timers.push(walk as unknown as ReturnType<typeof setTimeout>, sample as unknown as ReturnType<typeof setTimeout>);
   }
 
   stop(): void {
-    for (const t of this.timers) clearTimeout(t);
+    for (const t of this.timers) {
+      clearTimeout(t);
+      clearInterval(t);
+    }
   }
 
   async getState(): Promise<AgentState> {
@@ -464,6 +517,303 @@ export class MockAgent implements AgentSource {
     if (now - this.emptySince < MOCK_EMPTY_MS || this.busy) return;
     this.disarm();
     this.fireApply("when_empty");
+  }
+
+  // ---- the fake bridge ------------------------------------------------------
+
+  async bridge(req: BridgeRequest): Promise<Proxied> {
+    const ok = (data: unknown): Proxied => ({ status: 200, body: { ok: true, data } });
+    const fail = (status: number, error: string): Proxied => ({ status, body: { ok: false, error } });
+    if (this.bridgeMode === "off") return { status: 404, body: { ok: false, message: "not found" } };
+    if (req.op === "status") return { status: 200, body: this.bridgeStatus() };
+    if (this.bridgeMode === "disabled") return fail(503, "bridge disabled: game API binding failed (ZNet.Kick), game build l-1.0.18");
+    if (this.state.server.status !== "running") return fail(502, "bridge unavailable");
+    switch (req.op) {
+      case "players":
+        return ok({ players: this.livePlayers().map((p) => ({ ...p, y: 34, hasCharacter: true })) });
+      case "read":
+        switch (req.name) {
+          case "time": {
+            const c = (await this.getState()).world.clock;
+            return ok({ day: c?.day ?? 0, dayFraction: c?.dayFraction ?? 0, netTimeSeconds: c?.netTime ?? 0, dayLengthSeconds: 1800, timeSkipping: false });
+          }
+          case "events":
+            this.expireEvent();
+            return ok({
+              current: this.event ? { name: this.event.name, position: { x: 220, y: 34, z: -340 }, elapsed: Math.round((this.clock() - this.event.at) / 1000), duration: this.event.duration } : null,
+              available: MOCK_EVENTS,
+            });
+          case "globalkeys":
+            return ok([...(this.state.world.meta?.globalKeys ?? [])].sort());
+          case "locations":
+            return ok({ aliases: Object.keys(SPOTS), locations: ["Eikthyrnir", "GDKing", "Vendor_BlackForest", "StartTemple"] });
+          case "bans":
+            return ok(this.bans);
+        }
+        return fail(404, "unknown read");
+      case "run":
+        return this.runBridge(req.command, req.body, req.actor);
+    }
+  }
+
+  private bridgeStatus(): BridgeStatus {
+    const untested = this.bridgeMode === "untested";
+    const base = { testedBuilds: [MOCK_BUILD], commands: [] as string[], timeFrozen: this.frozen };
+    if (this.bridgeMode === "disabled") return { ...base, available: false, reason: "disabled" as const, message: "bridge disabled: game API binding failed (ZNet.Kick), game build l-1.0.18", worldLoaded: false, tested: false, acknowledged: false };
+    if (this.state.server.status !== "running") return { ...base, available: false, reason: "restarting" as const, worldLoaded: false, tested: false, acknowledged: false };
+    return { ...base, available: true, plugin: "0.1.1", gameBuild: untested ? "l-1.0.18" : MOCK_BUILD, worldLoaded: true, tested: !untested, acknowledged: untested && this.acked };
+  }
+
+  private livePlayers() {
+    return this.state.players.map((p) => {
+      const at = this.posOf(p.name);
+      return { name: p.name, platform: p.platform ?? "unknown", x: Math.round(at.x * 10) / 10, z: Math.round(at.z * 10) / 10, health: Math.round(at.health), maxHealth: at.maxHealth };
+    });
+  }
+
+  private posOf(name: string): MockPos {
+    let p = this.pos.get(name);
+    if (!p) {
+      const [hx, hz] = HAUNTS[Math.floor(Math.random() * 2)]!;
+      p = { x: hx + (Math.random() - 0.5) * 60, z: hz + (Math.random() - 0.5) * 60, tx: hx, tz: hz, health: 40 + Math.random() * 60, maxHealth: name === "Ragnar" ? 120 : 100 };
+      this.pos.set(name, p);
+    }
+    return p;
+  }
+
+  /** Each player walks towards a target near a haunt, picks another on arrival. */
+  private walk(dt: number): void {
+    for (const pl of this.state.players) {
+      const p = this.posOf(pl.name);
+      const dx = p.tx - p.x;
+      const dz = p.tz - p.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 3) {
+        const [hx, hz] = Math.random() < 0.97 ? [p.x, p.z] : HAUNTS[Math.floor(Math.random() * HAUNTS.length)]!;
+        // Wander, but drift back home when too far from any haunt.
+        const home = HAUNTS[0]!;
+        const far = Math.hypot(p.x - home[0], p.z - home[1]) > 400 && Math.random() < 0.2;
+        p.tx = (far ? home[0] : hx) + (Math.random() - 0.5) * 120;
+        p.tz = (far ? home[1] : hz) + (Math.random() - 0.5) * 120;
+        continue;
+      }
+      // Walking pace, a run now and then; long trips go by "portal".
+      if (d > 600) {
+        p.x = p.tx + (Math.random() - 0.5) * 20;
+        p.z = p.tz + (Math.random() - 0.5) * 20;
+        continue;
+      }
+      const speed = (Math.random() < 0.3 ? 7 : 4) * dt;
+      p.x += (dx / d) * Math.min(d, speed);
+      p.z += (dz / d) * Math.min(d, speed);
+      p.health = Math.min(p.maxHealth, Math.max(5, p.health + (Math.random() - 0.35) * 2));
+    }
+    for (const name of [...this.pos.keys()]) if (!this.state.players.some((p) => p.name === name)) this.pos.delete(name);
+  }
+
+  private samplePositions(): void {
+    if (this.bridgeMode === "off" || this.bridgeMode === "disabled" || this.state.server.status !== "running") return;
+    const players = this.livePlayers();
+    const key = JSON.stringify(players);
+    if (key === this.lastPositions) return;
+    this.lastPositions = key;
+    // Volatile, like the agent's: seq 0, not kept for replay.
+    const ev: AgentEvent = { seq: 0, ts: new Date(this.clock()).toISOString(), type: "positions", data: { t: this.clock(), players } };
+    for (const fn of this.subs) fn(ev);
+  }
+
+  private expireEvent(): void {
+    if (this.event && this.clock() - this.event.at > this.event.duration * 1000) this.event = null;
+  }
+
+  /** One admin command: a plausible answer, the plugin's audit lines, and the agent's `admin` event. */
+  private runBridge(command: string, body: Record<string, unknown>, actor: string): Proxied {
+    const fail = (status: number, error: string): Proxied => {
+      this.log(`[Info   :Skald Bridge] [SkaldBridge] audit actor=${actor} cmd=POST /v1/${command} result=error ${error}`);
+      this.emit("admin", { ...summary, actor, command, result: "error", error });
+      return { status, body: { ok: false, error } };
+    };
+    const summary = mockSummary(body);
+    if (this.bridgeMode === "untested" && !this.acked && command !== "ack-build") {
+      return { status: 409, body: { ok: false, error: "untested game build l-1.0.18: confirm it in the admin panel first" } };
+    }
+    if (command === "ack-build") {
+      if (body.build !== "l-1.0.18" && body.build !== MOCK_BUILD) return { status: 409, body: { ok: false, error: `the server runs ${this.bridgeStatus().gameBuild}` } };
+      this.acked = true;
+      this.emit("admin", { actor, command, result: "ok", build: body.build });
+      return { status: 200, body: { ok: true, data: { build: body.build } } };
+    }
+    this.log(`[Info   :Skald Bridge] [SkaldBridge] audit actor=${actor} cmd=POST /v1/${command} args=${JSON.stringify({ ...body, player: body.player ? "***" : undefined })}`);
+    const online = (n: unknown) => typeof n === "string" && this.state.players.some((p) => p.name.toLowerCase() === n.toLowerCase());
+    const nameOf = (n: unknown) => this.state.players.find((p) => p.name.toLowerCase() === String(n).toLowerCase())?.name ?? String(n);
+    for (const k of ["player", "toPlayer"]) {
+      if (k in body && !online(body[k])) return fail(404, `no connected player '${String(body[k])}'`);
+    }
+    const target = body.player ? nameOf(body.player) : undefined;
+    const near = target ?? "position";
+    let data: Record<string, unknown>;
+    switch (command) {
+      case "broadcast":
+        if (body.type === "chat") return fail(501, "not possible server-side: use center, topleft or narrator");
+        if (typeof body.text !== "string" || !body.text.trim()) return fail(400, "missing 'text'");
+        data = { sentTo: this.state.players.length, type: body.type ?? "center" };
+        break;
+      case "save":
+        this.timers.push(setTimeout(() => this.save(), 800));
+        data = { started: true };
+        break;
+      case "kick":
+        if (!target) return fail(400, "missing 'player'");
+        this.timers.push(setTimeout(() => this.leave(target), 600));
+        data = { kicked: target };
+        break;
+      case "ban":
+        if (!target) return fail(400, "missing 'player'");
+        this.bans.push({ id: Math.random().toString(16).slice(2, 18).padEnd(16, "0"), platform: platformOf(target), name: target });
+        this.timers.push(setTimeout(() => this.leave(target), 600));
+        data = { name: target };
+        break;
+      case "unban": {
+        const i = this.bans.findIndex((b) => b.id === body.id);
+        if (i < 0) return fail(404, "not on the ban list (reload it)");
+        this.bans.splice(i, 1);
+        data = {};
+        break;
+      }
+      case "time":
+      case "skip-to-morning": {
+        const meta = this.state.world.meta;
+        if (!meta) return fail(503, "world not loaded yet");
+        const frac = command === "time" ? Number(body.dayFraction) : 0.25;
+        if (!(frac >= 0 && frac < 1)) return fail(400, "'dayFraction' must be in [0,1)");
+        const now = meta.netTime % 1800;
+        const add = frac * 1800 > now ? frac * 1800 - now : 1800 - now + frac * 1800;
+        meta.netTime += add;
+        meta.day = Math.floor(meta.netTime / 1800);
+        meta.savedAt = new Date(this.clock()).toISOString();
+        data = { day: meta.day, dayFraction: frac };
+        break;
+      }
+      case "time-freeze":
+      case "time-resume":
+        this.frozen = command === "time-freeze";
+        data = { frozen: this.frozen };
+        break;
+      case "event-start": {
+        const name = String(body.name ?? "");
+        if (!MOCK_EVENTS.includes(name)) return fail(404, `unknown event '${name}'`);
+        this.event = { name, at: this.clock(), duration: 120 };
+        this.timers.push(setTimeout(() => this.raid(name), 400));
+        data = { started: name, near };
+        break;
+      }
+      case "event-stop":
+        this.expireEvent();
+        if (!this.event) return fail(409, "no event is running");
+        data = { stopped: this.event.name };
+        this.event = null;
+        break;
+      case "spawn": {
+        const lines = Array.isArray(body.items) ? (body.items as Record<string, unknown>[]) : [body];
+        if (lines.length === 0 || lines.length > 20) return fail(400, "'items' must hold 1 to 20 entries");
+        let stacks = 0;
+        for (const l of lines) {
+          if (typeof l.item !== "string" || !l.item) return fail(400, "missing 'item'");
+          const amount = Number(l.amount ?? 1);
+          if (!(amount >= 1 && amount <= 999)) return fail(400, "'amount' must be between 1 and 999");
+          stacks += Math.ceil(amount / (/Wood|Stone|Resin|Coins/.test(l.item) ? 50 : 1));
+        }
+        if (stacks > 60) return fail(400, "too many stacks in one call (max 60)");
+        data = { items: lines.map((l) => ({ item: l.item, amount: Number(l.amount ?? 1), quality: Number(l.quality ?? 1) })), stacks, near };
+        break;
+      }
+      case "teleport": {
+        if (!target) return fail(400, "missing 'player'");
+        const p = this.posOf(target);
+        let to: [number, number];
+        let label: string;
+        if (typeof body.toPlayer === "string") {
+          const o = this.posOf(nameOf(body.toPlayer));
+          to = [o.x + 2, o.z + 2];
+          label = nameOf(body.toPlayer);
+        } else if (typeof body.toSpot === "string") {
+          const spot = SPOTS[body.toSpot.toLowerCase()];
+          if (!spot) return fail(404, `unknown spot '${body.toSpot}'`);
+          to = spot;
+          label = body.toSpot;
+        } else if (body.to && typeof body.to === "object") {
+          const t = body.to as { x?: unknown; z?: unknown };
+          to = [Number(t.x), Number(t.z)];
+          if (!to.every(Number.isFinite) || Math.abs(to[0]) > 10500 || Math.abs(to[1]) > 10500) return fail(400, "'to' is outside the world");
+          label = "position";
+        } else return fail(400, "one of 'to', 'toPlayer', 'toSpot' is required");
+        p.x = p.tx = to[0];
+        p.z = p.tz = to[1];
+        data = { player: target, to: { x: to[0], y: 34, z: to[1] }, label };
+        break;
+      }
+      case "globalkey-set":
+      case "globalkey-remove": {
+        const key = String(body.key ?? "").toLowerCase();
+        const meta = this.state.world.meta;
+        if (!key || !meta) return fail(400, "missing 'key'");
+        const keys = new Set(meta.globalKeys ?? []);
+        if (command === "globalkey-set") keys.add(key);
+        else keys.delete(key);
+        meta.globalKeys = [...keys];
+        if (meta.bosses) meta.bosses = meta.bosses.map((b) => ({ ...b, defeated: keys.has(b.key) }));
+        data = [...keys].sort() as unknown as Record<string, unknown>;
+        break;
+      }
+      case "creature-spawn": {
+        const count = Number(body.count ?? 1);
+        if (typeof body.prefab !== "string" || !body.prefab) return fail(400, "missing 'prefab'");
+        if (!(count >= 1 && count <= 20)) return fail(400, "'count' must be between 1 and 20");
+        data = { prefab: body.prefab, count, level: Number(body.level ?? 1), tamed: Boolean(body.tamed), boss: /Eikthyr|gd_king|Bonemass|Dragon|GoblinKing|SeekerQueen|Fader/.test(body.prefab), near };
+        break;
+      }
+      case "creature-kill":
+        data = { killed: Math.floor(Math.random() * 6), skippedTamedOrBoss: 0, unloaded: 0, near, radius: Number(body.radius ?? 30) };
+        break;
+      case "creature-tame":
+        data = { tamed: Math.floor(Math.random() * 3), alreadyTamed: 0, unloaded: 0, near };
+        break;
+      case "heal": {
+        if (!target) return fail(400, "missing 'player'");
+        const p = this.posOf(target);
+        p.health = p.maxHealth;
+        data = { player: target, amount: p.maxHealth };
+        break;
+      }
+      case "status":
+        if (!target) return fail(400, "missing 'player'");
+        data = { player: target, effect: body.effect ?? "Rested" };
+        break;
+      case "repair":
+        data = { repaired: Math.floor(Math.random() * 12), unloaded: 0, near };
+        break;
+      case "fill":
+        data = { smelters: 1 + Math.floor(Math.random() * 3), fermenters: Math.floor(Math.random() * 2), unloaded: 0, near };
+        break;
+      case "grow":
+        data = { plants: Math.floor(Math.random() * 30), near };
+        break;
+      case "map-reveal":
+      case "map-pins":
+        data = { tables: Array.from({ length: 1 + Math.floor(Math.random() * 2) }, () => ({})), near };
+        break;
+      default:
+        return fail(404, `unknown command ${command}`);
+    }
+    this.log(`[Info   :Skald Bridge] [SkaldBridge] audit actor=${actor} cmd=POST /v1/${command} result=ok ${JSON.stringify({ ok: true, data })}`);
+    const counts: Record<string, unknown> = {};
+    if (!Array.isArray(data)) {
+      for (const k of ["killed", "tamed", "repaired", "smelters", "fermenters", "plants", "sentTo", "stopped", "started", "label", "stacks", "day"]) if (k in data) counts[k] = data[k];
+      if (Array.isArray(data.tables)) counts.tables = data.tables.length;
+      for (const k of ["near", "kicked", "player", "name"]) if (typeof data[k] === "string" && data[k] !== "position") counts.player = data[k];
+    }
+    this.emit("admin", { ...summary, ...counts, actor, command, result: "ok" });
+    return { status: 200, body: { ok: true, data } };
   }
 
   async backup(name: string): Promise<Response> {
@@ -715,6 +1065,22 @@ export class MockAgent implements AgentSource {
       this.emit("player_count", { count: i + 1 }, at);
     }
   }
+}
+
+/** The agent's argument summary for an admin event: names, never ids. */
+function mockSummary(body: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of ["type", "item", "amount", "quality", "prefab", "count", "level", "tamed", "includeBosses", "name", "key", "effect", "dayFraction", "toSpot", "radius", "player", "toPlayer"]) {
+    if (body[k] !== undefined) out[k] = body[k];
+  }
+  if (typeof body.text === "string") out.text = body.text.slice(0, 120);
+  if (Array.isArray(body.items)) out.items = (body.items as Record<string, unknown>[]).slice(0, 20).map((l) => ({ item: l.item, amount: l.amount, quality: l.quality }));
+  if (Array.isArray(body.pins)) out.pins = body.pins.length;
+  for (const k of ["at", "to"]) {
+    const v = body[k] as { x?: unknown; z?: unknown } | undefined;
+    if (v && typeof v === "object") out[k] = { x: Math.round(Number(v.x)), z: Math.round(Number(v.z)) };
+  }
+  return out;
 }
 
 /** Synthetic 6 h of resource series for mock mode. */

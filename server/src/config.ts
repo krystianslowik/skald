@@ -8,6 +8,12 @@ export interface Config {
   agentUrl: string;
   agentToken: string;
   passwordHash: string;
+  /**
+   * argon2id hash of an admin password. Set, the panel password only views
+   * and admin actions need an admin session; empty, everyone signed in is an
+   * admin (the behaviour before 0.8.0).
+   */
+  adminPasswordHash: string;
   sessionSecret: string;
   /** Empty means "no Prometheus": the resource charts show how to enable them. */
   promUrl: string;
@@ -27,6 +33,8 @@ export interface Config {
   trustedIpHeader: string;
   /** Show every boss, trader and dungeon location, not only the ones someone found. */
   mapSpoilers: boolean;
+  /** Mock mode only: how the fake bridge behaves (on, off, disabled, untested). */
+  mockBridge: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -65,6 +73,7 @@ export function loadConfig(env: Env = process.env): Config {
     agentToken: req("AGENT_TOKEN", "mock"),
     // Empty in mock mode means "hash the dev password at startup".
     passwordHash: req("PANEL_PASSWORD_HASH", ""),
+    adminPasswordHash: opt("ADMIN_PASSWORD_HASH", ""),
     sessionSecret: req("SESSION_SECRET", "mock-session-secret"),
     // Empty means no Prometheus (mock mode synthesizes metrics instead).
     promUrl: opt("PROM_URL", "").replace(/\/+$/, ""),
@@ -78,5 +87,6 @@ export function loadConfig(env: Env = process.env): Config {
     cookieSecure: mock ? false : opt("COOKIE_SECURE", "true") !== "false",
     trustedIpHeader: opt("TRUSTED_IP_HEADER", ""),
     mapSpoilers: ["1", "true", "yes", "on"].includes(opt("MAP_SPOILERS", "false").toLowerCase()),
+    mockBridge: opt("MOCK_BRIDGE", "on").toLowerCase(),
   };
 }

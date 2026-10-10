@@ -245,10 +245,12 @@ export type AgentEventType =
   | "raid"
   | "net_stats"
   | "settings_changed"
-  | "settings_apply";
+  | "settings_apply"
+  | "admin"
+  | "positions";
 
 /** High-frequency types that are broadcast live but never stored in history. */
-export const UNSTORED_EVENTS: readonly AgentEventType[] = ["log", "net_stats"];
+export const UNSTORED_EVENTS: readonly AgentEventType[] = ["log", "net_stats", "positions"];
 
 export interface AgentEvent {
   seq: number;
@@ -343,7 +345,8 @@ export interface PublicConfig {
 
 export type LiveMessage =
   | { type: "event"; event: AgentEvent }
-  | { type: "state"; state: AgentState; online: boolean };
+  | { type: "state"; state: AgentState; online: boolean }
+  | { type: "positions"; t: number; players: LivePlayer[] };
 
 export interface ActionResult {
   ok: boolean;
@@ -559,4 +562,111 @@ export interface ApiStorage {
   savedAt: string;
   showNames: boolean;
   containers: MapContainer[];
+}
+
+// ---- admin (the Skald bridge plugin, through the agent) --------------------
+
+/**
+ * Commands the panel may send (agent POST /bridge/{command}). The agent keeps
+ * the same allow-list; `ack-build` lets commands run on a game build that is
+ * not on the tested list.
+ */
+export const ADMIN_COMMANDS = [
+  "broadcast",
+  "save",
+  "kick",
+  "ban",
+  "unban",
+  "time",
+  "skip-to-morning",
+  "time-freeze",
+  "time-resume",
+  "event-start",
+  "event-stop",
+  "spawn",
+  "teleport",
+  "globalkey-set",
+  "globalkey-remove",
+  "creature-spawn",
+  "creature-kill",
+  "creature-tame",
+  "heal",
+  "status",
+  "repair",
+  "fill",
+  "grow",
+  "map-reveal",
+  "map-pins",
+  "ack-build",
+] as const;
+export type AdminCommand = (typeof ADMIN_COMMANDS)[number];
+
+/** Read-only bridge calls (agent GET /bridge/{name}). */
+export const ADMIN_READS = ["time", "events", "globalkeys", "locations", "bans"] as const;
+export type AdminRead = (typeof ADMIN_READS)[number];
+
+/** Why the bridge cannot take commands right now. */
+export type BridgeReason = "off" | "unreachable" | "disabled" | "token" | "loading" | "restarting" | "agent";
+
+/** Agent GET /bridge/status. */
+export interface BridgeStatus {
+  available: boolean;
+  reason?: BridgeReason;
+  message?: string;
+  plugin?: string;
+  gameBuild?: string;
+  worldLoaded: boolean;
+  timeFrozen: boolean;
+  /** The game build is on the agent's tested list. */
+  tested: boolean;
+  /** An admin confirmed this untested build from the panel. */
+  acknowledged: boolean;
+  testedBuilds: string[];
+  commands: string[];
+}
+
+/** GET /api/admin/status: the bridge and whether this browser may command it. */
+export interface AdminStatus {
+  bridge: BridgeStatus;
+  /** ADMIN_PASSWORD_HASH is set: the panel password alone only views. */
+  required: boolean;
+  /** This browser holds an admin session (always true when not required). */
+  unlocked: boolean;
+  /** Idle timeout of an admin session, in ms. */
+  idleMs: number;
+}
+
+/** A connected player as the agent serves it: never a platform or peer id. */
+export interface LivePlayer {
+  name: string;
+  platform: Platform;
+  x: number;
+  z: number;
+  health: number | null;
+  maxHealth: number | null;
+}
+
+/** A ban list entry by opaque id; the platform id stays in the agent. */
+export interface BanEntry {
+  id: string;
+  platform: Platform;
+  name?: string;
+}
+
+/** GET /api/admin/catalog: what can be named in commands, cached for a minute. */
+export interface AdminCatalog {
+  /** Random events (raids) the world can start. */
+  events: string[];
+  /** The one running, if any. */
+  currentEvent: { name: string; elapsed: number; duration: number } | null;
+  globalKeys: string[];
+  /** Teleport spot aliases (spawn, eikthyr, haldor, ...). */
+  spots: string[];
+}
+
+/** One admin command's outcome as the panel gets it. */
+export interface AdminResult {
+  ok: boolean;
+  data?: unknown;
+  error?: string;
 }
