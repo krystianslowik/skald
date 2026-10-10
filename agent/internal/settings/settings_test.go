@@ -415,6 +415,9 @@ func TestPendingEffectiveAndHook(t *testing.T) {
 	c.add(time.Minute)
 	start3 := c.t
 	c.add(5 * time.Second)
+	// The image echoes the hook command, which contains the confirmation
+	// text, even when the hook never prints it (seen on 1.0.17).
+	s.NoteLine(`Oct 10 11:14:42 supervisord: valheim-server INFO - Running pre server run hook: skald_f=/settings/server.env; if [ -r "$skald_f" ]; then info "` + HookLine + `"; fi`)
 	if h := s.View(&start3).Hook; h != "unknown" {
 		t.Errorf("hook during grace = %s", h)
 	}

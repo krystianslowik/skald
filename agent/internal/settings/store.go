@@ -19,6 +19,9 @@ const (
 	fileMode = 0o640
 	// HookLine is what the game's PRE_SERVER_RUN_HOOK logs after reading server.env.
 	HookLine = "Skald settings applied"
+	// hookEcho prefixes the image's own log of the hook command, whose text
+	// contains HookLine too; that echo proves nothing ran.
+	hookEcho = "Running pre server run hook"
 )
 
 // Seed is what the game runs with before Skald ever wrote a file: its own
@@ -294,7 +297,7 @@ func (s *Store) Armed() bool {
 
 // NoteLine watches the game's log for the hook's confirmation line.
 func (s *Store) NoteLine(line string) {
-	if !strings.Contains(line, HookLine) {
+	if !strings.Contains(line, HookLine) || strings.Contains(line, hookEcho) {
 		return
 	}
 	now := s.now().UTC()
