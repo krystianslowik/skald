@@ -20,6 +20,14 @@ const LAYER_ICON: Partial<Record<LayerId, IconId>> = {
 };
 
 function Swatch({ layer }: { layer: LayerId }) {
+  if (layer === "relief")
+    return (
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden className="shrink-0">
+        <circle cx="11" cy="11" r="10" fill="#7c9cab" />
+        <path d="M4 12c2-4 5-6 8-5s4 3 6 2v6a10 10 0 0 1-14-1z" fill="#9cac5c" />
+        <path d="M9 9l2-3 2 3z" fill="#e2e2e6" />
+      </svg>
+    );
   if (layer === "fog")
     return (
       <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden className="shrink-0">
@@ -69,6 +77,7 @@ export function MapLayers({
   markers,
   layers,
   counts,
+  relief = "none",
   onToggle,
   onPick,
   now,
@@ -77,6 +86,8 @@ export function MapLayers({
   markers: readonly Marker[];
   layers: Record<LayerId, boolean>;
   counts: Record<LayerId, number>;
+  /** The world generator's terrain: none (no row), ready, or from an older game build. */
+  relief?: "none" | "ready" | "stale";
   onToggle: (l: LayerId) => void;
   onPick: (m: Marker) => void;
   now: number;
@@ -141,7 +152,7 @@ export function MapLayers({
       <div>
         <h3 className="label-caps">{t("map.layers")}</h3>
         <ul className="mt-1.5 space-y-0.5">
-          {LAYERS.map((l) => {
+          {LAYERS.filter((l) => l !== "relief" || relief !== "none").map((l) => {
             const label = t(`map.layer.${l}` as TextKey);
             const on = layers[l];
             const disabled = l === "fog" && !map.explored.available;
@@ -157,7 +168,7 @@ export function MapLayers({
                 >
                   <Swatch layer={l} />
                   <span className="flex-1 text-bone">{label}</span>
-                  {l !== "grid" && l !== "fog" && <span className="text-xs tabular-nums text-ash">{number(counts[l])}</span>}
+                  {l !== "grid" && l !== "fog" && l !== "relief" && <span className="text-xs tabular-nums text-ash">{number(counts[l])}</span>}
                   {/* A wider switch for a thumb. */}
                   <span aria-hidden className={`h-3.5 w-6 rounded-full p-[2px] transition-colors coarse:h-7 coarse:w-12 coarse:p-[3px] ${on && !disabled ? "bg-select" : "bg-black/50"}`}>
                     <span
@@ -185,6 +196,8 @@ export function MapLayers({
 
       <div className="space-y-1.5 border-t border-iron/30 pt-3 text-xs text-ash">
         {!map.explored.available && <p>{t("map.noTable")}</p>}
+        {relief === "stale" && <p>{t("map.relief.stale")}</p>}
+        {relief !== "none" && layers.relief && !map.spoilers && <p>{t("map.relief.spoilers")}</p>}
         <p>{map.spoilers ? t("map.spoilersOn") : tn("map.spoilersOff", map.hiddenLocations)}</p>
         {!map.meta.showNames && <p>{t("map.namesHidden")}</p>}
         <p>{t("map.builtFrom", { gen: map.meta.generation, ago: ago(map.meta.savedAt, now) })}</p>

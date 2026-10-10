@@ -21,7 +21,7 @@ import {
 import { useIconSheet } from "../../lib/itemicons";
 import { COARSE, useMedia } from "../../lib/useMedia";
 import { inertiaStep, releaseVelocity, REST_SPEED, springStep } from "../../lib/mapmotion";
-import { MapRenderer } from "../../lib/maprender";
+import { MapRenderer, type Relief } from "../../lib/maprender";
 import type { ApiMap } from "../../types";
 
 export interface MapCanvasHandle {
@@ -78,6 +78,8 @@ export const MapCanvas = forwardRef<
     selected: Marker | null;
     /** Mark ids drawn out of their clusters with a ring. */
     highlighted?: ReadonlySet<string>;
+    /** The world generator's terrain, drawn under everything when the relief layer is on. */
+    relief?: Relief | null;
     onSelect: (m: Marker | null) => void;
     /** A tap on a cluster that cannot be zoomed apart any further (marks a few metres apart). */
     onGroup?: (members: readonly Marker[]) => void;
@@ -92,7 +94,7 @@ export const MapCanvas = forwardRef<
     interactive?: boolean;
     className?: string;
   }
->(function MapCanvas({ map, mask, markers, layers, selected, highlighted, onSelect, onGroup, onAnchor, onPointerWorld, remember = false, insets = NO_INSETS, interactive = true, className = "relative" }, ref) {
+>(function MapCanvas({ map, mask, markers, layers, selected, highlighted, relief = null, onSelect, onGroup, onAnchor, onPointerWorld, remember = false, insets = NO_INSETS, interactive = true, className = "relative" }, ref) {
   const { t } = useI18n();
   const reduced = useReducedMotion() ?? false;
   const coarse = useMedia(COARSE);
@@ -257,6 +259,11 @@ export const MapCanvas = forwardRef<
     renderer.current.setData(map, mask);
     schedule();
   }, [map, mask, schedule]);
+
+  useEffect(() => {
+    renderer.current?.setRelief(relief);
+    schedule();
+  }, [relief, schedule]);
 
   // Item icons for the contents strips under containers, once the sheet has decoded.
   const iconSheet = useIconSheet();

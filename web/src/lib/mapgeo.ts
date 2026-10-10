@@ -286,11 +286,13 @@ export function fitBounds(w: number, h: number, box: readonly [number, number, n
 
 // ---- markers ---------------------------------------------------------------
 
-export type LayerId = "fog" | "bases" | "portals" | "graves" | "beds" | "vehicles" | "storage" | "pins" | "locations" | "terrain" | "grid";
+export type LayerId = "relief" | "fog" | "bases" | "portals" | "graves" | "beds" | "vehicles" | "storage" | "pins" | "locations" | "terrain" | "grid";
 
-export const LAYERS: readonly LayerId[] = ["fog", "bases", "portals", "graves", "beds", "vehicles", "storage", "pins", "locations", "terrain", "grid"];
+export const LAYERS: readonly LayerId[] = ["relief", "fog", "bases", "portals", "graves", "beds", "vehicles", "storage", "pins", "locations", "terrain", "grid"];
 
 export const DEFAULT_LAYERS: Record<LayerId, boolean> = {
+  // The world generator's terrain, under everything; only drawn when the server has one.
+  relief: true,
   fog: true,
   bases: true,
   portals: true,
@@ -512,6 +514,7 @@ export function layerCounts(markers: readonly Marker[], map: ApiMap): Record<Lay
   c.terrain = map.terrainEdits.length;
   c.fog = map.explored.available ? map.explored.tables : 0;
   c.grid = 0;
+  c.relief = 0;
   return c;
 }
 

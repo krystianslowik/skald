@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import { buildMarkers, decodeRLE, DEFAULT_LAYERS, layerCounts, LAYERS, mainBase, markerStore, type Insets, type LayerId, type Marker } from "../../lib/mapgeo";
 import { COARSE, PHONE, useMedia } from "../../lib/useMedia";
+import { useTerrain } from "../../lib/useTerrain";
 import { useWorldMap } from "../../lib/useWorldMap";
 import { terrainUrl } from "../../lib/world";
 import { Sheet, SheetClose } from "../Sheet";
@@ -202,6 +203,8 @@ function SaveMap({
   const leaving = useRef(false);
   const [sheetEpoch, setSheetEpoch] = useState(0);
 
+  const terrain = useTerrain(`${map.meta.seed}:${map.meta.generation}`);
+  const relief = terrain.status === "ready" ? terrain.relief : null;
   const markers = useMemo(() => buildMarkers(map, lookup), [map, lookup]);
   const mask = useMemo(() => (map.explored.available ? decodeRLE(map.explored.rle, map.explored.size) : null), [map]);
   const counts = useMemo(() => layerCounts(markers, map), [markers, map]);
@@ -374,7 +377,8 @@ function SaveMap({
     [coarse, wide, landscape],
   );
 
-  const panel = <MapLayers map={map} markers={markers} layers={layers} counts={counts} onToggle={toggle} onPick={pickResult} now={now} />;
+  const reliefState = terrain.status === "ready" ? (terrain.doc.stale ? "stale" : "ready") : "none";
+  const panel = <MapLayers map={map} markers={markers} layers={layers} counts={counts} relief={reliefState} onToggle={toggle} onPick={pickResult} now={now} />;
   const bottom = "bottom-[max(0.75rem,env(safe-area-inset-bottom))]";
 
   return (
@@ -387,6 +391,7 @@ function SaveMap({
         layers={layers}
         selected={selected}
         highlighted={highlighted}
+        relief={relief}
         onSelect={onSelect}
         onGroup={onGroup}
         onAnchor={phone ? undefined : onAnchor}

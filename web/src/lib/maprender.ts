@@ -266,6 +266,12 @@ export function prepare(map: ApiMap, mask: Uint8Array | null): Prepared {
   };
 }
 
+/** The world generator's terrain, decoded: north up, spanning [-radius, radius] on both axes. */
+export interface Relief {
+  img: CanvasImageSource;
+  radius: number;
+}
+
 export interface FrameState {
   view: View;
   layers: Record<LayerId, boolean>;
@@ -317,6 +323,9 @@ export class MapRenderer {
   private splits = new Map<string, { x: number; z: number; t0: number }>();
   /** The item icon sheet, decoded, for the contents strips under containers. */
   private icons: { img: CanvasImageSource; sheet: IconSheet } | null = null;
+  private relief: Relief | null = null;
+  /** Spoilers on: the terrain is not cut to where the world has been generated. */
+  private spoilers = false;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext("2d");
@@ -329,8 +338,15 @@ export class MapRenderer {
   setData(map: ApiMap, mask: Uint8Array | null): void {
     if (!this.ctx) return;
     this.prep = prepare(map, mask);
+    this.spoilers = map.spoilers;
     this.version++;
     this.paper ??= paperTile();
+  }
+
+  /** The decoded terrain image, or null for the land inked from the save. */
+  setRelief(relief: Relief | null): void {
+    this.relief = relief;
+    this.version++;
   }
 
   /** The decoded item icon sheet, or null to draw no contents strips. */
@@ -410,7 +426,7 @@ export class MapRenderer {
     const g = this.ctx;
     if (!g) return false;
     const v = f.view;
-    const key = `${f.layers.fog ? 1 : 0}${f.layers.terrain ? 1 : 0}:${this.version}:${v.w}x${v.h}:${this.dpr}`;
+    const key = `${f.layers.fog ? 1 : 0}${f.layers.terrain ? 1 : 0}${f.layers.relief ? 1 : 0}:${this.version}:${v.w}x${v.h}:${this.dpr}`;
     let b = this.base;
     const covers = (c: NonNullable<typeof b>) => {
       const k = v.scale / c.scale;
@@ -468,7 +484,23 @@ export class MapRenderer {
     g.fillStyle = PAPER;
     g.fillRect(-WORLD_RADIUS, -WORLD_RADIUS, WORLD_RADIUS * 2, WORLD_RADIUS * 2);
     this.drawPaper(g, v);
-    if (p) {
+    const relief = layers.relief ? this.relief : null;
+    if (p && relief) {
+      // The world generator's own land, multiplied into the parchment so it
+      // reads as ink on paper. Without spoilers it is cut to the zones the
+      // world has generated (where someone has been); the fog does the rest.
+      g.save();
+      if (!this.spoilers) g.clip(p.sea);
+      g.globalCompositeOperation = "multiply";
+      g.globalAlpha = 0.9;
+      g.imageSmoothingEnabled = true;
+      // The image is north up; the world transform flips rows, so flip them back.
+      g.scale(1, -1);
+      g.drawImage(relief.img, -relief.radius, -relief.radius, relief.radius * 2, relief.radius * 2);
+      g.restore();
+      if (layers.terrain) this.drawTerrain(g, v, p);
+      this.drawFog(g, p, layers);
+    } else if (p) {
       g.fillStyle = SEA;
       g.fill(p.sea);
       // Old-map coastal ripples: wide, faint strokes around the land.
@@ -492,12 +524,7 @@ export class MapRenderer {
       g.lineWidth = Math.max(1.1, Math.min(2.2, v.scale * 6)) / v.scale;
       g.stroke(p.coast);
       if (layers.terrain) this.drawTerrain(g, v, p);
-      if (layers.fog && p.fog) {
-        g.imageSmoothingEnabled = true;
-        g.globalAlpha = 0.96;
-        g.drawImage(p.fog as CanvasImageSource, p.fogOrigin, p.fogOrigin, p.fogExtent, p.fogExtent);
-        g.globalAlpha = 1;
-      }
+      this.drawFog(g, p, layers);
     }
     g.restore();
     // The edge of the world.
@@ -509,6 +536,14 @@ export class MapRenderer {
     g.strokeStyle = COAST;
     g.lineWidth = 1.5 / v.scale;
     g.stroke();
+  }
+
+  private drawFog(g: CanvasRenderingContext2D, p: Prepared, layers: Record<LayerId, boolean>) {
+    if (!layers.fog || !p.fog) return;
+    g.imageSmoothingEnabled = true;
+    g.globalAlpha = 0.96;
+    g.drawImage(p.fog as CanvasImageSource, p.fogOrigin, p.fogOrigin, p.fogExtent, p.fogExtent);
+    g.globalAlpha = 1;
   }
 
   private drawPaper(g: CanvasRenderingContext2D, v: View) {
