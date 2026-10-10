@@ -7,7 +7,7 @@
 # reference DLLs anonymously (bridge/build.sh), compiles, and only the plugin
 # is copied into the busybox image.
 #   docker buildx build --platform linux/amd64,linux/arm64 -t ghcr.io/krystianslowik/skald-bridge:dev bridge
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 RUN apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY build.sh ./
