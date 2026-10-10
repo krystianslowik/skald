@@ -96,6 +96,35 @@ func (h *Hub) Publish(typ string, data map[string]any) Event {
 	return ev
 }
 
+// PublishVolatile fans an event out to the current subscribers only: it gets
+// no seq (0) and is neither stored nor replayed. For high-rate state that is
+// only worth seeing live (player positions), which would otherwise wash the
+// replay ring out within minutes.
+func (h *Hub) PublishVolatile(typ string, data map[string]any) {
+	if data == nil {
+		data = map[string]any{}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.counts[typ]++
+	ev := Event{TS: h.now().UTC(), Type: typ, Data: data}
+	for ch := range h.subs {
+		select {
+		case ch <- ev:
+		default:
+			delete(h.subs, ch)
+			close(ch)
+		}
+	}
+}
+
+// Subscribers is the number of live subscribers.
+func (h *Hub) Subscribers() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.subs)
+}
+
 // Subscribe atomically returns the buffered events with seq > since and a
 // channel for everything after them. The channel is closed when the
 // subscriber is dropped for lagging or after Unsubscribe.

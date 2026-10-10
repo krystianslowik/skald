@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/krystianslowik/skald/agent/internal/bridge"
 	"github.com/krystianslowik/skald/agent/internal/config"
 	"github.com/krystianslowik/skald/agent/internal/events"
 	"github.com/krystianslowik/skald/agent/internal/icons"
@@ -50,11 +51,30 @@ func main() {
 		logger.Info("server settings disabled", "dir", cfg.SettingsDir, "reason", err.Error())
 		store = nil
 	}
-	handleLine := tracker.HandleLine
+	// The admin plugin in the game process; nil without BRIDGE_TOKEN.
+	var ackPath string
 	if store != nil {
-		handleLine = func(line string) {
-			tracker.HandleLine(line)
+		ackPath = filepath.Join(cfg.SettingsDir, "bridge.json")
+	}
+	br := bridge.New(bridge.Options{
+		URL:          cfg.BridgeURL,
+		Token:        cfg.BridgeToken,
+		TestedBuilds: cfg.BridgeTestedBuilds,
+		AckPath:      ackPath,
+		Hub:          hub,
+		Logger:       logger,
+	})
+	if br == nil {
+		logger.Info("bridge disabled", "reason", "BRIDGE_TOKEN not set")
+	}
+
+	handleLine := func(line string) {
+		tracker.HandleLine(line)
+		if store != nil {
 			store.NoteLine(line)
+		}
+		if br != nil {
+			br.NoteLine(line)
 		}
 	}
 
@@ -95,9 +115,17 @@ func main() {
 		Map:        worldMap,
 		Icons:      icons.New(cfg.IconsDir),
 		Terrain:    terr,
+		Bridge:     br,
 		Logger:     logger,
 	})
 	go s.RunSettingsWatcher(ctx)
+	if br != nil {
+		// Live positions only while someone watches and someone plays.
+		go br.RunPositions(ctx, 2*time.Second, func() bool {
+			snap := tracker.Snapshot()
+			return hub.Subscribers() > 0 && (snap.PlayersReported > 0 || len(snap.Players) > 0) && !s.Restarting()
+		})
+	}
 	go func() {
 		if err := s.ListenAndServeMetrics(ctx, cfg.MetricsAddr); err != nil {
 			fail(fmt.Errorf("metrics listen %s: %w", cfg.MetricsAddr, err))

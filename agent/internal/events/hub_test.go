@@ -65,3 +65,31 @@ func TestCount(t *testing.T) {
 		t.Errorf("counts = %d %d %d", h.Count("death"), h.Count("log"), h.Count("raid"))
 	}
 }
+
+func TestPublishVolatile(t *testing.T) {
+	h := New(10, 10)
+	h.Publish("a", nil)
+	if h.Subscribers() != 0 {
+		t.Fatal("no subscribers yet")
+	}
+	_, ch := h.Subscribe(0)
+	if h.Subscribers() != 1 {
+		t.Fatal("one subscriber")
+	}
+	h.PublishVolatile("positions", map[string]any{"players": []any{}})
+	ev := <-ch
+	if ev.Type != "positions" || ev.Seq != 0 {
+		t.Fatalf("got %+v", ev)
+	}
+	replay, ch2 := h.Subscribe(0)
+	defer h.Unsubscribe(ch2)
+	for _, e := range replay {
+		if e.Type == "positions" {
+			t.Fatal("volatile event was stored")
+		}
+	}
+	if h.Publish("b", nil).Seq != 2 {
+		t.Fatal("volatile event took a seq")
+	}
+	h.Unsubscribe(ch)
+}

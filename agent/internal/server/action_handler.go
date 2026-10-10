@@ -74,6 +74,8 @@ func (s *Server) restart(after func(ok bool, msg string)) {
 }
 
 func (s *Server) stopStart() (bool, string) {
+	s.restarting.Store(true)
+	defer s.restarting.Store(false)
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), s.opt.ActionTimeout)
 	err := s.opt.Supervisor.StopProcess(stopCtx, serverProgram, true)
 	stopCancel()
@@ -93,3 +95,6 @@ func (s *Server) stopStart() (bool, string) {
 func (s *Server) publishAction(name string, ok bool, msg string) {
 	s.opt.Hub.Publish("action", map[string]any{"name": name, "ok": ok, "message": msg})
 }
+
+// Restarting reports a stop+start in flight.
+func (s *Server) Restarting() bool { return s.restarting.Load() }

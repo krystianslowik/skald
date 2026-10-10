@@ -36,29 +36,41 @@ type Config struct {
 	// TerrainDir is where the skald-terrain Job writes the world generator's
 	// grids; empty turns the terrain image off (its request is still in /state).
 	TerrainDir string
+	// BridgeURL is the Skald bridge plugin inside the game process; the
+	// agent shares the pod's network namespace, so loopback reaches it.
+	BridgeURL string
+	// BridgeToken is the game container's SKALD_BRIDGE_TOKEN; empty turns
+	// the /bridge routes off.
+	BridgeToken string
+	// BridgeTestedBuilds are game builds admin commands may run on without
+	// an acknowledgement from the panel; "*" allows any.
+	BridgeTestedBuilds []string
 }
 
 func Load() (Config, error) {
 	c := Config{
-		AgentToken:     os.Getenv("AGENT_TOKEN"),
-		SyslogAddr:     getenv("SYSLOG_ADDR", "127.0.0.1:5140"),
-		ListenAddr:     getenv("LISTEN_ADDR", ":8080"),
-		MetricsAddr:    getenv("METRICS_ADDR", ":9464"),
-		LogLevel:       getenv("LOG_LEVEL", "info"),
-		ConfigDir:      getenv("CONFIG_DIR", "/config"),
-		StatusFile:     getenv("STATUS_FILE", "/var/run/valheim/valheim-server.status"),
-		SupervisorURL:  getenv("SUPERVISOR_URL", "http://127.0.0.1:9001/RPC2"),
-		SupervisorUser: os.Getenv("SUPERVISOR_USER"),
-		SupervisorPass: os.Getenv("SUPERVISOR_PASS"),
-		WorldName:      os.Getenv("WORLD_NAME"),
-		ServerName:     os.Getenv("SERVER_NAME"),
-		ServerArgs:     os.Getenv("SERVER_ARGS"),
-		ServerPublic:   os.Getenv("SERVER_PUBLIC"),
-		SettingsDir:    getenv("SETTINGS_DIR", "/settings"),
-		PasswordFile:   os.Getenv("PASSWORD_FILE"),
-		MapShowNames:   parseBool(os.Getenv("MAP_SHOW_NAMES"), true),
-		IconsDir:       os.Getenv("ICONS_DIR"),
-		TerrainDir:     os.Getenv("TERRAIN_DIR"),
+		AgentToken:         os.Getenv("AGENT_TOKEN"),
+		SyslogAddr:         getenv("SYSLOG_ADDR", "127.0.0.1:5140"),
+		ListenAddr:         getenv("LISTEN_ADDR", ":8080"),
+		MetricsAddr:        getenv("METRICS_ADDR", ":9464"),
+		LogLevel:           getenv("LOG_LEVEL", "info"),
+		ConfigDir:          getenv("CONFIG_DIR", "/config"),
+		StatusFile:         getenv("STATUS_FILE", "/var/run/valheim/valheim-server.status"),
+		SupervisorURL:      getenv("SUPERVISOR_URL", "http://127.0.0.1:9001/RPC2"),
+		SupervisorUser:     os.Getenv("SUPERVISOR_USER"),
+		SupervisorPass:     os.Getenv("SUPERVISOR_PASS"),
+		WorldName:          os.Getenv("WORLD_NAME"),
+		ServerName:         os.Getenv("SERVER_NAME"),
+		ServerArgs:         os.Getenv("SERVER_ARGS"),
+		ServerPublic:       os.Getenv("SERVER_PUBLIC"),
+		SettingsDir:        getenv("SETTINGS_DIR", "/settings"),
+		PasswordFile:       os.Getenv("PASSWORD_FILE"),
+		MapShowNames:       parseBool(os.Getenv("MAP_SHOW_NAMES"), true),
+		IconsDir:           os.Getenv("ICONS_DIR"),
+		TerrainDir:         os.Getenv("TERRAIN_DIR"),
+		BridgeURL:          getenv("BRIDGE_URL", "http://127.0.0.1:9010"),
+		BridgeToken:        os.Getenv("BRIDGE_TOKEN"),
+		BridgeTestedBuilds: splitList(os.Getenv("BRIDGE_TESTED_BUILDS")),
 	}
 	if c.AgentToken == "" {
 		return c, errors.New("AGENT_TOKEN is required")
@@ -75,6 +87,15 @@ func parseBool(v string, def bool) bool {
 		return false
 	}
 	return def
+}
+
+// splitList reads a comma- or space-separated list; empty entries are dropped.
+func splitList(v string) []string {
+	var out []string
+	for _, f := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == ' ' }) {
+		out = append(out, f)
+	}
+	return out
 }
 
 func getenv(k, def string) string {

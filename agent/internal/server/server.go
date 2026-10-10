@@ -6,8 +6,10 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/krystianslowik/skald/agent/internal/bridge"
 	"github.com/krystianslowik/skald/agent/internal/events"
 	"github.com/krystianslowik/skald/agent/internal/icons"
 	"github.com/krystianslowik/skald/agent/internal/settings"
@@ -46,7 +48,10 @@ type Options struct {
 	// Terrain is the world generator's terrain from TERRAIN_DIR; nil leaves
 	// /state.terrain null and answers /terrain.* with 404.
 	Terrain *terrain.Terrain
-	Logger  *slog.Logger
+	// Bridge is the admin plugin in the game process; nil (no BRIDGE_TOKEN)
+	// leaves the /bridge routes unregistered (404).
+	Bridge *bridge.Client
+	Logger *slog.Logger
 	// PingEvery is the SSE keepalive interval; 15 s when zero.
 	PingEvery time.Duration
 	// ActionTimeout bounds stop/start during a restart; 5 min when zero.
@@ -59,6 +64,9 @@ type Server struct {
 	world     *world.Reader
 	// busy serialises actions: TryLock fails with 409 while one is running.
 	busy sync.Mutex
+	// restarting is set while a stop+start runs: the bridge plugin is down
+	// with the game then.
+	restarting atomic.Bool
 	// procs is the last supervisor answer, shared by /state and /metrics.
 	procMu sync.Mutex
 	procs  procSnapshot
@@ -100,6 +108,12 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("PUT /settings", s.settingsPut)
 		mux.HandleFunc("POST /settings/apply", s.settingsApply)
 		mux.HandleFunc("DELETE /settings/apply", s.settingsCancel)
+	}
+	if s.opt.Bridge != nil {
+		mux.HandleFunc("GET /bridge/status", s.bridgeStatus)
+		mux.HandleFunc("GET /bridge/players", s.bridgePlayers)
+		mux.HandleFunc("GET /bridge/{name}", s.bridgeRead)
+		mux.HandleFunc("POST /bridge/{command}", s.bridgeCommand)
 	}
 	return requireToken(s.opt.Token, mux)
 }

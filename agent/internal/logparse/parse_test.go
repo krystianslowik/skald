@@ -251,3 +251,38 @@ func TestSessionLog(t *testing.T) {
 		}
 	}
 }
+
+func TestAdminAudit(t *testing.T) {
+	args := `Oct 10 18:01:02 supervisord: valheim-server [Info   :Skald Bridge] [SkaldBridge] audit actor=admin-1a2b cmd=POST /v1/spawn args={"item":"Wood","amount":20,"player":"123456789"}`
+	_, m := Parse(args)
+	want := []Match{{Kind: KindAdmin, Actor: "admin-1a2b", Cmd: "POST /v1/spawn", Args: `{"item":"Wood","amount":20,"player":"123456789"}`}}
+	if !reflect.DeepEqual(m, want) {
+		t.Fatalf("args line: got %+v", m)
+	}
+	res := `Oct 10 18:01:02 supervisord: valheim-server [Info   :Skald Bridge] [SkaldBridge] audit actor=admin-1a2b cmd=POST /v1/spawn result=ok {"ok":true,"data":{"near":"Ragnar"}}`
+	_, m = Parse(res)
+	if len(m) != 1 || m[0].Result != "ok" || m[0].Detail != `{"ok":true,"data":{"near":"Ragnar"}}` || m[0].Args != "" {
+		t.Fatalf("result line: got %+v", m)
+	}
+	_, m = Parse(`[Warning:Skald Bridge] [SkaldBridge] audit actor=x cmd=POST /v1/save result=timeout`)
+	if len(m) != 1 || m[0].Result != "timeout" || m[0].Detail != "" {
+		t.Fatalf("timeout line: got %+v", m)
+	}
+}
+
+func TestRedactAudit(t *testing.T) {
+	in := `[SkaldBridge] audit actor=a cmd=POST /v1/ban result=ok {"ok":true,"data":{"banned":"Xbox_2533274800000000","name":"Ragnar","banList":["Xbox_2533274800000000","Steam_76561190000000000"]}}`
+	got := Redact(in)
+	for _, leak := range []string{"2533274800000000", "76561190000000000"} {
+		if regexp.MustCompile(leak).MatchString(got) {
+			t.Fatalf("leaked %s: %s", leak, got)
+		}
+	}
+	if !regexp.MustCompile(`"name":"Ragnar"`).MatchString(got) {
+		t.Fatalf("name lost: %s", got)
+	}
+	got = Redact(`audit actor=a cmd=POST /v1/kick args={"player":"-4611686018427387904"}`)
+	if got != `audit actor=a cmd=POST /v1/kick args={"player":"***"}` {
+		t.Fatalf("uid kept: %s", got)
+	}
+}

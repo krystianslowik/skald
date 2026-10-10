@@ -76,6 +76,11 @@ func writeEvent(w http.ResponseWriter, ev events.Event) error {
 	if err != nil {
 		return err
 	}
+	if ev.Seq == 0 {
+		// Volatile: not replayable, so it must not move Last-Event-ID.
+		_, err = fmt.Fprintf(w, "data: %s\n\n", b)
+		return err
+	}
 	_, err = fmt.Fprintf(w, "id: %d\ndata: %s\n\n", ev.Seq, b)
 	return err
 }

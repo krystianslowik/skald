@@ -36,6 +36,10 @@ const (
 	// KindPlatform is "PlayFab socket ... received local Platform ID X_id":
 	// a connecting client's platform, before its character is known.
 	KindPlatform = "platform"
+	// KindAdmin is the Skald bridge plugin's audit line: one with the
+	// arguments before a command runs (Args set) and one with its outcome
+	// after (Result set).
+	KindAdmin = "admin"
 	// KindAbandoned is "Destroying abandoned non persistent zdo U:N owner U":
 	// the owner's peer is gone. Logged once per object, in bursts.
 	KindAbandoned = "abandoned"
@@ -73,6 +77,14 @@ type Match struct {
 	UID      string
 	Platform string  // platform: one of the Platform* constants
 	Ms       float64 // world_saved; 0 when the line had no duration
+	// admin: Actor and Cmd ("POST /v1/spawn") on both lines; Args is the raw
+	// JSON on the first, Result (ok, error, timeout, exception) and Detail
+	// (the response or the error) on the second.
+	Actor  string
+	Cmd    string
+	Args   string
+	Result string
+	Detail string
 	// net_stats
 	Connections int
 	ZDOs        int
@@ -176,6 +188,11 @@ var table = []rule{
 		r, _ := strconv.Atoi(s[4])
 		return []Match{{Kind: KindNetStats, Connections: c, ZDOs: z, Sent: se, Recv: r}}
 	}},
+	// The Skald bridge plugin (bridge/plugin/HttpServer.cs) writes these for
+	// every mutating command; the token is never in them.
+	{regexp.MustCompile(`\[SkaldBridge\] audit actor=(\S*) cmd=([A-Z]+ \S+) (?:args=(.*)|result=(\w+)(?: (.*))?)$`), func(s []string) []Match {
+		return []Match{{Kind: KindAdmin, Actor: s[1], Cmd: s[2], Args: s[3], Result: s[4], Detail: s[5]}}
+	}},
 	{regexp.MustCompile(`Joined PlayFab Party network`), func([]string) []Match {
 		return []Match{{Kind: KindPlayfab, State: PlayfabOK}}
 	}},
@@ -227,6 +244,10 @@ var redactions = []struct {
 	{regexp.MustCompile(`\b([A-Za-z]+)_\d{6,}\b`), "${1}_***"},
 	{regexp.MustCompile(`playfab/[0-9A-Za-z]+`), "playfab/***"},
 	{regexp.MustCompile(`(remote player) [0-9A-Fa-f]+`), "$1 ***"},
+	// Skald bridge audit lines: a player argument can be a peer uid or a
+	// platform id, and ban results carry the whole ban list.
+	{regexp.MustCompile(`"(player|toPlayer|banned|unbanned)":"([^"]*_[^"]*|-?\d{6,})"`), `"$1":"***"`},
+	{regexp.MustCompile(`"banList":\[[^\]]*\]`), `"banList":["***"]`},
 }
 
 // Redact removes player identifiers from a log line.

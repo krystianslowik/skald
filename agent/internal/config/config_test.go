@@ -45,3 +45,19 @@ func TestLoadMapShowNames(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadBridge(t *testing.T) {
+	t.Setenv("AGENT_TOKEN", "t")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.BridgeURL != "http://127.0.0.1:9010" || c.BridgeToken != "" || c.BridgeTestedBuilds != nil {
+		t.Errorf("bridge defaults: %+v", c)
+	}
+	t.Setenv("BRIDGE_TOKEN", "secret")
+	t.Setenv("BRIDGE_TESTED_BUILDS", "l-1.0.17, l-1.0.18,,")
+	if c, _ = Load(); c.BridgeToken != "secret" || len(c.BridgeTestedBuilds) != 2 || c.BridgeTestedBuilds[1] != "l-1.0.18" {
+		t.Errorf("bridge from env: %+v", c)
+	}
+}
