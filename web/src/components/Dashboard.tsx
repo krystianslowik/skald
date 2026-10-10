@@ -17,6 +17,9 @@ import { Ranking } from "./Ranking";
 import { Runes } from "./Runes";
 import { Saga } from "./Saga";
 import { Treasury } from "./Treasury";
+import { VillageStores } from "./storage/VillageStores";
+import type { MapFocus } from "./map/MapView";
+import type { StoreEntry } from "../lib/storage";
 import { Progress, World } from "./World";
 import { BOSSES } from "../lib/world";
 import { cancelApply } from "../lib/api";
@@ -77,6 +80,20 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
     go("fire");
     (mapOpener.current as HTMLElement | null)?.focus?.({ preventScroll: true });
   }, [go]);
+  // Where an item is kept, handed from the stores to the map; cleared when the map goes.
+  const [mapFocus, setMapFocus] = useState<MapFocus | null>(null);
+  const showStore = useCallback(
+    (entry: StoreEntry, open: string) => {
+      mapOpener.current = document.activeElement;
+      setMapFocus({ ids: entry.places.map((p) => p.container.id), open, label: entry.label, key: Date.now() });
+      go("map");
+    },
+    [go],
+  );
+  const clearFocus = useCallback(() => setMapFocus(null), []);
+  useEffect(() => {
+    if (!mapOpen) setMapFocus(null);
+  }, [mapOpen]);
   const openServerSettings = useCallback(() => openSettings(false), [openSettings]);
 
   // Each tab keeps its own scroll position; the map sits over the fire's.
@@ -170,6 +187,11 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
       </Suspense>
     </Plank>
   );
+  const stores = (
+    <Plank title={t("store.title")} id="stores" aside={t("store.aside")}>
+      <VillageStores saveKey={saveKey} onShow={showStore} />
+    </Plank>
+  );
   const saga = (
     <Plank title={t("plank.saga")} id="saga" aside={t("plank.saga.aside")} className="lg:col-span-7">
       <Saga events={state.history.events} now={now} />
@@ -228,6 +250,7 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
               )}
               {shownTab === "saga" && (
                 <>
+                  {stores}
                   {saga}
                   {ranking}
                   {onlineBoard}
@@ -262,6 +285,7 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
               {progress}
             </div>
             {mapBoard}
+            {stores}
             <div className="grid gap-5 lg:grid-cols-12 lg:gap-6">
               {saga}
               <div className="space-y-5 lg:col-span-5 lg:space-y-6">
@@ -286,7 +310,7 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
         )}
         {mapOpen && (
           <Suspense fallback={null}>
-            <MapView seedName={state.world.meta?.seedName ?? ""} saveKey={saveKey} now={now} onClose={closeMap} asTab={phone} />
+            <MapView seedName={state.world.meta?.seedName ?? ""} saveKey={saveKey} now={now} onClose={closeMap} asTab={phone} focus={mapFocus} onFocusClear={clearFocus} />
           </Suspense>
         )}
         {settingsOpen && state.settings?.enabled && (

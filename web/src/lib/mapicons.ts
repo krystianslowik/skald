@@ -28,6 +28,8 @@ export const ICONS: Record<IconId, IconDef> = {
   bed: { d: "M3 18V8M3 14h18v4M21 14v-2a3 3 0 0 0-3-3h-7v5M5.5 11.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0", ink: INK },
   // A longship: curled prow and stern, square sail.
   ship: { d: "M3 15h18l-3 4H6zM3 15c-1-2 0-4 2-4M21 15c1-2 0-4-2-4M12 15V4M8 5h8v7H8z", fill: "M8 5h8v7H8z", ink: BLUE },
+  // A chest: a domed lid, iron bands and a lock plate.
+  chest: { d: "M4 11h16v8H4zM4 11c0-4 3-6 8-6s8 2 8 6M8 6.5V19M16 6.5V19M10.5 13h3v2.5h-3z", fill: "M4 11h16v8H4z", ink: INK },
   cart: { d: "M4 8h16l-2 7H6zM8 18.5a2 2 0 1 0 0.01 0M16 18.5a2 2 0 1 0 0.01 0M2 8h2", ink: INK },
   "pin-fire": { d: "M12 21c-4 0-6-3-6-6c0-4 4-6 4-10c3 2 4 4 3 7c2-1 3-2 3-4c2 2 2 4 2 7c0 3-2 6-6 6zM12 21c-2 0-3-1.5-3-3c0-2 2-3 2-5c2 1.5 4 3 4 5c0 1.5-1 3-3 3z", ink: RED },
   "pin-home": { d: "M4 11l8-6l8 6M6 10v9h12v-9M10 19v-5h4v5", ink: INK },

@@ -75,6 +75,8 @@ export const MapCanvas = forwardRef<
     markers: readonly Marker[];
     layers: Record<LayerId, boolean>;
     selected: Marker | null;
+    /** Mark ids drawn out of their clusters with a ring. */
+    highlighted?: ReadonlySet<string>;
     onSelect: (m: Marker | null) => void;
     /** A tap on a cluster that cannot be zoomed apart any further (marks a few metres apart). */
     onGroup?: (members: readonly Marker[]) => void;
@@ -89,7 +91,7 @@ export const MapCanvas = forwardRef<
     interactive?: boolean;
     className?: string;
   }
->(function MapCanvas({ map, mask, markers, layers, selected, onSelect, onGroup, onAnchor, onPointerWorld, remember = false, insets = NO_INSETS, interactive = true, className = "relative" }, ref) {
+>(function MapCanvas({ map, mask, markers, layers, selected, highlighted, onSelect, onGroup, onAnchor, onPointerWorld, remember = false, insets = NO_INSETS, interactive = true, className = "relative" }, ref) {
   const { t } = useI18n();
   const reduced = useReducedMotion() ?? false;
   const coarse = useMedia(COARSE);
@@ -104,8 +106,8 @@ export const MapCanvas = forwardRef<
   const fling = useRef<{ vx: number; vy: number } | null>(null);
   const glide = useRef<{ cx: number; cz: number; ls: number; v: [number, number, number] } | null>(null);
   const last = useRef(0);
-  const props = useRef({ markers, layers, selected, onAnchor, coarse, reduced, remember });
-  props.current = { markers, layers, selected, onAnchor, coarse, reduced, remember };
+  const props = useRef({ markers, layers, selected, highlighted, onAnchor, coarse, reduced, remember });
+  props.current = { markers, layers, selected, highlighted, onAnchor, coarse, reduced, remember };
 
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draw = useCallback((quality: "fast" | "full" = "fast") => {
@@ -116,7 +118,7 @@ export const MapCanvas = forwardRef<
     // Fingers need wider clusters and fewer, larger labels on a small screen.
     const labels = p.coarse ? { max: Math.round(Math.max(8, Math.min(40, (v.w * v.h) / 9000))), px: 13 } : { max: 160, px: 12 };
     const animating = r.draw(
-      { view: v, layers: p.layers, markers: p.markers, selected: p.selected?.id ?? null, hovered: hovered.current, cluster: p.coarse ? 30 : 24, labels, reduced: p.reduced },
+      { view: v, layers: p.layers, markers: p.markers, selected: p.selected?.id ?? null, highlighted: p.highlighted, hovered: hovered.current, cluster: p.coarse ? 30 : 24, labels, reduced: p.reduced },
       quality,
     );
     // A mark leaving its cluster keeps the frames coming.
@@ -258,7 +260,7 @@ export const MapCanvas = forwardRef<
   // Anything drawn that is not the view.
   useEffect(() => {
     schedule();
-  }, [markers, layers, selected, schedule]);
+  }, [markers, layers, selected, highlighted, schedule]);
 
   // Size: follow the box; the first size fits the view to what people made.
   useEffect(() => {

@@ -1,6 +1,7 @@
 import { useId, useMemo, useState } from "react";
 import { useI18n, type TextKey } from "../../i18n";
-import { LAYERS, searchMarkers, type IconId, type LayerId, type Marker } from "../../lib/mapgeo";
+import { LAYERS, markerItems, searchMarkers, type IconId, type LayerId, type Marker } from "../../lib/mapgeo";
+import { fold, matchingItems } from "../../lib/storage";
 import type { ApiMap } from "../../types";
 import { markerKind, markerTitle } from "./MapDetails";
 import { MapIcon } from "./MapIcon";
@@ -12,6 +13,7 @@ const LAYER_ICON: Partial<Record<LayerId, IconId>> = {
   graves: "grave",
   beds: "bed",
   vehicles: "ship",
+  storage: "chest",
   pins: "pin-fire",
   locations: "loc-dungeon",
 };
@@ -81,10 +83,26 @@ export function MapLayers({
   const { t, tn, lookup, number, ago } = useI18n();
   const [query, setQuery] = useState("");
   const searchId = useId();
-  const results = useMemo(
-    () => searchMarkers(markers.filter((m) => layers[m.layer]), query, (m) => `${markerTitle(m, t, lookup)} ${markerKind(m, t, lookup)}`),
-    [markers, layers, query, t, lookup],
-  );
+  const results = useMemo(() => {
+    const shown = markers.filter((m) => layers[m.layer]);
+    const byName = searchMarkers(shown, query, (m) => `${markerTitle(m, t, lookup)} ${markerKind(m, t, lookup)}`);
+    // Then whatever holds a matching item, the most of it first.
+    const q = fold(query.trim());
+    const seen = new Set(byName.map((m) => m.id));
+    const held: { m: Marker; hint: string; count: number }[] = [];
+    if (q.length >= 2) {
+      for (const m of shown) {
+        const items = markerItems(m);
+        if (!items?.length || seen.has(m.id)) continue;
+        const hits = matchingItems(items, q, lookup);
+        if (!hits.length) continue;
+        const top = hits[0]!;
+        held.push({ m, count: top.count, hint: t("map.searchItem", { item: top.label, n: number(top.count) }) });
+      }
+      held.sort((a, b) => b.count - a.count);
+    }
+    return [...byName.map((m) => ({ m, hint: "" })), ...held.slice(0, 10)];
+  }, [markers, layers, query, t, lookup, number]);
   return (
     <div className="space-y-5 text-sm">
       <div role="search">
@@ -103,12 +121,14 @@ export function MapLayers({
         {query.trim() && (
           <ul className="mt-2 space-y-1" aria-live="polite">
             {results.length === 0 && <li className="text-xs text-ash">{t("map.searchEmpty")}</li>}
-            {results.map((m) => (
+            {results.map(({ m, hint }) => (
               <li key={m.id}>
                 <button type="button" onClick={() => onPick(m)} className="press-soft flex w-full items-center gap-2 rounded-[2px] px-1.5 py-1 text-left hover:bg-black/25 coarse:min-h-11">
                   <MapIcon icon={m.icon} size={20} />
                   <span className="min-w-0 flex-1 truncate text-bone">{markerTitle(m, t, lookup)}</span>
-                  <span className="shrink-0 text-xs text-ash">{markerKind(m, t, lookup) === markerTitle(m, t, lookup) ? "" : markerKind(m, t, lookup)}</span>
+                  <span className={`shrink-0 text-xs ${hint ? "font-bold tabular-nums text-flame" : "text-ash"}`}>
+                    {hint || (markerKind(m, t, lookup) === markerTitle(m, t, lookup) ? "" : markerKind(m, t, lookup))}
+                  </span>
                 </button>
               </li>
             ))}

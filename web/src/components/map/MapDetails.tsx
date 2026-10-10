@@ -1,6 +1,8 @@
 import { useI18n } from "../../i18n";
-import type { Marker } from "../../lib/mapgeo";
+import { markerItems, markerStore, type Marker } from "../../lib/mapgeo";
+import { countItems } from "../../lib/storage";
 import { mapUrlAt } from "../../lib/world";
+import { InventoryGrid } from "../storage/Inventory";
 import { MapIcon } from "./MapIcon";
 
 /** What a mark is, in a few words: the popover heading and the search hint. */
@@ -17,6 +19,8 @@ export function markerTitle(m: Marker, t: ReturnType<typeof useI18n>["t"], looku
       return t("map.bed.title");
     case "vehicle":
       return lookup(`map.vehicle.${d.kind}`) ?? d.kind;
+    case "storage":
+      return lookup(`map.storage.prefab.${d.store.prefab}`) ?? t("map.storage.chest");
     case "pin":
       return d.name || (lookup(`map.pinKind.${d.kind}`) ?? t("map.pinKind.other"));
     case "location":
@@ -54,11 +58,23 @@ function marksLines(marker: Marker, t: ReturnType<typeof useI18n>["t"], tn: Retu
     case "grave": {
       const name = d.owner || t("map.grave.someone");
       lines.push(d.day >= 0 ? t("map.grave.fell", { name, day: d.day }) : t("map.grave.fellHere", { name }));
+      if (d.items.length) lines.push(tn("map.grave.holds", countItems(d.items)));
       break;
     }
     case "bed":
       if (d.owner) lines.push(t("map.bed.owner", { name: d.owner }));
       break;
+    case "vehicle":
+    case "storage": {
+      const store = markerStore(marker);
+      if (!store) break;
+      const n = countItems(store.items);
+      if (store.unreadable) lines.push(t("map.storage.unreadable"));
+      else if (store.width === 0) lines.push(t("map.storage.noHold"));
+      else if (n === 0) lines.push(t("map.storage.empty"));
+      else lines.push(tn(d.type === "vehicle" ? "map.storage.loaded" : "map.storage.holds", n));
+      break;
+    }
     case "pin":
       if (d.name) lines.push(lookup(`map.pinKind.${d.kind}`) ?? t("map.pinKind.other"));
       else lines.push(t("map.pinUnnamed"));
@@ -131,6 +147,10 @@ export function DetailsBody({
   }
   const lines = marksLines(marker, t, tn, lookup);
   const d = marker.data;
+  const items = markerItems(marker);
+  const store = markerStore(marker);
+  // A grave is the player's own 8 x 4 inventory; a raft has no hold at all.
+  const grid = d.type === "grave" ? { width: 8, height: Math.max(4, ...d.items.map((i) => i.y + 1)) } : store && store.width > 0 && !store.unreadable ? store : null;
   const partner = d.type === "portal" ? d.partner : undefined;
   const action = roomy ? "min-h-11 px-4 py-2.5 text-sm" : "px-2.5 py-1 text-xs";
   return (
@@ -141,6 +161,11 @@ export function DetailsBody({
             <li key={l}>{l}</li>
           ))}
         </ul>
+      )}
+      {items && grid && (items.length > 0 || store) && (
+        <div className="mt-3">
+          <InventoryGrid items={items} width={grid.width} height={grid.height} names={roomy || grid.width <= 4} />
+        </div>
       )}
       <div className={`mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 ${roomy ? "gap-x-3" : ""}`}>
         {partner && onGo && (
@@ -185,7 +210,7 @@ export function MapDetails({
   onClose: () => void;
 }) {
   return (
-    <div className="w-[16.5rem] max-w-[calc(100vw-2rem)] text-sm">
+    <div className={`${!group && markerItems(marker)?.length ? "w-[19rem]" : "w-[16.5rem]"} max-w-[calc(100vw-2rem)] text-sm`}>
       <DetailsHead marker={marker} group={group} onClose={onClose} />
       <DetailsBody marker={marker} group={group} seedName={seedName} onGo={onGo} onPick={onPick} />
     </div>

@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
-import { buildMarkers, decodeRLE, DEFAULT_LAYERS, layerCounts, LAYERS, mainBase, type Insets, type LayerId, type Marker } from "../../lib/mapgeo";
+import { buildMarkers, decodeRLE, DEFAULT_LAYERS, layerCounts, LAYERS, mainBase, markerStore, type Insets, type LayerId, type Marker } from "../../lib/mapgeo";
 import { COARSE, PHONE, useMedia } from "../../lib/useMedia";
 import { useWorldMap } from "../../lib/useWorldMap";
 import { terrainUrl } from "../../lib/world";
@@ -11,6 +11,18 @@ import { DetailsBody, DetailsHead, MapDetails, markerTitle } from "./MapDetails"
 import { MapLayers } from "./MapLayers";
 
 const LAYERS_KEY = "skald.map.layers";
+
+/**
+ * Containers to pick out on the map (where an item is kept): every one gets a
+ * ring, `open` is selected and flown to. A new `key` repeats the move.
+ */
+export interface MapFocus {
+  ids: readonly string[];
+  open: string;
+  /** What they have in common, for the chip ("Iron: 3 places"). */
+  label: string;
+  key: number;
+}
 
 function storedLayers(): Record<LayerId, boolean> {
   try {
@@ -32,7 +44,23 @@ function storedLayers(): Record<LayerId, boolean> {
  * dashboard's map board; Escape, the close button or Back closes it. On
  * phones it is the Map tab: it stops above the tab bar and has no back button.
  */
-export default function MapView({ seedName, saveKey, now, onClose, asTab = false }: { seedName: string; saveKey: string; now: number; onClose: () => void; asTab?: boolean }) {
+export default function MapView({
+  seedName,
+  saveKey,
+  now,
+  onClose,
+  asTab = false,
+  focus = null,
+  onFocusClear,
+}: {
+  seedName: string;
+  saveKey: string;
+  now: number;
+  onClose: () => void;
+  asTab?: boolean;
+  focus?: MapFocus | null;
+  onFocusClear?: () => void;
+}) {
   const { t } = useI18n();
   const [load, retry] = useWorldMap(saveKey);
   const [tab, setTab] = useState<"map" | "terrain">("map");
@@ -94,7 +122,7 @@ export default function MapView({ seedName, saveKey, now, onClose, asTab = false
       <div className="relative min-h-0 flex-1">
         <div id="map-panel-map" role="tabpanel" hidden={tab !== "map"} className="absolute inset-0">
           {map ? (
-            <SaveMap map={map} stale={load.status === "ready" && load.stale} seed={seed} now={now} />
+            <SaveMap map={map} stale={load.status === "ready" && load.stale} seed={seed} now={now} focus={focus} onFocusClear={onFocusClear} />
           ) : (
             <MapMessage load={load.status} onRetry={retry} />
           )}
@@ -143,7 +171,21 @@ function MapMessage({ load, onRetry }: { load: string; onRetry: () => void }) {
 /** A mark, or a pile of marks too close to zoom apart, that the details are about. */
 type Selection = { m: Marker; group?: readonly Marker[] };
 
-function SaveMap({ map, stale, seed, now }: { map: import("../../types").ApiMap; stale: boolean; seed: string; now: number }) {
+function SaveMap({
+  map,
+  stale,
+  seed,
+  now,
+  focus,
+  onFocusClear,
+}: {
+  map: import("../../types").ApiMap;
+  stale: boolean;
+  seed: string;
+  now: number;
+  focus: MapFocus | null;
+  onFocusClear?: () => void;
+}) {
   const { t, tn, lookup, number } = useI18n();
   const coarse = useMedia(COARSE);
   // Phones get the details as a bottom sheet; wider screens a popover on the mark.
@@ -165,6 +207,18 @@ function SaveMap({ map, stale, seed, now }: { map: import("../../types").ApiMap;
   const counts = useMemo(() => layerCounts(markers, map), [markers, map]);
   const home = useMemo(() => mainBase(markers), [markers]);
   const selected = sel?.m ?? null;
+  // Marks of the focused containers, by container id.
+  const focusMarks = useMemo(() => {
+    if (!focus) return null;
+    const want = new Set(focus.ids);
+    const byStore = new Map<string, Marker>();
+    for (const m of markers) {
+      const id = markerStore(m)?.id;
+      if (id && want.has(id)) byStore.set(id, m);
+    }
+    return byStore;
+  }, [focus, markers]);
+  const highlighted = useMemo(() => (focusMarks ? new Set([...focusMarks.values()].map((m) => m.id)) : undefined), [focusMarks]);
 
   // Keep the selection when a new save arrives, by id.
   useEffect(() => {
@@ -213,6 +267,19 @@ function SaveMap({ map, stale, seed, now }: { map: import("../../types").ApiMap;
     },
     [phone],
   );
+
+  // A focus request (from the village stores): its layers on, the container open, the map on it.
+  const focusDone = useRef<number | null>(null);
+  useEffect(() => {
+    if (!focus || !focusMarks || focusDone.current === focus.key) return;
+    focusDone.current = focus.key;
+    const target = focusMarks.get(focus.open);
+    const need = new Set([...focusMarks.values()].map((m) => m.layer));
+    setLayers((prev) => (LAYERS.some((l) => need.has(l) && !prev[l]) ? Object.fromEntries(LAYERS.map((l) => [l, prev[l] || need.has(l)])) as Record<LayerId, boolean> : prev));
+    if (!target) return;
+    choose({ m: target });
+    canvas.current?.flyTo(target.x, target.z, 0.9);
+  }, [focus, focusMarks, choose]);
 
   const pickResult = useCallback(
     (m: Marker) => {
@@ -319,6 +386,7 @@ function SaveMap({ map, stale, seed, now }: { map: import("../../types").ApiMap;
         markers={markers}
         layers={layers}
         selected={selected}
+        highlighted={highlighted}
         onSelect={onSelect}
         onGroup={onGroup}
         onAnchor={phone ? undefined : onAnchor}
@@ -371,11 +439,26 @@ function SaveMap({ map, stale, seed, now }: { map: import("../../types").ApiMap;
       <div className={`pointer-events-none absolute ${bottom} left-1/2 z-10 -translate-x-1/2 lg:left-[calc(50%+9rem)]`}>
         <span ref={coords} aria-hidden className="material rounded-[2px] px-2.5 py-1 font-mono text-xs text-bone empty:hidden" />
       </div>
-      {stale && (
-        <p role="status" className="material absolute left-1/2 top-3 z-10 -translate-x-1/2 rounded-[2px] px-3 py-1.5 text-xs text-flame">
-          {t("map.stale")}
-        </p>
-      )}
+      <div className="pointer-events-none absolute inset-x-3 top-3 z-10 flex flex-col items-center gap-2 lg:left-[19rem] lg:items-start">
+        {stale && (
+          <p role="status" className="material rounded-[2px] px-3 py-1.5 text-xs text-flame">
+            {t("map.stale")}
+          </p>
+        )}
+        {focus && focusMarks && focusMarks.size > 0 && (
+          <div role="status" className="material pointer-events-auto flex max-w-full items-center gap-1 rounded-full py-0.5 pl-3.5 pr-0.5 text-xs font-bold text-bone coarse:text-sm">
+            <span aria-hidden className="h-2.5 w-2.5 shrink-0 rounded-full border-2 border-[#21465f] bg-select/50" />
+            <span className="min-w-0 truncate pl-1">{tn("map.highlight", focusMarks.size, { item: focus.label })}</span>
+            {onFocusClear && (
+              <button type="button" onClick={onFocusClear} aria-label={t("map.highlightClear")} title={t("map.highlightClear")} className="press grid h-8 w-8 shrink-0 place-items-center rounded-full text-ash hover:text-bone coarse:h-11 coarse:w-11">
+                <svg width="11" height="11" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                  <path d="M3 3l10 10M13 3L3 13" />
+                </svg>
+              </button>
+            )}
+          </div>
+        )}
+      </div>
 
       {phone ? (
         sel && (

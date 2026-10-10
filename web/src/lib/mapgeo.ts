@@ -7,7 +7,7 @@
 // up, so screen y = centre - (z - cz) * scale. The land grid and the
 // explored mask are both row-major from the south-west corner.
 
-import type { ApiMap, MapLand, MapLocation } from "../types";
+import type { ApiMap, MapContainer, MapItem, MapLand, MapLocation } from "../types";
 
 /** Radius of the playable world in metres. */
 export const WORLD_RADIUS = 10_500;
@@ -286,9 +286,9 @@ export function fitBounds(w: number, h: number, box: readonly [number, number, n
 
 // ---- markers ---------------------------------------------------------------
 
-export type LayerId = "fog" | "bases" | "portals" | "graves" | "beds" | "vehicles" | "pins" | "locations" | "terrain" | "grid";
+export type LayerId = "fog" | "bases" | "portals" | "graves" | "beds" | "vehicles" | "storage" | "pins" | "locations" | "terrain" | "grid";
 
-export const LAYERS: readonly LayerId[] = ["fog", "bases", "portals", "graves", "beds", "vehicles", "pins", "locations", "terrain", "grid"];
+export const LAYERS: readonly LayerId[] = ["fog", "bases", "portals", "graves", "beds", "vehicles", "storage", "pins", "locations", "terrain", "grid"];
 
 export const DEFAULT_LAYERS: Record<LayerId, boolean> = {
   fog: true,
@@ -297,6 +297,7 @@ export const DEFAULT_LAYERS: Record<LayerId, boolean> = {
   graves: true,
   beds: false,
   vehicles: true,
+  storage: true,
   pins: true,
   locations: true,
   terrain: false,
@@ -311,6 +312,7 @@ export type IconId =
   | "bed"
   | "ship"
   | "cart"
+  | "chest"
   | "pin-fire"
   | "pin-home"
   | "pin-hammer"
@@ -325,9 +327,10 @@ export type IconId =
 export type MarkerData =
   | { type: "base"; pieces: number; hasBed: boolean; stations: string[]; zones: number; name?: string }
   | { type: "portal"; tag: string; pairedWith?: string; partnerTag?: string; partner?: { x: number; z: number } }
-  | { type: "grave"; owner: string; day: number }
+  | { type: "grave"; owner: string; day: number; items: MapItem[] }
   | { type: "bed"; owner: string }
-  | { type: "vehicle"; kind: string }
+  | { type: "vehicle"; kind: string; store?: MapContainer }
+  | { type: "storage"; store: MapContainer }
   | { type: "pin"; kind: string; name: string }
   | { type: "location"; kind: MapLocation["kind"]; name: string; placed: boolean; explored: boolean };
 
@@ -433,11 +436,12 @@ export function buildMarkers(map: ApiMap, lookup: (key: string) => string | unde
     });
   }
   for (const [i, g] of map.tombstones.entries()) {
-    out.push({ id: `grave:${i}`, layer: "graves", icon: "grave", x: g.x, z: g.z, priority: 60, tier: 2, rank: 260, label: g.owner, labelScale: 0.04, data: { type: "grave", owner: g.owner, day: g.day } });
+    out.push({ id: `grave:${i}`, layer: "graves", icon: "grave", x: g.x, z: g.z, priority: 60, tier: 2, rank: 260, label: g.owner, labelScale: 0.04, data: { type: "grave", owner: g.owner, day: g.day, items: g.items ?? [] } });
   }
   for (const [i, b] of map.beds.entries()) {
     out.push({ id: `bed:${i}`, layer: "beds", icon: "bed", x: b.x, z: b.z, priority: 30, tier: 1, rank: 50, label: b.owner, labelScale: 1.2, data: { type: "bed", owner: b.owner } });
   }
+  const stores = new Map(map.storage.map((c) => [c.id, c]));
   for (const [i, v] of map.vehicles.entries()) {
     out.push({
       id: `vehicle:${i}`,
@@ -450,8 +454,13 @@ export function buildMarkers(map: ApiMap, lookup: (key: string) => string | unde
       rank: 100,
       label: lookup(`map.vehicle.${v.kind}`) ?? v.kind,
       labelScale: 0.6,
-      data: { type: "vehicle", kind: v.kind },
+      data: { type: "vehicle", kind: v.kind, store: v.id ? stores.get(v.id) : undefined },
     });
+  }
+  // Carts and ships are drawn as vehicles; the storage layer adds the chests.
+  for (const c of map.storage) {
+    if (c.kind !== "chest") continue;
+    out.push({ id: `store:${c.id}`, layer: "storage", icon: "chest", x: c.x, z: c.z, priority: 35, tier: 1, rank: 60, label: "", labelScale: Infinity, data: { type: "storage", store: c } });
   }
   for (const [i, p] of map.pins.entries()) {
     out.push({
@@ -694,7 +703,17 @@ export function placeLabels(
 
 // ---- search -----------------------------------------------------------------
 
-const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[łŁ]/g, "l").toLowerCase();
+
+/** The container a mark stands for: a chest, a built cart or ship. */
+export function markerStore(m: Marker): MapContainer | undefined {
+  return m.data.type === "storage" ? m.data.store : m.data.type === "vehicle" ? m.data.store : undefined;
+}
+
+/** What a mark holds: a container's items or a grave's. */
+export function markerItems(m: Marker): readonly MapItem[] | undefined {
+  return m.data.type === "grave" ? m.data.items : markerStore(m)?.items;
+}
 
 /** Markers whose label, owner, tag or kind name contains the query, best first. */
 export function searchMarkers(markers: readonly Marker[], query: string, kindName: (m: Marker) => string, limit = 8): Marker[] {

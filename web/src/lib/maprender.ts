@@ -270,6 +270,8 @@ export interface FrameState {
   markers: readonly Marker[];
   selected: string | null;
   hovered: string | null;
+  /** Marks picked out on purpose (where an item is kept): drawn on their own with a ring. */
+  highlighted?: ReadonlySet<string>;
   /** Marks closer than this on screen (CSS px) cluster; 0 draws every mark. */
   cluster?: number;
   /** Label budget and size: phones get fewer, larger labels. */
@@ -621,10 +623,20 @@ export class MapRenderer {
     const now = performance.now();
     let animating = false;
     const list = this.clustersFor(f, crowd);
-    const selectedMember = f.selected ? list.find((c) => c.lead.id !== f.selected && c.members.some((m) => m.id === f.selected)) : undefined;
+    // The selected mark and highlighted ones leave their clusters, so they are always seen.
+    const own = new Set(f.highlighted ?? []);
+    if (f.selected) own.add(f.selected);
+    const items: { m: Marker; members: readonly Marker[] }[] = [];
+    for (const c of list) {
+      if (own.size === 0) {
+        items.push({ m: c.lead, members: c.members });
+        continue;
+      }
+      const rest = c.members.filter((m) => m.id === c.lead.id || !own.has(m.id));
+      items.push({ m: c.lead, members: rest });
+      for (const m of c.members) if (m.id !== c.lead.id && own.has(m.id)) items.push({ m, members: [] });
+    }
     // Draw order: low priority first, so the important marks sit on top.
-    const items: { m: Marker; members: readonly Marker[] }[] = list.map((c) => ({ m: c.lead, members: c.members }));
-    if (selectedMember) items.push({ m: selectedMember.members.find((m) => m.id === f.selected)!, members: [] });
     items.sort((a, b) => a.m.priority - b.m.priority);
     for (const { m, members } of items) {
       let wx = m.x;
@@ -651,6 +663,16 @@ export class MapRenderer {
       const sp = this.sprite(m.icon, px, dim);
       if (!sp) continue;
       const size = px + 8;
+      if (f.highlighted?.has(m.id)) {
+        // A blue seal under the mark, like the game's selection.
+        g.fillStyle = "rgba(94, 151, 204, 0.35)";
+        g.strokeStyle = "#21465f";
+        g.lineWidth = 2;
+        g.beginPath();
+        g.arc(sx, sy, px / 2 + 7, 0, Math.PI * 2);
+        g.fill();
+        g.stroke();
+      }
       g.globalAlpha = alpha;
       g.drawImage(sp as CanvasImageSource, sx - size / 2, sy - size / 2, size, size);
       g.globalAlpha = 1;

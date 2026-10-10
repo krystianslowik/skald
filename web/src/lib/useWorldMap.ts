@@ -36,6 +36,8 @@ export function loadMap(key: string): Promise<MapLoad> {
         const map = (await res.json()) as ApiMap;
         // Anything that is not a map (an older server, a proxy page) counts as a failure.
         if (!isMap(map)) return { status: "failed" };
+        // An older agent sends no storage.
+        map.storage ??= [];
         return { status: "ready", map, stale: res.headers?.get("X-Skald-Stale") === "1" };
       }
       if (res.status === 404) return { status: "off" };
