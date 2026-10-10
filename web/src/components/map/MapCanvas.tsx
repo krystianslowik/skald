@@ -54,11 +54,15 @@ export const MapCanvas = forwardRef<
   const props = useRef({ markers, layers, selected, onAnchor });
   props.current = { markers, layers, selected, onAnchor };
 
-  const draw = useCallback(() => {
+  const idle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draw = useCallback((quality: "fast" | "full" = "fast") => {
     const r = renderer.current;
     if (!r) return;
     const p = props.current;
-    r.draw({ view: view.current, layers: p.layers, markers: p.markers, selected: p.selected?.id ?? null, hovered: hovered.current });
+    r.draw({ view: view.current, layers: p.layers, markers: p.markers, selected: p.selected?.id ?? null, hovered: hovered.current }, quality);
+    // Once nothing has moved for a moment, redraw the map itself at full detail.
+    if (idle.current) clearTimeout(idle.current);
+    if (quality === "fast") idle.current = setTimeout(() => draw("full"), 140);
     if (p.onAnchor) {
       const sel = p.selected;
       if (!sel) p.onAnchor(null);
@@ -210,6 +214,7 @@ export const MapCanvas = forwardRef<
   useEffect(
     () => () => {
       if (frame.current !== null) cancelAnimationFrame(frame.current);
+      if (idle.current) clearTimeout(idle.current);
     },
     [],
   );

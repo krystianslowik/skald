@@ -57,7 +57,7 @@ const LEGEND: { icon: IconId; key: TextKey }[] = [
   { icon: "pin-hammer", key: "map.pinKind.hammer" },
   { icon: "pin-point", key: "map.pinKind.point" },
   { icon: "pin-cave", key: "map.pinKind.cave" },
-  { icon: "pin-boss", key: "map.locKind.boss" },
+  { icon: "pin-boss", key: "map.legend.bossPin" },
 ];
 
 /** Search, layer toggles with counts, the legend and what the map leaves out. */

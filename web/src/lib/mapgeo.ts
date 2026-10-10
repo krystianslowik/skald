@@ -369,7 +369,7 @@ export function buildMarkers(map: ApiMap, lookup: (key: string) => string | unde
       z: p.z,
       priority: 70,
       label: p.tag,
-      labelScale: 0.12,
+      labelScale: 0.07,
       data: { type: "portal", tag: p.tag, pairedWith: p.pairedWith, partnerTag: partner?.tag, partner: partner ? { x: partner.x, z: partner.z } : undefined },
     });
   }
@@ -401,7 +401,7 @@ export function buildMarkers(map: ApiMap, lookup: (key: string) => string | unde
       z: p.z,
       priority: 55,
       label: p.name,
-      labelScale: 0.15,
+      labelScale: 0.1,
       data: { type: "pin", kind: p.kind, name: p.name },
     });
   }
@@ -416,7 +416,7 @@ export function buildMarkers(map: ApiMap, lookup: (key: string) => string | unde
       z: l.z,
       priority: important ? 65 : 20,
       label: locationName(l.name, l.kind, lookup),
-      labelScale: important ? 0.1 : 0.5,
+      labelScale: important ? 0.08 : 0.5,
       data: { type: "location", kind: l.kind, name: l.name, placed: l.placed, explored: l.explored },
     });
   }

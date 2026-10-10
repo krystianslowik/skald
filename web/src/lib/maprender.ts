@@ -32,6 +32,8 @@ const SEA = "rgba(58, 82, 92, 0.62)";
 const VOID = "#16110c";
 const FONT = "'Averia Serif Libre', Georgia, serif";
 const ICON_PX = 22;
+/** The cached base covers this many times the view, so pans reuse it. */
+const BASE_MARGIN = 1.5;
 
 function makeCanvas(w: number, h: number): HTMLCanvasElement | OffscreenCanvas {
   if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(w, h);
@@ -274,6 +276,9 @@ export class MapRenderer {
   private sprites = new Map<string, HTMLCanvasElement | OffscreenCanvas>();
   private paper: HTMLCanvasElement | OffscreenCanvas | null = null;
   private measureCache = new Map<string, number>();
+  /** Bumped on new data, so the cached base is re-rendered. */
+  private version = 0;
+  private base: { canvas: HTMLCanvasElement | OffscreenCanvas; key: string; cx: number; cz: number; scale: number; w: number; h: number } | null = null;
   /** Markers drawn in the last frame, in screen space, for picking. */
   visible: ScreenMarker[] = [];
 
@@ -288,6 +293,7 @@ export class MapRenderer {
   setData(map: ApiMap, mask: Uint8Array | null): void {
     if (!this.ctx) return;
     this.prep = prepare(map, mask);
+    this.version++;
     this.paper ??= paperTile();
   }
 
@@ -300,12 +306,6 @@ export class MapRenderer {
       this.canvas.height = H;
       this.sprites.clear();
     }
-  }
-
-  /** Sets the transform that maps world metres to device pixels. */
-  private world(g: CanvasRenderingContext2D, v: View) {
-    const s = v.scale * this.dpr;
-    g.setTransform(s, 0, 0, -s, (v.w / 2 - v.cx * v.scale) * this.dpr, (v.h / 2 + v.cz * v.scale) * this.dpr);
   }
 
   private screen(g: CanvasRenderingContext2D) {
@@ -357,17 +357,68 @@ export class MapRenderer {
     return w;
   }
 
-  draw(f: FrameState): void {
+  /**
+   * Draws a frame. "fast" frames (during a gesture or an animation) reuse a
+   * cached bitmap of the paper, land, sea and fog, rendered with a margin
+   * around the view and only moved or scaled; a "full" frame, once things
+   * settle, re-renders it at the exact view. Marks and labels are always
+   * drawn fresh, so they stay crisp.
+   */
+  draw(f: FrameState, quality: "fast" | "full" = "full"): void {
     const g = this.ctx;
     if (!g) return;
     const v = f.view;
-    const p = this.prep;
+    const key = `${f.layers.fog ? 1 : 0}${f.layers.terrain ? 1 : 0}:${this.version}:${v.w}x${v.h}:${this.dpr}`;
+    let b = this.base;
+    const covers = (c: NonNullable<typeof b>) => {
+      const k = v.scale / c.scale;
+      if (quality === "full" ? Math.abs(k - 1) > 1e-6 : k < 0.6 || k > 1.8) return false;
+      // The view's corners must fall inside the cached area.
+      const halfW = v.w / 2 / v.scale;
+      const halfH = v.h / 2 / v.scale;
+      const cw = c.w / 2 / c.scale;
+      const ch = c.h / 2 / c.scale;
+      return Math.abs(v.cx - c.cx) + halfW <= cw + 0.5 / v.scale && Math.abs(v.cz - c.cz) + halfH <= ch + 0.5 / v.scale;
+    };
+    if (!b || b.key !== key || !covers(b)) b = this.renderBase(f, key);
     this.screen(g);
     g.fillStyle = VOID;
     g.fillRect(0, 0, v.w, v.h);
+    if (b) {
+      // Place the cached bitmap: its centre world point and scale against the view's.
+      const k = v.scale / b.scale;
+      const [sx, sy] = worldToScreen(v, b.cx, b.cz);
+      g.imageSmoothingEnabled = true;
+      g.drawImage(b.canvas as CanvasImageSource, sx - (b.w / 2) * k, sy - (b.h / 2) * k, b.w * k, b.h * k);
+    }
+    this.screen(g);
+    if (f.layers.grid) this.drawGrid(g, v);
+    if (this.prep && f.layers.portals) this.drawLinks(g, v, this.prep);
+    this.drawMarkers(g, f);
+  }
 
-    // The world disc is the sheet of paper.
-    this.world(g, v);
+  private renderBase(f: FrameState, key: string): MapRenderer["base"] {
+    const v = f.view;
+    const w = Math.ceil(v.w * BASE_MARGIN);
+    const h = Math.ceil(v.h * BASE_MARGIN);
+    // The cache need not be sharper than 2x: it is redrawn at rest anyway.
+    const dpr = Math.min(this.dpr, 2);
+    let canvas = this.base?.canvas;
+    if (!canvas || canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) canvas = makeCanvas(Math.round(w * dpr), Math.round(h * dpr));
+    const g = ctx2d(canvas) as CanvasRenderingContext2D | null;
+    if (!g) return null;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, canvas.width, canvas.height);
+    this.drawWorld(g, { ...v, w, h }, f.layers, dpr);
+    this.base = { canvas, key, cx: v.cx, cz: v.cz, scale: v.scale, w, h };
+    return this.base;
+  }
+
+  /** Paper, sea, land, terrain heat, fog and the world's edge, for view `v` at `dpr`. */
+  private drawWorld(g: CanvasRenderingContext2D, v: View, layers: Record<LayerId, boolean>, dpr: number) {
+    const p = this.prep;
+    const s = v.scale * dpr;
+    g.setTransform(s, 0, 0, -s, (v.w / 2 - v.cx * v.scale) * dpr, (v.h / 2 + v.cz * v.scale) * dpr);
     g.save();
     g.beginPath();
     g.arc(0, 0, WORLD_RADIUS, 0, Math.PI * 2);
@@ -375,7 +426,6 @@ export class MapRenderer {
     g.fillStyle = PAPER;
     g.fillRect(-WORLD_RADIUS, -WORLD_RADIUS, WORLD_RADIUS * 2, WORLD_RADIUS * 2);
     this.drawPaper(g, v);
-
     if (p) {
       g.fillStyle = SEA;
       g.fill(p.sea);
@@ -393,23 +443,21 @@ export class MapRenderer {
         g.clip(p.land);
         g.imageSmoothingEnabled = true;
         // Image rows run south to north and the world transform flips y, so no flip here.
-        g.drawImage(p.density, p.gridOrigin, p.gridOrigin, p.gridExtent, p.gridExtent);
+        g.drawImage(p.density as CanvasImageSource, p.gridOrigin, p.gridOrigin, p.gridExtent, p.gridExtent);
         g.restore();
       }
       g.strokeStyle = COAST;
       g.lineWidth = Math.max(1.1, Math.min(2.2, v.scale * 6)) / v.scale;
       g.stroke(p.coast);
-
-      if (f.layers.terrain) this.drawTerrain(g, v, p);
-      if (f.layers.fog && p.fog) {
+      if (layers.terrain) this.drawTerrain(g, v, p);
+      if (layers.fog && p.fog) {
         g.imageSmoothingEnabled = true;
         g.globalAlpha = 0.96;
-        g.drawImage(p.fog, p.fogOrigin, p.fogOrigin, p.fogExtent, p.fogExtent);
+        g.drawImage(p.fog as CanvasImageSource, p.fogOrigin, p.fogOrigin, p.fogExtent, p.fogExtent);
         g.globalAlpha = 1;
       }
     }
     g.restore();
-
     // The edge of the world.
     g.strokeStyle = PAPER_DARK;
     g.lineWidth = 6 / v.scale;
@@ -419,11 +467,6 @@ export class MapRenderer {
     g.strokeStyle = COAST;
     g.lineWidth = 1.5 / v.scale;
     g.stroke();
-
-    this.screen(g);
-    if (f.layers.grid) this.drawGrid(g, v);
-    if (p && f.layers.portals) this.drawLinks(g, v, p);
-    this.drawMarkers(g, f);
   }
 
   private drawPaper(g: CanvasRenderingContext2D, v: View) {

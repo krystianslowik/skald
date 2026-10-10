@@ -529,6 +529,7 @@ export const pl: Dict = {
   "map.pinKind.cave": "Znacznik jaskini",
   "map.pinKind.boss": "Ołtarz bossa, wskazany przez Vegvisir",
   "map.pinKind.other": "Znacznik",
+  "map.legend.bossPin": "Znak z Vegvisira",
   "map.pinUnnamed": "Znacznik bez nazwy",
   "map.locKind.boss": "Ołtarz bossa",
   "map.locKind.trader": "Kupiec",

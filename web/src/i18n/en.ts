@@ -543,6 +543,7 @@ export const en = {
   "map.pinKind.cave": "Cave pin",
   "map.pinKind.boss": "Boss altar, marked by a Vegvisir",
   "map.pinKind.other": "Pin",
+  "map.legend.bossPin": "Vegvisir mark",
   "map.pinUnnamed": "A pin without a name",
   "map.locKind.boss": "Boss altar",
   "map.locKind.trader": "Trader",
