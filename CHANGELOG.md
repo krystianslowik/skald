@@ -6,6 +6,40 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Admin bridge (opt-in): live admin commands through the Skald bridge, a
+  server-side BepInEx plugin (`bridge/`, plugin 0.1.1) that listens on the
+  game pod's loopback only. New image `skald-bridge` (busybox with the DLL and
+  an install script, used as an initContainer that also removes older copies);
+  its build fetches the game's reference DLLs anonymously (about 2 MB through
+  DepotDownloader) and never ships them. Kustomize component `bridge`,
+  Compose profile `bridge`.
+- Agent: `BRIDGE_URL`, `BRIDGE_TOKEN`, `BRIDGE_TESTED_BUILDS`;
+  `/bridge/status` (with the game build and whether it is tested),
+  `/bridge/players`, allow-listed reads and commands, `X-Skald-Actor` passed
+  to the plugin's audit line. Player names are swapped for uids inside the
+  agent; uids, platform and PlayFab ids never leave it, and the ban list is
+  served by opaque ids. Commands on an untested game build wait for an admin
+  to confirm the build. The plugin's audit lines become `admin` events with
+  names, never ids. Live `positions` every 2 s while someone watches and
+  someone plays, never stored or replayed.
+- Web tier: `/api/admin/*` with the same allow-list; an optional admin
+  password (`ADMIN_PASSWORD_HASH`): with it the panel password only views,
+  and admin commands, restarts, backups, updates and settings need an admin
+  session (rate-limited unlock, 30 minutes idle). Admin events are kept in
+  the history. The mock agent has a fake bridge with players walking around.
+- Dashboard: an admin sheet (header button; on phones in Settings) with
+  broadcast and presets, players with health, items (search in English and
+  Polish over the icon sheet, amounts, quality, kits saved on the device),
+  time (sun and moon dial, skip to morning, freeze), raids, creatures, world
+  keys with explanations, base helpers, save and the ban list; a player sheet
+  (teleport to the base, a place, another player or a tapped point; items,
+  heal, Rested; kick and ban held, ban with the name typed); live players on
+  the map, gliding between samples; a long press on the map for teleport,
+  spawn and table pins; admin actions in the Saga; a banner saying why
+  controls are off (bridge off, disabled after a patch, untested build).
+
 ## [0.7.0] - 2026-10-10
 
 ### Added

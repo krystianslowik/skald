@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valheim
+spec:
+  template:
+    spec:
+      initContainers:
+        # The agent talks to the plugin over the pod's loopback.
+        - name: agent
+          env:
+            - name: BRIDGE_TOKEN
+              valueFrom:
+                secretKeyRef: {name: skald-agent, key: BRIDGE_TOKEN}
+            # Game builds commands may run on without a confirmation from the
+            # panel (comma-separated, "*" for any). Default: l-1.0.17.
+            # - name: BRIDGE_TESTED_BUILDS
+            #   value: "l-1.0.17"
+        # Copies SkaldBridge.dll into /config/bepinex/plugins (and the
+        # BepInEx install, if it exists yet) after deleting older copies:
+        # the image syncs that directory on start but never prunes it.
+        - name: bridge-plugin
+          image: ghcr.io/krystianslowik/skald-bridge:0.8.0
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests: {cpu: 10m, memory: 8Mi}
+            limits: {memory: 32Mi}
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+              add: [DAC_OVERRIDE, FOWNER]
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: data
+              mountPath: /opt/valheim
+      containers:
+        - name: valheim
+          env:
+            - name: BEPINEX
+              value: "true"
+            # Kill switch: "off" makes the plugin log one line and serve nothing.
+            - name: SKALD_BRIDGE
+              value: "on"
+            - name: SKALD_BRIDGE_PORT
+              value: "9010"
+            - name: SKALD_BRIDGE_TOKEN
+              valueFrom:
+                secretKeyRef: {name: skald-agent, key: BRIDGE_TOKEN}

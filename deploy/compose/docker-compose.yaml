@@ -15,6 +15,9 @@
 #              your own game files, read-only; Skald ships no game assets
 #   terrain    opt-in, run on demand: the map's land from the game's own
 #              world generator (docker compose --profile terrain run --rm terrain)
+#   bridge     opt-in (COMPOSE_PROFILES=bridge, BEPINEX=true, BRIDGE_TOKEN):
+#              live admin commands through a server-side BepInEx plugin;
+#              see README "Admin bridge" for what that changes
 #
 # Server settings (name, password, world modifiers) are edited on the
 # dashboard: the agent writes them to the skald-settings volume and the game
@@ -57,14 +60,34 @@ services:
       SUPERVISOR_HTTP_PASS: ${SUPERVISOR_HTTP_PASS:?set SUPERVISOR_HTTP_PASS in .env}
       # Reads the settings the dashboard saved (deploy/settings/pre-server-run-hook.sh;
       # every $ is doubled for Compose). Parsed with an allow-list, never sourced.
+      # Admin bridge (opt-in): BepInEx and the Skald plugin. SKALD_BRIDGE=off
+      # is the kill switch; BEPINEX=false turns modding off entirely.
+      BEPINEX: ${BEPINEX:-false}
+      SKALD_BRIDGE: ${SKALD_BRIDGE:-on}
+      SKALD_BRIDGE_TOKEN: ${BRIDGE_TOKEN:-}
       PRE_SERVER_RUN_HOOK: >-
         skald_f=/settings/server.env; if [ -r "$$skald_f" ]; then while IFS='=' read -r skald_k skald_v || [ -n "$$skald_k" ]; do case "$$skald_k" in SERVER_NAME) SERVER_NAME=$$skald_v;; SERVER_PASS) SERVER_PASS=$$skald_v;; SERVER_PUBLIC) SERVER_PUBLIC=$$skald_v;; SERVER_ARGS) SERVER_ARGS=$$skald_v;; esac; done < "$$skald_f"; valheim_server_args=(-password "$$SERVER_PASS"); if [ "$$CROSSPLAY" = true ]; then valheim_server_args+=(-crossplay); fi; info "Skald settings applied"; fi
     secrets: [server_pass]
+    depends_on:
+      # Only with COMPOSE_PROFILES=bridge: the plugin is in place before the game starts.
+      bridge-plugin:
+        condition: service_completed_successfully
+        required: false
     volumes:
       - valheim-config:/config
       - valheim-data:/opt/valheim
       - valheim-run:/var/run/valheim
       - skald-settings:/settings:ro
+
+  # Opt-in: copies SkaldBridge.dll into the game's BepInEx plugin directory
+  # (deleting any older copy first) and exits. Enable with
+  # COMPOSE_PROFILES=bridge plus BEPINEX=true and BRIDGE_TOKEN in .env.
+  bridge-plugin:
+    image: ghcr.io/krystianslowik/skald-bridge:${SKALD_VERSION:-latest}
+    profiles: [bridge]
+    volumes:
+      - valheim-config:/config
+      - valheim-data:/opt/valheim
 
   # The agent and the icons extractor run as uid 65532 and cannot chown; a
   # new named volume is root-owned. Runs once per `up` and exits.
@@ -157,6 +180,8 @@ services:
       ICONS_DIR: /icons
       # Empty until a terrain run; harmless without it.
       TERRAIN_DIR: /terrain
+      # The admin bridge; empty leaves the bridge routes off.
+      BRIDGE_TOKEN: ${BRIDGE_TOKEN:-}
     secrets: [server_pass]
     volumes:
       - valheim-config:/config:ro
@@ -177,6 +202,8 @@ services:
       AGENT_URL: http://valheim:8080
       AGENT_TOKEN: ${AGENT_TOKEN}
       PANEL_PASSWORD_HASH: ${PANEL_PASSWORD_HASH:?set PANEL_PASSWORD_HASH in .env}
+      # Optional: the panel password then only views; changing anything needs this one.
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
       SKALD_LOCALE: ${SKALD_LOCALE:-en}
       SKALD_TZ: ${TZ:-UTC}

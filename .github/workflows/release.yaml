@@ -32,6 +32,11 @@ jobs:
           - image: skald-terrain
             context: terrain
             file: terrain/Dockerfile
+          # Same pattern: the plugin is built once (reference DLLs fetched
+          # anonymously in the build stage), the image is busybox.
+          - image: skald-bridge
+            context: bridge
+            file: bridge/Dockerfile
     steps:
       - uses: actions/checkout@v4.2.2
       # The arm64 runtime stages run a few shell commands under emulation.

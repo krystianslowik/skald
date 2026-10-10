@@ -25,9 +25,13 @@ resources:
 #            docs/configuration.md#item-icons)
 #   terrain: the map's land from the game's own world generator
 #            (terrain/kustomization.yaml, docs/configuration.md#terrain)
+#   bridge:  live admin commands through a server-side BepInEx plugin
+#            (bridge/kustomization.yaml, docs/configuration.md#admin-bridge);
+#            needs BRIDGE_TOKEN in the skald-agent Secret
 # components:
 #   - icons
 #   - terrain
+#   - bridge
 labels:
   - pairs:
       app.kubernetes.io/part-of: skald

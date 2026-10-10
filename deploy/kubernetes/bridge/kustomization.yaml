@@ -1,0 +1,24 @@
+# Live admin commands (opt-in): the Skald bridge, a server-side BepInEx
+# plugin, plus the agent's side of it. Enable it in ../kustomization.yaml:
+#
+#   components:
+#     - bridge
+#
+# and add BRIDGE_TOKEN (openssl rand -hex 24) to the skald-agent Secret.
+# Needs skald-agent and skald-web 0.8.0 or newer.
+#
+# What it changes in the game pod, so read README "Admin bridge" first:
+#   - BEPINEX=true: the server runs modded (BepInEx 5). Crossplay was
+#     verified with an Xbox client on l-1.0.17. A game update can break
+#     BepInEx or the plugin; the plugin then switches itself off.
+#   - an initContainer copies SkaldBridge.dll into the image's plugin
+#     directory (and removes any older copy first)
+#   - SKALD_BRIDGE is the kill switch: "off" loads the plugin but serves
+#     nothing. BEPINEX=false removes modding entirely.
+# The plugin listens on 127.0.0.1:9010 only; nothing new is exposed and the
+# NetworkPolicy needs no change. Applying it restarts the game once (and the
+# join code changes).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+  - path: plugin.yaml

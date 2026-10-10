@@ -43,6 +43,10 @@ spec:
             - name: PANEL_PASSWORD_HASH
               valueFrom:
                 secretKeyRef: {name: skald-web, key: PANEL_PASSWORD_HASH}
+            # Optional admin password: without the key, everyone signed in is an admin.
+            - name: ADMIN_PASSWORD_HASH
+              valueFrom:
+                secretKeyRef: {name: skald-web, key: ADMIN_PASSWORD_HASH, optional: true}
             - name: SESSION_SECRET
               valueFrom:
                 secretKeyRef: {name: skald-web, key: SESSION_SECRET}

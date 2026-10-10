@@ -22,6 +22,9 @@
 | `MAP_SHOW_NAMES` | `true` | Put grave and bed owners' names, portal tags and pin names on the world map. Platform ids (tag and pin authors, owner ids) are never sent either way. The map is behind the panel password, so this is on by default |
 | `ICONS_DIR` | (empty) | Where the opt-in `skald-icons` sidecar writes the item icon sheet (`/config/skald-icons` in Kubernetes, `/icons` in Compose). Empty turns the icon routes off; see [Item icons](#item-icons) |
 | `TERRAIN_DIR` | (empty) | Where terrain runs leave the world generator's grids (`/terrain`); empty turns the terrain image off. See [Terrain](#terrain) |
+| `BRIDGE_URL` | `http://127.0.0.1:9010` | The Skald bridge plugin inside the game process; the agent shares the pod's (or container's) network namespace, so loopback reaches it. See [Admin bridge](#admin-bridge) |
+| `BRIDGE_TOKEN` | (empty) | Same value as the game container's `SKALD_BRIDGE_TOKEN` (16+ characters). Empty leaves the `/bridge` routes unregistered and the admin UI hidden |
+| `BRIDGE_TESTED_BUILDS` | `l-1.0.17` | Game builds admin commands may run on without a confirmation from the panel, comma-separated; `*` allows any |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 
 ## skald-web
@@ -31,6 +34,7 @@
 | `AGENT_URL` | (required) | e.g. `http://valheim:8080` (Compose) or `http://skald-agent.valheim.svc.cluster.local:8080` |
 | `AGENT_TOKEN` | (required) | Same value as the agent's |
 | `PANEL_PASSWORD_HASH` | (required) | argon2id hash; generate with `skald-web hash-password` |
+| `ADMIN_PASSWORD_HASH` | (empty) | Optional argon2id hash of an admin password (same command). Set, the panel password only views: admin commands, restarts, backups/updates and saving settings need an admin session, unlocked with this password and ended after 30 minutes without an admin action. Empty, everyone signed in is an admin, as before 0.8.0. See [Roles](#roles) |
 | `SESSION_SECRET` | (required) | HMAC key for session cookies; 32+ random bytes |
 | `SKALD_LOCALE` | `en` | Default UI language, `en` or `pl`; each viewer can switch in the header |
 | `SKALD_TZ` | `$TZ`, else `UTC` | IANA zone for calendar days: streaks, daily playtime, the night-owl badge |
@@ -290,3 +294,98 @@ agent changes the game pod, so enabling the component restarts the server once.
 
 **Compose**: `docker compose --profile terrain run --rm terrain`. The agent
 mounts the `skald-terrain` volume read-only with `TERRAIN_DIR=/terrain`.
+
+## Admin bridge
+
+Opt-in. Live admin commands from the panel: broadcasts, items and kits,
+teleport, heal and Rested, time of day, raids, creatures, world keys, base
+helpers (repair, fill kilns and smelters, grow crops, reveal the map and pin
+on cartography tables), save, kick and ban; plus every player on the map,
+moving, every 2 seconds.
+
+It needs a **server-side BepInEx plugin**, the Skald bridge
+([`bridge/`](../bridge/README.md)). It runs inside the game process, listens
+on `127.0.0.1:9010` only, and calls the operator's own installed game code. It
+ships as `ghcr.io/krystianslowik/skald-bridge` (busybox, the DLL and an
+install script, used as an initContainer); it contains no game code.
+
+```
+browser --cookie--> skald-web --X-Agent-Token--> agent --X-Skald-Token--> plugin 127.0.0.1:9010
+```
+
+**Enable it**
+
+| Where | Setting |
+|---|---|
+| Game container | `BEPINEX=true`, `SKALD_BRIDGE=on` (kill switch: `off`), `SKALD_BRIDGE_TOKEN` (16+ characters, from a Secret) |
+| Plugin | the `skald-bridge` initContainer (Kubernetes) or the `bridge-plugin` service (Compose), before the game starts |
+| Agent | `BRIDGE_TOKEN`, the same value; `BRIDGE_URL` stays at its default |
+| Web | nothing; `ADMIN_PASSWORD_HASH` is recommended (see [Roles](#roles)) |
+
+Kubernetes: the `bridge` component in
+[`kustomization.yaml`](../deploy/kubernetes/kustomization.yaml), plus
+`BRIDGE_TOKEN` in the `skald-agent` Secret. Compose: `COMPOSE_PROFILES=bridge`
+(comma-separated with others), `BEPINEX=true` and `BRIDGE_TOKEN` in `.env`.
+Either restarts the game once and changes the join code: do it with nobody
+online. `BEPINEX=true` makes the image download BepInEx (about 1 MB from
+Thunderstore, TCP 443, already allowed) and adds about 30 s to the first
+start. The NetworkPolicy needs no change: the plugin is loopback only.
+
+**The agent's side**
+
+- `GET /bridge/status`: `available`, `reason` (`unreachable`: not installed,
+  BepInEx off, kill switch, or still starting; `disabled`: the plugin turned
+  itself off, usually after a game patch; `token`; `loading`; `restarting`),
+  the plugin version and the **game build**, `tested` and `acknowledged`.
+- `GET /bridge/players`: name, platform type, position and health. The
+  plugin's peer uids, platform ids and PlayFab ids **never leave the agent**:
+  it keeps a private name to uid table and swaps a name for its uid before a
+  command goes on.
+- `GET /bridge/{time,events,globalkeys,locations,bans}`. The ban list comes
+  back as opaque ids (and a name when the agent saw the player connected);
+  `unban` takes such an id.
+- `POST /bridge/{command}` for one allow-list: `broadcast, save, kick, ban,
+  unban, time, skip-to-morning, time-freeze, time-resume, event-start,
+  event-stop, spawn, teleport, globalkey-set, globalkey-remove,
+  creature-spawn, creature-kill, creature-tame, heal, status, repair, fill,
+  grow, map-reveal, map-pins`, plus `ack-build`. Bodies are JSON objects
+  (`{}` at least, 16 KB max), `X-Skald-Actor` is passed through to the
+  plugin's audit line, 8 s timeout. The plugin's 400/404/409/501/503/504
+  pass through; an unreachable plugin is 502. Commands are refused while a
+  restart runs, but do not wait for backups or updates.
+- **Game build gate.** On a build not in `BRIDGE_TESTED_BUILDS`, commands
+  answer 409 until an admin confirms the build in the panel (held button, kept
+  in `SETTINGS_DIR/bridge.json`). Reads keep working.
+- **Saga.** The plugin writes an audit line before and after every command.
+  The agent turns each pair into an `admin` event: who, which command, the
+  result, the player **by name**, and an allow-listed summary of the
+  arguments (item, amount, quality, creature, key, time, the broadcast text,
+  ...). Platform ids and uids are dropped, error messages redacted. The web
+  tier keeps them in the history, so the Saga reads "Sigrun spawned 20 Wood
+  for Ragnar". The full lines stay in the game log (with ids redacted in the
+  Chronicle).
+- **Live positions.** While at least one SSE client is subscribed (skald-web
+  always is) and somebody is playing, the agent polls the plugin every 2 s and
+  publishes a `positions` event (name, platform, x, z, health) when something
+  moved. It is volatile: no sequence number, not replayed, not stored, and not
+  on the metrics port. skald-web passes it to browsers at most every 2 s.
+
+**Who is named.** The actor in the saga is the name a device set in the admin
+sheet ("Your name in the saga", kept in that browser) folded to ASCII, or
+`dashboard-` plus a short hash of the session.
+
+### Roles
+
+Without `ADMIN_PASSWORD_HASH`, anyone who knows the panel password can
+spawn items, kill, ban and teleport. Keep the password strong and the panel
+behind your access layer, or set an admin password:
+
+- The panel password then only views (the map, live players and the saga
+  included).
+- Admin commands, restarts, backups, updates and saving or applying server
+  settings answer 403 until the browser unlocks an admin session with the
+  admin password (`POST /api/admin/unlock`, rate-limited like the login: 5
+  tries a minute, then 15 minutes).
+- The admin session is a second signed cookie, tied to the panel session,
+  that lasts 30 minutes from the last admin action. "Lock" ends it at once;
+  logging out ends both.

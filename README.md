@@ -91,6 +91,46 @@ updates. Details in [docs/configuration.md](docs/configuration.md#item-icons).
 > not affiliated with or endorsed by them. Keep the panel private to your
 > community if you turn this on.
 
+## Admin bridge (opt-in)
+
+Run the evening from your phone: broadcast to every screen (centre or the
+narrator's gold italics), drop items and saved kits next to a player with
+quality, teleport someone home or to Eikthyr's altar, heal and rest them, set
+the time of day, start or stop a raid, spawn or clear creatures, toggle world
+keys, repair and refill the base, pin the cartography tables, save, kick and
+ban. Players move on the map live, every 2 seconds, and every admin action is
+written into the Saga ("Sigrun spawned 20 Wood for Ragnar"). A long press on
+the map offers "teleport a player here", "spawn here" and "pin here".
+
+It needs a small **server-side BepInEx plugin**, the Skald bridge
+([`bridge/`](bridge/README.md)), which the deploy examples install with an
+initContainer. Clients install nothing. Setup in
+[docs/configuration.md](docs/configuration.md#admin-bridge).
+
+> [!WARNING]
+> **What turning it on means.**
+> - The server runs **modded** (`BEPINEX=true`). Crossplay with BepInEx was
+>   verified with an Xbox client on game build `l-1.0.17`: joining, live
+>   positions, broadcasts, items and kits with quality, teleport to a place,
+>   time, raids, creatures, heal, Rested, kiln fill and repair all worked.
+>   Kick and ban of a connected player, teleport to coordinates or to another
+>   player, crop growth and the map reveal and pins (reworked in plugin
+>   0.1.1) are not confirmed in game yet.
+> - **Game patches can disable it.** The plugin checks what it uses when it
+>   loads and switches itself (or one command) off with one log line instead
+>   of crashing the game; the panel then says so. A renamed network call
+>   fails silently, so on a game build that is not on the tested list,
+>   commands stay off until an admin confirms the build in the panel.
+>   A Unity upgrade can break BepInEx itself before a new pack is out.
+> - **Kill switches:** `SKALD_BRIDGE=off` keeps BepInEx but makes the plugin
+>   serve nothing; `BEPINEX=false` returns the server to vanilla. Both need a
+>   restart.
+> - **Privilege:** without `ADMIN_PASSWORD_HASH`, anyone with the panel
+>   password is an admin. With it, the panel password only views and admin
+>   actions need a separate, rate-limited admin session (30 minutes idle).
+> - Chat lines from the server are not possible (consoles do not show them),
+>   nor are god mode, flying, weather or food: those live on the client.
+
 ## Server settings
 
 <img src="docs/images/settings.webp" alt="The server settings sheet: world modifier presets as wooden slots with Custom lit in blue, stepped choices for combat, death penalty, resources and raids, and a footer counting four changes" width="100%" />
@@ -187,7 +227,12 @@ Metrics, alert rules and the Grafana dashboard are in [docs/metrics.md](docs/met
 ## Security
 
 - One panel password, stored only as an argon2id hash. Login is limited to 5
-  tries a minute, then a 15-minute lockout.
+  tries a minute, then a 15-minute lockout. An optional admin password
+  (`ADMIN_PASSWORD_HASH`) makes the panel password view-only; admin sessions
+  are rate-limited the same way and end after 30 idle minutes.
+- The admin bridge plugin listens on the pod's loopback only, behind its own
+  token, and the agent forwards an allow-list of commands. Player platform ids
+  never leave the agent.
 - Sessions are signed `HttpOnly`, `SameSite=Strict` cookies.
 - The two tiers share a token. Backup downloads are name-checked and refuse symlinks.
 - With crossplay the server only dials out to PlayFab, so there are no game
@@ -213,7 +258,10 @@ Report issues as described in [SECURITY.md](SECURITY.md).
 ## Development
 
 Needs Go 1.26+, Bun 1.3+ and Node 22+. A built-in mock server fakes a month of
-history, players coming and going, deaths and raids (password: `ognisko`).
+history, players coming and going, deaths and raids (password: `ognisko`),
+and a fake bridge with players walking around the map. `MOCK_ADMIN=1` adds an
+admin password (`jarl`); `MOCK_BRIDGE=off|disabled|untested` plays a bridge
+that is missing, switched off by a patch, or on an untested game build.
 
 ```sh
 cd web && npm install && npm run build
@@ -224,6 +272,7 @@ Tests:
 
 ```sh
 cd agent  && go vet ./... && go test -race ./...
+cd bridge && dotnet test tests && sh build.sh   # build.sh fetches reference DLLs anonymously
 cd server && bun run typecheck && bun test
 cd web    && npm run typecheck && npm test
 ```
@@ -243,7 +292,10 @@ To add a language, copy `web/src/i18n/en.ts`, register it in
   people connecting within the same few seconds could swap marks.
 - Boss slots follow the seven vanilla bosses up to Fader; a Deep North boss
   key isn't known yet.
-- One game server and one panel password per Skald instance.
+- One game server and one panel password (plus an optional admin password) per Skald instance.
+- Admin bridge: kick and ban of a connected player, teleport to coordinates
+  or to another player, crop growth and the cartography table reveal and pins
+  are not yet confirmed with a player in game.
 
 ## Contributing
 
