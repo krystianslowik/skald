@@ -1,10 +1,11 @@
 import "@testing-library/jest-dom";
 
 // jsdom gaps: matchMedia (motion's reduced-motion hook), canvas, ResizeObserver, WebSocket.
+// Everything is a desktop with a mouse unless a test sets `window.__media[query] = true`.
 if (!window.matchMedia) {
   window.matchMedia = (query: string) =>
     ({
-      matches: false,
+      matches: !!(window as unknown as { __media?: Record<string, boolean> }).__media?.[query],
       media: query,
       onchange: null,
       addEventListener() {},

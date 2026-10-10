@@ -585,3 +585,40 @@ body {
     background: #4a4748;
   }
 }
+
+/* ---- phones ------------------------------------------------------------------ */
+
+:root {
+  /* The bottom tab bar on phones, home indicator included. */
+  --tabbar-h: calc(3.75rem + env(safe-area-inset-bottom));
+}
+
+html {
+  overflow-x: clip;
+}
+
+@layer components {
+  /* A finger-sized hit area (44 px) around a smaller control, without moving the layout. */
+  .tap {
+    position: relative;
+  }
+  @media (pointer: coarse) {
+    .tap::after {
+      content: "";
+      position: absolute;
+      top: min(0px, calc((100% - 44px) / 2));
+      bottom: min(0px, calc((100% - 44px) / 2));
+      left: min(0px, calc((100% - 44px) / 2));
+      right: min(0px, calc((100% - 44px) / 2));
+    }
+  }
+}
+
+@media (pointer: coarse) {
+  /* iOS zooms the page into any field under 16 px. */
+  input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: max(16px, 1em) !important;
+  }
+}

@@ -6,6 +6,8 @@ export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
+      // Touch screens: larger targets where a finger, not a cursor, does the pointing.
+      screens: { coarse: { raw: "(pointer: coarse)" } },
       colors: {
         coal: "#0e0b09",
         soot: "#1e140d",
