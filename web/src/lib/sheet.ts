@@ -1,4 +1,4 @@
-// Drag-to-dismiss math for the profile sheet. Pure functions, so they can be
+// Drag-to-dismiss math for the sheets (profile, settings). Pure functions, so they can be
 // tested without a browser. Offsets are measured along the dismiss axis:
 // 0 is fully open, `size` is fully off-screen, negative is past the open edge.
 
