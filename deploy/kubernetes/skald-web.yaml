@@ -28,7 +28,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: web
-          image: ghcr.io/krystianslowik/skald-web:0.1.0
+          image: ghcr.io/krystianslowik/skald-web:0.3.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
