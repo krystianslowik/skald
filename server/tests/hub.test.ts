@@ -40,6 +40,9 @@ function fakeAgent(startedAt: string, sinces: number[]): AgentSource {
     async settings() {
       return { status: 404, body: {} };
     },
+    async map() {
+      return { status: 404, etag: null, body: null };
+    },
     async stream(since, onEvent, signal) {
       sinces.push(since);
       for (const e of BUFFER) if (e.seq > since) onEvent(e);

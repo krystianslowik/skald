@@ -1,5 +1,5 @@
 import { SseParser } from "./sse";
-import type { ActionName, ActionResult, AgentEvent, AgentState, LogLine, SettingsRequest } from "./types";
+import type { ActionName, ActionResult, AgentEvent, AgentState, LogLine, MapSnapshot, SettingsRequest } from "./types";
 
 export interface ActionResponse {
   status: number;
@@ -10,6 +10,13 @@ export interface ActionResponse {
 export interface Proxied {
   status: number;
   body: unknown;
+}
+
+/** Agent `GET /map`: 200 with a body, 304 when `etag` still matches, 404 off, 503 not built yet. */
+export interface MapSourceResult {
+  status: number;
+  etag: string | null;
+  body: MapSnapshot | null;
 }
 
 /** Everything the web tier needs from the agent; implemented over HTTP and by the mock. */
@@ -23,6 +30,8 @@ export interface AgentSource {
   stream(since: number, onEvent: (e: AgentEvent) => void, signal: AbortSignal): Promise<void>;
   /** Server settings: 404 when the agent has the feature off. */
   settings(req: SettingsRequest): Promise<Proxied>;
+  /** The world map, conditional on the ETag of the copy the caller holds. */
+  map(etag: string | null): Promise<MapSourceResult>;
 }
 
 const SETTINGS_ROUTE: Record<SettingsRequest["op"], [method: string, path: string]> = {
@@ -95,6 +104,18 @@ export class HttpAgent implements AgentSource {
       json = { ok: res.ok, message: `HTTP ${res.status}` };
     }
     return { status: res.status, body: json };
+  }
+
+  async map(etag: string | null): Promise<MapSourceResult> {
+    const headers: Record<string, string> = { ...this.headers(), "Accept-Encoding": "gzip" };
+    if (etag) headers["If-None-Match"] = etag;
+    const res = await this.fetchImpl(`${this.baseUrl}/map`, { headers, signal: AbortSignal.timeout(30_000) });
+    const tag = res.headers.get("ETag");
+    if (res.status !== 200) {
+      await res.body?.cancel();
+      return { status: res.status, etag: tag, body: null };
+    }
+    return { status: 200, etag: tag, body: (await res.json()) as MapSnapshot };
   }
 
   backup(name: string, signal: AbortSignal): Promise<Response> {

@@ -5,6 +5,7 @@ import { loadConfig } from "./config";
 import { HistoryStore } from "./db";
 import { hashPassword } from "./hash";
 import { Hub } from "./hub";
+import { MapCache } from "./map";
 import { MockAgent, mockMetrics } from "./mock";
 import { cachedMetrics, fetchMetrics } from "./prom";
 import { mountStatic } from "./static";
@@ -59,6 +60,7 @@ const app = createApp({
   metricsConfigured,
   locale: cfg.locale,
   trustedIpHeader: cfg.trustedIpHeader,
+  map: new MapCache((etag) => agent.map(etag), cfg.mapSpoilers),
 });
 
 // Static SPA, resolved relative to the process CWD (image: /app/bin -> /app/web/dist).
@@ -97,5 +99,5 @@ const server = Bun.serve<WsData>({
 });
 
 console.log(
-  `skald-web listening on ${server.hostname}:${server.port} (locale ${cfg.locale}, tz ${cfg.timeZone}, metrics ${metricsConfigured ? "on" : "off"})${cfg.mock ? " (mock agent)" : ""}`,
+  `skald-web listening on ${server.hostname}:${server.port} (locale ${cfg.locale}, tz ${cfg.timeZone}, metrics ${metricsConfigured ? "on" : "off"}, map spoilers ${cfg.mapSpoilers ? "on" : "off"})${cfg.mock ? " (mock agent)" : ""}`,
 );

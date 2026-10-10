@@ -61,6 +61,24 @@ export interface WorldMeta {
   bosses?: { key: string; defeated: boolean }[] | null;
 }
 
+/**
+ * Where the world's day stands now (agent `world.clock`). netTime reaches disk
+ * only with a save, so the agent extrapolates while players are on; a
+ * dedicated server's world only advances with someone connected.
+ */
+export interface WorldClock {
+  netTime: number;
+  day: number;
+  /** Time of day, 0..1: netTime mod the 1800 s day. */
+  dayFraction: number;
+  /** Approximate: the middle half of the day counts as daylight. */
+  daylight: boolean;
+  /** False when nobody is connected: the world is asleep, time frozen. */
+  advancing: boolean;
+  /** netTime per wall second between the last two saves seen; null until two. */
+  rate: number | null;
+}
+
 export interface AgentState {
   now: string;
   server: {
@@ -79,7 +97,14 @@ export interface AgentState {
     netStats: NetStats | null;
   };
   players: Player[];
-  world: { sizeBytes: number; lastSaveAt: string | null; lastSaveMs: number; meta: WorldMeta | null };
+  world: {
+    sizeBytes: number;
+    lastSaveAt: string | null;
+    lastSaveMs: number;
+    meta: WorldMeta | null;
+    /** null when the save is unreadable; missing from agents older than 0.5.0. */
+    clock?: WorldClock | null;
+  };
   backups: Backup[];
   agent: { startedAt: string; lastLogAt: string | null };
   /** null when the agent has no writable SETTINGS_DIR (or predates the feature). */
@@ -292,4 +317,137 @@ export function emptyAgentState(now = new Date()): AgentState {
     agent: { startedAt: now.toISOString(), lastLogAt: null },
     settings: null,
   };
+}
+
+// ---- world map (agent GET /map, web GET /api/map) --------------------------
+
+/** World metres rounded to whole metres: x east, z north, origin at the centre. */
+export interface MapPoint {
+  x: number;
+  z: number;
+}
+
+export interface MapMeta {
+  seedName: string;
+  seed: number;
+  worldGenVersion: number;
+  day: number;
+  netTime: number;
+  generation: number;
+  savedAt: string;
+  generatedAt: string;
+  /** Names (owners, portal tags, pin names) were exported (agent MAP_SHOW_NAMES). */
+  showNames: boolean;
+}
+
+/**
+ * Zone grid, `size` x `size` zones of `zoneSize` m, row-major from zone
+ * (`min`, `min`) east then north. `data` is base64, one byte per zone:
+ * 0 never generated, 1 generated and empty (water), 2..255 log object density.
+ */
+export interface MapLand {
+  zoneSize: number;
+  min: number;
+  size: number;
+  data: string;
+}
+
+/**
+ * Union of the cartography tables' explored masks: `size` x `size` pixels of
+ * `metersPerPixel`, centred on the origin, row-major from the south-west.
+ * `rle` (base64) is LEB128 run lengths alternating unexplored/explored,
+ * starting with unexplored.
+ */
+export interface MapExplored {
+  available: boolean;
+  tables: number;
+  size: number;
+  metersPerPixel: number;
+  pixels: number;
+  rle: string;
+}
+
+export interface MapPin extends MapPoint {
+  type: number;
+  kind: string;
+  name: string;
+}
+
+export interface MapPortal extends MapPoint {
+  id: string;
+  kind: string;
+  tag: string;
+  pairedWith?: string;
+}
+
+export interface MapTombstone extends MapPoint {
+  owner: string;
+  /** In-game day of the death; -1 when unknown. */
+  day: number;
+}
+
+export interface MapBed extends MapPoint {
+  owner: string;
+}
+
+export interface MapVehicle extends MapPoint {
+  kind: string;
+}
+
+export interface MapBase extends MapPoint {
+  pieces: number;
+  zones: number;
+  hasBed: boolean;
+  stations: string[];
+}
+
+export type MapLocationKind = "start" | "boss" | "trader" | "dungeon";
+
+export interface MapLocation extends MapPoint {
+  kind: MapLocationKind;
+  name: string;
+  /** The game has built it (its zone was loaded). */
+  placed: boolean;
+  /** Inside the explored mask or within 64 m of a player-built piece. */
+  explored: boolean;
+}
+
+export interface MapTerrainEdit extends MapPoint {
+  cells: number;
+}
+
+export interface MapStats {
+  zdos: number;
+  chunks: number;
+  chunksParsed: number;
+  chunksFailed: number;
+  pieces: number;
+  generatedZones: number;
+  locationsTotal: number;
+  locationsPlaced: number;
+  buildSeconds: number;
+}
+
+/** Agent GET /map. */
+export interface MapSnapshot {
+  meta: MapMeta;
+  land: MapLand;
+  explored: MapExplored;
+  pins: MapPin[];
+  portals: MapPortal[];
+  tombstones: MapTombstone[];
+  beds: MapBed[];
+  vehicles: MapVehicle[];
+  bases: MapBase[];
+  locations: MapLocation[];
+  terrainEdits: MapTerrainEdit[];
+  stats: MapStats;
+}
+
+/** Web GET /api/map: the snapshot after the spoiler setting was applied. */
+export interface ApiMap extends MapSnapshot {
+  /** MAP_SPOILERS: unexplored locations are kept. */
+  spoilers: boolean;
+  /** Locations dropped because nobody has found them yet. */
+  hiddenLocations: number;
 }

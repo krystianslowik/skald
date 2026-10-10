@@ -1,4 +1,5 @@
-import type { ActionResponse, AgentSource, Proxied } from "./agent";
+import type { ActionResponse, AgentSource, MapSourceResult, Proxied } from "./agent";
+import { mockMap } from "./mapmock";
 import { addDays, calendar } from "./profiles";
 import { buildArgs, changedKeys, normalize, parseArgs, validateSettings } from "./settings";
 import type {
@@ -8,6 +9,7 @@ import type {
   AgentState,
   ApplyMode,
   LogLine,
+  MapSnapshot,
   Metrics,
   Platform,
   SeriesPoint,
@@ -127,6 +129,9 @@ export class MockAgent implements AgentSource {
   /** Peer id per online name, for the abandoned-object lines on leave. */
   private uids = new Map<string, number>();
   private effective: SettingsView["effective"];
+  /** World map: built once, re-stamped with the save generation. */
+  private mapBase: MapSnapshot | null = null;
+  private mapGeneration = 1;
 
   constructor(
     private readonly clock: () => number = Date.now,
@@ -220,7 +225,30 @@ export class MockAgent implements AgentSource {
   }
 
   async getState(): Promise<AgentState> {
-    return structuredClone({ ...this.state, now: new Date(this.clock()).toISOString() });
+    const now = this.clock();
+    const st = structuredClone({ ...this.state, now: new Date(now).toISOString() });
+    const meta = st.world.meta;
+    if (meta) {
+      // The world only moves with someone on it; between saves it is extrapolated, as the agent does.
+      const advancing = st.players.length > 0;
+      const from = Math.max(Date.parse(meta.savedAt), ...st.players.map((p) => Date.parse(p.since)));
+      const netTime = meta.netTime + (advancing ? Math.max(0, Math.min(7200, (now - from) / 1000)) : 0);
+      const dayFraction = Math.round(((netTime % 1800) / 1800) * 1000) / 1000;
+      st.world.clock = { netTime, day: Math.floor(netTime / 1800), dayFraction, daylight: dayFraction >= 0.25 && dayFraction < 0.75, advancing, rate: advancing ? 1 : 0 };
+    }
+    return st;
+  }
+
+  async map(etag: string | null): Promise<MapSourceResult> {
+    const tag = `"mock-map-${this.mapGeneration}"`;
+    if (etag === tag) return { status: 304, etag: tag, body: null };
+    this.mapBase ??= mockMap({ now: this.clock() });
+    const meta = this.state.world.meta;
+    const body: MapSnapshot = {
+      ...this.mapBase,
+      meta: { ...this.mapBase.meta, generation: this.mapGeneration, netTime: meta?.netTime ?? 0, day: meta?.day ?? 0, savedAt: meta?.savedAt ?? this.mapBase.meta.savedAt },
+    };
+    return { status: 200, etag: tag, body };
   }
 
   async getLogs(limit: number): Promise<LogLine[]> {
@@ -515,6 +543,7 @@ export class MockAgent implements AgentSource {
       meta.day = Math.floor(meta.netTime / 1800);
       meta.savedAt = this.state.world.lastSaveAt;
     }
+    this.mapGeneration++;
     // The game's own autobackup rides along with some saves.
     if (Math.random() < 0.25) {
       const bms = Math.round(20 + Math.random() * 40);

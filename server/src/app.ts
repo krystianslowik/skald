@@ -4,6 +4,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { AgentSource } from "./agent";
 import { createSession, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS, verifySession } from "./auth";
 import type { Hub } from "./hub";
+import type { MapCache } from "./map";
 import {
   ACTION_NAMES,
   BACKUP_NAME,
@@ -30,6 +31,8 @@ export interface AppDeps {
   /** Header holding the real client IP behind a trusted proxy; empty = socket address. */
   trustedIpHeader?: string;
   limiter?: RateLimiter;
+  /** The world map; without it /api/map answers 404. */
+  map?: MapCache;
   verifyPassword?: (password: string, hash: string) => Promise<boolean>;
   clock?: () => number;
 }
@@ -133,6 +136,24 @@ export function createApp(deps: AppDeps): Hono {
     } catch {
       return c.json({ lines: [], error: "agent unreachable" }, 502);
     }
+  });
+
+  // The world map, gated by MAP_SPOILERS. Revalidated by ETag; gzip when accepted.
+  app.get("/api/map", async (c) => {
+    if (!deps.map) return c.json({ error: "world map off" }, 404);
+    const res = await deps.map.get();
+    if (!res.ok) return c.json({ error: res.message }, res.status as 404);
+    const headers: Record<string, string> = { ETag: res.etag, "Cache-Control": "private, no-cache", Vary: "Accept-Encoding" };
+    if (res.stale) headers["X-Skald-Stale"] = "1";
+    if ((c.req.header("If-None-Match") ?? "").split(",").some((t) => t.trim().replace(/^W\//, "") === res.etag)) {
+      return new Response(null, { status: 304, headers });
+    }
+    headers["Content-Type"] = "application/json";
+    if (/\bgzip\b/.test(c.req.header("Accept-Encoding") ?? "")) {
+      headers["Content-Encoding"] = "gzip";
+      return new Response(res.gzip, { status: 200, headers });
+    }
+    return new Response(res.json, { status: 200, headers });
   });
 
   app.get("/api/players", (c) => {

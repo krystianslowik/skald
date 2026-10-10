@@ -31,6 +31,9 @@ function setup(
       return opts.backup ? opts.backup(name, signal) : new Response(null, { status: 404 });
     },
     async stream() {},
+    async map() {
+      return { status: 404, etag: null, body: null };
+    },
     async settings(req) {
       settingsCalls.push(req);
       return opts.settings ? opts.settings(req) : { status: 404, body: { ok: false, message: "not found" } };

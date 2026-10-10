@@ -25,6 +25,8 @@ export interface Config {
   cookieSecure: boolean;
   /** Header carrying the real client IP (e.g. CF-Connecting-IP); empty = socket address. */
   trustedIpHeader: string;
+  /** Show every boss, trader and dungeon location, not only the ones someone found. */
+  mapSpoilers: boolean;
 }
 
 type Env = Record<string, string | undefined>;
@@ -75,5 +77,6 @@ export function loadConfig(env: Env = process.env): Config {
     timeZone,
     cookieSecure: mock ? false : opt("COOKIE_SECURE", "true") !== "false",
     trustedIpHeader: opt("TRUSTED_IP_HEADER", ""),
+    mapSpoilers: ["1", "true", "yes", "on"].includes(opt("MAP_SPOILERS", "false").toLowerCase()),
   };
 }
