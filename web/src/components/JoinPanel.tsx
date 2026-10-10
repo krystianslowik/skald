@@ -66,15 +66,16 @@ export const JoinPanel = memo(function JoinPanel({
   }, []);
 
   const toggleInclude = useCallback(() => {
-    setInclude((v) => {
-      try {
-        localStorage.setItem(INCLUDE_KEY, v ? "0" : "1");
-      } catch {
-        // not remembered; fine
-      }
-      return !v;
-    });
-  }, []);
+    const next = !include;
+    try {
+      localStorage.setItem(INCLUDE_KEY, next ? "1" : "0");
+    } catch {
+      // not remembered; fine
+    }
+    setInclude(next);
+    // Turned on by hand: fetch it now, so the next Share needs no wait.
+    if (next) void load();
+  }, [include, load]);
 
   // Pressing Share starts the password request, so the share sheet can open
   // while the tap still counts as the person's own action.

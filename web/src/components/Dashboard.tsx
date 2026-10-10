@@ -213,7 +213,7 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
         <Atmosphere dim={!online} />
         {!online && <OfflineBanner />}
         {phone ? (
-          <main className="relative z-10 mx-auto max-w-xl px-[max(1rem,env(safe-area-inset-left))] pb-[calc(var(--tabbar-h)+1.5rem)] pt-[max(1.25rem,env(safe-area-inset-top))]">
+          <main className="relative z-10 mx-auto max-w-xl pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pb-[calc(var(--tabbar-h)+1.5rem)] pt-[max(1.25rem,env(safe-area-inset-top))]">
             {/* Each tab fades in on its own; the boards inside do not move. */}
             <motion.div key={shownTab} className="space-y-5" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.18 }}>
               {shownTab === "fire" && (
