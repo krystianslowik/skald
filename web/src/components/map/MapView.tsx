@@ -299,8 +299,13 @@ function SaveMap({ map, stale, seed, now }: { map: import("../../types").ApiMap;
   );
 
   // Clear of the controls: the side board on wide screens, the buttons along the bottom.
+  // In landscape the buttons sit in the side margins, so the map keeps its full height.
   const [wide] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1024);
-  const insets = useMemo<Insets>(() => ({ top: 12, right: coarse ? 12 : 64, bottom: coarse ? 72 : 20, left: wide ? 300 : 12 }), [coarse, wide]);
+  const [landscape] = useState(() => typeof window !== "undefined" && window.innerWidth > window.innerHeight);
+  const insets = useMemo<Insets>(
+    () => (landscape && !wide ? { top: 12, right: 64, bottom: 12, left: 64 } : { top: 12, right: coarse ? 12 : 64, bottom: coarse ? 72 : 20, left: wide ? 300 : 12 }),
+    [coarse, wide, landscape],
+  );
 
   const panel = <MapLayers map={map} markers={markers} layers={layers} counts={counts} onToggle={toggle} onPick={pickResult} now={now} />;
   const bottom = "bottom-[max(0.75rem,env(safe-area-inset-bottom))]";

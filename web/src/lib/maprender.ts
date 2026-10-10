@@ -669,7 +669,7 @@ export class MapRenderer {
       visible.push(count > 1 ? { m, sx, sy, members } : { m, sx, sy });
       icons.push({ x: sx - px / 2, y: sy - px / 2, w: px, h: px });
       // A cluster whose lead has no name borrows the best one inside it (a portal's tag, a grave).
-      const named = m.label ? m : count > 1 ? members.filter((x) => x.label && x.tier >= 2).sort((a, b) => b.rank - a.rank)[0] : undefined;
+      const named = m.label ? m : count > 1 ? members.filter((x) => x.label && x.tier >= 2 && x.id !== f.selected).sort((a, b) => b.rank - a.rank)[0] : undefined;
       if (named && (v.scale >= named.labelScale || m.id === f.selected)) {
         labels.push({ sx, sy, text: named.label, priority: m.id === f.selected ? 1000 : named.rank, r: px / 2 + (count > 1 ? 9 : 1) });
       }
