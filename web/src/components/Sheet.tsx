@@ -1,5 +1,6 @@
 import { animate, motion, useMotionValue, useReducedMotion, useTransform, type AnimationPlaybackControls } from "motion/react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { dragOffset, FLICK_VELOCITY, pickDetent, shouldDismiss, travelFor, velocityFrom, VELOCITY_WINDOW_MS, type Sample } from "../lib/sheet";
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -254,7 +255,8 @@ export function Sheet({
     }
   };
 
-  return (
+  // On the body, so a sheet opened inside the map tab still covers the tab bar.
+  return createPortal(
     <div className={`fixed inset-0 z-50 ${modal ? "" : "pointer-events-none"}`}>
       {modal && <motion.div aria-hidden className="sheet-scrim absolute inset-0" style={{ opacity: scrim }} onClick={requestClose} />}
       <motion.div
@@ -292,7 +294,8 @@ export function Sheet({
         </div>
         {footer}
       </motion.div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -300,7 +303,7 @@ export function Sheet({
 export function SheetClose({ label, escLabel, onClose }: { label: string; escLabel: string; onClose: () => void }) {
   return (
     <div className="flex shrink-0 flex-col items-center gap-1.5 self-start">
-      <button data-autofocus type="button" onClick={onClose} aria-label={label} className="plaque press grid h-9 w-9 place-items-center">
+      <button data-autofocus type="button" onClick={onClose} aria-label={label} className="plaque press grid h-9 w-9 place-items-center coarse:h-11 coarse:w-11">
         <svg width="16" height="16" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden>
           <path d="M3 3l10 10M13 3L3 13" />
         </svg>

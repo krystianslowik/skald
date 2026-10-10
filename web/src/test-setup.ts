@@ -30,3 +30,5 @@ class FakeWebSocket {
   close() {}
 }
 (globalThis as unknown as { WebSocket: unknown }).WebSocket = FakeWebSocket;
+// jsdom has no layout, so no scrolling.
+window.scrollTo = (() => undefined) as typeof window.scrollTo;

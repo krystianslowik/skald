@@ -9,6 +9,7 @@ import { pl } from "./i18n/pl";
 import { applyEvent } from "./lib/apply";
 import { stripValheimStamp } from "./lib/format";
 import { createLogStore } from "./lib/useValheim";
+import { COARSE, PHONE } from "./lib/useMedia";
 import { emptyAgentState, type ApiState, type PlayerProfile, type SettingsView } from "./types";
 
 const inPolish = (ui: ReactElement) => render(<I18nProvider locale="pl">{ui}</I18nProvider>);
@@ -514,5 +515,84 @@ describe("helpers", () => {
     expect(s.history.events).toHaveLength(2);
     s = applyEvent(s, { seq: 12, ts: "2026-10-09T20:03:00Z", type: "net_stats", data: { connections: 1, zdos: 9, sent: 0, recv: 0 } });
     expect(s.server.netStats).toEqual({ connections: 1, zdos: 9, sent: 0, recv: 0 });
+  });
+});
+
+describe("On a phone", () => {
+  const media = window as unknown as { __media?: Record<string, boolean> };
+  afterEach(() => {
+    media.__media = {};
+    delete (navigator as { share?: unknown }).share;
+  });
+  function phone() {
+    media.__media = { [PHONE]: true, [COARSE]: true };
+    history.replaceState(null, "", "/");
+  }
+  const clip = () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    return writeText;
+  };
+
+  it("shows one tab at a time and Back returns to the fire", async () => {
+    phone();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 })));
+    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    const tabs = screen.getByRole("navigation", { name: "Sections" });
+    expect(within(tabs).getByRole("link", { name: "Fire" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText(/^Tap to copy\./)).toBeInTheDocument();
+    // The header's buttons moved to the Settings tab.
+    expect(screen.queryByRole("button", { name: "Log out" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Saga" })).not.toBeInTheDocument();
+
+    fireEvent.click(within(tabs).getByRole("link", { name: "Saga" }));
+    expect(location.hash).toBe("#saga");
+    expect(screen.getByRole("heading", { name: "Saga" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Warrior ranking" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Join code 4 8 2 9 1 5/ })).not.toBeInTheDocument();
+
+    // Tab to tab replaces the entry, so one Back is home.
+    fireEvent.click(within(tabs).getByRole("link", { name: "Settings" }));
+    expect(location.hash).toBe("#settings");
+    expect(screen.getByRole("button", { name: "Log out" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Chronicle" })).toBeInTheDocument();
+    act(() => {
+      history.back();
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: /Join code 4 8 2 9 1 5/ })).toBeInTheDocument());
+    expect(location.hash).toBe("");
+
+    // The Map tab keeps the bar and has no back button of its own.
+    fireEvent.click(within(tabs).getByRole("link", { name: "Map" }));
+    expect(await screen.findByRole("dialog", { name: "World map" })).toBeInTheDocument();
+    expect(within(screen.getByRole("navigation", { name: "Sections" })).getByRole("link", { name: "Map" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("shares the code and the password through the share sheet", async () => {
+    phone();
+    const share = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "share", { value: share, configurable: true });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => (String(url) === "/api/settings/password" ? Response.json({ password: "hearth-77" }) : new Response("{}", { status: 404 }))));
+    render(<Dashboard live={{ state: withSettings(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    expect(screen.getByRole("checkbox", { name: "Include password" })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Share the join code" }));
+    await waitFor(() => expect(share).toHaveBeenCalledWith({ text: "Join My Valheim in Valheim: code 482915, password hearth-77" }));
+    // Without the password, only the code goes.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Include password" }));
+    fireEvent.click(screen.getByRole("button", { name: "Share the join code" }));
+    await waitFor(() => expect(share).toHaveBeenLastCalledWith({ text: "Join My Valheim in Valheim: code 482915" }));
+  });
+
+  it("copies the invite where there is no share sheet, in Polish too", async () => {
+    phone();
+    const writeText = clip();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })));
+    inPolish(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    expect(screen.getByText(/^Stuknij, aby skopiować\./)).toBeInTheDocument();
+    // No password on this server: no toggle either.
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Udostępnij kod dołączenia" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Dołącz do My Valheim w Valheim: kod 482915"));
+    expect(await screen.findByText("Zaproszenie skopiowane")).toBeInTheDocument();
   });
 });

@@ -42,6 +42,7 @@ export const Header = memo(function Header({
   clock,
   day,
   onMap,
+  compact = false,
 }: {
   server: ApiState["server"];
   online: boolean;
@@ -57,20 +58,27 @@ export const Header = memo(function Header({
   day?: number | null;
   /** Opens the world map. */
   onMap?: () => void;
+  /** Phones: one line of status, one row of facts, and the buttons live in the tab bar and the Settings tab. */
+  compact?: boolean;
 }) {
   const { t, duration } = useI18n();
   const level = flameLevel(s, online);
   const up = s?.serverStartedAt && s.status === "running" ? duration(now - Date.parse(s.serverStartedAt)) : null;
   return (
-    <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
-      <div className="flex min-w-0 items-center gap-4 sm:flex-1">
-        <Flame level={level} size={44} className="shrink-0 drop-shadow-[0_0_14px_rgba(214,96,24,0.45)]" />
+    <header className={compact ? "flex flex-col gap-3" : "flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6"}>
+      <div className={`flex min-w-0 items-center sm:flex-1 ${compact ? "gap-3" : "gap-4"}`}>
+        <Flame level={level} size={compact ? 34 : 44} className="shrink-0 drop-shadow-[0_0_14px_rgba(214,96,24,0.45)]" />
         <div className="min-w-0">
           <p aria-hidden className="truncate font-rune text-xs tracking-[0.3em] text-flame/45">{toRunes(s?.name || "Valheim")}</p>
-          <h1 className="on-world truncate text-2xl font-bold uppercase tracking-[0.08em] text-flame sm:text-[1.875rem]">{s?.name || "Valheim"}</h1>
-          <p className="on-world mt-0.5 text-sm text-ash">
-            {t("header.world")} <span className="text-bone">{s?.world || t("header.worldUnknown")}</span>
-            <span className="mx-2 text-iron">/</span>
+          <h1 className={`on-world truncate font-bold uppercase tracking-[0.08em] text-flame ${compact ? "text-xl leading-tight" : "text-2xl sm:text-[1.875rem]"}`}>{s?.name || "Valheim"}</h1>
+          <p className={`on-world mt-0.5 text-sm text-ash ${compact ? "truncate" : ""}`}>
+            {/* The world's name is on its own board below; a phone keeps the status to one line. */}
+            {!compact && (
+              <>
+                {t("header.world")} <span className="text-bone">{s?.world || t("header.worldUnknown")}</span>
+                <span className="mx-2 text-iron">/</span>
+              </>
+            )}
             <span className={level === "alive" ? "text-flame" : level === "ash" ? "text-ash" : "text-ember"}>{t(`flame.${level}`)}</span>
             <span className="text-ash">, {online ? t(SERVER_STATUS[s?.status ?? "unknown"] ?? "status.unknown") : t("header.noLink")}</span>
           </p>
@@ -79,7 +87,11 @@ export const Header = memo(function Header({
           )}
         </div>
       </div>
-      <dl className="on-world flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-iron/30 pt-3 text-sm sm:flex-nowrap sm:gap-6 sm:border-0 sm:pt-0">
+      <dl
+        className={`on-world flex items-center text-sm ${
+          compact ? "flex-nowrap justify-between gap-x-3 border-t border-iron/30 pt-2.5" : "flex-wrap gap-x-5 gap-y-3 border-t border-iron/30 pt-3 sm:flex-nowrap sm:gap-6 sm:border-0 sm:pt-0"
+        }`}
+      >
         <div>
           <dt className="text-xs text-ash">{t("header.version")}</dt>
           <dd className="font-bold text-bone">{gameVersion(s?.version)}</dd>
@@ -89,47 +101,49 @@ export const Header = memo(function Header({
           <dd className="whitespace-nowrap font-bold text-bone">{up ?? t("header.notBurning")}</dd>
         </div>
         <WorldClock clock={clock} day={day} />
-        <div className="ml-auto flex items-center gap-2 sm:ml-0 sm:gap-3">
-          {onMap && (
+        {!compact && (
+          <div className="ml-auto flex items-center gap-2 sm:ml-0 sm:gap-3">
+            {onMap && (
+              <button
+                type="button"
+                onClick={onMap}
+                onPointerEnter={preloadMap}
+                onFocus={preloadMap}
+                aria-haspopup="dialog"
+                aria-label={t("map.open")}
+                title={t("map.open")}
+                className="plaque press grid h-8 w-8 place-items-center coarse:h-11 coarse:w-11"
+              >
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" aria-hidden>
+                  <path d="M2 5l5-2 6 2 5-2v12l-5 2-6-2-5 2zM7 3v12M13 5v12" />
+                </svg>
+              </button>
+            )}
+            {settings?.enabled && onSettings && (
+              <button
+                type="button"
+                onClick={() => onSettings(false)}
+                onPointerEnter={preloadSettingsSheet}
+                onFocus={preloadSettingsSheet}
+                aria-haspopup="dialog"
+                aria-label={t("settings.open")}
+                title={t("settings.open")}
+                className="plaque press grid h-8 w-8 place-items-center coarse:h-11 coarse:w-11"
+              >
+                <SettingsGlyph size={18} className="text-current" />
+              </button>
+            )}
+            <SoundToggle />
+            <LocaleToggle />
             <button
               type="button"
-              onClick={onMap}
-              onPointerEnter={preloadMap}
-              onFocus={preloadMap}
-              aria-haspopup="dialog"
-              aria-label={t("map.open")}
-              title={t("map.open")}
-              className="plaque press grid h-8 w-8 place-items-center"
+              onClick={onLogout}
+              className="plaque press whitespace-nowrap px-3 py-1.5 text-xs font-bold"
             >
-              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" aria-hidden>
-                <path d="M2 5l5-2 6 2 5-2v12l-5 2-6-2-5 2zM7 3v12M13 5v12" />
-              </svg>
+              {t("header.logout")}
             </button>
-          )}
-          {settings?.enabled && onSettings && (
-            <button
-              type="button"
-              onClick={() => onSettings(false)}
-              onPointerEnter={preloadSettingsSheet}
-              onFocus={preloadSettingsSheet}
-              aria-haspopup="dialog"
-              aria-label={t("settings.open")}
-              title={t("settings.open")}
-              className="plaque press grid h-8 w-8 place-items-center"
-            >
-              <SettingsGlyph size={18} className="text-current" />
-            </button>
-          )}
-          <SoundToggle />
-          <LocaleToggle />
-          <button
-            type="button"
-            onClick={onLogout}
-            className="plaque press whitespace-nowrap px-3 py-1.5 text-xs font-bold"
-          >
-            {t("header.logout")}
-          </button>
-        </div>
+          </div>
+        )}
       </dl>
     </header>
   );
@@ -148,7 +162,7 @@ function SettingsChips({ armed, onOpen, onCancel }: { armed: boolean; onOpen: ()
         onClick={onOpen}
         onPointerEnter={preloadSettingsSheet}
         aria-label={t("settings.pendingChipAria")}
-        className={`press inline-flex items-center gap-1.5 rounded-[2px] border px-2 py-0.5 text-[0.6875rem] font-bold uppercase tracking-[0.06em] ${
+        className={`press tap inline-flex items-center gap-1.5 rounded-[2px] border px-2 py-0.5 text-[0.6875rem] font-bold uppercase tracking-[0.06em] ${
           armed ? "border-white/25 bg-[linear-gradient(180deg,#7aaedc,#5e97cc_60%,#4c82b5)] text-[#10161d]" : "border-ember/60 bg-black/30 text-flame"
         }`}
       >
@@ -156,7 +170,7 @@ function SettingsChips({ armed, onOpen, onCancel }: { armed: boolean; onOpen: ()
         {armed ? t("settings.armedChip") : t("settings.pendingChip")}
       </button>
       {armed && onCancel && (
-        <button type="button" onClick={onCancel} aria-label={t("settings.cancelArmed")} title={t("settings.cancelArmed")} className="plaque press grid h-6 w-6 place-items-center">
+        <button type="button" onClick={onCancel} aria-label={t("settings.cancelArmed")} title={t("settings.cancelArmed")} className="plaque press tap grid h-6 w-6 place-items-center">
           <svg width="11" height="11" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
             <path d="M3 3l10 10M13 3L3 13" />
           </svg>
@@ -167,7 +181,7 @@ function SettingsChips({ armed, onOpen, onCancel }: { armed: boolean; onOpen: ()
 }
 
 /** Optional crackling-fire ambience; off until someone asks for it. */
-function SoundToggle() {
+export function SoundToggle() {
   const { t } = useI18n();
   const { on, supported, toggle } = useCampfireSound();
   if (!supported) return null;
@@ -178,7 +192,7 @@ function SoundToggle() {
       aria-pressed={on}
       aria-label={t("sound.label")}
       title={on ? t("sound.on") : t("sound.off")}
-      className="plaque press grid h-8 w-8 place-items-center"
+      className="plaque press grid h-8 w-8 place-items-center coarse:h-11 coarse:w-11"
     >
       <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d="M3 8h3l4-3.5v11L6 12H3z" />
