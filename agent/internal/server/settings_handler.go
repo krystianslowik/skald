@@ -171,6 +171,8 @@ func (s *Server) applyTick(ctx context.Context, now time.Time) {
 		s.zeroSince = time.Time{}
 		return
 	}
+	// The process snapshot may be a few seconds old, so a tick right after
+	// someone else's restart can still see "pending"; the next one corrects it.
 	if !st.Pending(s.cachedProcesses(ctx, settingsProcMaxAge).serverStart) {
 		// Applied some other way (a pod restart, the restart rune).
 		if was, _ := st.Disarm(); was {

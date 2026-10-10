@@ -388,3 +388,36 @@ func TestSettingsApplyWhenEmptyWaitsForLockAndCancels(t *testing.T) {
 		}
 	}
 }
+
+// Once the server process started after the save, /state reports the saved
+// name and args as the running ones.
+func TestStateFollowsAppliedSettings(t *testing.T) {
+	h := newSettingsHarness(t)
+	// Reopen the store with a clock before the fake supervisor's start
+	// (2026-10-09T22:27:55Z): the save below happened before that start.
+	early := func() time.Time { return time.Date(2026, 10, 9, 20, 0, 0, 0, time.UTC) }
+	store, err := settings.Open(h.dir, settings.Seed{Name: "My Valheim", Public: true, Args: "-crossplay"}, early)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.s.opt.Settings = store
+	if _, err := store.Update(settings.Input{Name: "New Hall", Password: ptrStr("ognisko-9"), Public: true, Preset: "casual"}); err != nil {
+		t.Fatal(err)
+	}
+	r := h.do(t, "GET", "/state", token)
+	var st struct {
+		Server struct {
+			Name string `json:"name"`
+			Args string `json:"args"`
+		} `json:"server"`
+		Settings struct {
+			Pending bool `json:"pending"`
+		} `json:"settings"`
+	}
+	json.NewDecoder(r.Body).Decode(&st)
+	if st.Server.Name != "New Hall" || st.Server.Args != "-preset casual -crossplay" || st.Settings.Pending {
+		t.Errorf("state = %+v", st)
+	}
+}
+
+func ptrStr(s string) *string { return &s }
