@@ -19,6 +19,13 @@ type Config struct {
 	WorldName      string
 	ServerName     string
 	ServerArgs     string
+	ServerPublic   string
+	// SettingsDir is where the settings feature writes server.env for the
+	// game's pre-run hook; the feature is off when it is missing or read-only.
+	SettingsDir string
+	// PasswordFile is the game's server password secret, read once to seed
+	// the settings before the first save.
+	PasswordFile string
 }
 
 func Load() (Config, error) {
@@ -36,6 +43,9 @@ func Load() (Config, error) {
 		WorldName:      os.Getenv("WORLD_NAME"),
 		ServerName:     os.Getenv("SERVER_NAME"),
 		ServerArgs:     os.Getenv("SERVER_ARGS"),
+		ServerPublic:   os.Getenv("SERVER_PUBLIC"),
+		SettingsDir:    getenv("SETTINGS_DIR", "/settings"),
+		PasswordFile:   os.Getenv("PASSWORD_FILE"),
 	}
 	if c.AgentToken == "" {
 		return c, errors.New("AGENT_TOKEN is required")

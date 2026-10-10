@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/krystianslowik/skald/agent/internal/events"
+	"github.com/krystianslowik/skald/agent/internal/settings"
 	"github.com/krystianslowik/skald/agent/internal/state"
 	"github.com/krystianslowik/skald/agent/internal/supervisor"
 	"github.com/krystianslowik/skald/agent/internal/world"
@@ -31,7 +32,10 @@ type Options struct {
 	Hub        *events.Hub
 	Tracker    *state.Tracker
 	Supervisor Supervisor
-	Logger     *slog.Logger
+	// Settings is nil when SETTINGS_DIR is missing or read-only: the
+	// /settings routes are then not registered at all (404).
+	Settings *settings.Store
+	Logger   *slog.Logger
 	// PingEvery is the SSE keepalive interval; 15 s when zero.
 	PingEvery time.Duration
 	// ActionTimeout bounds stop/start during a restart; 5 min when zero.
@@ -47,6 +51,9 @@ type Server struct {
 	// procs is the last supervisor answer, shared by /state and /metrics.
 	procMu sync.Mutex
 	procs  procSnapshot
+	// zeroSince is when the apply-when-empty watcher first saw an empty,
+	// running server; zero while players are online. Watcher goroutine only.
+	zeroSince time.Time
 }
 
 func New(opt Options) *Server {
@@ -70,6 +77,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /logs", s.logsHandler)
 	mux.HandleFunc("GET /backups/{name}", s.backupHandler)
 	mux.HandleFunc("POST /action/{name}", s.actionHandler)
+	if s.opt.Settings != nil {
+		mux.HandleFunc("GET /settings", s.settingsGet)
+		mux.HandleFunc("GET /settings/password", s.settingsPassword)
+		mux.HandleFunc("PUT /settings", s.settingsPut)
+		mux.HandleFunc("POST /settings/apply", s.settingsApply)
+		mux.HandleFunc("DELETE /settings/apply", s.settingsCancel)
+	}
 	return requireToken(s.opt.Token, mux)
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/krystianslowik/skald/agent/internal/config"
 	"github.com/krystianslowik/skald/agent/internal/events"
 	"github.com/krystianslowik/skald/agent/internal/server"
+	"github.com/krystianslowik/skald/agent/internal/settings"
 	"github.com/krystianslowik/skald/agent/internal/state"
 	"github.com/krystianslowik/skald/agent/internal/supervisor"
 	"github.com/krystianslowik/skald/agent/internal/syslog"
@@ -30,11 +31,29 @@ func main() {
 	hub := events.New(events.DefaultRingSize, events.DefaultLogSize)
 	tracker := state.New(hub)
 
+	store, err := settings.Open(cfg.SettingsDir, settings.Seed{
+		Name:         cfg.ServerName,
+		Public:       settings.ParsePublic(cfg.ServerPublic),
+		Args:         cfg.ServerArgs,
+		PasswordFile: cfg.PasswordFile,
+	}, nil)
+	if err != nil {
+		logger.Info("server settings disabled", "dir", cfg.SettingsDir, "reason", err.Error())
+		store = nil
+	}
+	handleLine := tracker.HandleLine
+	if store != nil {
+		handleLine = func(line string) {
+			tracker.HandleLine(line)
+			store.NoteLine(line)
+		}
+	}
+
 	go tracker.WatchStatusFile(ctx, cfg.StatusFile, 2*time.Second)
 	go func() {
 		// A bind failure means the game's logs are lost for the pod's
 		// lifetime; exit so the container runtime restarts the sidecar.
-		if err := syslog.Listen(ctx, cfg.SyslogAddr, logger, tracker.HandleLine); err != nil {
+		if err := syslog.Listen(ctx, cfg.SyslogAddr, logger, handleLine); err != nil {
 			fail(fmt.Errorf("syslog listen %s: %w", cfg.SyslogAddr, err))
 		}
 	}()
@@ -48,8 +67,10 @@ func main() {
 		Hub:        hub,
 		Tracker:    tracker,
 		Supervisor: supervisor.New(cfg.SupervisorURL, cfg.SupervisorUser, cfg.SupervisorPass),
+		Settings:   store,
 		Logger:     logger,
 	})
+	go s.RunSettingsWatcher(ctx)
 	go func() {
 		if err := s.ListenAndServeMetrics(cfg.MetricsAddr); err != nil {
 			fail(fmt.Errorf("metrics listen %s: %w", cfg.MetricsAddr, err))

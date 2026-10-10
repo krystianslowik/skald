@@ -19,7 +19,7 @@ import (
 const metricsProcMaxAge = 30 * time.Second
 
 // countedEvents are the event types exported as valheim_events_total.
-var countedEvents = []string{"player_join", "player_leave", "death", "world_saved", "raid", "join_code", "action"}
+var countedEvents = []string{"player_join", "player_leave", "death", "world_saved", "raid", "join_code", "action", "settings_changed", "settings_apply"}
 
 // metricsHandler renders the Prometheus text exposition format (0.0.4) by
 // hand from the same sources as /state.
@@ -69,12 +69,19 @@ func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
 		p.sample("valheim_join_code_changed_timestamp_seconds", unix(*snap.JoinCodeAt))
 	}
 
+	serverName := s.opt.ServerName
+	if st := s.opt.Settings; st != nil {
+		serverName = st.EffectiveSettings(ps.serverStart).Name
+		p.family("valheim_settings_pending", "gauge", "1 if settings were saved after the server process started (a restart applies them), else 0.")
+		p.sample("valheim_settings_pending", boolf(st.Pending(ps.serverStart)))
+	}
+
 	p.family("valheim_info", "gauge", "Static server facts as labels; value is always 1.")
 	p.sample("valheim_info", 1,
 		"version", snap.Version,
 		"network_version", strconv.Itoa(snap.NetworkVersion),
 		"world", s.opt.WorldName,
-		"server_name", s.opt.ServerName)
+		"server_name", serverName)
 
 	p.family("valheim_world_size_bytes", "gauge", "Size of the world save files in bytes.")
 	p.sample("valheim_world_size_bytes", float64(size))

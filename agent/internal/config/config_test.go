@@ -17,6 +17,9 @@ func TestLoadDefaults(t *testing.T) {
 	if c.SupervisorURL != "http://127.0.0.1:9001/RPC2" {
 		t.Errorf("SupervisorURL = %q", c.SupervisorURL)
 	}
+	if c.SettingsDir != "/settings" || c.PasswordFile != "" {
+		t.Errorf("settings defaults: dir %q, password file %q", c.SettingsDir, c.PasswordFile)
+	}
 }
 
 func TestLoadRequiresToken(t *testing.T) {

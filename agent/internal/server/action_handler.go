@@ -38,7 +38,7 @@ func (s *Server) actionHandler(w http.ResponseWriter, r *http.Request) {
 
 	if name == "restart" {
 		s.publishAction(name, true, "restart started")
-		go s.restart()
+		go s.restart(nil)
 		writeJSON(w, http.StatusOK, actionResult{true, "restart started"})
 		return
 	}
@@ -60,14 +60,17 @@ func (s *Server) actionHandler(w http.ResponseWriter, r *http.Request) {
 // restart stops then starts valheim-server, waiting for each. It runs
 // detached from the request and owns s.busy until done. The lock is released
 // before the result event goes out, so a client reacting to that event can
-// immediately start the next action.
-func (s *Server) restart() {
+// immediately start the next action. after, if set, runs last.
+func (s *Server) restart(after func(ok bool, msg string)) {
 	ok, msg := s.stopStart()
 	s.busy.Unlock()
 	if !ok {
 		s.opt.Logger.Warn("restart failed", "err", msg)
 	}
 	s.publishAction("restart", ok, msg)
+	if after != nil {
+		after(ok, msg)
+	}
 }
 
 func (s *Server) stopStart() (bool, string) {

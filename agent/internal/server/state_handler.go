@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/krystianslowik/skald/agent/internal/files"
+	"github.com/krystianslowik/skald/agent/internal/settings"
 	"github.com/krystianslowik/skald/agent/internal/state"
 	"github.com/krystianslowik/skald/agent/internal/world"
 )
@@ -20,6 +21,8 @@ type stateResponse struct {
 	World   worldState     `json:"world"`
 	Backups []files.Backup `json:"backups"`
 	Agent   agentState     `json:"agent"`
+	// Settings is null when the settings feature is off.
+	Settings *settings.Summary `json:"settings"`
 }
 
 type serverState struct {
@@ -63,12 +66,22 @@ func (s *Server) stateHandler(w http.ResponseWriter, r *http.Request) {
 		lastSave = dbMtime
 	}
 
+	name, args := s.opt.ServerName, s.opt.ServerArgs
+	var sum *settings.Summary
+	if st := s.opt.Settings; st != nil {
+		// What the running server was started with, not what waits for a restart.
+		eff := st.EffectiveSettings(ps.serverStart)
+		name, args = eff.Name, eff.Args
+		v := st.Summary(ps.serverStart)
+		sum = &v
+	}
+
 	resp := stateResponse{
 		Now: time.Now().UTC(),
 		Server: serverState{
-			Name:            s.opt.ServerName,
+			Name:            name,
 			World:           s.opt.WorldName,
-			Args:            s.opt.ServerArgs,
+			Args:            args,
 			Status:          snap.Status,
 			Processes:       ps.procs,
 			ServerStartedAt: ps.startedAt,
@@ -80,10 +93,11 @@ func (s *Server) stateHandler(w http.ResponseWriter, r *http.Request) {
 			Playfab:         snap.Playfab,
 			NetStats:        snap.NetStats,
 		},
-		Players: snap.Players,
-		World:   worldState{SizeBytes: size, LastSaveAt: lastSave, LastSaveMs: snap.LastSaveMs, Meta: s.world.Meta()},
-		Backups: files.Backups(s.opt.ConfigDir),
-		Agent:   agentState{StartedAt: s.startedAt, LastLogAt: snap.LastLogAt},
+		Players:  snap.Players,
+		World:    worldState{SizeBytes: size, LastSaveAt: lastSave, LastSaveMs: snap.LastSaveMs, Meta: s.world.Meta()},
+		Backups:  files.Backups(s.opt.ConfigDir),
+		Agent:    agentState{StartedAt: s.startedAt, LastLogAt: snap.LastLogAt},
+		Settings: sum,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -94,6 +108,9 @@ type procSnapshot struct {
 	ok        bool
 	procs     map[string]string
 	startedAt *time.Time
+	// serverStart is when supervisord last spawned valheim-server, also while
+	// it is still STARTING: the pre-run hook has read the settings by then.
+	serverStart *time.Time
 }
 
 // fetchProcesses asks supervisord for every process and caches the result
@@ -108,9 +125,12 @@ func (s *Server) fetchProcesses(ctx context.Context) procSnapshot {
 		ps.ok = true
 		for _, p := range infos {
 			ps.procs[p.Name] = p.StateName
-			if p.Name == serverProgram && p.StateName == "RUNNING" && p.Start > 0 {
+			if p.Name == serverProgram && p.Start > 0 && (p.StateName == "RUNNING" || p.StateName == "STARTING") {
 				t := time.Unix(p.Start, 0).UTC()
-				ps.startedAt = &t
+				ps.serverStart = &t
+				if p.StateName == "RUNNING" {
+					ps.startedAt = &t
+				}
 			}
 		}
 	}
