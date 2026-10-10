@@ -1,0 +1,42 @@
+# Terrain from the game's own world generator (opt-in). Enable it in
+# ../kustomization.yaml:
+#
+#   components:
+#     - terrain
+#
+# Adds, in the game's namespace:
+#   - PVC skald-terrain: the grids a run writes; the agent mounts it read-only
+#   - PVC skald-terrain-game: the run's own copy of the dedicated server, so a
+#     run does not download ~2 GB every time
+#   - CronJob skald-terrain: daily; asks the agent whether its terrain is
+#     current and stops at once if so, otherwise downloads/updates the server,
+#     samples the world generator (a few seconds) and exits. Run it now with
+#       kubectl -n valheim create job --from=cronjob/skald-terrain skald-terrain-now
+#   - a NetworkPolicy for it, and an ingress rule letting it ask the agent
+# and mounts the output into the agent (TERRAIN_DIR=/terrain). That last part
+# changes the game pod, so applying the component restarts the server once.
+#
+# The run is the community server image, unchanged, with the Skald plugin
+# copied in by an initContainer (image skald-terrain: the plugin and two
+# scripts, no game files). It never starts a server: nothing listens and no
+# world is created. See docs/configuration.md#terrain.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - pvc.yaml
+  - cronjob.yaml
+  - networkpolicy.yaml
+patches:
+  - path: agent.yaml
+  # The game pod's policy admits the dashboard only; let the run ask the agent too.
+  - target:
+      kind: NetworkPolicy
+      name: valheim
+    patch: |-
+      - op: add
+        path: /spec/ingress/-
+        value:
+          from:
+            - podSelector: {matchLabels: {app.kubernetes.io/name: skald-terrain}}
+          ports:
+            - {protocol: TCP, port: 8080}

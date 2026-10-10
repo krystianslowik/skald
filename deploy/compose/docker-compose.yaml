@@ -13,6 +13,8 @@
 #              restarts the game (a game restart rotates the join code)
 #   icons      opt-in (COMPOSE_PROFILES=icons): item icons extracted from
 #              your own game files, read-only; Skald ships no game assets
+#   terrain    opt-in, run on demand: the map's land from the game's own
+#              world generator (docker compose --profile terrain run --rm terrain)
 #
 # Server settings (name, password, world modifiers) are edited on the
 # dashboard: the agent writes them to the skald-settings volume and the game
@@ -93,6 +95,41 @@ services:
       - valheim-data:/opt/valheim:ro
       - skald-icons:/icons
 
+  # Opt-in, on demand: draws the map's land with the game's own world
+  # generator. Asks the agent what to sample and stops at once when the
+  # agent's terrain is current; otherwise installs its own copy of the
+  # dedicated server (skald-terrain-game, ~7 GB, kept for the next run),
+  # samples for a few seconds and exits. It never starts a server.
+  #   docker compose --profile terrain run --rm terrain
+  # Re-run it after a new world or a game update (the dashboard's map says
+  # when), or from cron.
+  terrain-files:
+    image: ghcr.io/krystianslowik/skald-terrain:${SKALD_VERSION:-latest}
+    profiles: [terrain]
+    volumes:
+      - skald-terrain-files:/dest
+  terrain:
+    image: ghcr.io/community-valheim-tools/valheim-server:1.4.0
+    platform: linux/amd64
+    profiles: [terrain]
+    restart: "no"
+    depends_on:
+      terrain-files:
+        condition: service_completed_successfully
+    command: ["bash", "/skald/run.sh"]
+    environment:
+      SKALD_AGENT_URL: http://valheim:8080
+      SKALD_AGENT_TOKEN: ${AGENT_TOKEN}
+      SKALD_TERRAIN_RES: "2048"
+      SKALD_TERRAIN_THREADS: "2"
+    tmpfs:
+      - /config
+      - /skald-run
+    volumes:
+      - skald-terrain-files:/skald:ro
+      - skald-terrain:/config/skald-terrain
+      - skald-terrain-game:/opt/valheim
+
   agent:
     image: ghcr.io/krystianslowik/skald-agent:${SKALD_VERSION:-latest}
     restart: unless-stopped
@@ -118,12 +155,15 @@ services:
       PASSWORD_FILE: /run/secrets/server_pass
       # Empty until the icons service has written a sheet; harmless without it.
       ICONS_DIR: /icons
+      # Empty until a terrain run; harmless without it.
+      TERRAIN_DIR: /terrain
     secrets: [server_pass]
     volumes:
       - valheim-config:/config:ro
       - valheim-run:/var/run/valheim:ro
       - skald-settings:/settings
       - skald-icons:/icons:ro
+      - skald-terrain:/terrain:ro
 
   skald-web:
     image: ghcr.io/krystianslowik/skald-web:${SKALD_VERSION:-latest}
@@ -158,6 +198,9 @@ volumes:
   skald-data: # Skald's SQLite event history
   skald-settings: # server settings saved from the dashboard (agent rw, game ro)
   skald-icons: # item icon sheet from your own game files (icons rw, agent ro)
+  skald-terrain: # world generator grids (terrain rw, agent ro)
+  skald-terrain-files: # the terrain plugin and scripts, copied from skald-terrain
+  skald-terrain-game: # the terrain run's own server install, re-downloadable
 
 secrets:
   # The password players type after the join code. Only the first value: once

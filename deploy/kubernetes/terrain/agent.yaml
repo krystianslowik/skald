@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valheim
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: agent
+          env:
+            - name: TERRAIN_DIR
+              value: /terrain
+          volumeMounts:
+            - name: terrain
+              mountPath: /terrain
+              readOnly: true
+      volumes:
+        - name: terrain
+          persistentVolumeClaim:
+            claimName: skald-terrain
+            readOnly: true

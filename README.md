@@ -53,11 +53,22 @@ slots like the game's own, graves show what was left in them, each layer can
 be switched off, the search finds portal tags, names, places and items, and
 every mark links to the same spot
 on [valheim-map.world](https://valheim-map.world/), which also fills the
-Terrain tab. It opens on the explored area, gathers crowded spots into
+Terrain tab. With the opt-in [terrain job](#terrain-opt-in) the land itself
+comes from the game's own world generator. It opens on the explored area, gathers crowded spots into
 clusters you tap to open, and on a phone takes pinches, double taps (in) and
 two-finger taps (out). Places nobody has found stay hidden unless you set
 `MAP_SPOILERS=true`. Only what players built is read for storage: treasure,
 shipwreck and dungeon chests never show up, nor what is in them. Details in [docs/configuration.md](docs/configuration.md#world-map).
+
+## Terrain (opt-in)
+
+The map can draw the land with the game's **own** world generator: biomes,
+mountains and water depth for your seed, inked onto the parchment under the
+explored fog. A small terrain job runs your own dedicated server image once
+with a Skald plugin that samples the generator and quits (no server is
+started), and the agent paints the result. It reruns by itself after a new
+world or a game update. Details in
+[docs/configuration.md](docs/configuration.md#terrain).
 
 ## Item icons (opt-in)
 

@@ -74,10 +74,31 @@ jobs:
       - run: pip install --no-deps -r requirements.txt
       - run: python -W error::ResourceWarning -m unittest discover -s tests -v
 
+  terrain:
+    name: terrain (C# plugin)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terrain
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-dotnet@v4.3.1
+        with:
+          dotnet-version: 9.0.x
+      # Bound to the game by reflection: builds against BepInEx and Unity
+      # reference assemblies from the BepInEx feed, no game files needed.
+      - run: dotnet build plugin -c Release -o out
+      - run: bash -n run.sh && bash -n hook.sh
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: SkaldTerrain
+          path: terrain/out/SkaldTerrain.dll
+          if-no-files-found: error
+
   images:
     name: images build (amd64)
     runs-on: ubuntu-latest
-    needs: [agent, server, web, icons]
+    needs: [agent, server, web, icons, terrain]
     steps:
       - uses: actions/checkout@v4.2.2
       - uses: docker/setup-buildx-action@v3.11.1
@@ -98,5 +119,11 @@ jobs:
         uses: docker/build-push-action@v6.18.0
         with:
           context: icons
+          platforms: linux/amd64
+          push: false
+      - name: skald-terrain
+        uses: docker/build-push-action@v6.18.0
+        with:
+          context: terrain
           platforms: linux/amd64
           push: false

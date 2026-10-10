@@ -6,6 +6,32 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Item icons (opt-in). A `skald-icons` sidecar (new image) builds an icon
+  sheet from the operator's own installed game server files, read-only: it
+  follows each item prefab's ItemDrop to its inventory sprite (no name
+  guessing), reads about 100 MB of the bundles, writes a WebP sheet and a
+  map to its own volume, and rebuilds when the game updates in place.
+  Skald ships no game assets. The agent serves them (`ICONS_DIR`,
+  `/icons/map.json`, `/icons/sheet.webp`, `/state.icons`), the web tier
+  proxies `/api/icons/*`, and the storage views show each item's icon in
+  slots, graves, cluster lists, the village stores and the map search, with
+  the category mark as fallback. Zoomed in, containers on the map show the
+  four kinds they hold most of. Compose profile `icons`, kustomize
+  component `icons`.
+- Terrain (opt-in). A terrain job runs the operator's own dedicated server
+  image once with a new BepInEx plugin (image `skald-terrain`) that samples
+  the game's own world generator for the save's seed and quits without
+  starting a server. The agent checks the grids against the save, paints
+  them with its own palette and a hillshade (`TERRAIN_DIR`,
+  `/terrain.png`, `/terrain.json`, `/state.terrain` with the request a run
+  needs), and the map draws the land from it under the explored fog. The
+  job asks the agent first and does nothing when the terrain is current.
+  Kustomize component `terrain` (daily CronJob), Compose profile `terrain`.
+- The mock server generates its own icon sheet (plain shapes) and terrain
+  (its map's noise), so development needs no game files.
+
 ## [0.6.0] - 2026-10-10
 
 ### Added

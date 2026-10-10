@@ -21,6 +21,7 @@
 | `PASSWORD_FILE` | (empty) | The game's server password secret, mounted read-only; seeds the password shown on the dashboard before the first save |
 | `MAP_SHOW_NAMES` | `true` | Put grave and bed owners' names, portal tags and pin names on the world map. Platform ids (tag and pin authors, owner ids) are never sent either way. The map is behind the panel password, so this is on by default |
 | `ICONS_DIR` | (empty) | Where the opt-in `skald-icons` sidecar writes the item icon sheet (`/config/skald-icons` in Kubernetes, `/icons` in Compose). Empty turns the icon routes off; see [Item icons](#item-icons) |
+| `TERRAIN_DIR` | (empty) | Where terrain runs leave the world generator's grids (`/terrain`); empty turns the terrain image off. See [Terrain](#terrain) |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 
 ## skald-web
@@ -151,7 +152,8 @@ explored area or within 64 m of a built piece. The web tier drops everything
 else unless `MAP_SPOILERS=true`. The seed alone tells where every boss is, so
 this is off by default.
 
-The Terrain tab embeds [valheim-map.world](https://valheim-map.world/), a
+With a [terrain run](#terrain), the map's land comes from the game's own
+world generator instead. The Terrain tab embeds [valheim-map.world](https://valheim-map.world/), a
 third-party site, for the seed's terrain. It loads only when that tab is
 opened; the "Open on full map" links in the map's popovers go there too,
 centred on the point (`offset=x,z`, `zoom=0.100`, `ver=1.0.7`).
@@ -213,3 +215,78 @@ the game pod ([`icons/sidecar.yaml`](../deploy/kubernetes/icons/sidecar.yaml)):
   read-only.
 
 It changes the game pod, so applying it restarts the server once.
+
+## Terrain
+
+Opt-in. Off, the map inks land and sea from the save's 64 m zones. On, it
+draws the land the game itself generates for the world's seed: biomes,
+relief and water depth at about 10 m per pixel, multiplied into the
+parchment, under the explored fog, and cut to the zones the world has
+generated unless `MAP_SPOILERS=true`.
+
+How it works:
+
+- A **terrain run** is the community server image, unchanged, with
+  `BEPINEX=true`. `run.sh` (from the `skald-terrain` image) starts the
+  image's own bootstrap, which installs the dedicated server and BepInEx as
+  usual; the image's `PRE_SERVER_RUN_HOOK` then runs the server binary once
+  with Skald's plugin, which builds the world generator for the seed, samples
+  biome and height on a grid (about 2 s for the generator and 1 to 4 s of
+  sampling), writes the grids and quits; the hook stops supervisord before
+  the real server would start. Nothing listens, no world is created, nothing
+  is sent to Steam or PlayFab. If BepInEx does not load, a timeout
+  (`SKALD_TERRAIN_TIMEOUT`, 180 s) stops the process.
+- The plugin binds to the game by reflection, so it compiles without any
+  game files (BepInEx and Unity reference assemblies from the BepInEx NuGet
+  feed). Nothing from the game is in this repository or the images; BepInEx
+  (LGPL-2.1) is installed by the community image at run time, not shipped.
+- What to sample: with `SKALD_AGENT_URL` and `SKALD_AGENT_TOKEN`, the run
+  reads the agent's `/state` `terrain.request` (seed name, seed hash and
+  world generator version from the save's `.fwl2`) and exits at once when
+  the agent's terrain is current. Or set `SKALD_TERRAIN_SEED`,
+  `SKALD_TERRAIN_SEED_HASH` and `SKALD_TERRAIN_WORLDGEN_VERSION` yourself.
+  `SKALD_TERRAIN_RES` (2048, up to 4096), `SKALD_TERRAIN_THREADS` (4),
+  `SKALD_TERRAIN_FORCE=true` (run even when current).
+- Output in `TERRAIN_DIR`: `biomes.u8`, `height.u16le` and `manifest.json`
+  (format, seed hash, generator version, game build, resolution, radius),
+  manifest last. A run whose seed, generator, game build and resolution match
+  the files already there writes nothing.
+- The agent checks the grids against the save and paints them once per cache
+  key with its own palette and a hillshade (2048 px: about 0.5 s, a 0.8 MB
+  PNG). Grids for another seed or generator are never served; grids from an
+  older game build are shown and marked stale. `/state.terrain` has
+  `available`, `stale`, `reason` (`missing`, `seed`, `worldGenVersion`,
+  `gameBuild`, ...), `build` and the `request`; `GET /terrain.png` (ETag =
+  cache key, immutable) and `GET /terrain.json` serve it, and the web tier
+  proxies them as `/api/terrain.*`.
+- Exit codes of a run: 0 written, current or nothing to do; 10 bad settings;
+  11 the game's API is not what the plugin expects (a game update changed
+  it: the last good terrain stays); 12 sampling failed or timed out; 13 the
+  output is not writable; 20 the agent is unreachable; 21 the agent cannot
+  read the world.
+- The terrain shows the whole seed's land to signed-in viewers who open
+  `/api/terrain.png` directly, as the seed shown on the dashboard already
+  does. The map itself only draws it where the world has been generated.
+
+**Kubernetes**: enable the `terrain` component in
+[`kustomization.yaml`](../deploy/kubernetes/kustomization.yaml). It adds, in
+the game's namespace, the PVCs `skald-terrain` (output, mounted read-only by
+the agent at `/terrain`) and `skald-terrain-game` (the run's own server
+install, 10 GiB, re-downloadable: a node-local class is fine), a daily
+CronJob `skald-terrain` and a NetworkPolicy for it (egress to DNS, the agent
+and Steam/Thunderstore only), plus an ingress rule on the game pod's policy
+so the run can ask the agent. The run needs the output volume on the game
+pod's node (ReadWriteOnce), so it has required podAffinity to the game pod
+and stays Pending while that pod is down. Next to the game it runs with 2
+threads, a CPU limit of 2 and lowered priority. Run it right away with:
+
+```sh
+kubectl -n valheim create job --from=cronjob/skald-terrain skald-terrain-now
+```
+
+The first run downloads the server (about 2 GB, a minute or two); later ones
+take about 35 s, or seconds when nothing is due. Mounting the output into the
+agent changes the game pod, so enabling the component restarts the server once.
+
+**Compose**: `docker compose --profile terrain run --rm terrain`. The agent
+mounts the `skald-terrain` volume read-only with `TERRAIN_DIR=/terrain`.

@@ -1,0 +1,108 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: skald-terrain
+  labels:
+    app.kubernetes.io/name: skald-terrain
+spec:
+  # Daily. Most days the agent's terrain is current and the run ends within
+  # seconds; after a new world or a game update it takes a minute or two.
+  schedule: "40 4 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 3600
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: skald-terrain
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          terminationGracePeriodSeconds: 30
+          # The game image is amd64 only.
+          nodeSelector:
+            kubernetes.io/arch: amd64
+          # skald-terrain is ReadWriteOnce and mounted by the game pod: run on
+          # its node. While the game pod is down the run stays Pending.
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: valheim
+                  topologyKey: kubernetes.io/hostname
+          initContainers:
+            # Copies the plugin and the run scripts into the shared volume.
+            - name: skald-terrain
+              image: ghcr.io/krystianslowik/skald-terrain:0.7.0
+              imagePullPolicy: IfNotPresent
+              resources:
+                requests: {cpu: 10m, memory: 8Mi}
+                limits: {memory: 32Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              volumeMounts:
+                - name: skald
+                  mountPath: /dest
+          containers:
+            - name: valheim
+              # The same image as the game; root and a writable root FS are
+              # required by its bootstrap, as for the game container.
+              image: ghcr.io/community-valheim-tools/valheim-server:1.4.0
+              imagePullPolicy: IfNotPresent
+              command: [bash, /skald/run.sh]
+              env:
+                # Ask the agent what to sample; it says when nothing is due.
+                - name: SKALD_AGENT_URL
+                  value: http://skald-agent:8080
+                - name: SKALD_AGENT_TOKEN
+                  valueFrom:
+                    secretKeyRef: {name: skald-agent, key: AGENT_TOKEN}
+                # 2048 px over 21 km is about 10 m per pixel; 4096 is the maximum.
+                - name: SKALD_TERRAIN_RES
+                  value: "2048"
+                # Next to the game: few threads, lowered priority.
+                - name: SKALD_TERRAIN_THREADS
+                  value: "2"
+                - name: TZ
+                  value: UTC
+              resources:
+                requests:
+                  cpu: 500m
+                  memory: 1536Mi
+                limits:
+                  cpu: "2"
+                  memory: 3Gi
+              volumeMounts:
+                - name: skald
+                  mountPath: /skald
+                  readOnly: true
+                - name: run
+                  mountPath: /skald-run
+                - name: config
+                  mountPath: /config
+                - name: out
+                  mountPath: /config/skald-terrain
+                - name: game
+                  mountPath: /opt/valheim
+          volumes:
+            - name: skald
+              emptyDir: {}
+            - name: run
+              emptyDir: {}
+            - name: config
+              emptyDir: {}
+            - name: out
+              persistentVolumeClaim:
+                claimName: skald-terrain
+            - name: game
+              persistentVolumeClaim:
+                claimName: skald-terrain-game

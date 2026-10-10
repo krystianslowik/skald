@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: skald-terrain
+  labels:
+    app.kubernetes.io/name: skald-terrain
+spec:
+  # biomes.u8 + height.u16le + manifest.json: 12 MB at 2048 px, 48 MB at 4096.
+  # ReadWriteOnce: the run and the agent share it, so the run is scheduled
+  # next to the game pod (podAffinity in cronjob.yaml). Use your default,
+  # replicated class: the game pod mounts it.
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: skald-terrain-game
+  labels:
+    app.kubernetes.io/name: skald-terrain
+spec:
+  # The run's own server install (download dir + server + BepInEx copy, about
+  # 7 GB). Re-downloadable, so a node-local class (local-path) is fine:
+  #   storageClassName: local-path
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi

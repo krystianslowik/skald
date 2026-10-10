@@ -20,10 +20,14 @@ resources:
   - secrets.yaml
   # Needs the prometheus-operator CRDs (kube-prometheus-stack):
   # - servicemonitor.yaml
-# Optional: item icons from your own game files (restarts the game pod once;
-# see icons/kustomization.yaml and docs/configuration.md#item-icons).
+# Optional (each restarts the game pod once when first applied):
+#   icons:   item icons from your own game files (icons/kustomization.yaml,
+#            docs/configuration.md#item-icons)
+#   terrain: the map's land from the game's own world generator
+#            (terrain/kustomization.yaml, docs/configuration.md#terrain)
 # components:
 #   - icons
+#   - terrain
 labels:
   - pairs:
       app.kubernetes.io/part-of: skald

@@ -1,0 +1,33 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: skald-terrain
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: skald-terrain
+  policyTypes: [Ingress, Egress]
+  # Nothing connects in: the run never starts a server.
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    # The agent, for terrain.request.
+    - to:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: valheim}}
+      ports:
+        - {protocol: TCP, port: 8080}
+    # steamcmd (Steam, TCP/UDP 27015-27050 and the CDNs on 80/443) and
+    # Thunderstore for BepInExPack (443). Public internet only.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+      ports:
+        - {protocol: TCP, port: 80}
+        - {protocol: TCP, port: 443}
+        - {protocol: TCP, port: 27015, endPort: 27050}
+        - {protocol: UDP, port: 27015, endPort: 27050}

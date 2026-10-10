@@ -28,6 +28,10 @@ jobs:
           - image: skald-icons
             context: icons
             file: icons/Dockerfile
+          # The plugin is built once on the runner's platform; the image is busybox.
+          - image: skald-terrain
+            context: terrain
+            file: terrain/Dockerfile
     steps:
       - uses: actions/checkout@v4.2.2
       # The arm64 runtime stages run a few shell commands under emulation.
