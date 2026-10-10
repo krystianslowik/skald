@@ -102,10 +102,10 @@ func TestBuildFixture(t *testing.T) {
 	for _, p := range s.Portals {
 		pairs[p.ID] = p.PairedWith
 	}
-	if pairs["-396,22"] != "2020,1990" || pairs["2020,1990"] != "-396,22" {
+	if pairs["96,-180"] != "2020,1990" || pairs["2020,1990"] != "96,-180" {
 		t.Errorf("connection pair = %v", pairs)
 	}
-	if pairs["-410,-4"] != "260,-140" || pairs["260,-140"] != "-410,-4" {
+	if pairs["84,-214"] != "260,-140" || pairs["260,-140"] != "84,-214" {
 		t.Errorf("tag pair = %v", pairs)
 	}
 	if pairs["200,200"] != "" {
@@ -130,7 +130,7 @@ func TestBuildFixture(t *testing.T) {
 		t.Fatal("no bases")
 	}
 	main := s.Bases[0]
-	if main.Pieces < 36 || !main.HasBed || strings.Join(main.Stations, ",") != "forge,workbench" || main.X > -350 || main.X < -420 {
+	if main.Pieces < 36 || !main.HasBed || strings.Join(main.Stations, ",") != "forge,workbench" || main.X < 60 || main.X > 140 || main.Z < -240 || main.Z > -160 {
 		t.Errorf("main base = %+v", main)
 	}
 
@@ -142,7 +142,7 @@ func TestBuildFixture(t *testing.T) {
 		t.Error("explored mask is not where the table put it")
 	}
 
-	if len(s.Pins) != 3 || s.Pins[0].Kind != "fire" || s.Pins[0].Name != "Home fire" {
+	if len(s.Pins) != 3 || s.Pins[1].Kind != "fire" || s.Pins[1].Name != "Home fire" || s.Pins[2].Kind != "boss" {
 		t.Errorf("pins = %+v", s.Pins)
 	}
 
@@ -179,7 +179,7 @@ func TestBuildFixture(t *testing.T) {
 		edits[[2]int{e.X, e.Z}] = e.Cells
 	}
 	// Levelled 40 + both 10 + painted only 20 = 70; the second compiler only painted 5.
-	if edits[[2]int{-384, 0}] != 70 || edits[[2]int{0, 0}] != 5 {
+	if edits[[2]int{128, -192}] != 70 || edits[[2]int{0, 0}] != 5 {
 		t.Errorf("terrain edits = %v", edits)
 	}
 }

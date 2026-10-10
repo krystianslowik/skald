@@ -199,9 +199,9 @@ func cartographyData() []byte {
 			mask[row*size+col] = 1
 		}
 	}
-	for x := -420.0; x <= 420; x += 6 {
-		for z := -420.0; z <= 420; z += 6 {
-			if x*x+z*z <= 400*400 {
+	for x := -170.0; x <= 170; x += 6 {
+		for z := -170.0; z <= 170; z += 6 {
+			if x*x+z*z <= 160*160 {
 				mark(x, z)
 			}
 		}
@@ -217,9 +217,9 @@ func cartographyData() []byte {
 		x, z float32
 		typ  int32
 	}{
-		{"Home fire", -380, 10, 0},
-		{"Copper here", 250, -150, 3},
-		{"Eikthyr", 300, -200, 9},
+		{"Home fire", 100, -200, 0},
+		{"Copper here", 40, 60, 3},
+		{"Eikthyr", 120, 90, 9},
 	}
 	i32(&raw, int32(len(pins)))
 	for _, p := range pins {
@@ -299,15 +299,15 @@ func writeMapWorld(dir string) {
 		}
 	}
 	for i := 0; i < 30; i++ {
-		island = append(island, piece("wood_wall", float32(-400+(i%6)*8), float32(-10+(i/6)*8)))
+		island = append(island, piece("wood_wall", float32(80+(i%6)*8), float32(-210+(i/6)*8)))
 	}
 	island = append(island,
-		piece("piece_workbench", -380, 6),
-		piece("forge", -372, 14),
-		zdo{prefab: "bed", x: -390, y: 31, z: 18, rot: 4,
+		piece("piece_workbench", 100, -196),
+		piece("forge", 108, -188),
+		zdo{prefab: "bed", x: 90, y: 31, z: -185, rot: 4,
 			longs: []kv[int64]{{"owner", fakeOwnerID}, {"creator", fakeOwnerID}},
 			strs:  []kv[string]{{"ownerName", "Ragnar"}}},
-		zdo{prefab: "piece_cartographytable", x: -384, y: 31, z: 0, rot: 4,
+		zdo{prefab: "piece_cartographytable", x: 104, y: 31, z: -204, rot: 4,
 			ints:  []kv[int32]{{"addedDefaultItems", 1}},
 			longs: []kv[int64]{{"creator", fakeOwnerID}},
 			byts:  []kv[[]byte]{{"data", cartographyData()}}},
@@ -320,12 +320,12 @@ func writeMapWorld(dir string) {
 			floats: []kv[float32]{{"rudder", 0.1}},
 			longs:  []kv[int64]{{"creator", fakeOwnerID}, {"user", fakeOwnerID}}},
 		zdo{prefab: "Cart", x: 90, y: 34, z: 40, rot: 4, longs: []kv[int64]{{"creator", fakeOwnerID}}},
-		zdo{prefab: "_TerrainCompiler", x: -384, y: 0, z: 0, byts: []kv[[]byte]{{"TCData", terrainData(40, 20, 10)}}},
+		zdo{prefab: "_TerrainCompiler", x: 128, y: 0, z: -192, byts: []kv[[]byte]{{"TCData", terrainData(40, 20, 10)}}},
 		zdo{prefab: "_TerrainCompiler", x: 0, y: 0, z: 0, byts: []kv[[]byte]{{"TCData", terrainData(0, 5, 0)}}},
 		// An object with a map of 130 entries: the count takes two bytes.
 		zdo{prefab: "Pickable_Mushroom", x: 30, y: 31, z: 30, pad: 130},
 		// A location proxy with a string the map does not read.
-		zdo{prefab: "LocationProxy", x: 300, y: 31, z: -200, strs: []kv[string]{{"text", "a long rune text the map skips"}}, ints: []kv[int32]{{"location", stableHash("Eikthyrnir")}}},
+		zdo{prefab: "LocationProxy", x: 120, y: 31, z: 90, strs: []kv[string]{{"text", "a long rune text the map skips"}}, ints: []kv[int32]{{"location", stableHash("Eikthyrnir")}}},
 	)
 
 	// Chunk 22_22__1_2: the outpost island far to the north-east.
@@ -357,11 +357,11 @@ func writeMapWorld(dir string) {
 			longs: []kv[int64]{{"creator", fakeOwnerID}},
 			strs:  []kv[string]{{"tag", tag}, {"tagauthor", fakeXboxID}}}
 	}
-	home := portal(-396, 22, "home")
+	home := portal(96, -180, "home")
 	home.conn, home.connType, home.connHash = true, 1, 777
 	far := portal(2020, 1990, "home")
 	far.conn, far.connType, far.connHash = true, 17, 777
-	mineA := portal(-410, -4, "mine")
+	mineA := portal(84, -214, "mine")
 	mineB := portal(260, -140, "mine")
 	alone := portal(200, 200, "lost")
 	portals := []zdo{home, far, mineA, mineB, alone}
@@ -442,8 +442,8 @@ func writeMapWorld(dir string) {
 		placed bool
 	}{
 		{"StartTemple", 0, 0, true},
-		{"Eikthyrnir", 300, -200, true},   // inside the explored disc
-		{"Crypt2", -440, 30, true},        // outside the mask, near the base
+		{"Eikthyrnir", 120, 90, true},     // inside the explored disc
+		{"Crypt2", 40, -190, true},        // outside the mask, near the base
 		{"TrollCave02", 1000, 1000, true}, // on the explored corridor
 		{"GDKing", 3000, -2500, false},    // never seen
 		{"Vendor_BlackForest", -2600, 4100, false},
