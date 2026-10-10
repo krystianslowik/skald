@@ -1,9 +1,13 @@
 // Command gen-world writes a small synthetic Valheim 1.0 save generation
 // with starting keys, a player list and boss progress, in the layout
-// internal/world decodes. Every value is made up: real saves hold private
-// player data and never enter the repository.
+// internal/world decodes. With -map it writes a whole world for
+// internal/worldmap instead: chunk files with land, bases, portals, graves,
+// beds, ships, a cartography table and terrain edits, plus the chunk index
+// and the location list (see worldmap.go). Every value is made up: real
+// saves hold private player data and never enter the repository.
 //
 //	go run ./testdata/gen-world testdata/world-progress
+//	go run ./testdata/gen-world -map testdata/world-map
 package main
 
 import (
@@ -36,8 +40,12 @@ func strs(b *bytes.Buffer, list []string) {
 }
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "-map" {
+		writeMapWorld(os.Args[2])
+		return
+	}
 	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: gen-world <dir>")
+		fmt.Fprintln(os.Stderr, "usage: gen-world [-map] <dir>")
 		os.Exit(2)
 	}
 	dir := os.Args[1]
