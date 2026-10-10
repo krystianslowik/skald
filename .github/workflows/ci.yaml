@@ -72,7 +72,7 @@ jobs:
         working-directory: icons
     steps:
       - uses: actions/checkout@v4.2.2
-      - uses: actions/setup-python@v5.6.0
+      - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.13"
       # The same pinned set as the image, without fmod_toolkit (see requirements.txt).
