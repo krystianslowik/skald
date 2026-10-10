@@ -187,6 +187,10 @@ export function createApp(deps: AppDeps): Hono {
   };
   app.get("/api/icons/map.json", (c) => proxyAsset(c, "icons/map.json", "private, no-cache"));
   app.get("/api/icons/sheet.webp", (c) => proxyAsset(c, "icons/sheet.webp", "private, max-age=31536000, immutable"));
+  // The world generator's terrain: the whole seed's land, so like the seed
+  // itself it is only for signed-in viewers. The web draws it under the fog.
+  app.get("/api/terrain.json", (c) => proxyAsset(c, "terrain.json", "private, no-cache"));
+  app.get("/api/terrain.png", (c) => proxyAsset(c, "terrain.png", "private, max-age=31536000, immutable"));
 
   app.get("/api/players", (c) => {
     c.header("Cache-Control", "no-store");

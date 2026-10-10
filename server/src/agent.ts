@@ -19,8 +19,8 @@ export interface MapSourceResult {
   body: MapSnapshot | null;
 }
 
-/** Files the agent serves as they are: the item icon sheet and its map. */
-export type AgentAsset = "icons/map.json" | "icons/sheet.webp";
+/** Files the agent serves as they are: the item icon sheet and its map, the terrain image and its facts. */
+export type AgentAsset = "icons/map.json" | "icons/sheet.webp" | "terrain.png" | "terrain.json";
 
 /** Everything the web tier needs from the agent; implemented over HTTP and by the mock. */
 export interface AgentSource {

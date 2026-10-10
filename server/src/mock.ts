@@ -1,6 +1,7 @@
 import type { ActionResponse, AgentAsset, AgentSource, MapSourceResult, Proxied } from "./agent";
 import { mockMap } from "./mapmock";
 import { mockIcons, type MockIcons } from "./mockicons";
+import { MOCK_TERRAIN_RADIUS, mockTerrain } from "./mockterrain";
 import { addDays, calendar } from "./profiles";
 import { buildArgs, changedKeys, normalize, parseArgs, validateSettings } from "./settings";
 import type {
@@ -240,6 +241,15 @@ export class MockAgent implements AgentSource {
     }
     const icons = this.icons();
     st.icons = { available: true, build: icons.build, count: Object.keys(JSON.parse(icons.map).items).length };
+    st.terrain = {
+      enabled: true,
+      available: true,
+      stale: false,
+      build: "mock-terrain-1",
+      resolution: 1024,
+      radius: MOCK_TERRAIN_RADIUS,
+      request: meta ? { seedName: meta.seedName, seedHash: meta.seed, worldGenVersion: meta.worldGenVersion, gameBuild: st.server.version } : null,
+    };
     return st;
   }
 
@@ -264,6 +274,13 @@ export class MockAgent implements AgentSource {
   }
 
   async asset(path: AgentAsset, etag: string | null): Promise<Response> {
+    if (path === "terrain.png" || path === "terrain.json") {
+      const t = mockTerrain();
+      const tag = `"t-${t.build}"`;
+      if (path === "terrain.json") return new Response(t.json, { headers: { "Content-Type": "application/json" } });
+      if (etag === tag) return new Response(null, { status: 304, headers: { ETag: tag } });
+      return new Response(t.png, { headers: { ETag: tag, "Content-Type": "image/png" } });
+    }
     const set = this.icons();
     const tag = `"${set.build}"`;
     if (etag === tag) return new Response(null, { status: 304, headers: { ETag: tag } });

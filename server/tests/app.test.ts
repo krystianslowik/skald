@@ -353,3 +353,38 @@ describe("item icons", () => {
     agent.stop();
   });
 });
+
+describe("terrain", () => {
+  it("proxies the terrain image and its facts behind the session", async () => {
+    const s = setup({
+      asset: async (path, etag) => {
+        if (path === "terrain.json") return new Response('{"build":"k1","radius":10500}', { headers: { "Content-Type": "application/json" } });
+        if (path !== "terrain.png") return new Response(null, { status: 404 });
+        if (etag === '"t-k1"') return new Response(null, { status: 304, headers: { ETag: '"t-k1"' } });
+        return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { ETag: '"t-k1"', "Content-Type": "image/png" } });
+      },
+    });
+    expect((await s.app.request("/api/terrain.png")).status).toBe(401);
+    const cookie = await sessionCookie(s.app);
+    const doc = await s.app.request("/api/terrain.json", { headers: { cookie } });
+    expect(doc.status).toBe(200);
+    expect(doc.headers.get("cache-control")).toBe("private, no-cache");
+    const png = await s.app.request("/api/terrain.png?v=k1", { headers: { cookie } });
+    expect(png.status).toBe(200);
+    expect(png.headers.get("content-type")).toBe("image/png");
+    expect(png.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
+    expect((await s.app.request("/api/terrain.png?v=k1", { headers: { cookie, "If-None-Match": '"t-k1"' } })).status).toBe(304);
+  });
+
+  it("the mock paints its own noise as a north-up disc", async () => {
+    const agent = new MockAgent();
+    const st = await agent.getState();
+    expect(st.terrain?.available).toBe(true);
+    expect(st.terrain?.request?.seedHash).toBe(st.world.meta!.seed);
+    const doc = (await (await agent.asset("terrain.json", null)).json()) as { resolution: number; radius: number };
+    const png = new Uint8Array(await (await agent.asset("terrain.png", null)).arrayBuffer());
+    const dv = new DataView(png.buffer, png.byteOffset);
+    expect([dv.getUint32(16), dv.getUint32(20)]).toEqual([doc.resolution, doc.resolution]);
+    agent.stop();
+  });
+});

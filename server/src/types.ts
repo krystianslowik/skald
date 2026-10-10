@@ -111,6 +111,38 @@ export interface AgentState {
   settings?: SettingsSummary | null;
   /** Item icons from the operator's own game files; null when the agent has no ICONS_DIR (or predates 0.7.0). */
   icons?: IconsInfo | null;
+  /** The world generator's terrain (`skald-terrain`); null without one and without a readable save (or before 0.7.0). */
+  terrain?: TerrainInfo | null;
+}
+
+/** The agent's terrain image and what a terrain run should sample (`/state.terrain`). */
+export interface TerrainInfo {
+  /** The agent has a TERRAIN_DIR. */
+  enabled: boolean;
+  /** An image for this world can be served. */
+  available: boolean;
+  /** A run is due: no grids yet, another seed, or an older game build. */
+  stale: boolean;
+  reason?: "missing" | "unreadable" | "world" | "seed" | "worldGenVersion" | "gameBuild";
+  build?: string;
+  resolution?: number;
+  radius?: number;
+  request: { seedName: string; seedHash: number; worldGenVersion: number; gameBuild: string } | null;
+}
+
+/** GET /api/terrain.json: where the terrain image sits. North up, spanning [-radius, radius] on both axes. */
+export interface TerrainDoc {
+  build: string;
+  stale: boolean;
+  reason?: string;
+  seedHash: number;
+  worldGenVersion: number;
+  gameBuild: string;
+  resolution: number;
+  radius: number;
+  waterLevel: number;
+  renderedAt: string;
+  biomes: string[];
 }
 
 /** The agent's item icon sheet (`/state.icons`). */
@@ -342,6 +374,7 @@ export function emptyAgentState(now = new Date()): AgentState {
     agent: { startedAt: now.toISOString(), lastLogAt: null },
     settings: null,
     icons: null,
+    terrain: null,
   };
 }
 
