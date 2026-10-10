@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-10
+
 ### Added
 
 - Player storage. The agent reads what is in every chest, cart and ship a
