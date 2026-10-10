@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/krystianslowik/skald/agent/internal/supervisor"
 	"github.com/krystianslowik/skald/agent/internal/syslog"
 	"github.com/krystianslowik/skald/agent/internal/world"
+	"github.com/krystianslowik/skald/agent/internal/worldmap"
 )
 
 func main() {
@@ -63,6 +65,13 @@ func main() {
 		}
 	}()
 
+	var worldDir string
+	if cfg.WorldName != "" {
+		worldDir = filepath.Join(cfg.ConfigDir, "worlds_local", cfg.WorldName)
+	}
+	worldMap := worldmap.New(worldmap.Options{Dir: worldDir, ShowNames: cfg.MapShowNames, Logger: logger})
+	go worldMap.Run(ctx, worldmap.RebuildEvery)
+
 	s := server.New(server.Options{
 		Token:      cfg.AgentToken,
 		ConfigDir:  cfg.ConfigDir,
@@ -73,6 +82,7 @@ func main() {
 		Tracker:    tracker,
 		Supervisor: supervisor.New(cfg.SupervisorURL, cfg.SupervisorUser, cfg.SupervisorPass),
 		Settings:   store,
+		Map:        worldMap,
 		Logger:     logger,
 	})
 	go s.RunSettingsWatcher(ctx)

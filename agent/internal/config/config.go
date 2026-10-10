@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"os"
+	"strings"
 )
 
 type Config struct {
@@ -26,6 +27,9 @@ type Config struct {
 	// PasswordFile is the game's server password secret, read once to seed
 	// the settings before the first save.
 	PasswordFile string
+	// MapShowNames exports grave and bed owner names, portal tags and pin
+	// names in GET /map. Platform ids are never exported either way.
+	MapShowNames bool
 }
 
 func Load() (Config, error) {
@@ -46,11 +50,23 @@ func Load() (Config, error) {
 		ServerPublic:   os.Getenv("SERVER_PUBLIC"),
 		SettingsDir:    getenv("SETTINGS_DIR", "/settings"),
 		PasswordFile:   os.Getenv("PASSWORD_FILE"),
+		MapShowNames:   parseBool(os.Getenv("MAP_SHOW_NAMES"), true),
 	}
 	if c.AgentToken == "" {
 		return c, errors.New("AGENT_TOKEN is required")
 	}
 	return c, nil
+}
+
+// parseBool reads true/false/1/0/yes/no; anything else (or empty) is def.
+func parseBool(v string, def bool) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	}
+	return def
 }
 
 func getenv(k, def string) string {

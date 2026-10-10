@@ -46,6 +46,8 @@ type worldState struct {
 	LastSaveAt *time.Time  `json:"lastSaveAt"`
 	LastSaveMs float64     `json:"lastSaveMs"`
 	Meta       *world.Meta `json:"meta"`
+	// Clock is null when the save is not readable.
+	Clock *worldClock `json:"clock"`
 }
 
 type agentState struct {
@@ -76,8 +78,10 @@ func (s *Server) stateHandler(w http.ResponseWriter, r *http.Request) {
 		sum = &v
 	}
 
+	meta := s.world.Meta()
+	now := time.Now().UTC()
 	resp := stateResponse{
-		Now: time.Now().UTC(),
+		Now: now,
 		Server: serverState{
 			Name:            name,
 			World:           s.opt.WorldName,
@@ -94,7 +98,7 @@ func (s *Server) stateHandler(w http.ResponseWriter, r *http.Request) {
 			NetStats:        snap.NetStats,
 		},
 		Players:  snap.Players,
-		World:    worldState{SizeBytes: size, LastSaveAt: lastSave, LastSaveMs: snap.LastSaveMs, Meta: s.world.Meta()},
+		World:    worldState{SizeBytes: size, LastSaveAt: lastSave, LastSaveMs: snap.LastSaveMs, Meta: meta, Clock: s.clock(meta, snap.Players, now)},
 		Backups:  files.Backups(s.opt.ConfigDir),
 		Agent:    agentState{StartedAt: s.startedAt, LastLogAt: snap.LastLogAt},
 		Settings: sum,

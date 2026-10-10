@@ -12,6 +12,7 @@ import (
 	"github.com/krystianslowik/skald/agent/internal/state"
 	"github.com/krystianslowik/skald/agent/internal/supervisor"
 	"github.com/krystianslowik/skald/agent/internal/world"
+	"github.com/krystianslowik/skald/agent/internal/worldmap"
 )
 
 // Supervisor is the subset of the supervisord XML-RPC API the server calls.
@@ -35,7 +36,9 @@ type Options struct {
 	// Settings is nil when SETTINGS_DIR is missing or read-only: the
 	// /settings routes are then not registered at all (404).
 	Settings *settings.Store
-	Logger   *slog.Logger
+	// Map is the world map builder; nil or disabled answers GET /map with 404.
+	Map    *worldmap.Builder
+	Logger *slog.Logger
 	// PingEvery is the SSE keepalive interval; 15 s when zero.
 	PingEvery time.Duration
 	// ActionTimeout bounds stop/start during a restart; 5 min when zero.
@@ -54,6 +57,7 @@ type Server struct {
 	// zeroSince is when the apply-when-empty watcher first saw an empty,
 	// running server; zero while players are online. Watcher goroutine only.
 	zeroSince time.Time
+	clocks    clockTracker
 }
 
 func New(opt Options) *Server {
@@ -77,6 +81,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /logs", s.logsHandler)
 	mux.HandleFunc("GET /backups/{name}", s.backupHandler)
 	mux.HandleFunc("POST /action/{name}", s.actionHandler)
+	mux.HandleFunc("GET /map", s.mapHandler)
 	if s.opt.Settings != nil {
 		mux.HandleFunc("GET /settings", s.settingsGet)
 		mux.HandleFunc("GET /settings/password", s.settingsPassword)

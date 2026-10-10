@@ -129,6 +129,13 @@ func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
 		p.sample("valheim_events_total", float64(s.opt.Hub.Count(typ)), "type", typ)
 	}
 
+	if enc := s.opt.Map.Current(); enc != nil {
+		p.family("valheim_map_build_seconds", "gauge", "Duration of the last world map build, in seconds.")
+		p.sample("valheim_map_build_seconds", s.opt.Map.LastBuildSeconds())
+		p.family("valheim_map_generation", "gauge", "Save generation the world map was last built from.")
+		p.sample("valheim_map_generation", float64(enc.Generation))
+	}
+
 	if snap.LastLogAt != nil {
 		p.family("valheim_agent_last_log_timestamp_seconds", "gauge", "Unix time the agent last received a log line.")
 		p.sample("valheim_agent_last_log_timestamp_seconds", unix(*snap.LastLogAt))
