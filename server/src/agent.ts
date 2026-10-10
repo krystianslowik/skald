@@ -19,6 +19,9 @@ export interface MapSourceResult {
   body: MapSnapshot | null;
 }
 
+/** Files the agent serves as they are: the item icon sheet and its map. */
+export type AgentAsset = "icons/map.json" | "icons/sheet.webp";
+
 /** Everything the web tier needs from the agent; implemented over HTTP and by the mock. */
 export interface AgentSource {
   getState(): Promise<AgentState>;
@@ -32,6 +35,8 @@ export interface AgentSource {
   settings(req: SettingsRequest): Promise<Proxied>;
   /** The world map, conditional on the ETag of the copy the caller holds. */
   map(etag: string | null): Promise<MapSourceResult>;
+  /** Raw agent file response (200 with a body, 304, 404, 503); the caller owns the body. */
+  asset(path: AgentAsset, etag: string | null, signal: AbortSignal): Promise<Response>;
 }
 
 const SETTINGS_ROUTE: Record<SettingsRequest["op"], [method: string, path: string]> = {
@@ -116,6 +121,12 @@ export class HttpAgent implements AgentSource {
       return { status: res.status, etag: tag, body: null };
     }
     return { status: 200, etag: tag, body: (await res.json()) as MapSnapshot };
+  }
+
+  asset(path: AgentAsset, etag: string | null, signal: AbortSignal): Promise<Response> {
+    const headers: Record<string, string> = this.headers();
+    if (etag) headers["If-None-Match"] = etag;
+    return this.fetchImpl(`${this.baseUrl}/${path}`, { headers, signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]) });
   }
 
   backup(name: string, signal: AbortSignal): Promise<Response> {

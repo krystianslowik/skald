@@ -10,7 +10,7 @@ import { emptyAgentState, type ActionName, type PlayerProfile, type SettingsRequ
 const HASH = await Bun.password.hash("ognisko");
 
 function setup(
-  opts: { online?: boolean; actionStatus?: number; backup?: AgentSource["backup"]; trustedIpHeader?: string; settings?: AgentSource["settings"] } = {},
+  opts: { online?: boolean; actionStatus?: number; backup?: AgentSource["backup"]; trustedIpHeader?: string; settings?: AgentSource["settings"]; asset?: AgentSource["asset"] } = {},
 ) {
   const actions: ActionName[] = [];
   const backups: string[] = [];
@@ -33,6 +33,9 @@ function setup(
     async stream() {},
     async map() {
       return { status: 404, etag: null, body: null };
+    },
+    async asset(path, etag, signal) {
+      return opts.asset ? opts.asset(path, etag, signal) : new Response(null, { status: 404 });
     },
     async settings(req) {
       settingsCalls.push(req);
@@ -282,6 +285,71 @@ describe("app with the mock agent", () => {
     const bjorn = (await (await app.request("/api/players/Bjorn", { headers: { cookie } })).json()) as PlayerProfile;
     expect(bjorn.badges.find((b) => b.id === "night_owl")!.earnedAt).not.toBeNull();
     hub.stop();
+    agent.stop();
+  });
+});
+
+describe("item icons", () => {
+  it("proxies the sheet and map behind the session, with ETags and caching", async () => {
+    const seen: { path: string; etag: string | null }[] = [];
+    const s = setup({
+      asset: async (path, etag) => {
+        seen.push({ path, etag });
+        if (etag === '"b1"') return new Response(null, { status: 304, headers: { ETag: '"b1"' } });
+        if (path === "icons/map.json") return new Response('{"build":"b1"}', { headers: { ETag: '"b1"', "Content-Type": "application/json" } });
+        return new Response(new Uint8Array([82, 73, 70, 70]), { headers: { ETag: '"b1"', "Content-Type": "image/webp", "Content-Length": "4" } });
+      },
+    });
+    expect((await s.app.request("/api/icons/sheet.webp")).status).toBe(401);
+    expect(seen).toEqual([]);
+    const cookie = await sessionCookie(s.app);
+
+    const map = await s.app.request("/api/icons/map.json", { headers: { cookie } });
+    expect(map.status).toBe(200);
+    expect(map.headers.get("etag")).toBe('"b1"');
+    expect(map.headers.get("cache-control")).toBe("private, no-cache");
+    expect(await map.text()).toBe('{"build":"b1"}');
+
+    const sheet = await s.app.request("/api/icons/sheet.webp?v=b1", { headers: { cookie } });
+    expect(sheet.status).toBe(200);
+    expect(sheet.headers.get("content-type")).toBe("image/webp");
+    expect(sheet.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
+    expect(Array.from(new Uint8Array(await sheet.arrayBuffer()))).toEqual([82, 73, 70, 70]);
+
+    const again = await s.app.request("/api/icons/sheet.webp?v=b1", { headers: { cookie, "If-None-Match": '"b1"' } });
+    expect(again.status).toBe(304);
+    expect(again.headers.get("etag")).toBe('"b1"');
+    expect(seen.map((x) => x.path)).toEqual(["icons/map.json", "icons/sheet.webp", "icons/sheet.webp"]);
+    expect(seen[2]!.etag).toBe('"b1"');
+  });
+
+  it("answers 404 when the agent has no icons and 502 when it is unreachable", async () => {
+    const off = setup();
+    const cookie = await sessionCookie(off.app);
+    expect((await off.app.request("/api/icons/map.json", { headers: { cookie } })).status).toBe(404);
+    const down = setup({
+      asset: async () => {
+        throw new Error("ECONNREFUSED");
+      },
+    });
+    const c2 = await sessionCookie(down.app);
+    expect((await down.app.request("/api/icons/sheet.webp", { headers: { cookie: c2 } })).status).toBe(502);
+  });
+
+  it("the mock serves a generated sheet covering every item in its map", async () => {
+    const agent = new MockAgent();
+    const st = await agent.getState();
+    expect(st.icons?.available).toBe(true);
+    const mapRes = await agent.asset("icons/map.json", null);
+    const doc = (await mapRes.json()) as { build: string; size: number; width: number; height: number; items: Record<string, [number, number]> };
+    expect(doc.build).toBe(st.icons!.build!);
+    for (const name of ["Wood", "SwordBronze", "TrophyDeer", "Coins"]) expect(doc.items[name]).toBeDefined();
+    const sheet = new Uint8Array(await (await agent.asset("icons/sheet.webp", null)).arrayBuffer());
+    // A PNG of the size map.json gives.
+    expect(Array.from(sheet.subarray(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+    const dv = new DataView(sheet.buffer, sheet.byteOffset);
+    expect([dv.getUint32(16), dv.getUint32(20)]).toEqual([doc.width, doc.height]);
+    expect((await agent.asset("icons/sheet.webp", `"${doc.build}"`)).status).toBe(304);
     agent.stop();
   });
 });

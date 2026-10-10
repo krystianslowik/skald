@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import { getConnInfo } from "hono/bun";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import type { AgentSource } from "./agent";
+import type { AgentAsset, AgentSource } from "./agent";
 import { createSession, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS, verifySession } from "./auth";
 import type { Hub } from "./hub";
 import type { MapCache, MapView } from "./map";
@@ -158,6 +158,35 @@ export function createApp(deps: AppDeps): Hono {
   };
   app.get("/api/map", (c) => serveMap(c, "map"));
   app.get("/api/storage", (c) => serveMap(c, "storage"));
+
+  // Files the agent serves as they are, passed through with their ETag. The
+  // URL of a sheet carries its build (?v=), so it can be cached for good.
+  const proxyAsset = async (c: Context, path: AgentAsset, cache: string) => {
+    let up: Response;
+    try {
+      up = await deps.agent.asset(path, c.req.header("If-None-Match") ?? null, c.req.raw.signal);
+    } catch {
+      return c.json({ error: "agent unreachable" }, 502);
+    }
+    const headers = new Headers({ "Cache-Control": cache });
+    const etag = up.headers.get("ETag");
+    if (etag) headers.set("ETag", etag);
+    if (up.status === 304) {
+      await up.body?.cancel();
+      return new Response(null, { status: 304, headers });
+    }
+    if (up.status !== 200 || !up.body) {
+      await up.body?.cancel();
+      const status = up.status === 404 ? 404 : up.status === 503 ? 503 : 502;
+      return c.json({ error: status === 404 ? "not available" : "agent error" }, status);
+    }
+    headers.set("Content-Type", up.headers.get("Content-Type") ?? "application/octet-stream");
+    const len = up.headers.get("Content-Length");
+    if (len) headers.set("Content-Length", len);
+    return new Response(up.body, { status: 200, headers });
+  };
+  app.get("/api/icons/map.json", (c) => proxyAsset(c, "icons/map.json", "private, no-cache"));
+  app.get("/api/icons/sheet.webp", (c) => proxyAsset(c, "icons/sheet.webp", "private, max-age=31536000, immutable"));
 
   app.get("/api/players", (c) => {
     c.header("Cache-Control", "no-store");

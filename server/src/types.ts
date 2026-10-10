@@ -109,6 +109,31 @@ export interface AgentState {
   agent: { startedAt: string; lastLogAt: string | null };
   /** null when the agent has no writable SETTINGS_DIR (or predates the feature). */
   settings?: SettingsSummary | null;
+  /** Item icons from the operator's own game files; null when the agent has no ICONS_DIR (or predates 0.7.0). */
+  icons?: IconsInfo | null;
+}
+
+/** The agent's item icon sheet (`/state.icons`). */
+export interface IconsInfo {
+  available: boolean;
+  /** The game build the sheet was made from; the sheet's cache key. */
+  build?: string;
+  count: number;
+}
+
+/**
+ * GET /api/icons/map.json: where each item's icon sits in the sheet.
+ * `items[prefab]` is the cell's top-left corner in px; every cell is `size` px.
+ */
+export interface IconMap {
+  version: number;
+  build: string;
+  size: number;
+  columns: number;
+  width: number;
+  height: number;
+  count: number;
+  items: Record<string, [number, number]>;
 }
 
 /** The settings part of the agent's /state: enough for the header chips. */
@@ -316,6 +341,7 @@ export function emptyAgentState(now = new Date()): AgentState {
     backups: [],
     agent: { startedAt: now.toISOString(), lastLogAt: null },
     settings: null,
+    icons: null,
   };
 }
 

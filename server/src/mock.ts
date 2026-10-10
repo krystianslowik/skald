@@ -1,5 +1,6 @@
-import type { ActionResponse, AgentSource, MapSourceResult, Proxied } from "./agent";
+import type { ActionResponse, AgentAsset, AgentSource, MapSourceResult, Proxied } from "./agent";
 import { mockMap } from "./mapmock";
+import { mockIcons, type MockIcons } from "./mockicons";
 import { addDays, calendar } from "./profiles";
 import { buildArgs, changedKeys, normalize, parseArgs, validateSettings } from "./settings";
 import type {
@@ -131,6 +132,7 @@ export class MockAgent implements AgentSource {
   private effective: SettingsView["effective"];
   /** World map: built once, re-stamped with the save generation. */
   private mapBase: MapSnapshot | null = null;
+  private iconSet: MockIcons | null = null;
   private mapGeneration = 1;
 
   constructor(
@@ -236,6 +238,8 @@ export class MockAgent implements AgentSource {
       const dayFraction = Math.round(((netTime % 1800) / 1800) * 1000) / 1000;
       st.world.clock = { netTime, day: Math.floor(netTime / 1800), dayFraction, daylight: dayFraction >= 0.25 && dayFraction < 0.75, advancing, rate: advancing ? 1 : 0 };
     }
+    const icons = this.icons();
+    st.icons = { available: true, build: icons.build, count: Object.keys(JSON.parse(icons.map).items).length };
     return st;
   }
 
@@ -249,6 +253,23 @@ export class MockAgent implements AgentSource {
       meta: { ...this.mapBase.meta, generation: this.mapGeneration, netTime: meta?.netTime ?? 0, day: meta?.day ?? 0, savedAt: meta?.savedAt ?? this.mapBase.meta.savedAt },
     };
     return { status: 200, etag: tag, body };
+  }
+
+  /** A generated sheet for every item the mock map holds. */
+  private icons(): MockIcons {
+    this.mapBase ??= mockMap({ now: this.clock() });
+    const names = [...(this.mapBase.storage ?? []).flatMap((c) => c.items), ...this.mapBase.tombstones.flatMap((t) => t.items ?? [])].map((i) => i.name);
+    this.iconSet ??= mockIcons(names);
+    return this.iconSet;
+  }
+
+  async asset(path: AgentAsset, etag: string | null): Promise<Response> {
+    const set = this.icons();
+    const tag = `"${set.build}"`;
+    if (etag === tag) return new Response(null, { status: 304, headers: { ETag: tag } });
+    // The mock's sheet is a PNG under the same route: browsers go by Content-Type.
+    if (path === "icons/map.json") return new Response(set.map, { headers: { ETag: tag, "Content-Type": "application/json" } });
+    return new Response(set.sheet, { headers: { ETag: tag, "Content-Type": "image/png" } });
   }
 
   async getLogs(limit: number): Promise<LogLine[]> {
