@@ -221,11 +221,12 @@ var redactions = []struct {
 	re   *regexp.Regexp
 	with string
 }{
+	{regexp.MustCompile(`(Platform ID [A-Za-z]+_)\S+`), "${1}***"},
+	// "Player history entry with index 0:  gamertag (Xbox_2533..., 0123ABCD...)"
+	{regexp.MustCompile(`\(([A-Za-z]+)_[^,\s)]+, [0-9A-Fa-f]+\)`), "(${1}_***, ***)"},
 	{regexp.MustCompile(`\b([A-Za-z]+)_\d{6,}\b`), "${1}_***"},
 	{regexp.MustCompile(`playfab/[0-9A-Za-z]+`), "playfab/***"},
 	{regexp.MustCompile(`(remote player) [0-9A-Fa-f]+`), "$1 ***"},
-	// "Player history entry with index 0:  gamertag (Xbox_***, 0123ABCD...)"
-	{regexp.MustCompile(`(_\*\*\*, )[0-9A-Fa-f]+\)`), "${1}***)"},
 }
 
 // Redact removes player identifiers from a log line.

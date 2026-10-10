@@ -193,6 +193,10 @@ func TestRedact(t *testing.T) {
 		{`Keep socket for playfab/0A1B2C3D4E5F6071, try to reconnect before timeout`, `Keep socket for playfab/***, try to reconnect before timeout`},
 		{`Player history entry with index 2:  bjornthebold (Steam_76561190000000003, AAAA000000000003)`,
 			`Player history entry with index 2:  bjornthebold (Steam_***, ***)`},
+		{`PlayFab socket with remote ID playfab/X received local Platform ID Nintendo_ABCDEF01`,
+			`PlayFab socket with remote ID playfab/*** received local Platform ID Nintendo_***`},
+		{`Player history entry with index 3:  someone (PSN_ab-cd.ef, 0123ABCD)`,
+			`Player history entry with index 3:  someone (PSN_***, ***)`},
 		{`Backup created in Midgard_backup_auto-20261010-114246 [16.184ms]`, `Backup created in Midgard_backup_auto-20261010-114246 [16.184ms]`},
 		{`Using steam APPID:892970`, `Using steam APPID:892970`},
 	}
@@ -218,7 +222,7 @@ func TestSessionLog(t *testing.T) {
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for sc.Scan() {
 		l, ms := Parse(sc.Text())
-		if r := Redact(l.Text); regexp.MustCompile(`_\d{6,}|playfab/[0-9A-F]{6,}`).MatchString(r) {
+		if r := Redact(l.Text); regexp.MustCompile(`_\d{6,}|playfab/[0-9A-F]{6,}|Platform ID \w+_[^*]|\(\w+_[^*]`).MatchString(r) {
 			t.Errorf("unredacted: %q", r)
 		}
 		for _, m := range ms {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -169,6 +170,8 @@ func TestRaidAndNetStats(t *testing.T) {
 // joins, drops, reconnects from the same console as Freya; Bjorn (Steam)
 // joins and later leaves; Freya dies and respawns. No ghost of Ragnar may
 // remain and the respawn is not a second join.
+var rawID = regexp.MustCompile(`Platform ID \w+_[^*]|\(\w+_[^*]`)
+
 func TestSessionLog(t *testing.T) {
 	f, err := os.Open("../../testdata/session-1.0.17.log")
 	if err != nil {
@@ -213,6 +216,9 @@ func TestSessionLog(t *testing.T) {
 				if strings.Contains(line, leak) {
 					t.Errorf("log event leaks %q: %s", leak, line)
 				}
+			}
+			if rawID.MatchString(line) {
+				t.Errorf("log event keeps a platform id: %s", line)
 			}
 		}
 	}
