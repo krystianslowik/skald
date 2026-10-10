@@ -1,17 +1,9 @@
 import { memo, useId, useMemo, useState } from "react";
 import { useI18n } from "../../i18n";
-import { CATEGORY_GLYPH, itemCategory, itemLabel, type Category } from "../../lib/storage";
+import { itemLabel } from "../../lib/storage";
 import { COARSE, useMedia } from "../../lib/useMedia";
 import type { MapItem } from "../../types";
-
-/** A category's mark: an own line drawing, not the game's item icon. */
-export function ItemGlyph({ category, size = 20, className = "" }: { category: Category; size?: number; className?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`shrink-0 ${className}`}>
-      <path d={CATEGORY_GLYPH[category]} />
-    </svg>
-  );
-}
+import { ItemIcon } from "./ItemIcon";
 
 /** Quality as small stars, like the game's upgrade pips. */
 function Stars({ n }: { n: number }) {
@@ -80,7 +72,7 @@ export const InventoryGrid = memo(function InventoryGrid({
             className={`slot press-soft relative flex aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden px-0.5 text-flame ${roomy ? "pb-2.5 pt-1" : "p-0.5"} ${on ? "slot-selected text-bone" : ""}`}
           >
             {it.quality && it.quality > 1 ? <Stars n={it.quality} /> : null}
-            <ItemGlyph category={itemCategory(it.name, it.type)} size={roomy ? 20 : 17} className="opacity-90" />
+            <ItemIcon name={it.name} type={it.type} size={roomy ? 20 : 17} className="opacity-90" />
             {roomy && <span className="line-clamp-2 w-full break-words text-center text-[0.5625rem] font-bold leading-[1.1] text-bone">{label}</span>}
             {it.stack > 1 && (
               <span className="absolute bottom-0.5 right-1 text-[0.625rem] font-bold tabular-nums leading-none text-bone [text-shadow:1px_0_0_#000,-1px_0_0_#000,0_1px_0_#000,0_-1px_0_#000]">

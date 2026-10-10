@@ -6,7 +6,7 @@ import { useStorage } from "../../lib/useStorage";
 import type { MapContainer } from "../../types";
 import { MapIcon } from "../map/MapIcon";
 import { Sheet, SheetClose } from "../Sheet";
-import { ItemGlyph } from "./Inventory";
+import { ItemGlyph } from "./ItemIcon";
 
 const ICON: Record<MapContainer["kind"], IconId> = { chest: "chest", cart: "cart", ship: "ship" };
 

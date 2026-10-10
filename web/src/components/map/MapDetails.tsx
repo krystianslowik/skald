@@ -2,7 +2,9 @@ import { useI18n } from "../../i18n";
 import { markerItems, markerStore, type Marker } from "../../lib/mapgeo";
 import { countItems } from "../../lib/storage";
 import { mapUrlAt } from "../../lib/world";
+import { clusterSummary, contentsOf, sortCluster, stackText, summarize, type Summary } from "../../lib/clusterlist";
 import { InventoryGrid } from "../storage/Inventory";
+import { ItemIcon } from "../storage/ItemIcon";
 import { MapIcon } from "./MapIcon";
 
 /** What a mark is, in a few words: the popover heading and the search hint. */
@@ -108,6 +110,61 @@ export function DetailsHead({ marker, group, onClose, headingId }: { marker: Mar
   );
 }
 
+/** Stacks as "50× Wood, 20× Stone" with their marks, and "+N more" past them. */
+function SummaryLine({ summary, size, className = "" }: { summary: Summary; size: number; className?: string }) {
+  const { t, number } = useI18n();
+  return (
+    <span className={`flex flex-wrap items-center gap-x-2.5 gap-y-0.5 ${className}`}>
+      {summary.top.map((s) => (
+        <span key={s.name} className="inline-flex items-center gap-1">
+          <ItemIcon name={s.name} size={size} className="text-flame/80" />
+          <span>{t("map.cluster.stack", { n: number(s.total), item: s.label })}</span>
+        </span>
+      ))}
+      {summary.more > 0 && <span>{t("map.cluster.more", { n: summary.more })}</span>}
+    </span>
+  );
+}
+
+/** A pile of marks too close to zoom apart: what is in it, then each mark by how full it is. */
+function ClusterList({ group, onPick }: { group: readonly Marker[]; onPick?: (m: Marker) => void }) {
+  const { t, lookup } = useI18n();
+  const rows = sortCluster(group);
+  const all = clusterSummary(group, lookup);
+  return (
+    <>
+      {all.top.length > 0 && (
+        <div className="mt-2 rounded-[2px] bg-black/25 px-2 py-1.5">
+          <p className="text-[0.6875rem] font-bold uppercase tracking-wide text-ash">{t("map.cluster.all")}</p>
+          <SummaryLine summary={all} size={14} className="mt-1 text-xs text-bone" />
+        </div>
+      )}
+      <ul className="mt-1 space-y-0.5">
+        {rows.map((m) => {
+          const c = contentsOf(m);
+          const title = markerTitle(m, t, lookup);
+          const kind = markerKind(m, t, lookup);
+          const sum = c.kind === "items" ? summarize(c.items, lookup) : null;
+          const note = c.kind === "unreadable" ? t("map.cluster.unreadable") : c.kind === "noHold" ? t("map.cluster.noHold") : sum && sum.top.length === 0 ? t("map.cluster.empty") : null;
+          return (
+            <li key={m.id}>
+              <button type="button" onClick={() => onPick?.(m)} className="press-soft flex min-h-11 w-full items-center gap-2.5 rounded-[2px] px-1.5 py-1 text-left hover:bg-black/25">
+                <MapIcon icon={m.icon} size={22} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-bone">{title}</span>
+                  {sum && sum.top.length > 0 && <SummaryLine summary={sum} size={12} className="text-xs text-ash" />}
+                  {note && <span className="block text-xs text-ash">{note}</span>}
+                </span>
+                <span className="shrink-0 text-xs text-ash">{kind === title ? "" : kind}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </>
+  );
+}
+
 /**
  * The facts the save holds about a mark, "Go to the other end" for a portal
  * and a link to the same spot on valheim-map.world; for a pile of marks too
@@ -129,22 +186,8 @@ export function DetailsBody({
   /** Phone sheet: full-width, finger-sized actions. */
   roomy?: boolean;
 }) {
-  const { t, tn, lookup } = useI18n();
-  if (group) {
-    return (
-      <ul className="mt-1 space-y-0.5">
-        {group.map((m) => (
-          <li key={m.id}>
-            <button type="button" onClick={() => onPick?.(m)} className="press-soft flex min-h-11 w-full items-center gap-2.5 rounded-[2px] px-1.5 text-left hover:bg-black/25">
-              <MapIcon icon={m.icon} size={22} />
-              <span className="min-w-0 flex-1 truncate text-bone">{markerTitle(m, t, lookup)}</span>
-              <span className="shrink-0 text-xs text-ash">{markerKind(m, t, lookup) === markerTitle(m, t, lookup) ? "" : markerKind(m, t, lookup)}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    );
-  }
+  const { t, tn, lookup, number } = useI18n();
+  if (group) return <ClusterList group={group} onPick={onPick} />;
   const lines = marksLines(marker, t, tn, lookup);
   const d = marker.data;
   const items = markerItems(marker);
