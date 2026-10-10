@@ -9,7 +9,7 @@ import { pl } from "./i18n/pl";
 import { applyEvent } from "./lib/apply";
 import { stripValheimStamp } from "./lib/format";
 import { createLogStore } from "./lib/useValheim";
-import { emptyAgentState, type ApiState, type PlayerProfile } from "./types";
+import { emptyAgentState, type ApiState, type PlayerProfile, type SettingsView } from "./types";
 
 const inPolish = (ui: ReactElement) => render(<I18nProvider locale="pl">{ui}</I18nProvider>);
 
@@ -169,6 +169,143 @@ describe("Profile sheet", () => {
     // The sheet leaves along its own edge before it unmounts.
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument(), { timeout: 3000 });
     expect(opener).toHaveFocus();
+  });
+});
+
+function settingsView(): SettingsView {
+  return {
+    current: { name: "My Valheim", public: true, preset: "normal", modifiers: { raids: "less" }, keys: [], saveInterval: 1800, unmanaged: ["-crossplay"] },
+    pending: false,
+    effective: { name: "My Valheim", public: true, args: "-modifier raids less -crossplay" },
+    password: { set: true },
+    apply: { armed: false, since: null },
+    hook: "ok",
+    updatedAt: null,
+  };
+}
+
+function withSettings(pending = false, armed = false): ApiState {
+  return { ...fixture(), settings: { enabled: true, pending, armed, passwordSet: true } };
+}
+
+describe("Server settings", () => {
+  it("is hidden while the agent has the feature off", () => {
+    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Server settings" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show password" })).not.toBeInTheDocument();
+  });
+
+  it("shows the server password next to the join code only when asked", async () => {
+    const fetchMock = vi.fn(async (url: string) => (String(url) === "/api/settings/password" ? Response.json({ password: "hearth-77" }) : new Response("{}", { status: 404 })));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Dashboard live={{ state: withSettings(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    expect(screen.queryByText("hearth-77")).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Show password" }));
+    expect(await screen.findByText("hearth-77")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/settings/password", expect.anything());
+    fireEvent.click(screen.getByRole("button", { name: "Hide password" }));
+    expect(screen.queryByText("hearth-77")).not.toBeInTheDocument();
+  });
+
+  it("shows the pending chip and the armed chip with its cancel", () => {
+    const fetchMock = vi.fn(async () => Response.json(settingsView()));
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(<Dashboard live={{ state: withSettings(true), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    expect(screen.getByRole("button", { name: /Saved settings wait for a restart/ })).toHaveTextContent("Restart pending");
+    rerender(<Dashboard live={{ state: withSettings(true, true), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    expect(screen.getByRole("button", { name: /Saved settings wait for a restart/ })).toHaveTextContent("Applies when empty");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel applying when the server is empty" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/settings/apply", expect.objectContaining({ method: "DELETE" }));
+  });
+
+  it("validates inline, counts changes, turns a preset custom and saves", async () => {
+    const puts: unknown[] = [];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url) === "/api/settings" && init?.method === "PUT") {
+        const body = JSON.parse(String(init.body));
+        puts.push(body);
+        const v = settingsView();
+        return Response.json({ ...v, pending: true, current: { ...v.current, ...body } });
+      }
+      if (String(url) === "/api/settings") return Response.json(settingsView());
+      return new Response("{}", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Dashboard live={{ state: withSettings(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Server settings" }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    await within(dialog).findByText("World modifiers");
+    const save = within(dialog).getByRole("button", { name: "Save" });
+    expect(save).toBeDisabled();
+    expect(within(dialog).getByText("No changes")).toBeInTheDocument();
+    // Unmanaged launch options are shown, read-only.
+    expect(within(dialog).getByText("-crossplay")).toBeInTheDocument();
+    // The seeded raids modifier makes the world custom.
+    expect(within(dialog).getByText("Your own mix of modifiers.")).toBeInTheDocument();
+
+    // Inline validation, before any submit.
+    const name = within(dialog).getByLabelText("Server name");
+    fireEvent.change(name, { target: { value: "ab" } });
+    expect(within(dialog).getByText("3 to 40 characters.")).toBeInTheDocument();
+    expect(name).toHaveAttribute("aria-invalid", "true");
+    expect(save).toBeDisabled();
+    fireEvent.change(name, { target: { value: "Hall of Ash" } });
+    expect(within(dialog).queryByText("3 to 40 characters.")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("1 change")).toBeInTheDocument();
+    expect(save).toBeEnabled();
+
+    // A preset clears the overrides; a single step makes it custom on top of it.
+    const presets = within(dialog).getByRole("radiogroup", { name: "Presets" });
+    fireEvent.click(within(presets).getByRole("radio", { name: "Hard" }));
+    expect(within(presets).getByRole("radio", { name: "Hard" })).toHaveAttribute("aria-checked", "true");
+    expect(await within(dialog).findByText("Tougher enemies and harsher deaths.")).toBeInTheDocument();
+    const raids = within(dialog).getByRole("radiogroup", { name: "raids" });
+    expect(within(raids).getByRole("radio", { name: "preset" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(within(raids).getByRole("radio", { name: "none" }));
+    expect(await within(dialog).findByText("Your own mix, based on Hard.")).toBeInTheDocument();
+    expect(within(presets).getByRole("radio", { name: "Hard" })).toHaveAttribute("aria-checked", "false");
+    expect(within(dialog).getByText("No raids on your bases.")).toBeInTheDocument();
+    expect(within(dialog).getByText("3 changes")).toBeInTheDocument();
+
+    // A password that Valheim would refuse, shown as you type.
+    const pw = within(dialog).getByLabelText("Server password");
+    fireEvent.change(pw, { target: { value: "ash" } });
+    expect(within(dialog).getByText("5 to 32 characters.")).toBeInTheDocument();
+    fireEvent.change(pw, { target: { value: "" } });
+
+    fireEvent.click(save);
+    await within(dialog).findByText("Saved. A restart applies it.");
+    expect(puts).toEqual([{ name: "Hall of Ash", public: true, preset: "hard", modifiers: { raids: "none" }, keys: [], saveInterval: 1800 }]);
+    expect(within(dialog).getByRole("button", { name: /Apply now: restart the server/ })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /Apply when the server is empty/ })).toBeInTheDocument();
+  });
+
+  it("rolls back an optimistic save the agent refuses", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PUT") return Response.json({ ok: false, message: "invalid settings", errors: { name: "chars" } }, { status: 400 });
+      return String(url) === "/api/settings" ? Response.json(settingsView()) : new Response("{}", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Dashboard live={{ state: withSettings(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Server settings" }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    fireEvent.change(await within(dialog).findByLabelText("Server name"), { target: { value: "Hall of Ash" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await within(dialog).findByText("Fix the marked fields first.");
+    expect(within(dialog).getByText("Only letters, digits, spaces and - _ . ' !")).toBeInTheDocument();
+    expect(within(dialog).getByText("1 change")).toBeInTheDocument();
+  });
+
+  it("tells the saga about settings without ever naming the password", () => {
+    const s = withSettings();
+    s.history.events = [
+      { seq: 8, ts: "2026-10-09T19:52:00Z", type: "settings_apply", data: { state: "applied", mode: "when_empty" } },
+      { seq: 7, ts: "2026-10-09T19:51:00Z", type: "settings_changed", data: { changedKeys: ["name", "password", "modifier.raids", "key.nomap"] } },
+    ];
+    render(<Dashboard live={{ state: s, logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    expect(screen.getByText("Server settings changed: name, password, raids, no map")).toBeInTheDocument();
+    expect(screen.getByText("New settings are in effect")).toBeInTheDocument();
   });
 });
 

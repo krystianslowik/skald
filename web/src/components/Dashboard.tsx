@@ -9,6 +9,7 @@ import { Forge } from "./Forge";
 import { Header, OfflineBanner } from "./Header";
 import { Hearth } from "./Hearth";
 import { JoinCode } from "./JoinCode";
+import { ServerPassword } from "./ServerPassword";
 import { Plank } from "./Plank";
 import { ProfileProvider } from "./PlayerName";
 import { Ranking } from "./Ranking";
@@ -17,9 +18,11 @@ import { Saga } from "./Saga";
 import { Treasury } from "./Treasury";
 import { Progress, World } from "./World";
 import { BOSSES } from "../lib/world";
+import { cancelApply } from "../lib/api";
 
 // Opened on demand; the chunk is preloaded as soon as a pointer reaches a player name.
 const ProfileSheet = lazy(() => import("./ProfileSheet"));
+const SettingsSheet = lazy(() => import("./SettingsSheet"));
 
 function useNow(ms = 15_000): number {
   const [now, setNow] = useState(() => Date.now());
@@ -44,6 +47,18 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
     setProfile(null);
     opener.current?.focus();
   }, []);
+  // null = closed; "top" from the header button, "footer" from the pending chip.
+  const [settingsOpen, setSettingsOpen] = useState<null | "top" | "footer">(null);
+  const settingsOpener = useRef<Element | null>(null);
+  const openSettings = useCallback((footer: boolean) => {
+    settingsOpener.current = document.activeElement;
+    setSettingsOpen(footer ? "footer" : "top");
+  }, []);
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(null);
+    (settingsOpener.current as HTMLElement | null)?.focus?.();
+  }, []);
+  const cancelArmed = useCallback(() => void cancelApply().catch(() => undefined), []);
 
   const online7d = state?.history.online7d;
   const onlineChart = useMemo(
@@ -82,12 +97,21 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
           animate={{ opacity: 1 }}
           transition={{ duration: 0.8 }}
         >
-          <Header server={state.server} online={online} now={now} onLogout={onLogout} />
+          <Header
+            server={state.server}
+            online={online}
+            now={now}
+            onLogout={onLogout}
+            settings={state.settings}
+            onSettings={openSettings}
+            onCancelArmed={cancelArmed}
+          />
 
           <div className="grid gap-5 lg:grid-cols-12 lg:gap-6">
             {/* No board: the code sits straight on the world, like the game's centre-screen messages. */}
             <section className="relative flex flex-col items-center justify-center bg-[radial-gradient(55%_60%_at_50%_50%,rgba(70,104,112,0.13),transparent_72%)] px-4 py-8 sm:py-12 lg:col-span-8" aria-label={t("plank.joinCode")}>
               <JoinCode code={state.server.joinCode} codeAt={state.server.joinCodeAt} status={state.server.status} now={now} />
+              {state.settings?.enabled && state.settings.passwordSet && <ServerPassword stamp={state.settings} />}
             </section>
             <Plank title={t("plank.hearth")} id="hearth" aside={tn("plank.hearth.aside", players.length)} className="lg:col-span-4">
               <Hearth players={players} now={now} />
@@ -147,6 +171,11 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
         {profile && (
           <Suspense fallback={null}>
             <ProfileSheet key={profile} name={profile} now={now} onClose={closeProfile} />
+          </Suspense>
+        )}
+        {settingsOpen && state.settings?.enabled && (
+          <Suspense fallback={null}>
+            <SettingsSheet summary={state.settings} effectiveName={state.server.name} focusFooter={settingsOpen === "footer"} onClose={closeSettings} />
           </Suspense>
         )}
       </div>

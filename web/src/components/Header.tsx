@@ -1,9 +1,10 @@
 import { memo } from "react";
-import type { ApiState } from "../types";
+import type { ApiState, SettingsSummary } from "../types";
 import { useCampfireSound } from "../lib/campfire";
 import { gameVersion } from "../lib/format";
 import { LocaleToggle, useI18n, type TextKey } from "../i18n";
 import { Flame, type FlameLevel } from "./Flame";
+import { preloadSettingsSheet, SettingsGlyph } from "./SettingsGlyph";
 
 export function flameLevel(s: ApiState["server"] | null, online: boolean): FlameLevel {
   if (!s || !online) return "embers";
@@ -28,7 +29,25 @@ const FUTHARK: Record<string, string> = {
 const toRunes = (s: string) =>
   [...s.toLowerCase().normalize("NFD")].map((c) => FUTHARK[c] ?? "").join("");
 
-export const Header = memo(function Header({ server: s, online, now, onLogout }: { server: ApiState["server"]; online: boolean; now: number; onLogout: () => void }) {
+export const Header = memo(function Header({
+  server: s,
+  online,
+  now,
+  onLogout,
+  settings,
+  onSettings,
+  onCancelArmed,
+}: {
+  server: ApiState["server"];
+  online: boolean;
+  now: number;
+  onLogout: () => void;
+  /** Present when the agent can change server settings. */
+  settings?: SettingsSummary | null;
+  /** Opens the settings sheet; `footer` lands on the apply choice. */
+  onSettings?: (footer: boolean) => void;
+  onCancelArmed?: () => void;
+}) {
   const { t, duration } = useI18n();
   const level = flameLevel(s, online);
   const up = s?.serverStartedAt && s.status === "running" ? duration(now - Date.parse(s.serverStartedAt)) : null;
@@ -45,6 +64,9 @@ export const Header = memo(function Header({ server: s, online, now, onLogout }:
             <span className={level === "alive" ? "text-flame" : level === "ash" ? "text-ash" : "text-ember"}>{t(`flame.${level}`)}</span>
             <span className="text-ash">, {online ? t(SERVER_STATUS[s?.status ?? "unknown"] ?? "status.unknown") : t("header.noLink")}</span>
           </p>
+          {settings?.enabled && (settings.pending || settings.armed) && onSettings && (
+            <SettingsChips armed={settings.armed} onOpen={() => onSettings(true)} onCancel={onCancelArmed} />
+          )}
         </div>
       </div>
       <dl className="on-world flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-iron/30 pt-3 text-sm sm:flex-nowrap sm:gap-6 sm:border-0 sm:pt-0">
@@ -57,6 +79,20 @@ export const Header = memo(function Header({ server: s, online, now, onLogout }:
           <dd className="whitespace-nowrap font-bold text-bone">{up ?? t("header.notBurning")}</dd>
         </div>
         <div className="ml-auto flex items-center gap-2 sm:ml-0 sm:gap-3">
+          {settings?.enabled && onSettings && (
+            <button
+              type="button"
+              onClick={() => onSettings(false)}
+              onPointerEnter={preloadSettingsSheet}
+              onFocus={preloadSettingsSheet}
+              aria-haspopup="dialog"
+              aria-label={t("settings.open")}
+              title={t("settings.open")}
+              className="plaque press grid h-8 w-8 place-items-center"
+            >
+              <SettingsGlyph size={18} className="text-current" />
+            </button>
+          )}
           <SoundToggle />
           <LocaleToggle />
           <button
@@ -71,6 +107,37 @@ export const Header = memo(function Header({ server: s, online, now, onLogout }:
     </header>
   );
 });
+
+/**
+ * Saved settings waiting for a restart, and an armed apply-when-empty with
+ * its cancel. The chip opens the settings sheet on its apply choice.
+ */
+function SettingsChips({ armed, onOpen, onCancel }: { armed: boolean; onOpen: () => void; onCancel?: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      <button
+        type="button"
+        onClick={onOpen}
+        onPointerEnter={preloadSettingsSheet}
+        aria-label={t("settings.pendingChipAria")}
+        className={`press inline-flex items-center gap-1.5 rounded-[2px] border px-2 py-0.5 text-[0.6875rem] font-bold uppercase tracking-[0.06em] ${
+          armed ? "border-white/25 bg-[linear-gradient(180deg,#7aaedc,#5e97cc_60%,#4c82b5)] text-[#10161d]" : "border-ember/60 bg-black/30 text-flame"
+        }`}
+      >
+        {armed && <span aria-hidden className="armed-pulse h-2 w-2 rounded-full bg-white/80" />}
+        {armed ? t("settings.armedChip") : t("settings.pendingChip")}
+      </button>
+      {armed && onCancel && (
+        <button type="button" onClick={onCancel} aria-label={t("settings.cancelArmed")} title={t("settings.cancelArmed")} className="plaque press grid h-6 w-6 place-items-center">
+          <svg width="11" height="11" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+            <path d="M3 3l10 10M13 3L3 13" />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+}
 
 /** Optional crackling-fire ambience; off until someone asks for it. */
 function SoundToggle() {

@@ -38,7 +38,22 @@ export function actionTitle(i: Pick<I18n, "t">, name: string): string {
   return key ? i.t(key) : name;
 }
 
-type Tone = "join" | "leave" | "death" | "save" | "server" | "action" | "raid";
+type Tone = "join" | "leave" | "death" | "save" | "server" | "action" | "raid" | "settings";
+
+const SETTINGS_APPLY: Record<string, TextKey> = {
+  armed: "saga.settingsArmed",
+  cancelled: "saga.settingsCancelled",
+  applying: "saga.settingsApplying",
+  applied: "saga.settingsApplied",
+  failed: "saga.settingsFailed",
+};
+
+/** A settings_changed key as words: "name", "raids", "no map". Never a value. */
+export function settingLabel(i: Pick<I18n, "lookup">, key: string): string {
+  if (key.startsWith("modifier.")) return i.lookup(`mod.${key.slice(9)}`) ?? key.slice(9);
+  if (key.startsWith("key.")) return i.lookup(`setkey.${key.slice(4)}`)?.toLowerCase() ?? key.slice(4);
+  return i.lookup(`setkeyname.${key}`) ?? key;
+}
 
 /** `player` is set when the text starts with a player name (rendered as a profile link). */
 export function describe(i: I18n, ev: AgentEvent): { text: string; tone: Tone; player?: string } | null {
@@ -68,6 +83,15 @@ export function describe(i: I18n, ev: AgentEvent): { text: string; tone: Tone; p
       return d.state === "error" ? { text: t("saga.playfabError"), tone: "death" } : null;
     case "action":
       return { text: t("saga.action", { what: actionTitle(i, String(d.name)), status: actionStatus(i, Boolean(d.ok), String(d.message ?? "")) }), tone: "action" };
+    case "settings_changed": {
+      const keys = Array.isArray(d.changedKeys) ? d.changedKeys.map(String) : [];
+      if (keys.length === 0) return null;
+      return { text: t("saga.settingsChanged", { what: keys.map((k) => settingLabel(i, k)).join(", ") }), tone: "settings" };
+    }
+    case "settings_apply": {
+      const key = SETTINGS_APPLY[String(d.state)];
+      return key ? { text: t(key), tone: d.state === "failed" ? "death" : "settings" } : null;
+    }
     default:
       return null;
   }
@@ -110,6 +134,12 @@ function Glyph({ tone }: { tone: Tone }) {
       return (
         <svg {...common} stroke="#f3b867" aria-hidden>
           <path d="M10 2v16M10 6l5-4M10 6L5 2" />
+        </svg>
+      );
+    case "settings":
+      return (
+        <svg {...common} stroke="#8cbce6" aria-hidden>
+          <path d="M3 5h8M14 5h3M3 10h2M8 10h9M3 15h10M16 15h1M12.5 3.5v3M6.5 8.5v3M14.5 13.5v3" />
         </svg>
       );
     default:

@@ -1,4 +1,4 @@
-import type { ActionName, ActionResult, ApiState, LogLine, PlayerProfile, PublicConfig } from "../types";
+import type { ActionName, ActionResult, ApiState, ApplyMode, LogLine, PlayerProfile, PublicConfig, SettingsInput, SettingsView } from "../types";
 
 export class Unauthorized extends Error {}
 
@@ -61,3 +61,44 @@ export const getPlayer = (name: string) => call<PlayerProfile>(`/api/players/${e
 
 /** Same-origin link: the session cookie rides along and the browser streams the zip to disk. */
 export const backupHref = (name: string) => `/api/backups/${encodeURIComponent(name)}`;
+
+/** A settings call's raw outcome: the status matters (400 carries field errors, 409 busy, 404 off). */
+export interface SettingsResult<T> {
+  status: number;
+  body: T;
+}
+
+async function settingsCall<T>(path: string, init?: RequestInit): Promise<SettingsResult<T>> {
+  const res = await fetch(path, { credentials: "same-origin", ...init });
+  if (res.status === 401) throw new Unauthorized();
+  let body: T;
+  try {
+    body = (await res.json()) as T;
+  } catch {
+    body = { ok: false, message: `HTTP ${res.status}` } as T;
+  }
+  return { status: res.status, body };
+}
+
+export type SettingsFailure = { ok: false; message: string; errors?: Record<string, string> };
+
+export const getSettings = () => settingsCall<SettingsView>("/api/settings");
+
+/** Only on an explicit reveal or copy: the password never rides along otherwise. */
+export const getServerPassword = () => settingsCall<{ password: string }>("/api/settings/password");
+
+export const putSettings = (input: SettingsInput) =>
+  settingsCall<SettingsView | SettingsFailure>("/api/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+
+export const applySettings = (mode: ApplyMode) =>
+  settingsCall<SettingsView | ActionResult | SettingsFailure>("/api/settings/apply", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+
+export const cancelApply = () => settingsCall<SettingsView | SettingsFailure>("/api/settings/apply", { method: "DELETE" });
