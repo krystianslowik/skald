@@ -14,7 +14,7 @@ COPY build.sh ./
 COPY plugin/ plugin/
 RUN sh build.sh && test -s out/SkaldBridge.dll
 
-FROM busybox:1.37
+FROM busybox:1.38
 ARG VERSION=dev
 LABEL org.opencontainers.image.title=skald-bridge \
       org.opencontainers.image.description="Skald bridge: a server-side BepInEx plugin with live admin commands for the Skald agent" \
