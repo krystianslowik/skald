@@ -32,6 +32,8 @@ export interface MapCanvasHandle {
   zoomBy(factor: number): void;
   /** The explored area, or what people built, or the whole world. */
   fit(): void;
+  /** Screen position (px in the canvas box) of a world point, for overlays. */
+  project(x: number, z: number): [number, number];
 }
 
 /** Pointer travel before a press becomes a pan, so taps stay taps. */
@@ -41,6 +43,8 @@ const DOUBLE_TAP_MS = 300;
 const DOUBLE_TAP_PX = 30;
 /** Two fingers down and up within this time, barely moving, are a two-finger tap. */
 const TWO_TAP_MS = 300;
+/** A finger held this long without moving is a long press. */
+const LONG_PRESS_MS = 520;
 /** The view is remembered for the browser session (per tab). */
 const VIEW_KEY = "skald.map.view";
 const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
@@ -91,10 +95,16 @@ export const MapCanvas = forwardRef<
     onAnchor?: (p: { x: number; y: number } | null) => void;
     /** Shows the world coordinates under the pointer. */
     onPointerWorld?: (p: { x: number; z: number } | null) => void;
+    /** After every drawn frame: overlays that follow the view reposition here. */
+    onFrame?: () => void;
+    /** A long press (or a right click) on the map, at a world point. */
+    onLongPress?: (p: { x: number; z: number }) => void;
+    /** A tap on empty map, at a world point (alongside `onSelect(null)`). */
+    onTapWorld?: (p: { x: number; z: number }) => void;
     interactive?: boolean;
     className?: string;
   }
->(function MapCanvas({ map, mask, markers, layers, selected, highlighted, relief = null, onSelect, onGroup, onAnchor, onPointerWorld, remember = false, insets = NO_INSETS, interactive = true, className = "relative" }, ref) {
+>(function MapCanvas({ map, mask, markers, layers, selected, highlighted, relief = null, onSelect, onGroup, onAnchor, onPointerWorld, onFrame, onLongPress, onTapWorld, remember = false, insets = NO_INSETS, interactive = true, className = "relative" }, ref) {
   const { t } = useI18n();
   const reduced = useReducedMotion() ?? false;
   const coarse = useMedia(COARSE);
@@ -109,8 +119,8 @@ export const MapCanvas = forwardRef<
   const fling = useRef<{ vx: number; vy: number } | null>(null);
   const glide = useRef<{ cx: number; cz: number; ls: number; v: [number, number, number] } | null>(null);
   const last = useRef(0);
-  const props = useRef({ markers, layers, selected, highlighted, onAnchor, coarse, reduced, remember });
-  props.current = { markers, layers, selected, highlighted, onAnchor, coarse, reduced, remember };
+  const props = useRef({ markers, layers, selected, highlighted, onAnchor, onFrame, coarse, reduced, remember });
+  props.current = { markers, layers, selected, highlighted, onAnchor, onFrame, coarse, reduced, remember };
 
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draw = useCallback((quality: "fast" | "full" = "fast") => {
@@ -142,6 +152,7 @@ export const MapCanvas = forwardRef<
         p.onAnchor(x < 0 || y < 0 || x > v.w || y > v.h ? null : { x, y });
       }
     }
+    p.onFrame?.();
   }, []);
 
   const tick = useCallback(
@@ -247,6 +258,9 @@ export const MapCanvas = forwardRef<
       },
       fit() {
         glideTo(fit());
+      },
+      project(x, z) {
+        return worldToScreen(view.current, x, z);
       },
     }),
     [glideTo, fit],
@@ -359,6 +373,14 @@ export const MapCanvas = forwardRef<
     let lastTap: { x: number; y: number; t: number } | null = null;
     // Two fingers down together: when, where, and how far they have wandered.
     let two: { t: number; start: Map<number, { x: number; y: number }>; travel: number; mx: number; my: number } | null = null;
+    // A finger resting on one spot: after LONG_PRESS_MS it is a long press, and its release is not a tap.
+    let press: ReturnType<typeof setTimeout> | null = null;
+    let pressed = false;
+    const cancelPress = () => {
+      if (press) clearTimeout(press);
+      press = null;
+    };
+    const toWorld = (p: { x: number; y: number }) => ((w) => ({ x: Math.round(w[0]), z: Math.round(w[1]) }))(screenToWorld(view.current, p.x, p.y));
     const local = (e: PointerEvent | WheelEvent) => {
       const r = el.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -385,7 +407,19 @@ export const MapCanvas = forwardRef<
         moved = false;
         downAt = p;
         two = null;
+        pressed = false;
+        cancelPress();
+        if (onLongPress) {
+          press = setTimeout(() => {
+            press = null;
+            if (moved || pts.size !== 1) return;
+            pressed = true;
+            navigator.vibrate?.(12);
+            onLongPress(toWorld(p));
+          }, LONG_PRESS_MS);
+        }
       } else {
+        cancelPress();
         moved = true;
         pinch = pinchState();
         if (pts.size === 2 && pinch) two = { t: e.timeStamp, start: new Map(pts), travel: 0, mx: pinch.mx, my: pinch.my };
@@ -424,6 +458,7 @@ export const MapCanvas = forwardRef<
         return;
       }
       if (!moved && downAt && Math.hypot(p.x - downAt.x, p.y - downAt.y) < SLOP) return;
+      cancelPress();
       if (!moved) {
         moved = true;
         el.style.cursor = "grabbing";
@@ -438,6 +473,13 @@ export const MapCanvas = forwardRef<
       if (!pts.has(e.pointerId)) return;
       const p = local(e);
       pts.delete(e.pointerId);
+      cancelPress();
+      if (pressed) {
+        // The long press already answered; this release is not a tap.
+        if (pts.size === 0) pressed = false;
+        el.style.cursor = "grab";
+        return;
+      }
       if (pts.size === 1) {
         // Back from a pinch to a pan: restart the pan from the remaining finger.
         pinch = null;
@@ -471,6 +513,7 @@ export const MapCanvas = forwardRef<
         }
         lastTap = { ...p, t: e.timeStamp };
         onSelect(null);
+        onTapWorld?.(toWorld(p));
         return;
       }
       const [vx, vy] = releaseVelocity(samples);
@@ -495,6 +538,12 @@ export const MapCanvas = forwardRef<
       const k = e.ctrlKey ? 0.01 : 0.0018;
       setView(zoomAt(view.current, p.x, p.y, Math.exp(-e.deltaY * unit * k)));
     };
+    const context = (e: MouseEvent) => {
+      if (!onLongPress) return;
+      e.preventDefault();
+      onLongPress(toWorld(local(e as PointerEvent)));
+    };
+    el.addEventListener("contextmenu", context);
     el.addEventListener("pointerdown", down);
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", up);
@@ -502,6 +551,8 @@ export const MapCanvas = forwardRef<
     el.addEventListener("pointerleave", leave);
     el.addEventListener("wheel", wheel, { passive: false });
     return () => {
+      cancelPress();
+      el.removeEventListener("contextmenu", context);
       el.removeEventListener("pointerdown", down);
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);
@@ -509,7 +560,7 @@ export const MapCanvas = forwardRef<
       el.removeEventListener("pointerleave", leave);
       el.removeEventListener("wheel", wheel);
     };
-  }, [interactive, onPointerWorld, onSelect, openCluster, glideTo, reduced, schedule, setView]);
+  }, [interactive, onPointerWorld, onSelect, onLongPress, onTapWorld, openCluster, glideTo, reduced, schedule, setView]);
 
   const onKey = (e: ReactKeyboardEvent) => {
     const v = view.current;

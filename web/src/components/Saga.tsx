@@ -2,6 +2,8 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { memo, useMemo } from "react";
 import type { AgentEvent } from "../types";
 import { gameVersion } from "../lib/format";
+import { gameClock } from "../lib/admin";
+import { itemLabel } from "../lib/storage";
 import { useI18n, type I18n, type TextKey } from "../i18n";
 import { PlayerName } from "./PlayerName";
 
@@ -38,7 +40,90 @@ export function actionTitle(i: Pick<I18n, "t">, name: string): string {
   return key ? i.t(key) : name;
 }
 
-type Tone = "join" | "leave" | "death" | "save" | "server" | "action" | "raid" | "settings";
+type Tone = "join" | "leave" | "death" | "save" | "server" | "action" | "raid" | "settings" | "admin";
+
+/** Commands whose saga line names a player when there was one ("for X", "near X"). */
+const WITH_PLAYER = new Set(["spawn", "creature-spawn", "creature-kill", "creature-tame", "repair", "fill", "grow", "map-reveal", "map-pins", "event-start"]);
+
+/** "20 Wood, Iron sword ★3 and 2 more": what a spawn dropped. */
+function itemsText(i: Pick<I18n, "lookup" | "t">, d: Record<string, unknown>): string {
+  const lines = Array.isArray(d.items) ? (d.items as Record<string, unknown>[]) : d.item ? [d] : [];
+  const parts = lines.slice(0, 3).map((l) => {
+    const n = Number(l.amount ?? 1) || 1;
+    const q = Number(l.quality ?? 1) || 1;
+    return `${n > 1 ? `${n} ` : ""}${itemLabel(String(l.item ?? "?"), i.lookup)}${q > 1 ? ` ${"\u2605".repeat(Math.min(q, 5))}` : ""}`;
+  });
+  const more = lines.length - parts.length;
+  return more > 0 ? i.t("saga.admin.more", { list: parts.join(", "), n: more }) : parts.join(", ");
+}
+
+/** An admin command from the bridge's audit trail, as a line of the saga. */
+export function describeAdmin(i: I18n, d: Record<string, unknown>): string {
+  const { t, lookup } = i;
+  const raw = String(d.actor ?? "");
+  const actor = !raw || raw === "unknown" || raw.startsWith("dashboard-") ? t("saga.admin.someone") : raw;
+  const command = String(d.command ?? "");
+  const player = typeof d.player === "string" ? d.player : "";
+  if (d.result !== "ok") {
+    const what = lookup(`saga.admin.cmd.${command}`) ?? command;
+    return d.result === "error" ? t("saga.admin.failed", { actor, what, error: String(d.error ?? "") }) : t("saga.admin.timeout", { actor, what });
+  }
+  const vars: Record<string, string | number> = { actor, player };
+  switch (command) {
+    case "spawn":
+      vars.what = itemsText(i, d);
+      break;
+    case "broadcast":
+      vars.text = String(d.text ?? "");
+      break;
+    case "time":
+      vars.clock = gameClock(Number(d.dayFraction) || 0);
+      break;
+    case "event-start":
+      vars.raid = i.raidLabel(String(d.name ?? d.started ?? ""));
+      break;
+    case "teleport":
+      vars.where = typeof d.toPlayer === "string" ? d.toPlayer : typeof d.toSpot === "string" ? (lookup(`spot.${d.toSpot}`) ?? d.toSpot) : t("saga.admin.somewhere");
+      break;
+    case "globalkey-set":
+    case "globalkey-remove": {
+      const key = String(d.key ?? "");
+      vars.key = lookup(`boss.${key}`) ?? lookup(`gkey.${key}`) ?? key;
+      break;
+    }
+    case "creature-spawn":
+      vars.n = Number(d.count ?? 1) || 1;
+      vars.creature = lookup(`creature.${d.prefab}`) ?? String(d.prefab ?? "?");
+      break;
+    case "creature-kill":
+      vars.n = Number(d.killed ?? 0);
+      break;
+    case "creature-tame":
+      vars.n = Number(d.tamed ?? 0);
+      break;
+    case "repair":
+      vars.n = Number(d.repaired ?? 0);
+      break;
+    case "fill":
+      vars.n = Number(d.smelters ?? 0) + Number(d.fermenters ?? 0);
+      break;
+    case "grow":
+      vars.n = Number(d.plants ?? 0);
+      break;
+    case "map-reveal":
+    case "map-pins":
+      vars.n = Number(d.tables ?? 0);
+      break;
+    case "status":
+      vars.effect = lookup(`effect.${d.effect}`) ?? String(d.effect ?? "");
+      break;
+    case "ack-build":
+      vars.build = String(d.build ?? "");
+      break;
+  }
+  const key = WITH_PLAYER.has(command) && !player ? `saga.admin.${command}.at` : `saga.admin.${command}`;
+  return lookup(key, vars) ?? t("saga.admin.generic", { actor, what: lookup(`saga.admin.cmd.${command}`) ?? command });
+}
 
 const SETTINGS_APPLY: Record<string, TextKey> = {
   armed: "saga.settingsArmed",
@@ -94,6 +179,8 @@ export function describe(i: I18n, ev: AgentEvent): { text: string; tone: Tone; p
       const key = SETTINGS_APPLY[String(d.state)];
       return key ? { text: t(key), tone: d.state === "failed" ? "death" : "settings" } : null;
     }
+    case "admin":
+      return { text: describeAdmin(i, d), tone: d.result === "ok" ? "admin" : "death" };
     default:
       return null;
   }
@@ -136,6 +223,12 @@ function Glyph({ tone }: { tone: Tone }) {
       return (
         <svg {...common} stroke="#f3b867" aria-hidden>
           <path d="M10 2v16M10 6l5-4M10 6L5 2" />
+        </svg>
+      );
+    case "admin":
+      return (
+        <svg {...common} stroke="#ecc212" aria-hidden>
+          <path d="M3 17h14M6 17l1.2-3h5.6L14 17M11.5 2.5l3 3M9.5 4.5l3-3 3 3-3 3zM10.5 6.5L6 11" />
         </svg>
       );
     case "settings":

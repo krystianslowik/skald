@@ -25,6 +25,8 @@ import { BOSSES } from "../lib/world";
 import { cancelApply } from "../lib/api";
 import { PHONE, useMedia } from "../lib/useMedia";
 import { TABS, useRoute, type Tab } from "../lib/useRoute";
+import { AdminProvider } from "./admin/AdminContext";
+import { AdminBoard } from "./admin/AdminBoard";
 
 // Opened on demand; the chunk is preloaded as soon as a pointer reaches a player name.
 const ProfileSheet = lazy(() => import("./ProfileSheet"));
@@ -41,7 +43,7 @@ function useNow(ms = 15_000): number {
   return now;
 }
 
-export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => void }) {
+export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live: Valheim; onLogout: () => void; onUnauthorized?: () => void }) {
   const { t, tn, dayLabel, clock, intl } = useI18n();
   const now = useNow();
   const { state, online, logs, lastAction } = live;
@@ -230,6 +232,7 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
   const footer = <p className="on-world pt-2 text-center text-xs text-ash">{t("footer.unofficial")}</p>;
 
   return (
+    <AdminProvider state={state} online={online} onUnauthorized={onUnauthorized} onShowMap={showMap}>
     <ProfileProvider value={openProfile}>
       <div className="relative min-h-[100dvh]">
         <Atmosphere dim={!online} />
@@ -258,6 +261,7 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
               )}
               {shownTab === "settings" && (
                 <>
+                  <AdminBoard />
                   <Preferences onServerSettings={state.settings?.enabled ? openServerSettings : undefined} onLogout={onLogout} />
                   {runes}
                   {forge}
@@ -320,5 +324,6 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
         )}
       </div>
     </ProfileProvider>
+    </AdminProvider>
   );
 }

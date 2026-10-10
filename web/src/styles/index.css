@@ -397,6 +397,25 @@ body {
   50% { opacity: 1; transform: scale(1.1); }
 }
 
+/* A live player on the map: a soft ring that breathes, so a marker reads as
+   someone, not a place. */
+.live-pulse {
+  animation: live-breathe 2s ease-in-out infinite;
+}
+@keyframes live-breathe {
+  0%, 100% { opacity: 0.25; transform: scale(0.7); }
+  50% { opacity: 0.8; transform: scale(1.15); }
+}
+
+/* Admin results drop in from the top edge, like the game's centre messages. */
+.toast-in {
+  animation: toast-drop 0.32s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+@keyframes toast-drop {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: none; }
+}
+
 /* ---- press feedback --------------------------------------------------------- */
 
 /* Feedback lands on pointer-down, not on release. Unlayered on purpose, so the
@@ -530,6 +549,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .firelight::after,
   .armed-pulse,
+  .live-pulse,
+  .toast-in,
   .text-flicker,
   .flame-sway,
   .flame-sway-fast {

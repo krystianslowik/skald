@@ -12,7 +12,7 @@ function Panel({ onUnauthorized, onLogout }: { onUnauthorized: () => void; onLog
   const icons = live.state?.icons;
   // Item icons follow the agent's sheet: loaded once per game build.
   useEffect(() => setIconBuild(icons), [icons]);
-  return <Dashboard live={live} onLogout={onLogout} />;
+  return <Dashboard live={live} onLogout={onLogout} onUnauthorized={onUnauthorized} />;
 }
 
 export default function App() {

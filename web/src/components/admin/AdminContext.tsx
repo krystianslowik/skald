@@ -1,0 +1,251 @@
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { AdminCommand, AdminStatus, ApiState, Platform } from "../../types";
+import { getAdminStatus, runAdmin, type AdminOutcome, type KitLine } from "../../lib/admin";
+import { Unauthorized } from "../../lib/api";
+import { useWorldMap } from "../../lib/useWorldMap";
+import { useI18n } from "../../i18n";
+
+const AdminSheets = lazy(() => import("./AdminSheets"));
+export const preloadAdmin = () => void import("./AdminSheets");
+
+/** Where a command acts: next to a player, or at a point of the world. */
+export type Target = { player: string } | { at: { x: number; z: number }; label?: string };
+
+export const targetBody = (t: Target): Record<string, unknown> => ("player" in t ? { player: t.player } : { at: { x: Math.round(t.at.x), z: Math.round(t.at.z) } });
+
+/**
+ * A sheet the admin layer shows; only one at a time, the unlock sheet over
+ * any. `picked` is a point just picked on the map for it (the sheet steps
+ * aside while the map is open, then comes back with it).
+ */
+export type AdminView = (
+  | { kind: "panel" }
+  | { kind: "player"; name: string }
+  | { kind: "items"; target: Target; lines?: KitLine[] }
+  | { kind: "creatures"; target: Target }
+  | { kind: "point"; x: number; z: number }
+) & { picked?: { x: number; z: number } };
+
+/** A map tap someone is waiting for (teleport here, spawn here). */
+export interface PickRequest {
+  label: string;
+  /** Runs with the point; the sheet that asked comes back either way. */
+  onPick?: (p: { x: number; z: number }) => void;
+}
+
+export interface Toast {
+  id: number;
+  ok: boolean;
+  text: string;
+}
+
+/** Why controls are off, for the banner and the disabled buttons; null when they work. */
+export type Blocker = "off" | "unreachable" | "disabled" | "token" | "loading" | "restarting" | "agent" | "untested" | "offline" | null;
+
+export interface Admin {
+  status: AdminStatus | null;
+  /** The agent has a bridge at all; without one the admin UI stays hidden. */
+  present: boolean;
+  blocker: Blocker;
+  /** May command now (no admin password, or unlocked). */
+  unlocked: boolean;
+  refresh(): void;
+  run(command: AdminCommand, body?: Record<string, unknown>, opts?: { quiet?: boolean; done?: string }): Promise<AdminOutcome>;
+  open(view: AdminView): void;
+  close(): void;
+  /** Ask for the admin password; resolves true once unlocked. */
+  unlock(): Promise<boolean>;
+  /** Wait for a tap on the map (the map opens); null cancels. */
+  pick: PickRequest | null;
+  startPick(req: PickRequest): void;
+  /** The map's answer to a pick: runs it, then brings the sheet back. */
+  completePick(p: { x: number; z: number }): void;
+  cancelPick(): void;
+  toast(ok: boolean, text: string): void;
+  /** Players at the fire, for the target pickers. */
+  players: { name: string; platform?: Platform }[];
+  mainBase: { x: number; z: number } | null;
+}
+
+const AdminCtx = createContext<Admin | null>(null);
+
+/** The admin layer, or null outside the provider (tests, the login screen). */
+export const useAdmin = (): Admin | null => useContext(AdminCtx);
+
+export function AdminProvider({
+  state,
+  online,
+  onUnauthorized,
+  onShowMap,
+  children,
+}: {
+  state: ApiState;
+  online: boolean;
+  onUnauthorized: () => void;
+  onShowMap: () => void;
+  children: ReactNode;
+}) {
+  const { t } = useI18n();
+  const [status, setStatus] = useState<AdminStatus | null>(null);
+  const [view, setView] = useState<AdminView | null>(null);
+  const [unlocking, setUnlocking] = useState<((ok: boolean) => void) | null>(null);
+  const [pick, setPick] = useState<PickRequest | null>(null);
+  const pickFrom = useRef<AdminView | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastId = useRef(0);
+  const unauth = useRef(onUnauthorized);
+  unauth.current = onUnauthorized;
+
+  const refresh = useCallback(() => {
+    getAdminStatus()
+      .then(setStatus)
+      .catch((e) => {
+        if (e instanceof Unauthorized) unauth.current();
+      });
+  }, []);
+
+  // Status now, on every server state change, and every 20 s (the idle timeout and a patched game show up).
+  const serverStatus = state.server.status;
+  useEffect(() => {
+    refresh();
+    const timer = setInterval(refresh, 20_000);
+    return () => clearInterval(timer);
+  }, [refresh, serverStatus, online]);
+
+  const toast = useCallback((ok: boolean, text: string) => {
+    const id = ++toastId.current;
+    setToasts((ts) => [...ts.slice(-2), { id, ok, text }]);
+    setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== id)), ok ? 3500 : 6000);
+  }, []);
+
+  const unlock = useCallback(
+    () =>
+      new Promise<boolean>((resolve) => {
+        setUnlocking(() => (ok: boolean) => {
+          setUnlocking(null);
+          if (ok) refresh();
+          resolve(ok);
+        });
+      }),
+    [refresh],
+  );
+
+  const run = useCallback<Admin["run"]>(
+    async (command, body = {}, opts = {}) => {
+      let res: AdminOutcome;
+      try {
+        res = await runAdmin(command, body);
+        if (res.needsAdmin && (await unlock())) res = await runAdmin(command, body);
+      } catch (e) {
+        if (e instanceof Unauthorized) unauth.current();
+        return { ok: false, status: 401 };
+      }
+      if (!res.ok && res.status === 409) refresh();
+      if (!opts.quiet) {
+        if (res.ok) toast(true, opts.done ?? t("admin.done"));
+        else if (!res.needsAdmin) toast(false, res.status === 0 || res.status === 502 ? t("admin.unreachable") : res.error || t("admin.failed"));
+      }
+      return res;
+    },
+    [unlock, refresh, toast, t],
+  );
+
+  const startPick = useCallback(
+    (req: PickRequest) => {
+      setView((v) => {
+        pickFrom.current = v;
+        return null;
+      });
+      setPick(req);
+      onShowMap();
+    },
+    [onShowMap],
+  );
+  const completePick = useCallback(
+    (p: { x: number; z: number }) => {
+      const req = pick;
+      setPick(null);
+      req?.onPick?.(p);
+      const back = pickFrom.current;
+      pickFrom.current = null;
+      if (back) setView({ ...back, picked: p });
+    },
+    [pick],
+  );
+  const cancelPick = useCallback(() => {
+    setPick(null);
+    const back = pickFrom.current;
+    pickFrom.current = null;
+    if (back) setView({ ...back, picked: undefined });
+  }, []);
+
+  // The main base (most pieces) of the saved map: the default target of base helpers.
+  const saveKey = state.world.meta?.savedAt ?? "";
+  const [load] = useWorldMap(saveKey);
+  const mainBase = useMemo(() => {
+    if (load.status !== "ready") return null;
+    let best: { x: number; z: number; pieces: number } | null = null;
+    for (const b of load.map.bases) if (!best || b.pieces > best.pieces) best = b;
+    return best ? { x: best.x, z: best.z } : null;
+  }, [load]);
+
+  const bridge = status?.bridge;
+  const present = !!bridge && bridge.reason !== "off";
+  let blocker: Blocker = null;
+  if (!online) blocker = "offline";
+  else if (!bridge) blocker = "agent";
+  else if (!bridge.available) blocker = bridge.reason ?? "unreachable";
+  else if (!bridge.tested && !bridge.acknowledged) blocker = "untested";
+  const unlocked = !status?.required || status.unlocked;
+
+  const value = useMemo<Admin>(
+    () => ({
+      status,
+      present,
+      blocker,
+      unlocked,
+      refresh,
+      run,
+      open: setView,
+      close: () => setView(null),
+      unlock,
+      pick,
+      startPick,
+      completePick,
+      cancelPick,
+      toast,
+      players: state.players,
+      mainBase,
+    }),
+    [status, present, blocker, unlocked, refresh, run, unlock, pick, startPick, completePick, cancelPick, toast, state.players, mainBase],
+  );
+
+  return (
+    <AdminCtx.Provider value={value}>
+      {children}
+      {(view || unlocking) && (
+        <Suspense fallback={null}>
+          <AdminSheets view={view} unlocking={unlocking} />
+        </Suspense>
+      )}
+      <Toasts toasts={toasts} />
+    </AdminCtx.Provider>
+  );
+}
+
+function Toasts({ toasts }: { toasts: Toast[] }) {
+  if (toasts.length === 0) return null;
+  return (
+    <div aria-live="polite" className="pointer-events-none fixed inset-x-0 top-[max(0.75rem,env(safe-area-inset-top))] z-[60] flex flex-col items-center gap-2 px-4">
+      {toasts.map((x) => (
+        <p
+          key={x.id}
+          role={x.ok ? "status" : "alert"}
+          className={`material toast-in max-w-md rounded-[3px] border px-4 py-2.5 text-center text-sm font-bold shadow-[0_8px_24px_rgba(0,0,0,0.5)] ${x.ok ? "border-flame/40 text-flame" : "border-blood/50 text-blood"}`}
+        >
+          {x.text}
+        </p>
+      ))}
+    </div>
+  );
+}

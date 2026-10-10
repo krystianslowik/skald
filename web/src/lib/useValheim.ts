@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { UNSTORED_EVENTS, type AgentEvent, type ApiState, type LiveMessage, type LogLine } from "../types";
 import { getLogs, getState, Unauthorized } from "./api";
 import { applyEvent } from "./apply";
+import { getLivePositions, setLivePositions } from "./live";
 
 const MAX_LOGS = 1500;
 
@@ -112,6 +113,12 @@ export function useValheim(onUnauthorized: () => void): Valheim {
         return;
       }
       if (ev.type === "action") setLastAction(ev);
+      // Markers leave with their players, and all of them with the server.
+      if (ev.type === "player_leave" || (ev.type === "server_state" && ev.data.status !== "running")) {
+        const live = getLivePositions();
+        const players = ev.type === "player_leave" ? live.players.filter((p) => p.name !== ev.data.name) : [];
+        if (players.length !== live.players.length) setLivePositions({ t: live.t, players });
+      }
       setState((s) => {
         if (!s) return s;
         const next = applyEvent(s, ev);
@@ -138,6 +145,7 @@ export function useValheim(onUnauthorized: () => void): Valheim {
           return;
         }
         if (msg.type === "event") onEvent(msg.event);
+        else if (msg.type === "positions") setLivePositions({ t: msg.t, players: msg.players });
         else {
           setAgentUp(msg.online);
           setState((s) => (s ? share(s, { ...s, ...msg.state, online: msg.online }) : s));

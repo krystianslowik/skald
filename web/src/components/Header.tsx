@@ -6,6 +6,8 @@ import { LocaleToggle, useI18n, type TextKey } from "../i18n";
 import { Flame, type FlameLevel } from "./Flame";
 import { preloadSettingsSheet, SettingsGlyph } from "./SettingsGlyph";
 import { WorldClock } from "./WorldClock";
+import { preloadAdmin, useAdmin } from "./admin/AdminContext";
+import { AdminGlyph } from "./admin/glyphs";
 import type { WorldClock as Clock } from "../types";
 
 export function flameLevel(s: ApiState["server"] | null, online: boolean): FlameLevel {
@@ -119,6 +121,7 @@ export const Header = memo(function Header({
                 </svg>
               </button>
             )}
+            <AdminButton />
             {settings?.enabled && onSettings && (
               <button
                 type="button"
@@ -148,6 +151,28 @@ export const Header = memo(function Header({
     </header>
   );
 });
+
+/** Opens the admin sheet; hidden when the agent has no bridge. A dot says why it cannot act. */
+function AdminButton() {
+  const { t } = useI18n();
+  const admin = useAdmin();
+  if (!admin?.present) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => admin.open({ kind: "panel" })}
+      onPointerEnter={preloadAdmin}
+      onFocus={preloadAdmin}
+      aria-haspopup="dialog"
+      aria-label={t("admin.open")}
+      title={t("admin.open")}
+      className="plaque press relative grid h-8 w-8 place-items-center coarse:h-11 coarse:w-11"
+    >
+      <AdminGlyph size={18} />
+      {admin.blocker && <span aria-hidden className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-ember" />}
+    </button>
+  );
+}
 
 /**
  * Saved settings waiting for a restart, and an armed apply-when-empty with

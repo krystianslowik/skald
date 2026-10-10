@@ -7,6 +7,8 @@ import { useTerrain } from "../../lib/useTerrain";
 import { useWorldMap } from "../../lib/useWorldMap";
 import { terrainUrl } from "../../lib/world";
 import { Sheet, SheetClose } from "../Sheet";
+import { useAdmin } from "../admin/AdminContext";
+import { LiveLayer, type LiveLayerHandle } from "./LiveLayer";
 import { MapCanvas, type MapCanvasHandle } from "./MapCanvas";
 import { DetailsBody, DetailsHead, MapDetails, markerTitle } from "./MapDetails";
 import { MapLayers } from "./MapLayers";
@@ -144,7 +146,8 @@ function EscapeCloses({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // An open popover or the layers sheet takes Escape first.
-      if (e.key === "Escape" && !e.defaultPrevented && !document.getElementById("map-layers-h") && !document.getElementById("map-details-h")) onClose();
+      // Any sheet over the map (layers, details, an admin sheet) takes Escape first.
+      if (e.key === "Escape" && !e.defaultPrevented && document.querySelectorAll('[role="dialog"]').length <= 1) onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -192,6 +195,8 @@ function SaveMap({
   // Phones get the details as a bottom sheet; wider screens a popover on the mark.
   const phone = useMedia(PHONE);
   const canvas = useRef<MapCanvasHandle>(null);
+  const live = useRef<LiveLayerHandle>(null);
+  const admin = useAdmin();
   const [layers, setLayers] = useState(storedLayers);
   const [sel, setSel] = useState<Selection | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -377,6 +382,26 @@ function SaveMap({
     [coarse, wide, landscape],
   );
 
+  // Live players follow the view; admin long presses open what can happen at the spot.
+  const onFrame = useCallback(() => live.current?.place(), []);
+  const pick = admin?.pick ?? null;
+  const onLongPress = useMemo(() => {
+    if (!admin?.present) return undefined;
+    return (p: { x: number; z: number }) => (admin.pick ? admin.completePick(p) : admin.open({ kind: "point", x: p.x, z: p.z }));
+  }, [admin]);
+  const onTapWorld = useMemo(() => (pick && admin ? (p: { x: number; z: number }) => admin.completePick(p) : undefined), [pick, admin]);
+  useEffect(() => {
+    if (!pick) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      admin?.cancelPick();
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [pick, admin]);
+  const openPlayer = useMemo(() => (admin?.present ? (name: string) => admin.open({ kind: "player", name }) : undefined), [admin]);
+
   const reliefState = terrain.status === "ready" ? (terrain.doc.stale ? "stale" : "ready") : "none";
   const panel = <MapLayers map={map} markers={markers} layers={layers} counts={counts} relief={reliefState} onToggle={toggle} onPick={pickResult} now={now} />;
   const bottom = "bottom-[max(0.75rem,env(safe-area-inset-bottom))]";
@@ -396,10 +421,14 @@ function SaveMap({
         onGroup={onGroup}
         onAnchor={phone ? undefined : onAnchor}
         onPointerWorld={coarse ? undefined : onPointerWorld}
+        onFrame={onFrame}
+        onLongPress={onLongPress}
+        onTapWorld={onTapWorld}
         remember
         insets={insets}
         className="absolute inset-0"
       />
+      <LiveLayer ref={live} canvas={canvas} onOpen={openPlayer} />
 
       {/* Layers, legend and search: a side board on wide screens, a sheet on phones. */}
       <aside aria-label={t("map.layers")} className="plank plank-smooth scroll-quiet absolute bottom-3 left-3 top-3 z-10 hidden w-[17.5rem] overflow-y-auto px-4 py-4 lg:block">
@@ -445,6 +474,14 @@ function SaveMap({
         <span ref={coords} aria-hidden className="material rounded-[2px] px-2.5 py-1 font-mono text-xs text-bone empty:hidden" />
       </div>
       <div className="pointer-events-none absolute inset-x-3 top-3 z-10 flex flex-col items-center gap-2 lg:left-[19rem] lg:items-start">
+        {pick && (
+          <div role="status" className="material pointer-events-auto flex max-w-full items-center gap-2 rounded-full border border-select-hi/60 py-0.5 pl-4 pr-0.5 text-sm font-bold text-bone shadow-[0_0_18px_rgba(94,151,204,0.45)]">
+            <span className="min-w-0 truncate">{pick.label}</span>
+            <button type="button" onClick={admin?.cancelPick} className="plaque press min-h-9 rounded-full px-3 text-xs coarse:min-h-11">
+              {t("map.pick.cancel")}
+            </button>
+          </div>
+        )}
         {stale && (
           <p role="status" className="material rounded-[2px] px-3 py-1.5 text-xs text-flame">
             {t("map.stale")}
