@@ -41,12 +41,12 @@ function useMapRoute(): [boolean, () => void, () => void] {
     };
   }, []);
   const show = useCallback(() => {
-    if (location.hash !== MAP_HASH) history.pushState(null, "", MAP_HASH);
+    if (location.hash !== MAP_HASH) history.pushState({ skaldMap: true }, "", MAP_HASH);
     setOpen(true);
   }, []);
   const hide = useCallback(() => {
-    // Opened from here: Back pops it. Landed on #map directly: drop the hash.
-    if (history.state === null && location.hash === MAP_HASH && history.length > 1) history.back();
+    // Opened from here: Back pops it. Landed on #map directly: drop the hash in place.
+    if ((history.state as { skaldMap?: boolean } | null)?.skaldMap && location.hash === MAP_HASH) history.back();
     else history.replaceState(null, "", location.pathname + location.search);
     setOpen(false);
   }, []);

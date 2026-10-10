@@ -50,6 +50,25 @@ function fixture(): ApiState {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Dashboard", () => {
+  it("opens the world map at #map and Back closes it", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 })));
+    history.replaceState(null, "", "/");
+    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open the world map" }));
+    expect(location.hash).toBe("#map");
+    expect(history.state).toEqual({ skaldMap: true });
+    expect(await screen.findByRole("dialog", { name: "World map" })).toBeInTheDocument();
+    act(() => {
+      history.back();
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "World map" })).not.toBeInTheDocument());
+    // Landing on #map directly: closing drops the hash without leaving the page.
+    history.replaceState(null, "", "/#map");
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    fireEvent.click(await screen.findByRole("button", { name: "Close map" }));
+    expect(location.hash).toBe("");
+  });
+
   it("renders every plank in English by default", () => {
     render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
     expect(screen.getByRole("button", { name: /Join code 4 8 2 9 1 5/ })).toBeInTheDocument();

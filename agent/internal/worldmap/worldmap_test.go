@@ -250,7 +250,7 @@ func TestPrivacy(t *testing.T) {
 				t.Errorf("names=%v: map JSON contains %q", names, secret)
 			}
 		}
-		for _, name := range []string{"Ragnar", "Bjorn", "Freya", "Home fire", "Copper here", `"home"`, `"mine"`, `"lost"`} {
+		for _, name := range []string{"Ragnar", "Bjorn", "Freya", "Home fire", "Copper here", `"tag":"home"`, `"tag":"mine"`, `"tag":"lost"`} {
 			if got := strings.Contains(j, name); got != names {
 				t.Errorf("names=%v: JSON contains %q = %v", names, name, got)
 			}

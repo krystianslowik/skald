@@ -1,0 +1,12 @@
+import type { ApiMap, MapSnapshot } from "./types";
+
+/**
+ * Spoiler gating. With spoilers off only locations someone has found stay:
+ * placed by the game and inside the explored area (or next to a base). The
+ * agent sends every location of the listed kinds; the seed alone would give
+ * away where every boss and dungeon is.
+ */
+export function gateMap(snap: MapSnapshot, spoilers: boolean): ApiMap {
+  const locations = spoilers ? snap.locations : snap.locations.filter((l) => l.placed && l.explored);
+  return { ...snap, locations, spoilers, hiddenLocations: snap.locations.length - locations.length };
+}
