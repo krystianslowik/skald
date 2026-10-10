@@ -136,7 +136,7 @@ jobs:
       - uses: actions/checkout@v4.2.2
       - uses: docker/setup-buildx-action@v3.11.1
       - name: skald-agent
-        uses: docker/build-push-action@v6.18.0
+        uses: docker/build-push-action@v7.4.0
         with:
           context: agent
           platforms: linux/amd64
@@ -144,7 +144,7 @@ jobs:
           cache-from: type=gha,scope=skald-agent
           cache-to: type=gha,mode=max,scope=skald-agent
       - name: skald-web
-        uses: docker/build-push-action@v6.18.0
+        uses: docker/build-push-action@v7.4.0
         with:
           context: .
           file: server/Dockerfile
@@ -153,7 +153,7 @@ jobs:
           cache-from: type=gha,scope=skald-web
           cache-to: type=gha,mode=max,scope=skald-web
       - name: skald-icons
-        uses: docker/build-push-action@v6.18.0
+        uses: docker/build-push-action@v7.4.0
         with:
           context: icons
           platforms: linux/amd64
@@ -161,7 +161,7 @@ jobs:
           cache-from: type=gha,scope=skald-icons
           cache-to: type=gha,mode=max,scope=skald-icons
       - name: skald-terrain
-        uses: docker/build-push-action@v6.18.0
+        uses: docker/build-push-action@v7.4.0
         with:
           context: terrain
           platforms: linux/amd64
@@ -169,7 +169,7 @@ jobs:
           cache-from: type=gha,scope=skald-terrain
           cache-to: type=gha,mode=max,scope=skald-terrain
       - name: skald-bridge
-        uses: docker/build-push-action@v6.18.0
+        uses: docker/build-push-action@v7.4.0
         with:
           context: bridge
           platforms: linux/amd64
