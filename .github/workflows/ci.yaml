@@ -59,10 +59,25 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  icons:
+    name: icons (Python)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: icons
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: "3.13"
+      # The same pinned set as the image, without fmod_toolkit (see requirements.txt).
+      - run: pip install --no-deps -r requirements.txt
+      - run: python -W error::ResourceWarning -m unittest discover -s tests -v
+
   images:
     name: images build (amd64)
     runs-on: ubuntu-latest
-    needs: [agent, server, web]
+    needs: [agent, server, web, icons]
     steps:
       - uses: actions/checkout@v4.2.2
       - uses: docker/setup-buildx-action@v3.11.1
@@ -77,5 +92,11 @@ jobs:
         with:
           context: .
           file: server/Dockerfile
+          platforms: linux/amd64
+          push: false
+      - name: skald-icons
+        uses: docker/build-push-action@v6.18.0
+        with:
+          context: icons
           platforms: linux/amd64
           push: false

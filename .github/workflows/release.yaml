@@ -24,6 +24,10 @@ jobs:
           - image: skald-web
             context: .
             file: server/Dockerfile
+          # Wheels are built in their own stage; UnityPy is compiled for arm64.
+          - image: skald-icons
+            context: icons
+            file: icons/Dockerfile
     steps:
       - uses: actions/checkout@v4.2.2
       # The arm64 runtime stages run a few shell commands under emulation.
