@@ -6,6 +6,37 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Boss progress from the world save: the Progress strip lights defeated
+  bosses and marks the next one. The agent reads the save's global keys
+  (`world.meta.globalKeys`, `world.meta.bosses`) and falls back to "unknown"
+  when the layout does not match.
+- World modifiers from the save (`world.meta.modifiers`, `worldKeys`,
+  `knownPlayers`), shown in the Forge. The settings form starts from them
+  when nothing was saved yet, and otherwise preselects the ones the saved
+  settings lack, with a note, so a save never drops them.
+- A platform mark (controller or monitor) next to each player at the fire and
+  in their profile, from the PlayFab platform line. Raw platform and PlayFab
+  ids never leave the agent: they are redacted from the served log too.
+- `world_backup` event for the game's own autobackup.
+
+### Changed
+
+- Joins, leaves, deaths, saves and the network summary use the line formats
+  confirmed on a Valheim 1.0.17 crossplay session. Each player now leaves on
+  their own (from the abandoned-object lines) instead of everyone at once when
+  the count drops to zero, and reconnecting with another character leaves no
+  ghost. Player counts come from the joined, lost and new-session lines.
+- `world_saved` fires on the 1.0 `World save (5/5) done` line; the pre-1.0
+  form still works.
+- The in-game day is confirmed to match the game's own counter.
+
+### Fixed
+
+- The settings hook showed "ok" even when it never ran: the image echoes the
+  hook command, which contains the confirmation text.
+
 ## [0.3.0] - 2026-10-10
 
 ### Added

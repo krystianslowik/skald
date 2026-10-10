@@ -181,14 +181,16 @@ To add a language, copy `web/src/i18n/en.ts`, register it in
 
 ## Known gaps
 
-- Join, death and raid detection uses log patterns from before Valheim 1.0 and
-  hasn't been confirmed on 1.0 crossplay yet. The join code, player count,
-  version and PlayFab lines are confirmed on 1.0.17. If you have real 1.0 log
-  lines for these, please open an issue.
-- Leaving is inferred from the player count, so with several people online a
-  departure can show up late.
-- Boss progress isn't read from the save yet, so the boss path shows "unknown".
-- The in-game day is `floor(netTime / 1800)` and may be off by one.
+- Joins, leaves, deaths, platforms, saves and the network summary are
+  confirmed against a Valheim 1.0.17 crossplay session, as are boss progress
+  and world modifiers read from a 1.0.17 save. Raid detection still uses a
+  pre-1.0 pattern; if you have a real 1.0 raid line, please open an issue.
+- Xbox and Steam are the only platforms seen so far. PlayStation and Switch
+  players may show without a platform mark until their ID prefix is known.
+- A player's platform is matched to their character by arrival order, so two
+  people connecting within the same few seconds could swap marks.
+- Boss slots follow the seven vanilla bosses up to Fader; a Deep North boss
+  key isn't known yet.
 - One game server and one panel password per Skald instance.
 
 ## Contributing
