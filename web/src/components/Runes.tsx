@@ -12,15 +12,17 @@ interface RuneDef {
   name: ActionName;
   title: TextKey;
   rune: string;
+  /** The same letter as Unicode Elder Futhark, set in Noto Sans Runic. */
+  glyph: string;
   hint: TextKey;
   path: string;
 }
 
 // Elder Futhark strokes, drawn on a 40x60 box.
 const RUNES: RuneDef[] = [
-  { name: "backup", title: "rune.backup.title", rune: "Algiz", hint: "rune.backup.hint", path: "M20 56V6M20 24L8 8M20 24L32 8" },
-  { name: "update", title: "rune.update.title", rune: "Jera", hint: "rune.update.hint", path: "M16 10L6 22L16 34M24 26L34 38L24 50" },
-  { name: "restart", title: "rune.restart.title", rune: "Raido", hint: "rune.restart.hint", path: "M10 56V6L28 16L10 28L30 56" },
+  { name: "backup", title: "rune.backup.title", rune: "Algiz", glyph: "ᛉ", hint: "rune.backup.hint", path: "M20 56V6M20 24L8 8M20 24L32 8" },
+  { name: "update", title: "rune.update.title", rune: "Jera", glyph: "ᛃ", hint: "rune.update.hint", path: "M16 10L6 22L16 34M24 26L34 38L24 50" },
+  { name: "restart", title: "rune.restart.title", rune: "Raido", glyph: "ᚱ", hint: "rune.restart.hint", path: "M10 56V6L28 16L10 28L30 56" },
 ];
 
 type Phase = { kind: "idle" } | { kind: "holding" } | { kind: "sent" } | { kind: "done"; ok: boolean; message: string };
@@ -94,15 +96,22 @@ const Rune = memo(function Rune({ def, disabled, onFire }: { def: RuneDef; disab
   );
 
   const status =
-    phase.kind === "holding"
-      ? t("rune.holding")
-      : phase.kind === "sent"
-        ? t("rune.sent")
-        : phase.kind === "done"
-          ? phase.message
-          : disabled
-            ? t("rune.sleeping")
-            : t("rune.hold");
+    phase.kind === "holding" ? (
+      t("rune.holding")
+    ) : phase.kind === "sent" ? (
+      t("rune.sent")
+    ) : phase.kind === "done" ? (
+      phase.message
+    ) : disabled ? (
+      t("rune.sleeping")
+    ) : (
+      <>
+        <span className="key-chip mr-1.5">{t("key.hold")}</span>
+        {t("rune.hold")}
+      </>
+    );
+  // Holding or burning: the slot is the selected one, in the game's blue.
+  const active = phase.kind === "holding" || phase.kind === "sent";
 
   return (
     <div className="flex flex-col items-center text-center">
@@ -127,11 +136,11 @@ const Rune = memo(function Rune({ def, disabled, onFire }: { def: RuneDef; disab
           if (e.key === " " || e.key === "Enter") stop();
         }}
         onContextMenu={(e) => e.preventDefault()}
-        className="press group relative grid h-[7.5rem] w-24 touch-none select-none place-items-center rounded-[48%_48%_44%_44%/40%_40%_60%_60%] border border-iron/50 bg-[radial-gradient(circle_at_50%_30%,#3a2a1d,#1d140e)] shadow-[inset_0_2px_0_rgba(255,179,71,0.08),inset_0_-6px_14px_rgba(0,0,0,0.6),0_10px_24px_-10px_#000] transition-[border-color,opacity] enabled:hover:border-ember/50 disabled:cursor-not-allowed disabled:opacity-40"
+        className={`press group relative grid h-24 w-24 touch-none select-none place-items-center transition-[background,box-shadow,opacity] enabled:hover:shadow-[inset_0_2px_7px_rgba(0,0,0,0.65),inset_0_0_0_1px_rgba(243,184,103,0.55)] disabled:cursor-not-allowed disabled:opacity-40 ${active ? "slot-selected" : "slot"}`}
       >
-        <svg viewBox="0 0 40 62" width="46" height="70" aria-hidden className="overflow-visible">
+        <svg viewBox="0 0 40 62" width="40" height="62" aria-hidden className="overflow-visible">
           <path d={def.path} fill="none" stroke="#120c08" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
-          <path d={def.path} fill="none" stroke="#4a3626" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+          <path d={def.path} fill="none" stroke="#5a4330" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
           <motion.path
             d={def.path}
             fill="none"
@@ -139,14 +148,14 @@ const Rune = memo(function Rune({ def, disabled, onFire }: { def: RuneDef; disab
             strokeWidth="4"
             strokeLinecap="round"
             strokeLinejoin="round"
-            style={{ pathLength: progress, opacity: glow, filter: "drop-shadow(0 0 4px #ff7a1a) drop-shadow(0 0 10px rgba(255,122,26,0.6))" }}
+            style={{ pathLength: progress, opacity: glow, filter: "drop-shadow(0 0 3px #d68a1a) drop-shadow(0 0 8px rgba(236,194,18,0.5))" }}
           />
         </svg>
         <AnimatePresence>
           {phase.kind === "sent" && !reduced && (
             <motion.span
               className="pointer-events-none absolute inset-0 rounded-[inherit]"
-              style={{ boxShadow: "0 0 40px 6px rgba(255,122,26,0.55), inset 0 0 24px rgba(255,179,71,0.5)" }}
+              style={{ boxShadow: "0 0 26px 4px rgba(94,151,204,0.5), inset 0 0 18px rgba(255,255,255,0.35)" }}
               initial={{ opacity: 0 }}
               animate={{ opacity: [0.4, 1, 0.6] }}
               exit={{ opacity: 0 }}
@@ -155,12 +164,17 @@ const Rune = memo(function Rune({ def, disabled, onFire }: { def: RuneDef; disab
           )}
         </AnimatePresence>
       </button>
-      <h3 className="mt-3 font-display text-[0.9375rem] font-semibold text-bone">{t(def.title)}</h3>
-      <p className="text-[0.6875rem] text-ash/80">{t("rune.name", { rune: def.rune })}</p>
+      <h3 className="mt-2.5 text-[0.9375rem] font-bold leading-tight text-bone">{t(def.title)}</h3>
+      <p className="text-[0.6875rem] text-flame/90">
+        <span aria-hidden className="mr-1 font-rune">
+          {def.glyph}
+        </span>
+        {t("rune.name", { rune: def.rune })}
+      </p>
       <p className="mt-1 max-w-[18ch] text-xs leading-snug text-ash">{t(def.hint)}</p>
       <p
         aria-live="polite"
-        className={`mt-1.5 min-h-[1.25rem] text-xs ${phase.kind === "done" ? (phase.ok ? "text-flame" : "text-[#e3a091]") : "text-ash/70"}`}
+        className={`mt-2 min-h-[1.25rem] text-xs ${phase.kind === "done" ? (phase.ok ? "text-flame" : "text-blood") : "text-ash"}`}
       >
         {status}
       </p>
@@ -190,8 +204,8 @@ export const Runes = memo(function Runes({ online, lastAction }: { online: boole
       <svg width="0" height="0" className="absolute">
         <defs>
           <linearGradient id="rune-fire" x1="0" y1="1" x2="0" y2="0">
-            <stop offset="0%" stopColor="#ff7a1a" />
-            <stop offset="100%" stopColor="#ffe2b0" />
+            <stop offset="0%" stopColor="#e08a1c" />
+            <stop offset="100%" stopColor="#ffe58a" />
           </linearGradient>
         </defs>
       </svg>
@@ -201,9 +215,9 @@ export const Runes = memo(function Runes({ online, lastAction }: { online: boole
         ))}
       </div>
       {lastAction && (
-        <p className="mt-4 border-t border-iron/25 pt-3 text-center text-xs text-ash">
+        <p className="mt-4 border-t border-iron/40 pt-3 text-center text-xs text-ash">
           {t("rune.last")}: {actionTitle(i18n, String(lastAction.data.name))},{" "}
-          <span className={lastAction.data.ok ? "text-flame" : "text-[#e3a091]"}>
+          <span className={lastAction.data.ok ? "text-flame" : "text-blood"}>
             {actionStatus(i18n, Boolean(lastAction.data.ok), String(lastAction.data.message ?? ""))}
           </span>
         </p>

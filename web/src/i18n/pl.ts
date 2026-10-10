@@ -3,6 +3,9 @@ import { plural, type Dict } from "./en";
 /** Polish dictionary. Must match the English shape key for key (enforced by `Dict`). */
 export const pl: Dict = {
   "app.loading": "Rozdmuchuję żar...",
+  "footer.unofficial": "Skald to projekt fanowski, niezwiązany z Iron Gate Studio ani Coffee Stain.",
+  "key.hold": "Przytrzymaj",
+  "key.esc": "Esc",
   "lang.label": "Język",
   "lang.switchTo": "Zmień język na {lang}",
 
@@ -85,6 +88,7 @@ export const pl: Dict = {
   "progress.defeated": "pokonany",
   "progress.waiting": "czeka",
   "progress.note": "Rozpali się po imporcie świata, gdy serwer nauczy się czytać klucze postępu z zapisu.",
+  "progress.hint": "Wskaż trofeum, by odczytać jego imię.",
   "boss.defeated_eikthyr": "Eikthyr",
   "boss.defeated_gdking": "Starszy",
   "boss.defeated_bonemass": "Kościej (Bonemass)",
@@ -149,6 +153,7 @@ export const pl: Dict = {
   "forge.cpuLabel": "Zużycie procesora, ostatnie 6 godzin",
   "forge.memoryLabel": "Pamięć robocza, ostatnie 6 godzin",
   "forge.networkLabel": "Ruch sieciowy, ostatnie 6 godzin",
+  "forge.meter": "{value} teraz, {pct}% szczytu z ostatnich 6 godzin",
   "forge.rx": "pobieranie",
   "forge.tx": "wysyłanie",
   "forge.promDown": "Prometheus milczy. Wykresy wrócą, gdy odpowie.",
@@ -199,7 +204,7 @@ export const pl: Dict = {
   "rune.holding": "Trzymaj...",
   "rune.sent": "Runa płonie...",
   "rune.sleeping": "Runa uśpiona",
-  "rune.hold": "Przytrzymaj 1,5 s",
+  "rune.hold": "1,5 s",
   "rune.busy": "Inna runa jeszcze płonie",
   "rune.offline": "Brak łączności z serwerem",
   "rune.accepted": "Przyjęte",

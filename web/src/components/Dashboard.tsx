@@ -48,7 +48,7 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
   const online7d = state?.history.online7d;
   const onlineChart = useMemo(
     () => ({
-      series: [{ name: t("online.series"), points: online7d ?? [], color: "#ff7a1a" }],
+      series: [{ name: t("online.series"), points: online7d ?? [], color: "#f3b867" }],
       format: (v: number) => t("online.value", { n: Math.round(v) }),
       ticks: { every: 86_400_000, format: (v: number) => new Date(v).toLocaleDateString(intl, { weekday: "short" }) },
     }),
@@ -65,7 +65,7 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
     return (
       <main className="relative grid min-h-[100dvh] place-items-center">
         <Atmosphere dim />
-        <p className="relative z-10 font-display text-lg text-ash">{t("app.loading")}</p>
+        <p className="on-world relative z-10 text-lg font-bold uppercase tracking-[0.09em] text-flame">{t("app.loading")}</p>
       </main>
     );
   }
@@ -77,7 +77,7 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
         <Atmosphere dim={!online} />
         {!online && <OfflineBanner />}
         <motion.main
-          className="relative z-10 mx-auto max-w-[82.5rem] space-y-5 px-4 pb-16 pt-6 sm:px-6 lg:space-y-6 lg:pt-10"
+          className="relative z-10 mx-auto max-w-[82.5rem] space-y-5 px-4 pb-28 pt-6 sm:px-6 lg:space-y-6 lg:pt-10"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.8 }}
@@ -85,7 +85,8 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
           <Header server={state.server} online={online} now={now} onLogout={onLogout} />
 
           <div className="grid gap-5 lg:grid-cols-12 lg:gap-6">
-            <section className="plank plank-charred flex flex-col items-center justify-center px-4 py-10 sm:py-14 lg:col-span-8" aria-label={t("plank.joinCode")}>
+            {/* No board: the code sits straight on the world, like the game's centre-screen messages. */}
+            <section className="relative flex flex-col items-center justify-center bg-[radial-gradient(55%_60%_at_50%_50%,rgba(70,104,112,0.13),transparent_72%)] px-4 py-8 sm:py-12 lg:col-span-8" aria-label={t("plank.joinCode")}>
               <JoinCode code={state.server.joinCode} codeAt={state.server.joinCodeAt} status={state.server.status} now={now} />
             </section>
             <Plank title={t("plank.hearth")} id="hearth" aside={tn("plank.hearth.aside", players.length)} className="lg:col-span-4">
@@ -141,6 +142,7 @@ export function Dashboard({ live, onLogout }: { live: Valheim; onLogout: () => v
           <Plank title={t("plank.chronicle")} id="chronicle" aside={t("plank.chronicle.aside")}>
             <Chronicle source={logs} />
           </Plank>
+          <p className="on-world pt-2 text-center text-xs text-ash">{t("footer.unofficial")}</p>
         </motion.main>
         {profile && (
           <Suspense fallback={null}>

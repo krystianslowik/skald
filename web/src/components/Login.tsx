@@ -84,19 +84,21 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
       <LocaleToggle className="absolute right-4 top-4 z-20" />
       <div className="relative z-10 flex w-full max-w-sm flex-col items-center text-center">
         <Campfire lit={lit} />
+        <div className="plank mt-4 w-full px-6 pb-5 pt-6 sm:px-8">
         <motion.h1
-          className="type-title mt-6 font-display text-3xl font-semibold text-bone sm:text-4xl"
+          className="plank-title text-xl sm:text-2xl"
           animate={{ opacity: lit ? 0 : 1, y: lit ? -10 : 0 }}
         >
           {t("login.title")}
         </motion.h1>
-        <motion.p className="mt-2 text-sm leading-relaxed text-ash" animate={{ opacity: lit ? 0 : 1 }}>
+        <div aria-hidden className="plank-rule mx-auto mt-3 w-4/5" />
+        <motion.p className="mt-3 text-sm leading-relaxed text-label" animate={{ opacity: lit ? 0 : 1 }}>
           {t("login.subtitle")}
         </motion.p>
         <motion.form
           key={shake}
           onSubmit={submit}
-          className="mt-7 w-full"
+          className="mt-5 w-full"
           animate={shake && !reduced ? { x: [0, -10, 9, -6, 4, 0] } : { opacity: lit ? 0 : 1 }}
           transition={{ duration: 0.45 }}
         >
@@ -115,19 +117,20 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
             disabled={busy || lit}
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? "word-err" : undefined}
-            className="w-full rounded-md border border-iron/50 bg-black/40 px-4 py-3 text-center font-display text-lg tracking-[0.2em] text-flame placeholder:font-display placeholder:tracking-wider placeholder:text-ash/50 focus:border-ember/70 focus:shadow-[0_0_24px_-4px_rgba(255,122,26,0.55)] focus:outline-none"
+            className="slot w-full border border-transparent px-4 py-3 text-center text-lg font-bold tracking-[0.2em] text-flame placeholder:font-normal placeholder:tracking-wider placeholder:text-ash/90 focus:border-select-hi focus:shadow-[inset_0_2px_7px_rgba(0,0,0,0.65),0_0_0_1px_rgba(140,188,230,0.5)] focus:outline-none"
           />
           <button
             type="submit"
             disabled={busy || lit || !word}
-            className="press mt-3 w-full rounded-md border border-ember/40 bg-gradient-to-b from-[#3a2414] to-[#22150c] py-2.5 font-display font-semibold tracking-wider text-flame transition-[border-color,box-shadow] enabled:hover:border-ember enabled:hover:shadow-[0_0_20px_-6px_#ff7a1a] disabled:opacity-50"
+            className="plaque press mt-3 w-full py-2.5 text-xl font-bold !text-flame enabled:hover:!text-gold disabled:opacity-50"
           >
             {busy ? t("login.busy") : t("login.submit")}
           </button>
-          <p id="word-err" role="alert" className="mt-3 min-h-[1.25rem] text-sm text-[#e3a091]">
+          <p id="word-err" role="alert" className="mt-3 min-h-[1.25rem] text-sm text-blood">
             {error}
           </p>
         </motion.form>
+        </div>
       </div>
       <AnimatePresence>
         {lit && !reduced && (

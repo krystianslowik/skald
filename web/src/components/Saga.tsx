@@ -74,47 +74,47 @@ export function describe(i: I18n, ev: AgentEvent): { text: string; tone: Tone; p
 }
 
 function Glyph({ tone }: { tone: Tone }) {
-  const common = { width: 18, height: 18, viewBox: "0 0 20 20", fill: "none", strokeWidth: 1.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+  const common = { width: 16, height: 16, viewBox: "0 0 20 20", fill: "none", strokeWidth: 1.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   switch (tone) {
     case "join":
       return (
-        <svg {...common} stroke="#ffb347" aria-hidden>
+        <svg {...common} stroke="#f3b867" aria-hidden>
           <path d="M10 3v14M10 3l5 5M10 3L5 8" />
         </svg>
       );
     case "leave":
       return (
-        <svg {...common} stroke="#9b8f84" aria-hidden>
+        <svg {...common} stroke="#b3a596" aria-hidden>
           <path d="M6 15c0-3 3-3 3-6s-2-3-2-5M12 16c0-2 2-3 2-5s-1-2-1-4" />
         </svg>
       );
     case "death":
       return (
-        <svg {...common} stroke="#c2412d" aria-hidden>
+        <svg {...common} stroke="#e86a5a" aria-hidden>
           <path d="M5 5l10 10M15 5L5 15M10 2v3M10 15v3" />
         </svg>
       );
     case "save":
       return (
-        <svg {...common} stroke="#ff7a1a" aria-hidden>
+        <svg {...common} stroke="#d79c34" aria-hidden>
           <path d="M4 10h12M10 4v12M6 6l8 8M14 6l-8 8" />
         </svg>
       );
     case "raid":
       return (
-        <svg {...common} stroke="#c2412d" aria-hidden>
+        <svg {...common} stroke="#ecc212" aria-hidden>
           <path d="M3 17L13 7M13 7l1-4 3 3-4 1M7 13l-2-2M17 17L7 7M7 7L6 3 3 6l4 1M13 13l2-2" />
         </svg>
       );
     case "action":
       return (
-        <svg {...common} stroke="#ffb347" aria-hidden>
+        <svg {...common} stroke="#f3b867" aria-hidden>
           <path d="M10 2v16M10 6l5-4M10 6L5 2" />
         </svg>
       );
     default:
       return (
-        <svg {...common} stroke="#5b5650" aria-hidden>
+        <svg {...common} stroke="#8a7a6a" aria-hidden>
           <path d="M10 2L18 10L10 18L2 10Z" />
         </svg>
       );
@@ -137,12 +137,17 @@ export const Saga = memo(function Saga({ events, now }: { events: AgentEvent[]; 
   return (
     <div className="scroll-quiet relative max-h-[26.25rem] overflow-y-auto pr-2 [mask-image:linear-gradient(180deg,#000_85%,transparent)]">
       {rows.length === 0 && <p className="text-sm text-ash">{t("saga.empty")}</p>}
-      <ol className="relative border-l border-iron/40 pl-5">
+      <ol className="relative">
         <AnimatePresence initial={false}>
           {rows.map(({ e, d }) => {
             const day = dayLabel(e.ts, now);
             const header = day !== lastDay ? day : null;
             lastDay = day;
+            const time = (
+              <time className="shrink-0 text-xs tabular-nums text-ash" dateTime={e.ts} title={fullDate(e.ts)}>
+                {clock(e.ts)}
+              </time>
+            );
             return (
               <motion.li
                 key={`${e.ts}-${e.seq}-${e.type}`}
@@ -151,25 +156,37 @@ export const Saga = memo(function Saga({ events, now }: { events: AgentEvent[]; 
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ type: "spring", bounce: 0, visualDuration: 0.35 }}
               >
-                {header && <div className="-ml-5 mb-1.5 mt-3 font-display text-xs font-semibold tracking-wider text-ash/80 first:mt-0">{header}</div>}
-                <div className="relative flex items-start gap-3 py-1.5">
-                  <span className="absolute -left-[1.8125rem] top-1.5 rounded-full bg-wood p-0.5">
-                    <Glyph tone={d.tone} />
-                  </span>
-                  <span className={`flex-1 text-sm leading-snug ${d.tone === "death" || d.tone === "raid" ? "text-[#e3a091]" : d.tone === "leave" ? "text-ash" : "text-bone"}`}>
-                    {d.player && d.text.startsWith(d.player) ? (
-                      <>
-                        <PlayerName name={d.player} className="font-medium" />
-                        {d.text.slice(d.player.length)}
-                      </>
-                    ) : (
-                      d.text
-                    )}
-                  </span>
-                  <time className="shrink-0 pt-0.5 text-xs tabular-nums text-ash" dateTime={e.ts} title={fullDate(e.ts)}>
-                    {clock(e.ts)}
-                  </time>
-                </div>
+                {header && (
+                  <div className="mb-1 mt-3 flex items-center gap-3 first:mt-0">
+                    <span className="label-caps shrink-0">{header}</span>
+                    <span aria-hidden className="h-px flex-1 bg-gradient-to-r from-iron/60 to-transparent" />
+                  </div>
+                )}
+                {d.tone === "raid" ? (
+                  // A raid reads like the game's centre-screen warning: gold caps, no box.
+                  <div className="flex flex-col items-center py-3 text-center">
+                    <span className="raid-cry text-lg leading-tight sm:text-xl">{d.text}</span>
+                    {time}
+                  </div>
+                ) : (
+                  // Everything else is a line in the top-left message feed: a small slot icon and the text.
+                  <div className="flex items-center gap-2.5 py-1">
+                    <span className="slot grid h-7 w-7 shrink-0 place-items-center">
+                      <Glyph tone={d.tone} />
+                    </span>
+                    <span className={`on-world flex-1 text-sm font-bold leading-snug ${d.tone === "death" ? "text-blood" : d.tone === "leave" ? "text-ash" : "text-bone"}`}>
+                      {d.player && d.text.startsWith(d.player) ? (
+                        <>
+                          <PlayerName name={d.player} />
+                          {d.text.slice(d.player.length)}
+                        </>
+                      ) : (
+                        d.text
+                      )}
+                    </span>
+                    {time}
+                  </div>
+                )}
               </motion.li>
             );
           })}

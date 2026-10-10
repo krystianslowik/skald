@@ -22,7 +22,7 @@ export function PlayerName({ name, className = "" }: { name: string; className?:
       onPointerDown={preloadProfileSheet}
       onFocus={preloadProfileSheet}
       onClick={(e) => open(name, e.currentTarget)}
-      className={`press-text max-w-full cursor-pointer decoration-ember/60 underline-offset-4 transition-colors hover:text-flame hover:underline ${className}`}
+      className={`press-text max-w-full cursor-pointer decoration-flame/60 underline-offset-4 transition-colors hover:text-flame hover:underline ${className}`}
     >
       {name}
     </button>

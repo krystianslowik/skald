@@ -199,7 +199,7 @@ export function I18nProvider({ locale: initial, children }: { locale: Locale; ch
 export function LocaleToggle({ className = "" }: { className?: string }) {
   const { locale, setLocale, t } = useI18n();
   return (
-    <div role="group" aria-label={t("lang.label")} className={`inline-flex rounded-md border border-iron/50 p-0.5 text-[0.6875rem] font-medium ${className}`}>
+    <div role="group" aria-label={t("lang.label")} className={`inline-flex gap-0.5 text-[0.6875rem] font-bold ${className}`}>
       {LOCALES.map((l) => (
         <button
           key={l}
@@ -208,7 +208,7 @@ export function LocaleToggle({ className = "" }: { className?: string }) {
           aria-pressed={locale === l}
           aria-label={fill(DICTS[l]["lang.switchTo"], { lang: LOCALE_NAMES[l] })}
           onClick={() => setLocale(l)}
-          className={`press rounded px-1.5 py-1 uppercase tracking-wider transition-colors ${locale === l ? "bg-ember/15 text-flame" : "text-ash hover:text-bone"}`}
+          className="plaque press px-2 py-1 uppercase tracking-wider"
         >
           {l}
         </button>

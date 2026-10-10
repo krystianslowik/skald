@@ -17,6 +17,9 @@ export const plural = (p: Plural): Plural => p;
 
 export const en = {
   "app.loading": "Stirring the embers...",
+  "footer.unofficial": "Skald is a fan project, not affiliated with Iron Gate Studio or Coffee Stain.",
+  "key.hold": "Hold",
+  "key.esc": "Esc",
   "lang.label": "Language",
   "lang.switchTo": "Switch language to {lang}",
 
@@ -99,6 +102,7 @@ export const en = {
   "progress.defeated": "defeated",
   "progress.waiting": "waiting",
   "progress.note": "Lights up once Skald can read progress keys from the world save.",
+  "progress.hint": "Point at a trophy to read its name.",
   "boss.defeated_eikthyr": "Eikthyr",
   "boss.defeated_gdking": "The Elder",
   "boss.defeated_bonemass": "Bonemass",
@@ -163,6 +167,7 @@ export const en = {
   "forge.cpuLabel": "CPU usage, last 6 hours",
   "forge.memoryLabel": "Working-set memory, last 6 hours",
   "forge.networkLabel": "Network traffic, last 6 hours",
+  "forge.meter": "{value} now, {pct}% of the 6-hour peak",
   "forge.rx": "download",
   "forge.tx": "upload",
   "forge.promDown": "Prometheus is silent. The charts return when it answers.",
@@ -213,7 +218,7 @@ export const en = {
   "rune.holding": "Hold...",
   "rune.sent": "The rune burns...",
   "rune.sleeping": "The rune sleeps",
-  "rune.hold": "Hold for 1.5 s",
+  "rune.hold": "1.5 s",
   "rune.busy": "Another rune is still burning",
   "rune.offline": "No connection to the server",
   "rune.accepted": "Accepted",

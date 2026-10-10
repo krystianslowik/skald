@@ -2,14 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Palette sampled from the game's UI (docs/design/valheim-ui-research.md, section 7):
+   opaque wood boards, cream text, amber headings, blue for what is selected. */
 :root {
-  --coal: #0f0b08;
-  --wood: #2a1d14;
-  --iron: #5b5650;
-  --ember: #ff7a1a;
-  --flame: #ffb347;
-  --ash: #9b8f84;
-  --bone: #eadcc6;
+  --coal: #0e0b09;
+  --board-900: #2a1c12;
+  --board-800: #3a2618;
+  --board-700: #4a3322;
+  --board-600: #644631;
+  --slot: #2e1f15;
+  --bone: #f1eeeb;
+  --label: #e0c7c2;
+  --ash: #b3a596;
+  --iron: #6b5745;
+  --flame: #f3b867;
+  --ember: #c2812f;
+  --rule: #fcae08;
+  --gold: #ecc212;
+  --select: #5e97cc;
+  --select-hi: #8cbce6;
+  --hp: #c8303a;
+  --hp-hi: #d73b3e;
+  --hp-lo: #5f1410;
+  --stamina: #cea83e;
+  --stamina-lo: #8a6f1a;
+  --eitr: #b83ca0;
+  --eitr-hi: #d83bbe;
+  --boss: #e2453f;
+  --track: #2d2e30;
+  --key: #6d6a6b;
+  /* Worn board outline: jagged edge tiles, used as mask layers. */
+  --edge-top: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='97' height='6'%3E%3Cpath d='M0 6L0 1.4L7 2.4L13 1.4L20 0.8L27 1.5L34 2.3L37 1.4L41 0.5L44 1.8L50 2.7L57 1.9L64 0.3L71 0.5L74 0.8L78 1.8L84 1.1L91 2.4L97 1.4L97 6Z'/%3E%3C/svg%3E");
+  --edge-bottom: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='103' height='6'%3E%3Cpath transform='matrix(1 0 0 -1 0 6)' d='M0 6L0 0.9L5 1.5L8 1.4L13 1.3L20 2.8L23 2.1L28 2.2L35 1.0L38 1.7L41 1.3L46 1.3L49 2.4L52 0.8L55 1.5L61 1.3L68 1.9L73 1.1L78 1.1L84 2.2L87 0.6L90 0.3L96 2.3L100 2.0L103 0.9L103 6Z'/%3E%3C/svg%3E");
+  --edge-left: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='89'%3E%3Cpath d='M6 0L1.4 0L2.8 4L1.3 8L0.6 14L2.8 20L1.0 23L1.1 30L0.8 33L2.8 39L1.9 46L0.4 49L0.8 53L0.3 58L1.1 65L1.3 70L0.5 73L1.9 80L1.8 83L1.9 88L1.4 89L6 89Z'/%3E%3C/svg%3E");
+  --edge-right: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='83'%3E%3Cpath transform='matrix(-1 0 0 1 6 0)' d='M6 0L2.7 0L2.4 6L2.5 10L1.9 14L2.6 19L0.9 26L0.7 30L0.8 37L2.5 43L0.5 50L0.6 53L1.6 56L0.9 61L0.9 67L1.5 74L0.7 81L2.7 83L6 83Z'/%3E%3C/svg%3E");
   color-scheme: dark;
 }
 
@@ -17,9 +43,9 @@ html,
 body {
   background: var(--coal);
   color: var(--bone);
-  font-family: Inter, system-ui, sans-serif;
+  font-family: "Averia Serif Libre", Georgia, serif;
   -webkit-font-smoothing: antialiased;
-  font-feature-settings: "tnum" 1, "cv11" 1;
+  font-feature-settings: "tnum" 1;
 }
 
 body {
@@ -28,28 +54,50 @@ body {
 }
 
 ::selection {
-  background: rgba(255, 122, 26, 0.35);
-  color: #fff4e3;
+  background: rgba(94, 151, 204, 0.45);
+  color: #fff;
 }
 
+/* Focus is the game's selection blue. */
 :focus-visible {
-  outline: 2px solid var(--flame);
+  outline: 2px solid var(--select-hi);
   outline-offset: 3px;
-  border-radius: 4px;
+  border-radius: 3px;
 }
 
-/* ---- atmosphere ----------------------------------------------------------- */
+/* ---- the world behind the boards ------------------------------------------ */
 
-/* Firelight pooling from below the page, as if the hearth sits under the table. */
+/* Night forest: cold mist above, the fire's glow pooling below, a treeline in front of it. */
 .firelight {
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(120% 70% at 50% 115%, rgba(255, 122, 26, 0.22), rgba(255, 122, 26, 0.06) 45%, transparent 70%),
-    radial-gradient(60% 40% at 50% 105%, rgba(255, 179, 71, 0.16), transparent 70%);
+    radial-gradient(110% 60% at 50% 118%, rgba(214, 96, 24, 0.34), rgba(150, 60, 14, 0.12) 45%, transparent 72%),
+    radial-gradient(70% 45% at 12% -8%, rgba(70, 104, 112, 0.3), transparent 70%),
+    radial-gradient(60% 40% at 92% -4%, rgba(52, 78, 96, 0.26), transparent 70%),
+    linear-gradient(180deg, #101516 0%, #0e0d0b 48%, #130c08 100%);
+}
+.firelight::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(70% 38% at 50% 104%, rgba(255, 150, 50, 0.16), transparent 70%);
   animation: flicker 5.3s infinite steps(1, end);
+}
+
+/* Sits at the foot of the page (absolute, not fixed): reached by scrolling to the end. */
+.treeline {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 15rem;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='560' height='220'%3E%3Cpath fill='%2307090a' fill-opacity='1' d='M21 71L36 128L6 128ZM21 104L42 157L-0 157ZM21 137L49 187L-7 187ZM21 169L55 217L-13 217ZM19 205h3V220h-3ZM581 71L596 128L566 128ZM581 104L602 157L560 157ZM581 137L609 187L553 187ZM581 169L615 217L547 217ZM579 205h3V220h-3ZM32 104L44 148L21 148ZM32 129L49 171L16 171ZM32 155L54 194L11 194ZM32 180L59 218L6 218ZM31 208h3V220h-3ZM592 104L604 148L581 148ZM592 129L609 171L576 171ZM592 155L614 194L571 194ZM592 180L619 218L566 218ZM591 208h3V220h-3ZM41 102L52 147L29 147ZM41 128L57 170L24 170ZM41 154L63 194L18 194ZM41 180L68 218L13 218ZM39 208h3V220h-3ZM84 72L99 128L70 128ZM84 104L106 158L63 158ZM84 137L112 187L57 187ZM84 170L119 217L50 217ZM83 205h3V220h-3ZM181 36L200 106L163 106ZM181 76L208 143L155 143ZM181 117L216 179L147 179ZM181 157L224 216L139 216ZM180 202h3V220h-3ZM205 99L217 145L193 145ZM205 126L222 169L187 169ZM205 152L227 193L182 193ZM205 179L233 218L177 218ZM203 208h3V220h-3ZM284 90L297 139L271 139ZM284 119L303 165L266 165ZM284 147L308 191L260 191ZM284 176L314 217L254 217ZM283 207h3V220h-3ZM300 54L317 117L284 117ZM300 90L324 150L276 150ZM300 127L331 183L269 183ZM300 163L339 217L262 217ZM299 203h3V220h-3ZM365 25L384 99L345 99ZM365 68L392 138L337 138ZM365 111L401 177L328 177ZM365 154L410 216L319 216ZM363 200h3V220h-3ZM0 214H560V220H0Z'/%3E%3C/svg%3E") 0 100% / 560px 220px repeat-x,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='170'%3E%3Cpath fill='%231b2526' fill-opacity='1' d='M6 72L15 109L-4 109ZM6 93L20 129L-9 129ZM6 115L24 148L-13 148ZM6 137L28 168L-17 168ZM4 160h3V170h-3ZM426 72L435 109L416 109ZM426 93L440 129L411 129ZM426 115L444 148L407 148ZM426 137L448 168L403 168ZM424 160h3V170h-3ZM28 101L34 127L21 127ZM28 116L37 141L18 141ZM28 131L40 155L15 155ZM28 147L43 169L12 169ZM26 163h3V170h-3ZM448 101L454 127L441 127ZM448 116L457 141L438 141ZM448 131L460 155L435 155ZM448 147L463 169L432 169ZM446 163h3V170h-3ZM98 72L108 109L89 109ZM98 93L112 129L84 129ZM98 115L117 148L80 148ZM98 137L121 168L76 168ZM97 160h3V170h-3ZM100 58L111 101L89 101ZM100 83L116 123L84 123ZM100 107L121 145L79 145ZM100 132L126 168L74 168ZM98 159h3V170h-3ZM109 79L118 113L100 113ZM109 99L122 132L96 132ZM109 119L126 150L92 150ZM109 139L130 168L88 168ZM107 161h3V170h-3ZM155 66L166 105L145 105ZM155 89L170 126L140 126ZM155 111L175 147L136 147ZM155 134L180 168L131 168ZM154 160h3V170h-3ZM198 70L207 108L188 108ZM198 92L212 128L183 128ZM198 114L216 148L179 148ZM198 136L221 168L174 168ZM196 160h3V170h-3ZM200 106L206 130L194 130ZM200 120L209 143L191 143ZM200 134L212 156L188 156ZM200 148L215 169L185 169ZM199 164h3V170h-3ZM229 65L239 105L218 105ZM229 88L244 126L213 126ZM229 111L248 147L209 147ZM229 134L253 168L204 168ZM227 159h3V170h-3ZM254 75L263 111L244 111ZM254 96L267 130L240 130ZM254 117L271 149L236 149ZM254 138L276 168L232 168ZM252 160h3V170h-3ZM263 92L271 122L255 122ZM263 109L274 137L252 137ZM263 126L277 153L248 153ZM263 143L281 168L245 168ZM261 162h3V170h-3ZM351 108L357 132L345 132ZM351 122L360 144L342 144ZM351 135L363 156L340 156ZM351 149L366 169L337 169ZM350 164h3V170h-3ZM352 58L363 101L341 101ZM352 83L368 123L336 123ZM352 107L373 145L331 145ZM352 132L378 168L326 168ZM350 159h3V170h-3ZM418 82L427 115L409 115ZM418 101L431 133L406 133ZM418 121L435 151L402 151ZM418 140L439 168L398 168ZM417 161h3V170h-3ZM-2 82L7 115L-11 115ZM-2 101L11 133L-14 133ZM-2 121L15 151L-18 151ZM-2 140L19 168L-22 168ZM-3 161h3V170h-3ZM0 164H420V170H0Z'/%3E%3C/svg%3E") 140px 100% / 420px 170px repeat-x;
+  opacity: 0.9;
 }
 
 .vignette {
@@ -57,7 +105,7 @@ body {
   inset: 0;
   pointer-events: none;
   z-index: 40;
-  background: radial-gradient(130% 100% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.72) 100%);
+  background: radial-gradient(130% 100% at 50% 42%, transparent 58%, rgba(0, 0, 0, 0.66) 100%);
 }
 
 .grain {
@@ -65,7 +113,7 @@ body {
   inset: -50%;
   pointer-events: none;
   z-index: 41;
-  opacity: 0.07;
+  opacity: 0.05;
   mix-blend-mode: overlay;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
@@ -106,84 +154,157 @@ body {
   animation: flicker 4.1s infinite steps(1, end);
 }
 
-/* ---- planks --------------------------------------------------------------- */
+/* ---- boards ------------------------------------------------------------------ */
 
 @layer components {
+  /* An opaque wood board: procedural plank grain (no game bitmaps), a lighter carved
+     rim inside a dark edge, and a worn, slightly torn outline from the edge mask. */
   .plank {
     position: relative;
-    border-radius: 7px;
-    border: 1px solid #120c08;
-    background:
-      linear-gradient(180deg, rgba(255, 179, 71, 0.045), transparent 38%),
-      repeating-linear-gradient(178.4deg, rgba(0, 0, 0, 0.16) 0 1px, transparent 1px 7px, rgba(255, 255, 255, 0.012) 7px 8px, transparent 8px 13px),
-      linear-gradient(90deg, #271b12, #2d1f15 30%, #281b13 62%, #2c1f15);
+    border-radius: 3px;
+    background-color: var(--board-800);
+    background-image:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='300'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.006 0.28' numOctaves='3' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.42 -0.04'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E"),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='520' height='360'%3E%3Cfilter id='w'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.002 0.03' numOctaves='2' seed='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.62  0 0 0 0 0.42  0 0 0 0 0.26  0 0 0 0.3 -0.06'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23w)'/%3E%3C/svg%3E"),
+      linear-gradient(180deg, rgba(255, 220, 170, 0.06), rgba(0, 0, 0, 0.16));
     box-shadow:
-      inset 0 1px 0 rgba(255, 179, 71, 0.08),
-      inset 0 -3px 0 rgba(0, 0, 0, 0.35),
-      0 18px 40px -18px rgba(0, 0, 0, 0.9);
+      inset 0 0 0 1px #160d07,
+      inset 0 0 0 3px rgba(122, 88, 60, 0.55),
+      inset 0 0 0 4px rgba(20, 12, 7, 0.5),
+      inset 0 0 30px rgba(0, 0, 0, 0.42);
+    -webkit-mask:
+      linear-gradient(#000, #000) center / calc(100% - 8px) calc(100% - 8px) no-repeat,
+      var(--edge-top) 0 0 / 97px 6px repeat-x,
+      var(--edge-bottom) 0 100% / 103px 6px repeat-x,
+      var(--edge-left) 0 0 / 6px 89px repeat-y,
+      var(--edge-right) 100% 0 / 6px 83px repeat-y;
+    mask:
+      linear-gradient(#000, #000) center / calc(100% - 8px) calc(100% - 8px) no-repeat,
+      var(--edge-top) 0 0 / 97px 6px repeat-x,
+      var(--edge-bottom) 0 100% / 103px 6px repeat-x,
+      var(--edge-left) 0 0 / 6px 89px repeat-y,
+      var(--edge-right) 100% 0 / 6px 83px repeat-y;
   }
 
-  /* Iron nails in the two upper corners. */
-  .plank::before,
-  .plank::after {
-    content: "";
-    position: absolute;
-    top: 10px;
-    width: 6px;
-    height: 6px;
-    border-radius: 999px;
-    background: radial-gradient(circle at 35% 35%, #8b847c, #4a4540 55%, #1e1b18);
-    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.8);
-  }
-  .plank::before { left: 10px; }
-  .plank::after { right: 10px; }
-
-  /* Charred edges for the hero board. */
-  .plank-charred {
-    box-shadow:
-      inset 0 0 60px rgba(0, 0, 0, 0.75),
-      inset 0 1px 0 rgba(255, 179, 71, 0.1),
-      0 30px 60px -20px rgba(0, 0, 0, 0.95),
-      0 0 0 1px rgba(255, 122, 26, 0.05);
+  /* A board that moves (the profile sheet): no edge mask, so its transform stays cheap. */
+  .plank-smooth {
+    -webkit-mask: none;
+    mask: none;
   }
 
+  /* Panel heading: bold caps in amber with wide tracking, like the game's window titles. */
   .plank-title {
-    font-family: Cinzel, Georgia, serif;
-    font-weight: 600;
-    /* Cinzel is all capitals: a hair of air at heading size, tighter than the old 0.06em. */
-    letter-spacing: 0.015em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
     line-height: 1.2;
-    color: #d9c7ab;
-    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.7);
+    color: var(--flame);
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.75), 0 0 10px rgba(0, 0, 0, 0.35);
   }
 
-  .carved {
-    color: #1a120c;
-    text-shadow: 0 1px 0 rgba(255, 179, 71, 0.12), 0 -1px 0 rgba(0, 0, 0, 0.6);
+  /* The amber rule under a panel's header strip. */
+  .plank-rule {
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(194, 129, 47, 0.85) 6%, var(--rule) 50%, rgba(194, 129, 47, 0.85) 94%, transparent);
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.55);
+    opacity: 0.8;
+  }
+  /* Header rules that fade out towards the board's edge. */
+  .plank-rule-l {
+    background: linear-gradient(90deg, transparent, rgba(194, 129, 47, 0.8) 30%, var(--rule));
+  }
+  .plank-rule-r {
+    background: linear-gradient(270deg, transparent, rgba(194, 129, 47, 0.8) 30%, var(--rule));
+  }
+
+  /* Small amber caps label (stat names, kickers). */
+  .label-caps {
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.6875rem;
+    line-height: 1.3;
+    color: var(--ash);
+  }
+
+  /* An inventory slot: a dark inset square in the board. */
+  .slot {
+    border-radius: 3px;
+    background: var(--slot);
+    box-shadow:
+      inset 0 2px 7px rgba(0, 0, 0, 0.65),
+      inset 0 0 0 1px rgba(0, 0, 0, 0.4),
+      0 1px 0 rgba(255, 214, 170, 0.07);
+  }
+  /* Selected / equipped: the whole slot fills with the game's blue. */
+  .slot-selected {
+    background: linear-gradient(180deg, #7aaedc, var(--select) 55%, #4c82b5);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.28),
+      inset 0 -3px 8px rgba(0, 0, 0, 0.22),
+      0 1px 0 rgba(0, 0, 0, 0.6);
+  }
+
+  /* Grey key-hint chip, like "Mouse-1 Place". */
+  .key-chip {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 2px;
+    background: var(--key);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.6875rem;
+    line-height: 1;
+    padding: 0.22em 0.45em 0.26em;
+    box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.35), 0 1px 0 rgba(0, 0, 0, 0.55);
+    white-space: nowrap;
+  }
+
+  /* Recessed dark plaque: buttons and tabs. */
+  .plaque {
+    border-radius: 2px;
+    background: #2a2018;
+    border: 1px solid rgba(107, 87, 69, 0.6);
+    color: var(--label);
+    box-shadow: inset 0 2px 7px rgba(0, 0, 0, 0.65);
+  }
+  .plaque:hover:not(:disabled) {
+    color: var(--flame);
+    border-color: rgba(243, 184, 103, 0.55);
+  }
+  /* Active tab / toggled on: filled blue with dark text (white on this blue fails AA). */
+  .plaque[aria-selected="true"],
+  .plaque[aria-pressed="true"] {
+    background: linear-gradient(180deg, #7aaedc, var(--select) 60%, #4c82b5);
+    border-color: rgba(255, 255, 255, 0.25);
+    color: #10161d;
+    box-shadow: inset 0 -2px 5px rgba(0, 0, 0, 0.2);
   }
 
   .scroll-quiet {
     scrollbar-width: thin;
-    scrollbar-color: #4a3524 transparent;
+    scrollbar-color: #8a5e2c transparent;
   }
 }
 
 /* ---- type ------------------------------------------------------------------ */
 
 @layer components {
-  /* Size-specific tracking and leading: display tight, titles slightly tight,
-     small capitals kickers open, body text (the default) left at 0. */
   .type-display {
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
     line-height: 1;
   }
   .type-title {
-    letter-spacing: -0.01em;
+    letter-spacing: 0.02em;
     line-height: 1.15;
   }
   .type-kicker {
-    letter-spacing: 0.18em;
+    letter-spacing: 0.16em;
     line-height: 1.3;
+  }
+  /* Cream text sitting straight on the world, like the game's message feed. */
+  .on-world {
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 8px rgba(0, 0, 0, 0.5);
   }
 }
 
@@ -213,17 +334,62 @@ body {
 
 /* ---- materials -------------------------------------------------------------- */
 
-/* A floating layer (sticky outage banner, chart readout): translucent smoked glass over the boards. */
+/* A floating layer (sticky outage banner, chart readout): a dark board, slightly see-through. */
 .material {
-  background: rgba(22, 14, 9, 0.72);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
-  backdrop-filter: blur(14px) saturate(160%);
+  background: rgba(30, 20, 13, 0.86);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  backdrop-filter: blur(10px) saturate(140%);
 }
 
 .sheet-scrim {
-  background: rgba(0, 0, 0, 0.65);
+  background: rgba(0, 0, 0, 0.62);
   -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
+}
+
+/* ---- HUD meters ----------------------------------------------------------- */
+
+/* Stamina / eitr style bar: grey track, tick-segmented fill, number centred. */
+.meter {
+  position: relative;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--track);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(0, 0, 0, 0.65);
+}
+.meter::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(90deg, transparent 0 calc(10% - 1px), rgba(0, 0, 0, 0.5) calc(10% - 1px) 10%);
+}
+.meter-v::after {
+  background-image: repeating-linear-gradient(0deg, transparent 0 calc(10% - 1px), rgba(0, 0, 0, 0.55) calc(10% - 1px) 10%);
+}
+.meter-fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 50%;
+  transition: transform 500ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.meter-v .meter-fill {
+  transform-origin: 50% 100%;
+}
+.meter-stamina .meter-fill { background: linear-gradient(180deg, #e6c45a, var(--stamina) 45%, var(--stamina-lo)); }
+.meter-eitr .meter-fill { background: linear-gradient(180deg, var(--eitr-hi), var(--eitr) 50%, #6e1e5f); }
+.meter-hp .meter-fill { background: linear-gradient(90deg, var(--hp-lo), var(--hp) 30%, var(--hp-hi) 60%, var(--hp) 85%, var(--hp-lo)); }
+.meter-value {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 0.6875rem;
+  line-height: 1;
+  color: #fff;
+  text-shadow: 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000, 0 1px 3px #000;
 }
 
 /* ---- long lists -------------------------------------------------------------- */
@@ -236,37 +402,51 @@ body {
   contain-intrinsic-size: auto 1.2rem;
 }
 
-/* ---- join code ------------------------------------------------------------ */
+/* ---- join code: a centre-screen message ------------------------------------- */
 
 .digit {
-  font-family: "Cinzel Decorative", Cinzel, serif;
-  font-weight: 900;
+  font-family: "Averia Serif Libre", Georgia, serif;
+  font-weight: 700;
   line-height: 1;
 }
 
 .digit-lit {
-  color: #ffd29a;
-  background: linear-gradient(180deg, #fff1d6 5%, #ffb347 45%, #ff7a1a 80%, #b8430c);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.digit-glow {
-  filter: drop-shadow(0 0 10px rgba(255, 122, 26, 0.5)) drop-shadow(0 0 26px rgba(255, 90, 10, 0.3));
+  color: var(--gold);
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.55), 0 0 22px rgba(0, 0, 0, 0.7), 0 0 2px rgba(0, 0, 0, 0.8);
 }
 
 .digit-cold {
-  color: #241911;
-  text-shadow: 0 2px 0 rgba(255, 179, 71, 0.07), 0 -2px 1px rgba(0, 0, 0, 0.8);
+  color: rgba(236, 194, 18, 0.1);
+  text-shadow: 0 2px 2px rgba(0, 0, 0, 0.6);
+}
+
+/* Raid warning in the saga: gold caps straight on the world, like "The forest is moving". */
+.raid-cry {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--gold);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.6), 0 0 14px rgba(0, 0, 0, 0.7);
+}
+
+/* Boss title: red caps. */
+.boss-title {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--boss);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.8), 0 0 10px rgba(0, 0, 0, 0.6);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .firelight,
+  .firelight::after,
   .text-flicker,
   .flame-sway,
   .flame-sway-fast {
     animation: none !important;
+  }
+  .meter-fill {
+    transition: none;
   }
   .press:active:not(:disabled),
   .press-soft:active:not(:disabled) {
@@ -277,7 +457,7 @@ body {
 
 @media (prefers-reduced-transparency: reduce) {
   .material {
-    background: #1a110b;
+    background: #1e140d;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
@@ -290,22 +470,28 @@ body {
 
 @media (prefers-contrast: more) {
   .material {
-    background: #120b07;
+    background: #140d08;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     border: 1px solid var(--flame);
   }
-  .grain {
+  .grain,
+  .treeline {
     display: none;
   }
   /* Lift secondary text (ash) and hairlines (iron) for legibility. */
   .text-ash,
   .text-ash\/60,
   .text-ash\/70,
-  .text-ash\/80 {
-    color: #d2c6b8;
+  .text-ash\/80,
+  .label-caps {
+    color: #ddd2c4;
   }
   .plank {
-    border-color: rgba(234, 220, 198, 0.35);
+    background-image: none;
+    box-shadow: inset 0 0 0 1px rgba(241, 238, 235, 0.45);
+  }
+  .key-chip {
+    background: #4a4748;
   }
 }

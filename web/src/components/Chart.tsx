@@ -24,7 +24,7 @@ function pathFor(points: SeriesPoint[], x: (t: number) => number, y: (v: number)
 }
 
 /**
- * Hand-rolled SVG area/line chart in ember colours with a hover readout.
+ * Hand-rolled SVG area/line chart in HUD colours with a hover readout, drawn in a dark inset well.
  * Stretches to its container width; strokes stay crisp via non-scaling-stroke.
  */
 export const Chart = memo(function Chart({
@@ -82,7 +82,7 @@ export const Chart = memo(function Chart({
 
   if (!geo) {
     return (
-      <div className="flex items-center justify-center rounded-md border border-dashed border-iron/40 text-xs text-ash" style={{ height }}>
+      <div className="slot flex items-center justify-center px-3 text-center text-xs text-ash" style={{ height }}>
         {empty ?? t("chart.empty")}
       </div>
     );
@@ -124,7 +124,7 @@ export const Chart = memo(function Chart({
         ref={ref}
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="none"
-        className="block w-full touch-none"
+        className="slot block w-full touch-none"
         style={{ height: H }}
         role="img"
         aria-label={label}
@@ -135,30 +135,30 @@ export const Chart = memo(function Chart({
         <defs>
           {series.map((s, i) => (
             <linearGradient key={i} id={`${uid}-g${i}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={s.color} stopOpacity="0.45" />
+              <stop offset="0%" stopColor={s.color} stopOpacity="0.38" />
               <stop offset="100%" stopColor={s.color} stopOpacity="0" />
             </linearGradient>
           ))}
         </defs>
         {tickTimes.map((t) => (
-          <line key={t} x1={geo.x(t)} x2={geo.x(t)} y1="0" y2={H} stroke="rgba(155,143,132,0.1)" vectorEffect="non-scaling-stroke" />
+          <line key={t} x1={geo.x(t)} x2={geo.x(t)} y1="0" y2={H} stroke="rgba(241,238,235,0.06)" vectorEffect="non-scaling-stroke" />
         ))}
         {[0.25, 0.5, 0.75].map((f) => (
-          <line key={f} x1="0" x2={W} y1={H * f} y2={H * f} stroke="rgba(155,143,132,0.12)" strokeDasharray="2 6" vectorEffect="non-scaling-stroke" />
+          <line key={f} x1="0" x2={W} y1={H * f} y2={H * f} stroke="rgba(0,0,0,0.45)" strokeDasharray="2 6" vectorEffect="non-scaling-stroke" />
         ))}
         {series.map((s, i) => {
           const line = lines[i]!;
           return (
             <g key={s.name}>
               {s.fill !== false && <path d={`${line}V${H}H${geo.x(s.points[0]![0]).toFixed(1)}Z`} fill={`url(#${uid}-g${i})`} />}
-              <path d={line} fill="none" stroke={s.color} strokeWidth="1.6" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+              <path d={line} fill="none" stroke={s.color} strokeWidth="1.8" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
             </g>
           );
         })}
-        {hover !== null && <line x1={hover} x2={hover} y1="0" y2={H} stroke="rgba(255,179,71,0.5)" vectorEffect="non-scaling-stroke" />}
+        {hover !== null && <line x1={hover} x2={hover} y1="0" y2={H} stroke="rgba(243,184,103,0.7)" vectorEffect="non-scaling-stroke" />}
       </svg>
       {ticks && (
-        <div className="relative mt-1 h-4 text-[0.625rem] text-ash/70" aria-hidden>
+        <div className="relative mt-1 h-4 text-[0.625rem] text-ash" aria-hidden>
           {tickTimes.map((t) => {
             const pct = (geo.x(t) / W) * 100;
             if (pct > 92) return null;
@@ -172,10 +172,10 @@ export const Chart = memo(function Chart({
       )}
       {hoverT !== null && (
         <div
-          className="material pointer-events-none absolute top-1 z-10 rounded border border-ember/30 px-2 py-1 text-[0.6875rem] leading-tight shadow-lg"
+          className="material pointer-events-none absolute top-1 z-10 rounded-[2px] border border-[#160d07] px-2 py-1 text-[0.6875rem] font-bold leading-tight shadow-[inset_0_0_0_1px_rgba(122,88,60,0.6),0_4px_12px_rgba(0,0,0,0.6)]"
           style={{ left: `${(hover! / W) * 100}%`, transform: `translateX(${hover! > W / 2 ? "calc(-100% - 8px)" : "8px"})` }}
         >
-          <div className="text-ash">{timeFormat(hoverT)}</div>
+          <div className="text-flame">{timeFormat(hoverT)}</div>
           {series.map((s) => {
             const p = nearest(s.points, hoverT);
             return (

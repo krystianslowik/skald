@@ -23,7 +23,7 @@ export const Ranking = memo(function Ranking({ players, now }: { players: Player
 
   return (
     <div>
-      <div role="tablist" aria-label={t("ranking.sort")} className="mb-3 inline-flex rounded-md border border-iron/40 p-0.5 text-xs">
+      <div role="tablist" aria-label={t("ranking.sort")} className="mb-3 inline-flex gap-1 text-xs">
         {(
           [
             ["playtime", t("ranking.playtime")],
@@ -35,7 +35,7 @@ export const Ranking = memo(function Ranking({ players, now }: { players: Player
             role="tab"
             aria-selected={by === k}
             onClick={() => setBy(k)}
-            className={`press rounded px-3 py-1 transition-colors ${by === k ? "bg-ember/15 text-flame" : "text-ash hover:text-bone"}`}
+            className="plaque press px-3 py-1 font-bold uppercase tracking-[0.06em]"
           >
             {label}
           </button>
@@ -46,16 +46,16 @@ export const Ranking = memo(function Ranking({ players, now }: { players: Player
           const v = by === "playtime" ? p.playtimeMs : p.deaths;
           return (
             <motion.li key={p.name} layout={!reduced} transition={SETTLE} className="grid grid-cols-[1.25rem_1fr_auto] items-center gap-x-3">
-              <span className="font-display text-sm text-ash">{i + 1}</span>
+              <span className="text-sm font-bold text-select-hi/80">{i + 1}</span>
               <div className="min-w-0">
                 <div className="flex items-baseline gap-2">
-                  <PlayerName name={p.name} className="truncate text-left font-display text-[0.9375rem] font-semibold text-bone" />
-                  {p.online && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ember shadow-[0_0_6px_#ff7a1a]" title={t("ranking.onlineNow")} />}
+                  <PlayerName name={p.name} className="truncate text-left text-[0.9375rem] font-bold text-bone" />
+                  {p.online && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-gold shadow-[0_0_6px_#ecc212]" title={t("ranking.onlineNow")} />}
                 </div>
-                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-black/40">
+                <div className={`meter mt-1 h-2 ${by === "playtime" ? "meter-stamina" : "meter-hp"}`}>
                   <motion.div
-                    className="h-full rounded-full"
-                    style={{ background: by === "playtime" ? "linear-gradient(90deg,#b8430c,#ff7a1a,#ffb347)" : "linear-gradient(90deg,#5e1a10,#c2412d)" }}
+                    className="h-full"
+                    style={{ background: by === "playtime" ? "linear-gradient(180deg,#e6c45a,#cea83e 45%,#8a6f1a)" : "linear-gradient(180deg,#d73b3e,#c8303a 50%,#5f1410)" }}
                     initial={{ width: 0 }}
                     animate={{ width: `${(v / max) * 100}%` }}
                     transition={{ type: "spring", bounce: 0, visualDuration: 0.5 }}
@@ -63,8 +63,8 @@ export const Ranking = memo(function Ranking({ players, now }: { players: Player
                 </div>
               </div>
               <div className="text-right text-sm tabular-nums">
-                <div className="text-bone">{by === "playtime" ? duration(p.playtimeMs) : p.deaths}</div>
-                <div className="text-[0.6875rem] text-ash">{p.online ? t("ranking.atFire") : ago(p.lastSeen, now)}</div>
+                <div className="font-bold text-bone">{by === "playtime" ? duration(p.playtimeMs) : p.deaths}</div>
+                <div className="text-[0.6875rem] text-ash">{p.online ? <span className="text-flame">{t("ranking.atFire")}</span> : ago(p.lastSeen, now)}</div>
               </div>
             </motion.li>
           );

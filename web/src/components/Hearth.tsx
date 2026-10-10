@@ -10,7 +10,7 @@ export const Hearth = memo(function Hearth({ players, now }: { players: Player[]
   const { t, duration } = useI18n();
   const reduced = useReducedMotion();
   return (
-    <div className="flex min-h-[11.25rem] flex-wrap content-start justify-center gap-x-5 gap-y-6 pt-1">
+    <div className="flex min-h-[11.25rem] flex-wrap content-start justify-center gap-x-3 gap-y-5 pt-1">
       <AnimatePresence mode="popLayout">
         {players.map((p) => (
           <motion.figure
@@ -22,10 +22,12 @@ export const Hearth = memo(function Hearth({ players, now }: { players: Player[]
             exit={reduced ? { opacity: 0 } : { opacity: 0, y: -34, scale: 1.08, filter: "grayscale(1) blur(10px) brightness(1.6)" }}
             transition={{ type: "spring", bounce: 0, visualDuration: 0.4, opacity: { duration: 0.5 }, filter: { duration: 0.8 } }}
           >
-            <Shield name={p.name} size={84} />
-            <figcaption className="mt-2 w-full">
-              <PlayerName name={p.name} className="block w-full truncate font-display text-[0.9375rem] font-semibold text-bone" />
-              <span className="block text-xs text-ash">{duration(now - Date.parse(p.since))}</span>
+            <span className="slot grid h-[5.25rem] w-[5.25rem] place-items-center">
+              <Shield name={p.name} size={68} />
+            </span>
+            <figcaption className="mt-1.5 w-full">
+              <PlayerName name={p.name} className="block w-full truncate text-[0.9375rem] font-bold text-bone" />
+              <span className="block text-xs text-flame/90">{duration(now - Date.parse(p.since))}</span>
             </figcaption>
           </motion.figure>
         ))}

@@ -20,6 +20,14 @@ const SERVER_STATUS: Record<string, TextKey> = {
   unknown: "status.unknown",
 };
 
+// Elder Futhark letters for a Latin name: a decorative echo only, never the readable name.
+const FUTHARK: Record<string, string> = {
+  a: "ᚨ", b: "ᛒ", c: "ᚲ", d: "ᛞ", e: "ᛖ", f: "ᚠ", g: "ᚷ", h: "ᚺ", i: "ᛁ", j: "ᛃ", k: "ᚲ", l: "ᛚ", m: "ᛗ",
+  n: "ᚾ", o: "ᛟ", p: "ᛈ", q: "ᚲ", r: "ᚱ", s: "ᛊ", t: "ᛏ", u: "ᚢ", v: "ᚹ", w: "ᚹ", x: "ᚲᛊ", y: "ᛃ", z: "ᛉ", " ": "᛫",
+};
+const toRunes = (s: string) =>
+  [...s.toLowerCase().normalize("NFD")].map((c) => FUTHARK[c] ?? "").join("");
+
 export const Header = memo(function Header({ server: s, online, now, onLogout }: { server: ApiState["server"]; online: boolean; now: number; onLogout: () => void }) {
   const { t, duration } = useI18n();
   const level = flameLevel(s, online);
@@ -27,25 +35,26 @@ export const Header = memo(function Header({ server: s, online, now, onLogout }:
   return (
     <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
       <div className="flex min-w-0 items-center gap-4 sm:flex-1">
-        <Flame level={level} size={44} className="shrink-0 drop-shadow-[0_0_14px_rgba(255,122,26,0.45)]" />
+        <Flame level={level} size={44} className="shrink-0 drop-shadow-[0_0_14px_rgba(214,96,24,0.45)]" />
         <div className="min-w-0">
-          <h1 className="type-title truncate font-display text-2xl font-semibold text-bone sm:text-3xl">{s?.name || "Valheim"}</h1>
-          <p className="mt-0.5 text-sm text-ash">
-            {t("header.world")} <span className="text-bone/90">{s?.world || t("header.worldUnknown")}</span>
+          <p aria-hidden className="truncate font-rune text-xs tracking-[0.3em] text-flame/45">{toRunes(s?.name || "Valheim")}</p>
+          <h1 className="on-world truncate text-2xl font-bold uppercase tracking-[0.08em] text-flame sm:text-[1.875rem]">{s?.name || "Valheim"}</h1>
+          <p className="on-world mt-0.5 text-sm text-ash">
+            {t("header.world")} <span className="text-bone">{s?.world || t("header.worldUnknown")}</span>
             <span className="mx-2 text-iron">/</span>
             <span className={level === "alive" ? "text-flame" : level === "ash" ? "text-ash" : "text-ember"}>{t(`flame.${level}`)}</span>
             <span className="text-ash">, {online ? t(SERVER_STATUS[s?.status ?? "unknown"] ?? "status.unknown") : t("header.noLink")}</span>
           </p>
         </div>
       </div>
-      <dl className="flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-iron/20 pt-3 text-sm sm:flex-nowrap sm:gap-6 sm:border-0 sm:pt-0">
+      <dl className="on-world flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-iron/30 pt-3 text-sm sm:flex-nowrap sm:gap-6 sm:border-0 sm:pt-0">
         <div>
           <dt className="text-xs text-ash">{t("header.version")}</dt>
-          <dd className="font-medium text-bone">{gameVersion(s?.version)}</dd>
+          <dd className="font-bold text-bone">{gameVersion(s?.version)}</dd>
         </div>
         <div>
           <dt className="text-xs text-ash">{t("header.burning")}</dt>
-          <dd className="whitespace-nowrap font-medium text-bone">{up ?? t("header.notBurning")}</dd>
+          <dd className="whitespace-nowrap font-bold text-bone">{up ?? t("header.notBurning")}</dd>
         </div>
         <div className="ml-auto flex items-center gap-2 sm:ml-0 sm:gap-3">
           <SoundToggle />
@@ -53,7 +62,7 @@ export const Header = memo(function Header({ server: s, online, now, onLogout }:
           <button
             type="button"
             onClick={onLogout}
-            className="press whitespace-nowrap rounded-md border border-iron/50 px-3 py-1.5 text-xs text-ash transition-colors hover:border-ember/60 hover:text-flame"
+            className="plaque press whitespace-nowrap px-3 py-1.5 text-xs font-bold"
           >
             {t("header.logout")}
           </button>
@@ -75,9 +84,7 @@ function SoundToggle() {
       aria-pressed={on}
       aria-label={t("sound.label")}
       title={on ? t("sound.on") : t("sound.off")}
-      className={`press grid h-8 w-8 place-items-center rounded-md border transition-colors ${
-        on ? "border-ember/60 bg-ember/10 text-flame" : "border-iron/50 text-ash hover:border-ember/60 hover:text-flame"
-      }`}
+      className="plaque press grid h-8 w-8 place-items-center"
     >
       <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d="M3 8h3l4-3.5v11L6 12H3z" />
@@ -97,9 +104,9 @@ function SoundToggle() {
 export function OfflineBanner() {
   const { t } = useI18n();
   return (
-    <div role="status" className="material sticky top-0 z-30 border-b border-ember/30 px-4 py-2.5 text-center text-sm">
-      <span className="font-display font-semibold tracking-wide text-ember">{t("offline.title")}</span>{" "}
-      <span className="text-bone/80">{t("offline.body")}</span>
+    <div role="status" className="material sticky top-0 z-30 border-b border-ember/40 px-4 py-2.5 text-center text-sm">
+      <span className="font-bold uppercase tracking-[0.08em] text-flame">{t("offline.title")}</span>{" "}
+      <span className="text-bone/90">{t("offline.body")}</span>
     </div>
   );
 }

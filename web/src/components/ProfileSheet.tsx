@@ -202,11 +202,11 @@ export default function ProfileSheet({ name, now, onClose }: { name: string; now
         aria-labelledby="profile-h"
         onKeyDown={trap}
         style={vertical ? { y: offset, opacity: fade } : { x: offset, opacity: fade }}
-        className="plank absolute inset-x-0 bottom-0 top-[max(1.5rem,env(safe-area-inset-top))] flex flex-col overflow-hidden rounded-b-none rounded-t-xl border-t border-ember/20 will-change-transform sm:inset-y-0 sm:left-auto sm:right-0 sm:top-0 sm:w-[28.75rem] sm:rounded-l-lg sm:rounded-r-none sm:border-l sm:border-t-0"
+        className="plank plank-smooth absolute inset-x-0 bottom-0 top-[max(1.5rem,env(safe-area-inset-top))] flex flex-col overflow-hidden rounded-b-none rounded-t-[4px] border-t-2 border-[#160d07] will-change-transform sm:inset-y-0 sm:left-auto sm:right-0 sm:top-0 sm:w-[28.75rem] sm:rounded-l-[4px] sm:rounded-r-none sm:border-l-2 sm:border-t-0"
       >
         {/* Side grip (wider screens): the sheet's left edge can be dragged right. */}
         <div aria-hidden onPointerDown={grab} className="absolute inset-y-0 left-0 z-10 hidden w-4 cursor-grab touch-none select-none active:cursor-grabbing sm:block">
-          <span className="absolute left-1.5 top-1/2 h-10 w-1 -translate-y-1/2 rounded-full bg-iron/40" />
+          <span className="absolute left-1.5 top-1/2 h-10 w-1 -translate-y-1/2 rounded-full bg-iron/70" />
         </div>
         <header
           onPointerDown={grab}
@@ -220,35 +220,44 @@ export default function ProfileSheet({ name, now, onClose }: { name: string; now
           }}
           className="shrink-0 cursor-grab touch-none select-none px-5 pb-4 pt-3 active:cursor-grabbing sm:px-7 sm:pt-6"
         >
-          <span aria-hidden className="mx-auto mb-3 block h-1 w-10 rounded-full bg-iron/50 sm:hidden" />
+          <span aria-hidden className="mx-auto mb-3 block h-1 w-10 rounded-full bg-iron/80 sm:hidden" />
           <div className="flex items-center gap-4 pl-2">
-            <Shield name={name} size={64} />
+            <span className="slot grid h-[4.5rem] w-[4.5rem] shrink-0 place-items-center">
+              <Shield name={name} size={58} />
+            </span>
             <div className="min-w-0 flex-1">
-              <p className="type-kicker font-display text-xs text-ash">{t("profile.kicker")}</p>
-              <h2 id="profile-h" className="type-title truncate font-display text-2xl font-semibold text-bone">
+              <p className="label-caps">{t("profile.kicker")}</p>
+              <h2 id="profile-h" className="plank-title truncate text-2xl">
                 {name}
               </h2>
               <p className="text-xs text-ash">
                 {profile ? (profile.online ? <span className="text-flame">{t("profile.atFireNow")}</span> : t("profile.lastSeen", { ago: ago(profile.lastSeen, now) })) : " "}
               </p>
             </div>
-            <button
-              ref={closeBtn}
-              type="button"
-              onClick={requestClose}
-              aria-label={t("profile.close")}
-              className="press grid h-9 w-9 shrink-0 place-items-center self-start rounded-md border border-iron/50 text-ash transition-colors hover:border-ember/60 hover:text-flame"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden>
-                <path d="M3 3l10 10M13 3L3 13" />
-              </svg>
-            </button>
+            <div className="flex shrink-0 flex-col items-center gap-1.5 self-start">
+              <button
+                ref={closeBtn}
+                type="button"
+                onClick={requestClose}
+                aria-label={t("profile.close")}
+                className="plaque press grid h-9 w-9 place-items-center"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden>
+                  <path d="M3 3l10 10M13 3L3 13" />
+                </svg>
+              </button>
+              {/* Keyboard hint, like the game's key chips; phones close by swiping instead. */}
+              <span aria-hidden className="key-chip hidden sm:inline-flex">
+                {t("key.esc")}
+              </span>
+            </div>
           </div>
+          <div aria-hidden className="plank-rule mt-4" />
         </header>
 
         <div className="scroll-quiet min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-10 sm:px-7">
           {failed && <p className="mt-4 text-sm text-ash">{t("profile.failed")}</p>}
-          {!profile && !failed && <p className="mt-4 font-display text-sm tracking-wide text-ash">{t("profile.loading")}</p>}
+          {!profile && !failed && <p className="mt-4 text-sm font-bold uppercase tracking-[0.08em] text-flame">{t("profile.loading")}</p>}
           {profile && (
             <motion.div initial={{ opacity: 0, y: reduced ? 0 : 8 }} animate={{ opacity: 1, y: 0 }} transition={SETTLE}>
               <Stats p={profile} now={now} />
@@ -261,7 +270,7 @@ export default function ProfileSheet({ name, now, onClose }: { name: string; now
               <section aria-labelledby="profile-badges-h" className="mt-7">
                 <h3 id="profile-badges-h" className="plank-title mb-3 flex items-baseline justify-between text-base">
                   <span>{t("profile.badges")}</span>
-                  <span className="font-sans text-xs font-normal tracking-normal text-ash">
+                  <span className="text-xs font-normal normal-case tracking-normal text-ash">
                     {t("profile.badgeCount", { earned: profile.badges.filter((b) => b.earnedAt).length, total: profile.badges.length })}
                   </span>
                 </h3>
@@ -288,11 +297,11 @@ function Stats({ p, now }: { p: PlayerProfile; now: number }) {
     [t("profile.firstSeen"), f.shortDate.format(new Date(p.firstSeen))],
   ];
   return (
-    <dl className="mt-1 grid grid-cols-2 gap-px overflow-hidden rounded-md bg-iron/20 ring-1 ring-black/40">
+    <dl className="mt-1 grid grid-cols-2 gap-1.5">
       {rows.map(([label, value, sub]) => (
-        <div key={label} className="bg-wood-dark/90 px-3.5 py-3">
-          <dt className="text-[0.6875rem] uppercase tracking-wider text-ash">{label}</dt>
-          <dd className="mt-0.5 font-display text-lg font-semibold tabular-nums text-bone">{value}</dd>
+        <div key={label} className="slot px-3.5 py-3">
+          <dt className="label-caps">{label}</dt>
+          <dd className="mt-0.5 text-lg font-bold tabular-nums text-bone">{value}</dd>
           {sub && <dd className="text-[0.6875rem] text-ash">{sub}</dd>}
         </div>
       ))}
@@ -312,18 +321,18 @@ function DailyBars({ days }: { days: DailyPlay[] }) {
   const H = 84;
   const slot = W / Math.max(1, days.length);
   if (total === 0) {
-    return <div className="grid h-[5.25rem] place-items-center rounded-md border border-dashed border-iron/40 text-xs text-ash">{t("profile.dailyEmpty")}</div>;
+    return <div className="slot grid h-[5.25rem] place-items-center text-xs text-ash">{t("profile.dailyEmpty")}</div>;
   }
   return (
     <figure>
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        className="block h-[5.25rem] w-full"
+        className="slot block h-[5.25rem] w-full"
         preserveAspectRatio="none"
         role="img"
         aria-label={t("profile.dailyAria", { days: tn("profile.days", played), total: duration(total) })}
       >
-        <line x1="0" x2={W} y1={H - 0.5} y2={H - 0.5} stroke="rgba(155,143,132,0.25)" vectorEffect="non-scaling-stroke" />
+        <line x1="0" x2={W} y1={H - 0.5} y2={H - 0.5} stroke="rgba(0,0,0,0.5)" vectorEffect="non-scaling-stroke" />
         {days.map((d, i) => {
           const h = d.ms > 0 ? Math.max(2, (d.ms / max) * (H - 6)) : 0;
           const today = i === days.length - 1;
@@ -338,7 +347,7 @@ function DailyBars({ days }: { days: DailyPlay[] }) {
                   width={slot * 0.64}
                   height={h}
                   rx="1"
-                  fill={today ? "#ffb347" : "#ff7a1a"}
+                  fill={today ? "#ecc212" : "#cea83e"}
                   fillOpacity={today ? 1 : 0.55 + 0.45 * (d.ms / max)}
                   style={{ transformBox: "fill-box", transformOrigin: "50% 100%" }}
                   initial={reduced ? false : { scaleY: 0 }}
@@ -350,7 +359,7 @@ function DailyBars({ days }: { days: DailyPlay[] }) {
           );
         })}
       </svg>
-      <figcaption className="mt-1 flex justify-between text-[0.625rem] text-ash/80" aria-hidden>
+      <figcaption className="mt-1 flex justify-between text-[0.625rem] text-ash" aria-hidden>
         <span>{dayLabelOf(days[0]!.day)}</span>
         <span>{dayLabelOf(days[Math.floor(days.length / 2)]!.day)}</span>
         <span>{t("profile.today")}</span>
@@ -380,15 +389,18 @@ function Badges({ badges }: { badges: Badge[] }) {
         return (
           <li
             key={b.id}
-            className={`flex items-start gap-3 rounded-md px-3 py-2.5 ring-1 ${earned ? "bg-ember/[0.07] ring-ember/30" : "bg-black/15 opacity-45 grayscale ring-iron/25"}`}
+            className={`flex items-start gap-3 rounded-[3px] py-1 pr-1 ${earned ? "" : "opacity-45 grayscale"}`}
           >
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={earned ? "#ffb347" : "#9b8f84"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="mt-0.5 shrink-0">
-              <path d={GLYPHS[b.id] ?? "M12 2l10 10-10 10L2 12z"} />
-            </svg>
+            {/* An inventory slot holding the badge's mark; locked ones are dimmed. */}
+            <span className="slot grid h-12 w-12 shrink-0 place-items-center">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={earned ? "#f3b867" : "#b3a596"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={earned ? "drop-shadow-[0_0_5px_rgba(243,184,103,0.4)]" : ""}>
+                <path d={GLYPHS[b.id] ?? "M12 2l10 10-10 10L2 12z"} />
+              </svg>
+            </span>
             <div className="min-w-0">
-              <p className={`font-display text-sm font-semibold ${earned ? "text-bone" : "text-ash"}`}>{lookup(`badge.${b.id}.label`) ?? b.id}</p>
+              <p className={`text-sm font-bold ${earned ? "text-bone" : "text-ash"}`}>{lookup(`badge.${b.id}.label`) ?? b.id}</p>
               <p className="text-[0.6875rem] leading-snug text-ash">{lookup(`badge.${b.id}.description`) ?? ""}</p>
-              <p className={`mt-0.5 text-[0.6875rem] ${earned ? "text-flame/90" : "text-ash/80"}`}>{earned ? t("profile.earned", { date: f.date.format(new Date(b.earnedAt!)) }) : t("profile.locked")}</p>
+              <p className={`mt-0.5 text-[0.6875rem] ${earned ? "text-flame" : "text-ash"}`}>{earned ? t("profile.earned", { date: f.date.format(new Date(b.earnedAt!)) }) : t("profile.locked")}</p>
             </div>
           </li>
         );

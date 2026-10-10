@@ -12,20 +12,23 @@ export const Treasury = memo(function Treasury({ backups, now }: { backups: Back
       {backups.map((b, i) => (
         <li
           key={b.name}
-          className={`flex items-center gap-3 rounded-md px-3 py-2 ${i === 0 ? "bg-ember/[0.08] ring-1 ring-ember/25" : "hover:bg-black/15"}`}
+          className="flex items-center gap-3 rounded-[3px] px-1.5 py-1.5 transition-colors hover:bg-black/20"
         >
-          <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden className="shrink-0">
-            <rect x="2.5" y="6" width="15" height="10.5" rx="1.5" fill="none" stroke={i === 0 ? "#ffb347" : "#5b5650"} strokeWidth="1.4" />
-            <path d="M2.5 9.5h15M8 6V4h4v2" fill="none" stroke={i === 0 ? "#ffb347" : "#5b5650"} strokeWidth="1.4" />
-          </svg>
+          {/* The newest backup is the "equipped" one: its slot fills blue. */}
+          <span className={`grid h-10 w-10 shrink-0 place-items-center ${i === 0 ? "slot-selected" : "slot"}`}>
+            <svg width="22" height="22" viewBox="0 0 20 20" aria-hidden>
+              <path d="M3 8.5c0-2.5 3-4 7-4s7 1.5 7 4V16H3z" fill="none" stroke={i === 0 ? "#10161d" : "#d79c34"} strokeWidth="1.4" strokeLinejoin="round" />
+              <path d="M3 9.5h14M9 9.5v2.5h2V9.5" fill="none" stroke={i === 0 ? "#10161d" : "#d79c34"} strokeWidth="1.4" strokeLinejoin="round" />
+            </svg>
+          </span>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm text-bone" title={b.name}>
+            <div className="truncate text-sm font-bold text-bone" title={b.name}>
               {fullDate(b.modifiedAt)}
             </div>
             <div className="truncate text-[0.6875rem] text-ash">{b.name}</div>
           </div>
           <div className="text-right text-xs tabular-nums">
-            <div className="text-bone/90">{bytes(b.sizeBytes)}</div>
+            <div className="font-bold text-bone">{bytes(b.sizeBytes)}</div>
             <div className="text-ash">{ago(b.modifiedAt, now)}</div>
           </div>
           <a
@@ -33,7 +36,7 @@ export const Treasury = memo(function Treasury({ backups, now }: { backups: Back
             download={b.name}
             aria-label={t("treasury.downloadAria", { name: b.name })}
             title={t("treasury.download")}
-            className="press grid h-8 w-8 shrink-0 place-items-center rounded-md border border-iron/40 text-ash transition-colors hover:border-ember/60 hover:bg-ember/10 hover:text-flame"
+            className="plaque press grid h-9 w-9 shrink-0 place-items-center"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M8 2.5v8M4.5 7L8 10.5 11.5 7M3 13.5h10" />

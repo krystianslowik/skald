@@ -31,7 +31,7 @@ export const Chronicle = memo(function Chronicle({ source }: { source: LogStore 
       if (notable && !NOTABLE.test(l.line)) continue;
       if (needle && !l.line.toLowerCase().includes(needle)) continue;
       const text = stripValheimStamp(l.line);
-      out.push({ key: `${l.ts}-${i}`, ts: l.ts, text, tone: BAD.test(text) ? "text-[#e3a091]" : NOTABLE.test(text) ? "text-flame/90" : "text-bone/70" });
+      out.push({ key: `${l.ts}-${i}`, ts: l.ts, text, tone: BAD.test(text) ? "text-blood" : NOTABLE.test(text) ? "text-flame" : "text-bone/75" });
     }
     return out.length > SHOWN_MAX ? out.slice(-SHOWN_MAX) : out;
   }, [lines, needle, notable]);
@@ -60,27 +60,27 @@ export const Chronicle = memo(function Chronicle({ source }: { source: LogStore 
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder={t("chronicle.search")}
-            className="w-full rounded-md border border-iron/40 bg-black/30 px-3 py-1.5 text-sm text-bone placeholder:text-ash/60 focus:border-ember/60 focus:outline-none"
+            className="slot w-full border border-transparent px-3 py-1.5 text-sm text-bone placeholder:text-ash/80 focus:border-select-hi focus:outline-none"
           />
         </label>
         <label className="press flex cursor-pointer items-center gap-2 text-xs text-ash">
-          <input type="checkbox" checked={onlyNotable} onChange={(e) => setOnlyNotable(e.target.checked)} className="accent-[#ff7a1a]" />
+          <input type="checkbox" checked={onlyNotable} onChange={(e) => setOnlyNotable(e.target.checked)} className="accent-[#5e97cc]" />
           {t("chronicle.notable")}
         </label>
-        <span className="text-xs tabular-nums text-ash/70">
+        <span className="text-xs tabular-nums text-ash">
           {t("chronicle.count", { shown: shown.length, total: lines.length })}
         </span>
       </div>
       <div
         ref={box}
-        className={`scroll-quiet h-80 overflow-y-auto rounded-md border border-black/40 bg-[#0b0806]/80 p-3 font-mono text-xs leading-[1.55] shadow-[inset_0_2px_12px_rgba(0,0,0,0.7)] transition-opacity ${stale ? "opacity-70" : ""}`}
+        className={`scroll-quiet h-80 overflow-y-auto rounded-[3px] bg-[#120c08] p-3 font-mono text-xs leading-[1.55] shadow-[inset_0_2px_12px_rgba(0,0,0,0.75),inset_0_0_0_1px_rgba(0,0,0,0.5)] transition-opacity ${stale ? "opacity-70" : ""}`}
         role="log"
         aria-live="off"
       >
         {shown.length === 0 && <p className="text-ash">{lines.length === 0 ? t("chronicle.empty") : t("chronicle.noMatch")}</p>}
         {shown.map((l) => (
           <div key={l.key} className="log-row flex gap-3 whitespace-pre-wrap break-all">
-            <span className="shrink-0 select-none text-iron">{clockSec(l.ts)}</span>
+            <span className="shrink-0 select-none text-ash">{clockSec(l.ts)}</span>
             <span className={l.tone}>{l.text}</span>
           </div>
         ))}

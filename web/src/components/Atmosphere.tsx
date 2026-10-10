@@ -13,9 +13,9 @@ interface Ember {
   wobble: number;
 }
 
-const COUNT = 60;
-const HUE_MIN = 18;
-const HUE_SPAN = 22;
+const COUNT = 42;
+const HUE_MIN = 14;
+const HUE_SPAN = 20;
 const HUE_STEPS = 12;
 const SPRITE = 32;
 
@@ -32,8 +32,8 @@ function sprites(): HTMLCanvasElement[] {
     if (!g) return c;
     const r = SPRITE / 2;
     const grad = g.createRadialGradient(r, r, 0, r, r, r);
-    grad.addColorStop(0, `hsla(${hue + 10}, 100%, 75%, 1)`);
-    grad.addColorStop(0.35, `hsla(${hue}, 100%, 55%, 0.6)`);
+    grad.addColorStop(0, `hsla(${hue + 12}, 100%, 72%, 1)`);
+    grad.addColorStop(0.3, `hsla(${hue}, 95%, 50%, 0.55)`);
     grad.addColorStop(1, `hsla(${hue}, 100%, 50%, 0)`);
     g.fillStyle = grad;
     g.fillRect(0, 0, SPRITE, SPRITE);
@@ -96,9 +96,9 @@ export const Embers = memo(function Embers({ intensity = 1 }: { intensity?: numb
         e.x += (e.vx + Math.sin(e.wobble) * 14) * dt;
         e.y += e.vy * dt;
         const k = e.life / e.max;
-        const alpha = Math.sin(Math.PI * Math.min(1, k)) * (0.55 + 0.45 * Math.sin(t / 90 + i));
+        const alpha = Math.sin(Math.PI * Math.min(1, k)) * (0.4 + 0.3 * Math.sin(t / 90 + i));
         if (alpha <= 0.01) continue;
-        const size = e.r * 8;
+        const size = e.r * 6.5;
         ctx.globalAlpha = alpha;
         ctx.drawImage(glow[e.hue]!, e.x - size / 2, e.y - size / 2, size, size);
       }
@@ -128,7 +128,8 @@ export const Embers = memo(function Embers({ intensity = 1 }: { intensity?: numb
 export const Atmosphere = memo(function Atmosphere({ dim = false }: { dim?: boolean }) {
   return (
     <>
-      <div className="firelight" aria-hidden style={dim ? { opacity: 0.35, animation: "none" } : undefined} />
+      <div className="firelight" aria-hidden style={dim ? { opacity: 0.6 } : undefined} />
+      <div className="treeline" aria-hidden />
       <Embers intensity={dim ? 0.25 : 1} />
       <div className="vignette" aria-hidden />
       <div className="grain" aria-hidden />
