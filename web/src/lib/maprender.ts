@@ -5,7 +5,8 @@
 // sprites under the current transform, so it stays crisp at any zoom.
 // Every method is a no-op without a 2D context (jsdom in tests).
 
-import type { ApiMap } from "../types";
+import type { ApiMap, MapItem } from "../types";
+import type { IconSheet } from "./itemicons";
 import {
   clusterMarkers,
   isoPolygons,
@@ -13,6 +14,7 @@ import {
   landFields,
   LAYERS,
   LAND_LEVEL,
+  markerItems,
   placeLabels,
   portalLinks,
   WORLD_RADIUS,
@@ -282,6 +284,20 @@ export interface FrameState {
 
 /** How long a mark takes to leave its cluster when the map zooms in. */
 const SPLIT_MS = 280;
+/** Zoomed in this far (px per metre), a container shows what it holds most of. */
+const STRIP_SCALE = 2.4;
+const STRIP_ICON = 18;
+const STRIP_MAX = 4;
+
+/** The kinds a container holds most of, by total count. */
+export function topItems(items: readonly MapItem[], n = STRIP_MAX): string[] {
+  const by = new Map<string, number>();
+  for (const it of items) by.set(it.name, (by.get(it.name) ?? 0) + it.stack);
+  return [...by]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, n)
+    .map(([name]) => name);
+}
 
 export class MapRenderer {
   private ctx: CanvasRenderingContext2D | null;
@@ -299,6 +315,8 @@ export class MapRenderer {
   private clusters: { key: string; markers: readonly Marker[]; list: Cluster[]; leadOf: Map<string, Marker> } | null = null;
   /** Marks on their way out of a cluster: where they started and when. */
   private splits = new Map<string, { x: number; z: number; t0: number }>();
+  /** The item icon sheet, decoded, for the contents strips under containers. */
+  private icons: { img: CanvasImageSource; sheet: IconSheet } | null = null;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext("2d");
@@ -313,6 +331,11 @@ export class MapRenderer {
     this.prep = prepare(map, mask);
     this.version++;
     this.paper ??= paperTile();
+  }
+
+  /** The decoded item icon sheet, or null to draw no contents strips. */
+  setIcons(icons: { img: CanvasImageSource; sheet: IconSheet } | null): void {
+    this.icons = icons;
   }
 
   resize(w: number, h: number, dpr: number): void {
@@ -684,6 +707,10 @@ export class MapRenderer {
         g.stroke();
       }
       const count = members.length;
+      if (count <= 1 && this.icons && v.scale >= STRIP_SCALE && (m.data.type === "storage" || m.data.type === "vehicle" || m.data.type === "grave")) {
+        const strip = this.drawStrip(g, sx, sy + px / 2 + 4, markerItems(m));
+        if (strip) icons.push(strip);
+      }
       if (count > 1) {
         const badge = this.drawBadge(g, sx + px / 2 - 1, sy - px / 2 + 1, count);
         icons.push(badge);
@@ -714,6 +741,34 @@ export class MapRenderer {
     }
     g.textAlign = "left";
     return animating;
+  }
+
+  /** Up to four item icons on a dark plate under a container: what it holds most of. */
+  private drawStrip(g: CanvasRenderingContext2D, cx: number, top: number, items: readonly MapItem[] | undefined): Box | null {
+    const ic = this.icons;
+    if (!ic || !items?.length) return null;
+    const names = topItems(items).filter((n) => ic.sheet.items[n]);
+    if (!names.length) return null;
+    const pad = 2;
+    const w = names.length * STRIP_ICON + pad * 2;
+    const h = STRIP_ICON + pad * 2;
+    const x = Math.round(cx - w / 2);
+    const y = Math.round(top);
+    g.fillStyle = "rgba(43, 29, 18, 0.82)";
+    g.strokeStyle = "rgba(240, 228, 200, 0.55)";
+    g.lineWidth = 1;
+    g.beginPath();
+    if (typeof g.roundRect === "function") g.roundRect(x, y, w, h, 3);
+    else g.rect(x, y, w, h);
+    g.fill();
+    g.stroke();
+    g.imageSmoothingEnabled = true;
+    const s = ic.sheet.size;
+    names.forEach((n, i) => {
+      const [sx, sy] = ic.sheet.items[n]!;
+      g.drawImage(ic.img, sx, sy, s, s, x + pad + i * STRIP_ICON, y + pad, STRIP_ICON, STRIP_ICON);
+    });
+    return { x, y, w, h };
   }
 
   /** A cluster's count: a small dark seal on the icon's shoulder. */

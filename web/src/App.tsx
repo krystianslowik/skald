@@ -4,10 +4,14 @@ import { Dashboard } from "./components/Dashboard";
 import { Login } from "./components/Login";
 import { I18nProvider, storedLocale, type Locale } from "./i18n";
 import { getConfig, logout, me } from "./lib/api";
+import { setIconBuild } from "./lib/itemicons";
 import { useValheim } from "./lib/useValheim";
 
 function Panel({ onUnauthorized, onLogout }: { onUnauthorized: () => void; onLogout: () => void }) {
   const live = useValheim(onUnauthorized);
+  const icons = live.state?.icons;
+  // Item icons follow the agent's sheet: loaded once per game build.
+  useEffect(() => setIconBuild(icons), [icons]);
   return <Dashboard live={live} onLogout={onLogout} />;
 }
 

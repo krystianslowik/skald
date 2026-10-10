@@ -293,3 +293,20 @@ describe("valheim-map.world links", () => {
     expect(terrainUrl("ZbzIWkK5KK")).toBe("https://valheim-map.world/?seed=ZbzIWkK5KK&ver=1.0.7");
   });
 });
+
+describe("contents strip", () => {
+  it("picks the kinds held most of, by total count", async () => {
+    const { topItems } = await import("./maprender");
+    const items = [
+      { name: "Wood", stack: 50, x: 0, y: 0 },
+      { name: "Stone", stack: 30, x: 1, y: 0 },
+      { name: "Wood", stack: 20, x: 2, y: 0 },
+      { name: "Resin", stack: 40, x: 3, y: 0 },
+      { name: "Coins", stack: 5, x: 4, y: 0 },
+      { name: "Amber", stack: 5, x: 0, y: 1 },
+    ];
+    expect(topItems(items)).toEqual(["Wood", "Resin", "Stone", "Amber"]);
+    expect(topItems(items, 2)).toEqual(["Wood", "Resin"]);
+    expect(topItems([])).toEqual([]);
+  });
+});

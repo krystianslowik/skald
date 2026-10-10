@@ -6,7 +6,7 @@ import { useStorage } from "../../lib/useStorage";
 import type { MapContainer } from "../../types";
 import { MapIcon } from "../map/MapIcon";
 import { Sheet, SheetClose } from "../Sheet";
-import { ItemGlyph } from "./ItemIcon";
+import { ItemGlyph, ItemIcon } from "./ItemIcon";
 
 const ICON: Record<MapContainer["kind"], IconId> = { chest: "chest", cart: "cart", ship: "ship" };
 
@@ -26,7 +26,7 @@ const Row = memo(function Row({ entry, onOpen }: { entry: StoreEntry; onOpen: (e
         aria-haspopup="dialog"
         className="press-soft flex min-h-9 w-full items-center gap-2.5 rounded-[2px] px-1.5 py-1 text-left hover:bg-black/25 coarse:min-h-11"
       >
-        <ItemGlyph category={entry.category} size={18} className="text-flame/80" />
+        <ItemIcon name={entry.name} category={entry.category} size={18} iconSize={26} className="text-flame/80" />
         <span className="min-w-0 flex-1 truncate text-bone">{entry.label}</span>
         <span className="shrink-0 text-[0.6875rem] text-ash">{tn("store.places", entry.places.length)}</span>
         <span className="w-12 shrink-0 text-right font-bold tabular-nums text-flame">{number(entry.total)}</span>
@@ -143,7 +143,7 @@ function WhereSheet({ entry, onClose, onShow }: { entry: StoreEntry; onClose: ()
       header={(close) => (
         <div className="flex items-center gap-3 pl-1">
           <span className="slot grid h-11 w-11 shrink-0 place-items-center text-flame">
-            <ItemGlyph category={entry.category} size={22} />
+            <ItemIcon name={entry.name} category={entry.category} size={22} iconSize={36} />
           </span>
           <div className="min-w-0 flex-1">
             <h2 id="store-where-h" className="plank-title truncate text-lg">

@@ -4,6 +4,7 @@ import { LAYERS, markerItems, searchMarkers, type IconId, type LayerId, type Mar
 import { fold, matchingItems } from "../../lib/storage";
 import type { ApiMap } from "../../types";
 import { markerKind, markerTitle } from "./MapDetails";
+import { ItemIcon } from "../storage/ItemIcon";
 import { MapIcon } from "./MapIcon";
 
 /** The mark each layer row shows; the fog and grid get small drawn swatches instead. */
@@ -89,7 +90,7 @@ export function MapLayers({
     // Then whatever holds a matching item, the most of it first.
     const q = fold(query.trim());
     const seen = new Set(byName.map((m) => m.id));
-    const held: { m: Marker; hint: string; count: number }[] = [];
+    const held: { m: Marker; hint: string; count: number; item?: string }[] = [];
     if (q.length >= 2) {
       for (const m of shown) {
         const items = markerItems(m);
@@ -97,11 +98,11 @@ export function MapLayers({
         const hits = matchingItems(items, q, lookup);
         if (!hits.length) continue;
         const top = hits[0]!;
-        held.push({ m, count: top.count, hint: t("map.searchItem", { item: top.label, n: number(top.count) }) });
+        held.push({ m, count: top.count, item: top.name, hint: t("map.searchItem", { item: top.label, n: number(top.count) }) });
       }
       held.sort((a, b) => b.count - a.count);
     }
-    return [...byName.map((m) => ({ m, hint: "" })), ...held.slice(0, 10)];
+    return [...byName.map((m): { m: Marker; hint: string; item?: string } => ({ m, hint: "" })), ...held.slice(0, 10)];
   }, [markers, layers, query, t, lookup, number]);
   return (
     <div className="space-y-5 text-sm">
@@ -121,11 +122,12 @@ export function MapLayers({
         {query.trim() && (
           <ul className="mt-2 space-y-1" aria-live="polite">
             {results.length === 0 && <li className="text-xs text-ash">{t("map.searchEmpty")}</li>}
-            {results.map(({ m, hint }) => (
+            {results.map(({ m, hint, item }) => (
               <li key={m.id}>
                 <button type="button" onClick={() => onPick(m)} className="press-soft flex w-full items-center gap-2 rounded-[2px] px-1.5 py-1 text-left hover:bg-black/25 coarse:min-h-11">
                   <MapIcon icon={m.icon} size={20} />
                   <span className="min-w-0 flex-1 truncate text-bone">{markerTitle(m, t, lookup)}</span>
+                  {item && <ItemIcon name={item} size={14} iconSize={22} className="text-flame/80" />}
                   <span className={`shrink-0 text-xs ${hint ? "font-bold tabular-nums text-flame" : "text-ash"}`}>
                     {hint || (markerKind(m, t, lookup) === markerTitle(m, t, lookup) ? "" : markerKind(m, t, lookup))}
                   </span>

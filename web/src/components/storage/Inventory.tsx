@@ -72,7 +72,7 @@ export const InventoryGrid = memo(function InventoryGrid({
             className={`slot press-soft relative flex aspect-square w-full flex-col items-center justify-center gap-0.5 overflow-hidden px-0.5 text-flame ${roomy ? "pb-2.5 pt-1" : "p-0.5"} ${on ? "slot-selected text-bone" : ""}`}
           >
             {it.quality && it.quality > 1 ? <Stars n={it.quality} /> : null}
-            <ItemIcon name={it.name} type={it.type} size={roomy ? 20 : 17} className="opacity-90" />
+            <ItemIcon name={it.name} type={it.type} size={roomy ? 20 : 17} iconSize={roomy ? 26 : 28} className="opacity-90" />
             {roomy && <span className="line-clamp-2 w-full break-words text-center text-[0.5625rem] font-bold leading-[1.1] text-bone">{label}</span>}
             {it.stack > 1 && (
               <span className="absolute bottom-0.5 right-1 text-[0.625rem] font-bold tabular-nums leading-none text-bone [text-shadow:1px_0_0_#000,-1px_0_0_#000,0_1px_0_#000,0_-1px_0_#000]">

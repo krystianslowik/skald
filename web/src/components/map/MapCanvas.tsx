@@ -18,6 +18,7 @@ import {
   type Marker,
   type View,
 } from "../../lib/mapgeo";
+import { useIconSheet } from "../../lib/itemicons";
 import { COARSE, useMedia } from "../../lib/useMedia";
 import { inertiaStep, releaseVelocity, REST_SPEED, springStep } from "../../lib/mapmotion";
 import { MapRenderer } from "../../lib/maprender";
@@ -256,6 +257,30 @@ export const MapCanvas = forwardRef<
     renderer.current.setData(map, mask);
     schedule();
   }, [map, mask, schedule]);
+
+  // Item icons for the contents strips under containers, once the sheet has decoded.
+  const iconSheet = useIconSheet();
+  useEffect(() => {
+    const r = renderer.current;
+    if (!r) return;
+    if (!iconSheet || typeof Image === "undefined") {
+      r.setIcons(null);
+      schedule();
+      return;
+    }
+    let live = true;
+    const img = new Image();
+    img.decoding = "async";
+    img.onload = () => {
+      if (!live) return;
+      r.setIcons({ img, sheet: iconSheet });
+      schedule();
+    };
+    img.src = iconSheet.url;
+    return () => {
+      live = false;
+    };
+  }, [iconSheet, schedule]);
 
   // Anything drawn that is not the view.
   useEffect(() => {

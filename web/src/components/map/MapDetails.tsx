@@ -117,7 +117,7 @@ function SummaryLine({ summary, size, className = "" }: { summary: Summary; size
     <span className={`flex flex-wrap items-center gap-x-2.5 gap-y-0.5 ${className}`}>
       {summary.top.map((s) => (
         <span key={s.name} className="inline-flex items-center gap-1">
-          <ItemIcon name={s.name} size={size} className="text-flame/80" />
+          <ItemIcon name={s.name} category={s.category} size={size} iconSize={size + 6} className="text-flame/80" />
           <span>{t("map.cluster.stack", { n: number(s.total), item: s.label })}</span>
         </span>
       ))}
