@@ -4,7 +4,10 @@ import (
 	"bufio"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/krystianslowik/skald/agent/internal/events"
 )
@@ -159,5 +162,113 @@ func TestRaidAndNetStats(t *testing.T) {
 		if e.Type == "raid" && e.Data["name"] != "army_eikthyr" {
 			t.Errorf("raid data = %v", e.Data)
 		}
+	}
+}
+
+// TestSessionLog replays a redacted 1.0.17 crossplay session: Ragnar (Xbox)
+// joins, drops, reconnects from the same console as Freya; Bjorn (Steam)
+// joins and later leaves. No ghost of Ragnar may remain.
+func TestSessionLog(t *testing.T) {
+	f, err := os.Open("../../testdata/session-1.0.17.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	h := events.New(events.DefaultRingSize, events.DefaultLogSize)
+	tr := New(h)
+	tr.SetStatus("running")
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64*1024), 1024*1024)
+	for sc.Scan() {
+		tr.HandleLine(sc.Text())
+	}
+	s := tr.Snapshot()
+	if len(s.Players) != 1 || s.Players[0].Name != "Freya" || s.Players[0].Platform != "xbox" {
+		t.Fatalf("players = %+v", s.Players)
+	}
+	if s.PlayersReported != 1 {
+		t.Errorf("playersReported = %d", s.PlayersReported)
+	}
+	if s.NetStats == nil || *s.NetStats != (NetStats{Connections: 1, ZDOs: 374680, Sent: 0, Recv: 469}) {
+		t.Errorf("netStats = %+v", s.NetStats)
+	}
+	if s.LastSaveAt == nil || s.LastSaveMs != 488 {
+		t.Errorf("save = %v %v", s.LastSaveAt, s.LastSaveMs)
+	}
+
+	var seq []string
+	for _, e := range drain(h) {
+		switch e.Type {
+		case "player_join":
+			seq = append(seq, "+"+e.Data["name"].(string)+"/"+e.Data["platform"].(string))
+		case "player_leave":
+			seq = append(seq, "-"+e.Data["name"].(string))
+		case "world_backup", "world_saved", "death":
+			seq = append(seq, e.Type)
+		case "log":
+			line := e.Data["line"].(string)
+			for _, leak := range []string{"Xbox_2533", "Steam_7656", "playfab/0A1B", "remote player 1B2C", "AAAA0000"} {
+				if strings.Contains(line, leak) {
+					t.Errorf("log event leaks %q: %s", leak, line)
+				}
+			}
+		}
+	}
+	want := []string{"+Ragnar/xbox", "-Ragnar", "+Freya/xbox", "+Bjorn/steam", "world_backup", "world_saved", "-Bjorn"}
+	if strings.Join(seq, " ") != strings.Join(want, " ") {
+		t.Errorf("sequence\n got %v\nwant %v", seq, want)
+	}
+	for _, l := range h.Logs(-1) {
+		if strings.Contains(l.Line, "Xbox_2533") {
+			t.Errorf("/logs leaks: %s", l.Line)
+		}
+	}
+}
+
+func TestReconnectSameNameNoFalseLeave(t *testing.T) {
+	h := events.New(100, 100)
+	tr := New(h)
+	tr.SetStatus("running")
+	for _, l := range []string{
+		`supervisord: valheim-server Got character ZDOID from Ragnar : 100:1`,
+		`supervisord: valheim-server Got character ZDOID from Ragnar : 200:1`,
+		// The old peer's objects are cleaned up after the new one spawned.
+		`supervisord: valheim-server Destroying abandoned non persistent zdo 100:1 owner 100`,
+		`supervisord: valheim-server Destroying abandoned non persistent zdo 999:1 owner 999`,
+	} {
+		tr.HandleLine(l)
+	}
+	if s := tr.Snapshot(); len(s.Players) != 1 {
+		t.Fatalf("players = %+v", s.Players)
+	}
+	tr.HandleLine(`supervisord: valheim-server Destroying abandoned non persistent zdo 200:1 owner 200`)
+	tr.HandleLine(`supervisord: valheim-server Destroying abandoned non persistent zdo 200:2 owner 200`)
+	got := types(drain(h))
+	if got["player_join"] != 1 || got["player_leave"] != 1 {
+		t.Fatalf("events = %v", got)
+	}
+}
+
+func TestPlatformClaimFIFOAndExpiry(t *testing.T) {
+	h := events.New(100, 100)
+	tr := New(h)
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	tr.now = func() time.Time { return now }
+	tr.SetStatus("running")
+	tr.HandleLine(`supervisord: valheim-server PlayFab socket with remote ID playfab/A received local Platform ID Xbox_1234567`)
+	now = now.Add(5 * time.Minute) // expired: that client never spawned
+	tr.HandleLine(`supervisord: valheim-server PlayFab socket with remote ID playfab/B received local Platform ID Steam_1234567`)
+	tr.HandleLine(`supervisord: valheim-server PlayFab socket with remote ID playfab/C received local Platform ID Xbox_7654321`)
+	tr.HandleLine(`supervisord: valheim-server Got character ZDOID from Freya : 1:1`)
+	tr.HandleLine(`supervisord: valheim-server Got character ZDOID from Bjorn : 2:1`)
+	tr.HandleLine(`supervisord: valheim-server Got character ZDOID from Astrid : 3:1`)
+	got := map[string]string{}
+	for _, p := range tr.Snapshot().Players {
+		got[p.Name] = p.Platform
+	}
+	want := map[string]string{"Freya": "steam", "Bjorn": "xbox", "Astrid": "unknown"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("platforms = %v, want %v", got, want)
 	}
 }

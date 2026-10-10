@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"os"
 	"reflect"
+	"regexp"
 	"testing"
 )
 
@@ -76,7 +77,27 @@ func TestMatchMsg(t *testing.T) {
 			[]Match{{Kind: KindJoinCode, Code: "482915"}, {Kind: KindPlayfab, State: PlayfabOK}}},
 		{"active", `Session "My Valheim" with join code 482915 and IP 203.0.113.10:2456 is active with 3 player(s)`,
 			[]Match{{Kind: KindJoinCode, Code: "482915"}, {Kind: KindPlayerCount, Count: 3}}},
-		{"new session with empty code", `New session server "My Valheim" that has join code , now 0 player(s)`, nil},
+		{"new session with empty code", `New session server "My Valheim" that has join code , now 0 player(s)`,
+			[]Match{{Kind: KindPlayerCount}}},
+		{"player joined", `Player joined server "My Valheim" that has join code 482915, now 2 player(s)`,
+			[]Match{{Kind: KindPlayerCount, Count: 2}}},
+		{"connection lost", `Player connection lost server "My Valheim" that has join code 482915, now 1 player(s)`,
+			[]Match{{Kind: KindPlayerCount, Count: 1}}},
+		{"platform xbox", `PlayFab socket with remote ID playfab/0A1B2C3D4E5F6071 received local Platform ID Xbox_2533274900000001`,
+			[]Match{{Kind: KindPlatform, Platform: PlatformXbox}}},
+		{"platform steam", `PlayFab socket with remote ID playfab/1B2C3D4E5F607182 received local Platform ID Steam_76561190000000003`,
+			[]Match{{Kind: KindPlatform, Platform: PlatformSteam}}},
+		{"platform other", `PlayFab socket with remote ID playfab/1 received local Platform ID Stadia_1`,
+			[]Match{{Kind: KindPlatform, Platform: PlatformUnknown}}},
+		{"abandoned", `Destroying abandoned non persistent zdo 111111111:65 owner 111111111`,
+			[]Match{{Kind: KindAbandoned, UID: "111111111"}}},
+		{"abandoned negative", `Destroying abandoned non persistent zdo -22222222:50 owner -22222222`,
+			[]Match{{Kind: KindAbandoned, UID: "-22222222"}}},
+		{"world save done", `World save (5/5) done. Total time [488ms]`, []Match{{Kind: KindWorldSaved, Ms: 488}}},
+		{"world save step", `World save (2/5) Chunks writing done [422ms]`, nil},
+		{"world auto backup", `World auto backup saved [41ms]`, []Match{{Kind: KindWorldBackup, Ms: 41}}},
+		{"net stats 1.0 spacing", ` Connections 2 ZDOS:374624  sent:46 recv:76`,
+			[]Match{{Kind: KindNetStats, Connections: 2, ZDOs: 374624, Sent: 46, Recv: 76}}},
 		{"playfab joined", `Joined PlayFab Party network with ID "REDACTED"`,
 			[]Match{{Kind: KindPlayfab, State: PlayfabOK}}},
 		{"playfab connecting", `Server 'My Valheim' begin PlayFab create and join network for server `,
@@ -84,11 +105,11 @@ func TestMatchMsg(t *testing.T) {
 		{"playfab reconnect", `PlayFab reconnect attempt 1`, []Match{{Kind: KindPlayfab, State: PlayfabError}}},
 		{"connectivity error", `Network error: INTERNET_CONNECTIVITY_ERROR`, []Match{{Kind: KindPlayfab, State: PlayfabError}}},
 		{"service unavailable", `PlayFab request failed: ServiceUnavailable`, []Match{{Kind: KindPlayfab, State: PlayfabError}}},
-		// Synthetic, unconfirmed for 1.0 crossplay.
 		{"zdoid join", `Got character ZDOID from Ragnar : -123456:1`,
-			[]Match{{Kind: KindCharacter, Name: "Ragnar"}}},
+			[]Match{{Kind: KindCharacter, Name: "Ragnar", UID: "-123456"}}},
 		{"zdoid name with spaces", `Got character ZDOID from Ole Bjorn : 98765:4`,
-			[]Match{{Kind: KindCharacter, Name: "Ole Bjorn"}}},
+			[]Match{{Kind: KindCharacter, Name: "Ole Bjorn", UID: "98765"}}},
+		// Synthetic, unconfirmed for 1.0: no death in the captured session.
 		{"zdoid death", `Got character ZDOID from Ragnar : 0:0`,
 			[]Match{{Kind: KindCharacter, Name: "Ragnar", Death: true}}},
 		{"world saved with ms", `World saved ( 123.456ms )`, []Match{{Kind: KindWorldSaved, Ms: 123.456}}},
@@ -138,7 +159,7 @@ func TestStartupLog(t *testing.T) {
 				counts = append(counts, m)
 			case KindPlayfab:
 				lastPlayfab = m.State
-			case KindCharacter, KindWorldSaved, KindRaid, KindNetStats:
+			case KindCharacter, KindWorldSaved, KindWorldBackup, KindRaid, KindNetStats, KindPlatform, KindAbandoned:
 				t.Errorf("unexpected %s match in startup log", m.Kind)
 			}
 		}
@@ -152,7 +173,7 @@ func TestStartupLog(t *testing.T) {
 	if len(codes) != 2 || codes[0].Code != "482915" || codes[1].Code != "482915" {
 		t.Errorf("join codes = %+v", codes)
 	}
-	if len(counts) != 1 || counts[0].Count != 0 {
+	if len(counts) != 2 || counts[0].Count != 0 || counts[1].Count != 0 {
 		t.Errorf("player counts = %+v", counts)
 	}
 	if lastPlayfab != PlayfabOK {
@@ -160,5 +181,70 @@ func TestStartupLog(t *testing.T) {
 	}
 	if programs["valheim-server"] == 0 || programs["valheim-updater"] == 0 || programs[""] == 0 {
 		t.Errorf("programs = %v", programs)
+	}
+}
+
+func TestRedact(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`PlayFab socket with remote ID playfab/0A1B2C3D4E5F6071 received local Platform ID Xbox_2533274900000001`,
+			`PlayFab socket with remote ID playfab/*** received local Platform ID Xbox_***`},
+		{`Got handshake from client playfab/0A1B2C3D4E5F6071`, `Got handshake from client playfab/***`},
+		{`PlayFab listen socket child connected to remote player 0A1B2C3D4E5F6071`, `PlayFab listen socket child connected to remote player ***`},
+		{`Muted PlayFab remote player 1B2C3D4E5F607182`, `Muted PlayFab remote player ***`},
+		{`Keep socket for playfab/0A1B2C3D4E5F6071, try to reconnect before timeout`, `Keep socket for playfab/***, try to reconnect before timeout`},
+		{`Player history entry with index 2:  bjornthebold (Steam_76561190000000003, AAAA000000000003)`,
+			`Player history entry with index 2:  bjornthebold (Steam_***, ***)`},
+		{`Backup created in Midgard_backup_auto-20261010-114246 [16.184ms]`, `Backup created in Midgard_backup_auto-20261010-114246 [16.184ms]`},
+		{`Using steam APPID:892970`, `Using steam APPID:892970`},
+	}
+	for _, c := range cases {
+		if got := Redact(c.in); got != c.want {
+			t.Errorf("Redact(%q)\n got %q\nwant %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestSessionLog runs a redacted 1.0.17 crossplay session (three players,
+// one reconnect with another character) through Parse.
+func TestSessionLog(t *testing.T) {
+	f, err := os.Open("../../testdata/session-1.0.17.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	kinds := map[string]int{}
+	var chars, platforms []string
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64*1024), 1024*1024)
+	for sc.Scan() {
+		l, ms := Parse(sc.Text())
+		if r := Redact(l.Text); regexp.MustCompile(`_\d{6,}|playfab/[0-9A-F]{6,}`).MatchString(r) {
+			t.Errorf("unredacted: %q", r)
+		}
+		for _, m := range ms {
+			kinds[m.Kind]++
+			switch m.Kind {
+			case KindCharacter:
+				chars = append(chars, m.Name+"@"+m.UID)
+			case KindPlatform:
+				platforms = append(platforms, m.Platform)
+			}
+		}
+	}
+	if err := sc.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"Ragnar@111111111", "Freya@-22222222", "Bjorn@333333333"}; !reflect.DeepEqual(chars, want) {
+		t.Errorf("characters = %v, want %v", chars, want)
+	}
+	if want := []string{"xbox", "xbox", "steam"}; !reflect.DeepEqual(platforms, want) {
+		t.Errorf("platforms = %v, want %v", platforms, want)
+	}
+	want := map[string]int{KindAbandoned: 37, KindNetStats: 4, KindWorldSaved: 1, KindWorldBackup: 1, KindVersion: 1}
+	for k, v := range want {
+		if kinds[k] != v {
+			t.Errorf("%s = %d, want %d (all %v)", k, kinds[k], v, kinds)
+		}
 	}
 }

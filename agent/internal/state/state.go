@@ -1,6 +1,6 @@
 // Package state folds parsed log lines and status-file reads into the
 // server's current state, and publishes the resulting events. Notable events
-// (everything except `log`, `world_saved` and `raid`) fire on change only: the
+// (everything except `log`, `world_saved`, `world_backup` and `raid`) fire on change only: the
 // "is active with N player(s)" line repeats for the server's whole lifetime
 // and the web persists every non-log, non-net_stats event.
 package state
@@ -21,6 +21,18 @@ const (
 type Player struct {
 	Name  string    `json:"name"`
 	Since time.Time `json:"since"`
+	// Platform is xbox, steam, playstation, nintendo or unknown. The raw
+	// platform user ID never leaves the parser.
+	Platform string `json:"platform"`
+}
+
+// platformTTL bounds how long a connecting client's platform waits for its
+// character. Loading into the world took about 30 s in the captured session.
+const platformTTL = 3 * time.Minute
+
+type pendingPlatform struct {
+	platform string
+	at       time.Time
 }
 
 // NetStats is the latest "Connections N ZDOS:..." summary.
@@ -52,6 +64,13 @@ type Tracker struct {
 	hub *events.Hub
 	now func() time.Time
 	s   Snapshot
+
+	// uids maps a character's peer id to its name; current is the reverse,
+	// for the peer id each online name joined with last.
+	uids    map[string]string
+	current map[string]string
+	// pending platforms, oldest first, waiting for a character to claim them.
+	pending []pendingPlatform
 }
 
 func New(hub *events.Hub) *Tracker {
@@ -59,6 +78,9 @@ func New(hub *events.Hub) *Tracker {
 		hub: hub,
 		now: time.Now,
 		s:   Snapshot{Playfab: StatusUnknown, Players: []Player{}},
+
+		uids:    map[string]string{},
+		current: map[string]string{},
 	}
 }
 
@@ -71,7 +93,7 @@ func (t *Tracker) HandleLine(raw string) {
 	defer t.mu.Unlock()
 	now := t.now().UTC()
 	t.s.LastLogAt = &now
-	t.hub.Publish("log", map[string]any{"line": line.Text, "program": line.Program})
+	t.hub.Publish("log", map[string]any{"line": logparse.Redact(line.Text), "program": line.Program})
 
 	for _, m := range matches {
 		switch m.Kind {
@@ -93,12 +115,35 @@ func (t *Tracker) HandleLine(raw string) {
 				t.s.Playfab = m.State
 				t.hub.Publish("playfab", map[string]any{"state": m.State})
 			}
+		case logparse.KindPlatform:
+			t.pending = append(t.pending, pendingPlatform{platform: m.Platform, at: now})
 		case logparse.KindCharacter:
-			// A death line also proves the player is online, so join first.
-			t.join(m.Name, now)
 			if m.Death {
+				// A death line also proves the player is online, so join
+				// first. It carries no peer id: the uid maps stay as they are.
+				t.join(m.Name, "", now)
 				t.hub.Publish("death", map[string]any{"name": m.Name})
+				continue
 			}
+			if old, ok := t.current[m.Name]; ok && old != m.UID {
+				delete(t.uids, old) // a reconnect: the old peer's objects no longer mean a leave
+			}
+			t.uids[m.UID] = m.Name
+			t.current[m.Name] = m.UID
+			t.join(m.Name, t.claimPlatform(now), now)
+		case logparse.KindAbandoned:
+			// One line per object the peer owned; the first one is the leave.
+			name, ok := t.uids[m.UID]
+			if !ok {
+				continue
+			}
+			delete(t.uids, m.UID)
+			if t.current[name] == m.UID {
+				delete(t.current, name)
+				t.leave(name)
+			}
+		case logparse.KindWorldBackup:
+			t.hub.Publish("world_backup", map[string]any{"ms": m.Ms})
 		case logparse.KindWorldSaved:
 			t.s.LastSaveAt = &now
 			t.s.LastSaveMs = m.Ms
@@ -149,20 +194,52 @@ func (t *Tracker) Snapshot() Snapshot {
 	return s
 }
 
-// join adds a player unless already online. Caller holds mu.
-func (t *Tracker) join(name string, now time.Time) {
-	for _, p := range t.s.Players {
+// claimPlatform takes the oldest unexpired platform waiting for a
+// character. The ZDOID line carries no PlayFab id, so arrival order is all
+// there is to match on. Caller holds mu.
+func (t *Tracker) claimPlatform(now time.Time) string {
+	for len(t.pending) > 0 {
+		p := t.pending[0]
+		t.pending = t.pending[1:]
+		if now.Sub(p.at) <= platformTTL {
+			return p.platform
+		}
+	}
+	return logparse.PlatformUnknown
+}
+
+// join adds a player unless already online; a known platform fills in an
+// unknown one. Caller holds mu.
+func (t *Tracker) join(name, platform string, now time.Time) {
+	for i, p := range t.s.Players {
 		if p.Name == name {
+			if platform != "" && platform != logparse.PlatformUnknown && p.Platform != platform {
+				t.s.Players[i].Platform = platform
+			}
 			return
 		}
 	}
-	t.s.Players = append(t.s.Players, Player{Name: name, Since: now})
-	t.hub.Publish("player_join", map[string]any{"name": name})
+	if platform == "" {
+		platform = logparse.PlatformUnknown
+	}
+	t.s.Players = append(t.s.Players, Player{Name: name, Since: now, Platform: platform})
+	t.hub.Publish("player_join", map[string]any{"name": name, "platform": platform})
 }
 
-// setCount records the server-reported player count. Leave detection is
-// count-based only: a drop to 0 emits player_leave for everyone online.
-// Caller holds mu.
+// leave removes one player. Caller holds mu.
+func (t *Tracker) leave(name string) {
+	for i, p := range t.s.Players {
+		if p.Name == name {
+			t.s.Players = append(t.s.Players[:i:i], t.s.Players[i+1:]...)
+			t.hub.Publish("player_leave", map[string]any{"name": name})
+			return
+		}
+	}
+}
+
+// setCount records the server-reported player count. Per-player leaves come
+// from abandoned-object lines; a drop to 0 is the safety net and emits
+// player_leave for everyone still listed. Caller holds mu.
 func (t *Tracker) setCount(n int) {
 	if n != t.s.PlayersReported {
 		t.s.PlayersReported = n
@@ -173,5 +250,10 @@ func (t *Tracker) setCount(n int) {
 			t.hub.Publish("player_leave", map[string]any{"name": p.Name})
 		}
 		t.s.Players = []Player{}
+	}
+	if n == 0 {
+		clear(t.uids)
+		clear(t.current)
+		t.pending = nil
 	}
 }

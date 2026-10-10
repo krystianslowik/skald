@@ -6,6 +6,7 @@ package logparse
 import (
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // Line is one syslog datagram with the transport header removed.
@@ -31,6 +32,22 @@ const (
 	KindWorldSaved  = "world_saved"
 	KindRaid        = "raid"
 	KindNetStats    = "net_stats"
+	KindWorldBackup = "world_backup"
+	// KindPlatform is "PlayFab socket ... received local Platform ID X_id":
+	// a connecting client's platform, before its character is known.
+	KindPlatform = "platform"
+	// KindAbandoned is "Destroying abandoned non persistent zdo U:N owner U":
+	// the owner's peer is gone. Logged once per object, in bursts.
+	KindAbandoned = "abandoned"
+)
+
+// Platform types. The raw platform user ID is never kept.
+const (
+	PlatformXbox        = "xbox"
+	PlatformSteam       = "steam"
+	PlatformPlayStation = "playstation"
+	PlatformNintendo    = "nintendo"
+	PlatformUnknown     = "unknown"
 )
 
 // Playfab states.
@@ -51,7 +68,11 @@ type Match struct {
 	State          string
 	Name           string
 	Death          bool
-	Ms             float64 // world_saved; 0 when the line had no duration
+	// UID is the peer id part of a character ZDOID (character) or the owner
+	// of an abandoned object (abandoned).
+	UID      string
+	Platform string  // platform: one of the Platform* constants
+	Ms       float64 // world_saved; 0 when the line had no duration
 	// net_stats
 	Connections int
 	ZDOs        int
@@ -106,6 +127,50 @@ var table = []rule{
 		n, _ := strconv.Atoi(s[2])
 		return []Match{{Kind: KindJoinCode, Code: s[1]}, {Kind: KindPlayerCount, Count: n}}
 	}},
+	// Confirmed against a 1.0.17 crossplay session (testdata/session-1.0.17.log)
+	// from here to the network summary.
+	//
+	// "New session", "Player joined" and "Player connection lost" lines all
+	// end in the server's count. The first one has an empty join code. The
+	// "connection lost" count can lag by one while the socket is kept for a
+	// reconnect, so names come from ZDOIDs, not from this number.
+	{regexp.MustCompile(`server ".*" that has join code \d*, now (\d+) player`), func(s []string) []Match {
+		n, _ := strconv.Atoi(s[1])
+		return []Match{{Kind: KindPlayerCount, Count: n}}
+	}},
+	{regexp.MustCompile(`received local Platform ID ([A-Za-z]+)_`), func(s []string) []Match {
+		return []Match{{Kind: KindPlatform, Platform: PlatformOf(s[1])}}
+	}},
+	// A spawned character: UID is the peer's session id, new on every connect.
+	{regexp.MustCompile(`Got character ZDOID from (.+) : (-?\d+):(\d+)`), func(s []string) []Match {
+		if s[2] == "0" && s[3] == "0" {
+			return nil // the death form below
+		}
+		return []Match{{Kind: KindCharacter, Name: s[1], UID: s[2]}}
+	}},
+	{regexp.MustCompile(`Destroying abandoned non persistent zdo -?\d+:\d+ owner (-?\d+)`), func(s []string) []Match {
+		return []Match{{Kind: KindAbandoned, UID: s[1]}}
+	}},
+	// The regular save, every -saveinterval seconds and on shutdown.
+	{regexp.MustCompile(`World save \(\d+/\d+\) done\. Total time \[([\d.]+)ms\]`), func(s []string) []Match {
+		ms, _ := strconv.ParseFloat(s[1], 64)
+		return []Match{{Kind: KindWorldSaved, Ms: ms}}
+	}},
+	// The game's own autobackup, a step inside some saves (it is considered
+	// on every save but only taken every couple of hours of world time).
+	{regexp.MustCompile(`World auto backup saved \[([\d.]+)ms\]`), func(s []string) []Match {
+		ms, _ := strconv.ParseFloat(s[1], 64)
+		return []Match{{Kind: KindWorldBackup, Ms: ms}}
+	}},
+	// Confirmed against 1.0.17 (testdata/session-1.0.17.log): the periodic
+	// network summary, every 10 minutes, with a leading space.
+	{regexp.MustCompile(`Connections (\d+) ZDOS:(\d+)\s+sent:(\d+)\s+recv:(\d+)`), func(s []string) []Match {
+		c, _ := strconv.Atoi(s[1])
+		z, _ := strconv.Atoi(s[2])
+		se, _ := strconv.Atoi(s[3])
+		r, _ := strconv.Atoi(s[4])
+		return []Match{{Kind: KindNetStats, Connections: c, ZDOs: z, Sent: se, Recv: r}}
+	}},
 	{regexp.MustCompile(`Joined PlayFab Party network`), func([]string) []Match {
 		return []Match{{Kind: KindPlayfab, State: PlayfabOK}}
 	}},
@@ -116,11 +181,13 @@ var table = []rule{
 		return []Match{{Kind: KindPlayfab, State: PlayfabError}}
 	}},
 
-	// Unconfirmed for 1.0 crossplay: pre-1.0 community patterns, kept lenient.
-	// Replace with real lines in testdata/ after the first player session.
-	{regexp.MustCompile(`Got character ZDOID from (.+) : (-?\d+):(\d+)`), func(s []string) []Match {
-		return []Match{{Kind: KindCharacter, Name: s[1], Death: s[2] == "0" && s[3] == "0"}}
+	// Unconfirmed for 1.0: the pre-1.0 death form (the character ZDOID is
+	// reset to 0:0 while the player is dead). No death happened in the
+	// 1.0.17 session captured so far.
+	{regexp.MustCompile(`Got character ZDOID from (.+) : 0:0\s*$`), func(s []string) []Match {
+		return []Match{{Kind: KindCharacter, Name: s[1], Death: true}}
 	}},
+	// Pre-1.0 save line, kept for older servers.
 	{regexp.MustCompile(`World saved(?: \( ?([\d.]+) ?ms ?\))?`), func(s []string) []Match {
 		ms, _ := strconv.ParseFloat(s[1], 64)
 		return []Match{{Kind: KindWorldSaved, Ms: ms}}
@@ -130,14 +197,44 @@ var table = []rule{
 	{regexp.MustCompile(`Random event set:\s*(\S+)`), func(s []string) []Match {
 		return []Match{{Kind: KindRaid, Name: s[1]}}
 	}},
-	// Unconfirmed for 1.0: the periodic network summary.
-	{regexp.MustCompile(`Connections (\d+) ZDOS:(\d+)\s+sent:(\d+)\s+recv:(\d+)`), func(s []string) []Match {
-		c, _ := strconv.Atoi(s[1])
-		z, _ := strconv.Atoi(s[2])
-		se, _ := strconv.Atoi(s[3])
-		r, _ := strconv.Atoi(s[4])
-		return []Match{{Kind: KindNetStats, Connections: c, ZDOs: z, Sent: se, Recv: r}}
-	}},
+}
+
+// PlatformOf maps the prefix of a platform user ID to a platform type. Only
+// Xbox_ and Steam_ are confirmed on 1.0.17; the console prefixes are guesses.
+func PlatformOf(prefix string) string {
+	switch strings.ToLower(prefix) {
+	case "xbox":
+		return PlatformXbox
+	case "steam":
+		return PlatformSteam
+	case "playstation", "psn", "ps", "ps5", "sony":
+		return PlatformPlayStation
+	case "nintendo", "switch", "nx":
+		return PlatformNintendo
+	}
+	return PlatformUnknown
+}
+
+// redactions hide player identifiers in log text served to the UI: platform
+// user IDs (Xbox_2533..., Steam_7656...; the platform type stays readable)
+// and PlayFab remote player IDs.
+var redactions = []struct {
+	re   *regexp.Regexp
+	with string
+}{
+	{regexp.MustCompile(`\b([A-Za-z]+)_\d{6,}\b`), "${1}_***"},
+	{regexp.MustCompile(`playfab/[0-9A-Za-z]+`), "playfab/***"},
+	{regexp.MustCompile(`(remote player) [0-9A-Fa-f]+`), "$1 ***"},
+	// "Player history entry with index 0:  gamertag (Xbox_***, 0123ABCD...)"
+	{regexp.MustCompile(`(_\*\*\*, )[0-9A-Fa-f]+\)`), "${1}***)"},
+}
+
+// Redact removes player identifiers from a log line.
+func Redact(text string) string {
+	for _, r := range redactions {
+		text = r.re.ReplaceAllString(text, r.with)
+	}
+	return text
 }
 
 // MatchMsg runs the table against a stripped message.
