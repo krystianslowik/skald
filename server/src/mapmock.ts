@@ -60,8 +60,11 @@ export function mockElevation(x: number, z: number): number {
 
 const LAND = 0.5;
 
+// btoa rather than Buffer: the web build typechecks this file too, without Node types.
 function base64(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString("base64");
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
 }
 
 function rle(mask: Uint8Array): { rle: string; pixels: number } {
