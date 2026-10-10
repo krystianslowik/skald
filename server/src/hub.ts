@@ -123,6 +123,8 @@ export class Hub {
       }
     }
     this.emit({ type: "event", event: ev });
+    // A restart with new settings renames the server; fetch it now, not at the next poll.
+    if (ev.type === "settings_apply" && ev.data.state === "applied" && !this.stopped) void this.pollState();
   }
 
   private emit(m: LiveMessage): void {
