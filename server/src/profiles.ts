@@ -1,4 +1,4 @@
-import type { AgentEvent, Badge, DailyPlay, PlayerProfile } from "./types";
+import type { AgentEvent, Badge, DailyPlay, Platform, PlayerProfile } from "./types";
 
 /**
  * Player profiles: per-player stats, daily playtime, streaks and badges,
@@ -96,7 +96,10 @@ interface Folded {
   raids: number[];
   firstSeen: Map<string, number>;
   lastSeen: Map<string, number>;
+  platforms: Map<string, Platform>;
 }
+
+const PLATFORMS: readonly Platform[] = ["xbox", "steam", "playstation", "nintendo", "unknown"];
 
 /** Same open/close rules as `deriveHistory`. */
 export function foldSessions(events: AgentEvent[], now: number): Folded {
@@ -105,6 +108,7 @@ export function foldSessions(events: AgentEvent[], now: number): Folded {
   const raids: number[] = [];
   const firstSeen = new Map<string, number>();
   const lastSeen = new Map<string, number>();
+  const platforms = new Map<string, Platform>();
   const open = new Map<string, number>();
 
   const seen = (name: string, at: number) => {
@@ -132,14 +136,17 @@ export function foldSessions(events: AgentEvent[], now: number): Folded {
     if (!Number.isFinite(at)) continue;
     const name = typeof ev.data.name === "string" ? ev.data.name : "";
     switch (ev.type) {
-      case "player_join":
+      case "player_join": {
         if (!name) break;
         if (!open.has(name)) {
           open.set(name, at);
           if (!sessions.has(name)) sessions.set(name, []);
         }
         seen(name, at);
+        const p = ev.data.platform as Platform;
+        if (PLATFORMS.includes(p) && (p !== "unknown" || !platforms.has(name))) platforms.set(name, p);
         break;
+      }
       case "player_leave":
         if (name) close(name, at);
         break;
@@ -164,7 +171,7 @@ export function foldSessions(events: AgentEvent[], now: number): Folded {
     lastSeen.set(name, now);
   }
   for (const list of sessions.values()) list.sort((a, b) => a.start - b.start);
-  return { sessions, deaths, raids, firstSeen, lastSeen };
+  return { sessions, deaths, raids, firstSeen, lastSeen, platforms };
 }
 
 interface BadgeContext {
@@ -288,6 +295,7 @@ function buildProfile(cal: Calendar, name: string, f: Folded, now: number): Play
   return {
     name,
     online: sessions.some((s) => s.open),
+    platform: f.platforms.get(name) ?? null,
     firstSeen: iso(f.firstSeen.get(name)),
     lastSeen: iso(f.lastSeen.get(name)),
     playtimeMs,

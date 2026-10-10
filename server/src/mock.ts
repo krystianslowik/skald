@@ -9,6 +9,7 @@ import type {
   ApplyMode,
   LogLine,
   Metrics,
+  Platform,
   SeriesPoint,
   SettingsCurrent,
   SettingsInput,
@@ -23,6 +24,14 @@ import type {
  */
 
 const NAMES = ["Ragnar", "Freya", "Bjorn", "Astrid"];
+/** Each warrior's platform. PlayStation and Switch prefixes are not confirmed on a real server yet. */
+const PLATFORM: Record<string, { platform: Platform; prefix: string }> = {
+  Ragnar: { platform: "xbox", prefix: "Xbox" },
+  Freya: { platform: "steam", prefix: "Steam" },
+  Bjorn: { platform: "playstation", prefix: "PlayStation" },
+  Astrid: { platform: "nintendo", prefix: "Nintendo" },
+};
+const platformOf = (name: string): Platform => PLATFORM[name]?.platform ?? "unknown";
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 /** The real agent waits 60 s of an empty server; the mock waits a few seconds so the flow can be watched. */
@@ -36,8 +45,9 @@ const NOISE = [
   "Saving {n} zdos",
   "Loaded {n} portals",
   "Console: Spawned Greyling at (412, 31, -88)",
-  "Destroying abandoned non persistent zdo {n}:{k}",
-  "Steam auth ticket validated for client",
+  "Checking for any blocked players in the historical player list...",
+  "Lobby 00000000-0000-0000-0000-000000000001.r-20260101 for world 'Midgard' and network 00000000-0000-0000-0000-000000000002|REDACTED refreshed",
+  "Connected portals {n}:{k} <-> {n}:{k}",
 ];
 
 function pad(n: number): string {
@@ -114,6 +124,8 @@ export class MockAgent implements AgentSource {
   private armedSince: string | null = null;
   private emptySince: number | null = null;
   private lastLeave = 0;
+  /** Peer id per online name, for the abandoned-object lines on leave. */
+  private uids = new Map<string, number>();
   private effective: SettingsView["effective"];
 
   constructor(
@@ -140,8 +152,8 @@ export class MockAgent implements AgentSource {
       },
       // Two warriors already at the fire when the dev server starts.
       players: [
-        { name: "Ragnar", since: new Date(now - 72 * MIN).toISOString() },
-        { name: "Freya", since: new Date(now - 38 * MIN).toISOString() },
+        { name: "Ragnar", since: new Date(now - 72 * MIN).toISOString(), platform: "xbox" },
+        { name: "Freya", since: new Date(now - 38 * MIN).toISOString(), platform: "steam" },
       ],
       world: {
         sizeBytes: 48_213_771,
@@ -155,6 +167,21 @@ export class MockAgent implements AgentSource {
           netTime: 41 * 1800 + 734,
           day: 41,
           savedAt: new Date(now - 11 * MIN).toISOString(),
+          // Created with resources much more and casual portals, which the
+          // launch arguments leave out: the settings sheet notices.
+          modifiers: { deathpenalty: "casual", portals: "casual", raids: "less", resources: "muchmore" },
+          worldKeys: ["resourcerate 200", "teleportall"],
+          knownPlayers: 4,
+          globalKeys: ["activebosses 0", "defeated_eikthyr", "killedtroll", "defeated_gdking", "killed_surtling", "defeated_bonemass"],
+          bosses: [
+            { key: "defeated_eikthyr", defeated: true },
+            { key: "defeated_gdking", defeated: true },
+            { key: "defeated_bonemass", defeated: true },
+            { key: "defeated_dragon", defeated: false },
+            { key: "defeated_goblinking", defeated: false },
+            { key: "defeated_queen", defeated: false },
+            { key: "defeated_fader", defeated: false },
+          ],
         },
       },
       backups: Array.from({ length: 6 }, (_, i) => {
@@ -421,6 +448,7 @@ export class MockAgent implements AgentSource {
     this.emit("join_code", { code });
     this.setStatus("running");
     this.count();
+    this.log(`Session "${this.state.server.name}" with join code ${code} and IP 203.0.113.10:2456 is active with ${this.state.players.length} player(s)`);
   }
 
   private setStatus(status: AgentState["server"]["status"]): void {
@@ -428,33 +456,52 @@ export class MockAgent implements AgentSource {
     this.emit("server_state", { status });
   }
 
-  private count(): void {
+  private count(line?: "joined" | "lost"): void {
     const n = this.state.players.length;
     this.state.server.playersReported = n;
-    this.log(`Session "${this.state.server.name}" with join code ${this.state.server.joinCode} and IP 203.0.113.10:2456 is active with ${n} player(s)`);
+    const { name, joinCode } = this.state.server;
+    if (line === "joined") this.log(`Player joined server "${name}" that has join code ${joinCode}, now ${n} player(s)`);
+    if (line === "lost") this.log(`Player connection lost server "${name}" that has join code ${joinCode}, now ${n} player(s)`);
     this.emit("player_count", { count: n });
   }
 
   private join(name: string): void {
     // Nobody new sits down while the server waits to empty for new settings.
     if (this.state.server.status !== "running" || this.armedSince || this.state.players.some((p) => p.name === name)) return;
-    this.state.players.push({ name, since: new Date(this.clock()).toISOString() });
-    this.log(`Got character ZDOID from ${name} : ${1000000 + Math.floor(Math.random() * 9000000)}:1`);
-    this.emit("player_join", { name });
-    this.count();
+    const platform = platformOf(name);
+    const uid = 100_000_000 + Math.floor(Math.random() * 900_000_000);
+    this.uids.set(name, uid);
+    this.state.players.push({ name, since: new Date(this.clock()).toISOString(), platform });
+    // The 1.0 crossplay sequence, as the agent serves it (ids redacted).
+    this.log("PlayFab listen socket child connected to remote player ***");
+    this.count("joined");
+    this.log(`PlayFab socket with remote ID playfab/*** received local Platform ID ${PLATFORM[name]?.prefix ?? "Steam"}_***`);
+    this.log("Got handshake from client playfab/***");
+    this.log("Server: New peer connected,sending global keys");
+    this.log(`Got character ZDOID from ${name} : ${uid}:1`);
+    this.emit("player_join", { name, platform });
   }
 
   private leave(name: string): void {
     if (!this.state.players.some((p) => p.name === name)) return;
+    const uid = this.uids.get(name) ?? 1;
+    this.uids.delete(name);
     this.state.players = this.state.players.filter((p) => p.name !== name);
+    this.log("RPC_Disconnect");
+    for (const k of [1, 2, 3]) this.log(`Destroying abandoned non persistent zdo ${uid}:${k} owner ${uid}`);
     this.emit("player_leave", { name });
-    this.count();
+    this.count("lost");
   }
 
   private death(name: string): void {
     if (!this.state.players.some((p) => p.name === name)) return;
     this.log(`Got character ZDOID from ${name} : 0:0`);
     this.emit("death", { name });
+    // The respawn: a new character ZDOID with the same peer id, not a join.
+    this.timers.push(setTimeout(() => {
+      const uid = this.uids.get(name);
+      if (uid) this.log(`Got character ZDOID from ${name} : ${uid}:${2 + Math.floor(Math.random() * 20000)}`);
+    }, 8000));
   }
 
   private save(): void {
@@ -468,7 +515,13 @@ export class MockAgent implements AgentSource {
       meta.day = Math.floor(meta.netTime / 1800);
       meta.savedAt = this.state.world.lastSaveAt;
     }
-    this.log(`World saved ( ${ms}ms )`);
+    // The game's own autobackup rides along with some saves.
+    if (Math.random() < 0.25) {
+      const bms = Math.round(20 + Math.random() * 40);
+      this.log(`World auto backup saved [${bms}ms]`);
+      this.emit("world_backup", { ms: bms });
+    }
+    this.log(`World save (5/5) done. Total time [${ms}ms]`);
     this.emit("world_saved", { ms });
   }
 
@@ -489,7 +542,7 @@ export class MockAgent implements AgentSource {
       recv: Math.floor(Math.random() * 400),
     };
     this.state.server.netStats = ns;
-    this.log(`Connections ${ns.connections} ZDOS:${ns.zdos}  sent:${ns.sent} recv:${ns.recv}`);
+    this.log(` Connections ${ns.connections} ZDOS:${ns.zdos}  sent:${ns.sent} recv:${ns.recv}`);
     this.emit("net_stats", ns);
   }
 
@@ -506,7 +559,7 @@ export class MockAgent implements AgentSource {
 
   private noise(): void {
     const tpl = NOISE[Math.floor(Math.random() * NOISE.length)]!;
-    this.log(tpl.replace("{n}", String(Math.floor(Math.random() * 90000))).replace("{k}", String(Math.floor(Math.random() * 400))));
+    this.log(tpl.replaceAll("{n}", String(Math.floor(Math.random() * 90000))).replaceAll("{k}", String(Math.floor(Math.random() * 400))));
   }
 
   // ---- event plumbing ------------------------------------------------------
@@ -558,7 +611,7 @@ export class MockAgent implements AgentSource {
     spans.push({ name: "Bjorn", from: at(5, 23, 10), to: at(4, 4, 25), deaths: 1 });
     const raw: { at: number; type: AgentEventType; data: Record<string, unknown> }[] = [];
     for (const s of spans) {
-      raw.push({ at: s.from, type: "player_join", data: { name: s.name } });
+      raw.push({ at: s.from, type: "player_join", data: { name: s.name, platform: platformOf(s.name) } });
       raw.push({ at: s.to, type: "player_leave", data: { name: s.name } });
       for (let i = 0; i < s.deaths; i++) raw.push({ at: s.from + rand() * (s.to - s.from), type: "death", data: { name: s.name } });
     }
@@ -591,7 +644,7 @@ export class MockAgent implements AgentSource {
     // Tonight's session, matching the players in the initial state.
     for (const [i, p] of this.state.players.entries()) {
       const at = Date.parse(p.since);
-      this.emit("player_join", { name: p.name }, at);
+      this.emit("player_join", { name: p.name, platform: p.platform ?? "unknown" }, at);
       this.emit("player_count", { count: i + 1 }, at);
     }
   }

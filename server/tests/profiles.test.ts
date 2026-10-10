@@ -176,3 +176,18 @@ describe("deriveProfiles", () => {
     }
   });
 });
+
+describe("platform", () => {
+  it("keeps the latest known platform and ignores unknown after a known one", () => {
+    const events = [
+      ev("2026-10-01T18:00:00Z", "player_join", { name: "Freya", platform: "steam" }),
+      ev("2026-10-01T19:00:00Z", "player_leave", { name: "Freya" }),
+      ev("2026-10-02T18:00:00Z", "player_join", { name: "Freya", platform: "unknown" }),
+      ev("2026-10-02T19:00:00Z", "player_leave", { name: "Freya" }),
+      ev("2026-10-03T18:00:00Z", "player_join", { name: "Freya", platform: "xbox" }),
+      ev("2026-10-03T18:00:00Z", "player_join", { name: "Bjorn" }),
+    ];
+    expect(one(events, "2026-10-03T20:00:00Z", "Freya").platform).toBe("xbox");
+    expect(one(events, "2026-10-03T20:00:00Z", "Bjorn").platform).toBeNull();
+  });
+});

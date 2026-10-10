@@ -7,9 +7,14 @@ export type ActionName = "backup" | "restart" | "update";
 
 export const ACTION_NAMES: readonly ActionName[] = ["backup", "restart", "update"];
 
+/** Platform type from the PlayFab handshake; the raw platform ID is never sent. */
+export type Platform = "xbox" | "steam" | "playstation" | "nintendo" | "unknown";
+
 export interface Player {
   name: string;
   since: string;
+  /** Missing from agents older than 0.4.0. */
+  platform?: Platform;
 }
 
 /** Backup file names the agent produces; anything else never reaches it. */
@@ -37,9 +42,23 @@ export interface WorldMeta {
   worldGenVersion: number;
   /** In-game seconds since world creation. */
   netTime: number;
-  /** floor(netTime / 1800); mapping to the in-game day counter is unverified. */
+  /** floor(netTime / 1800); matches the game's own day counter. */
   day: number;
   savedAt: string;
+  /**
+   * Non-default world modifiers the world was created with (its starting
+   * `preset` key), e.g. `{ resources: "muchmore", portals: "casual" }`.
+   * null when unreadable; missing from agents older than 0.4.0.
+   */
+  modifiers?: Record<string, string> | null;
+  /** Other starting keys, e.g. `teleportall`, `resourcerate 200`. */
+  worldKeys?: string[] | null;
+  /** Players the world remembers (count only). */
+  knownPlayers?: number;
+  /** Current global keys (`defeated_eikthyr`, `killedtroll`, ...); null when unreadable. */
+  globalKeys?: string[] | null;
+  /** The boss path in order; null when the global keys are unreadable. */
+  bosses?: { key: string; defeated: boolean }[] | null;
 }
 
 export interface AgentState {
@@ -136,6 +155,7 @@ export type AgentEventType =
   | "player_leave"
   | "death"
   | "world_saved"
+  | "world_backup"
   | "version"
   | "server_state"
   | "playfab"
@@ -188,6 +208,8 @@ export interface DailyPlay {
 export interface PlayerProfile {
   name: string;
   online: boolean;
+  /** Platform of the latest join that carried one; null when never seen. */
+  platform: Platform | null;
   firstSeen: string;
   lastSeen: string;
   playtimeMs: number;

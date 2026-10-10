@@ -101,3 +101,35 @@ describe("MockAgent settings", () => {
     m.stop();
   });
 });
+
+describe("MockAgent 1.0 crossplay", () => {
+  it("joins with a platform, logs redacted 1.0 lines and knows the boss path", async () => {
+    jest.useFakeTimers();
+    let now = Date.parse("2026-10-10T20:00:00Z");
+    const m = new MockAgent(() => now);
+    const seen: AgentEvent[] = [];
+    const ac = new AbortController();
+    void m.stream(1 << 30, (e) => seen.push(e), ac.signal);
+    m.start();
+    try {
+      for (let i = 0; i < 40; i++) {
+        now += 250;
+        jest.advanceTimersByTime(250);
+      }
+      const st = await m.getState();
+      expect(st.players.map((p) => [p.name, p.platform])).toContainEqual(["Ragnar", "xbox"]);
+      expect(st.world.meta?.bosses?.filter((b) => b.defeated).map((b) => b.key)).toEqual(["defeated_eikthyr", "defeated_gdking", "defeated_bonemass"]);
+      expect(st.world.meta?.modifiers).toMatchObject({ resources: "muchmore", portals: "casual" });
+      const join = seen.find((e) => e.type === "player_join");
+      expect(join?.data).toEqual({ name: "Bjorn", platform: "playstation" });
+      const lines = seen.filter((e) => e.type === "log").map((e) => String(e.data.line));
+      expect(lines.some((l) => /Player joined server ".*" that has join code \d+, now \d+ player\(s\)/.test(l))).toBe(true);
+      expect(lines.some((l) => l.endsWith("received local Platform ID PlayStation_***"))).toBe(true);
+      expect(lines.some((l) => /_\d{6,}|playfab\/[0-9A-F]{6,}/.test(l))).toBe(false);
+    } finally {
+      ac.abort();
+      m.stop();
+      jest.useRealTimers();
+    }
+  });
+});

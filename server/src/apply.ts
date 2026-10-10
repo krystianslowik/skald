@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentState } from "./types";
+import type { AgentEvent, AgentState, Platform } from "./types";
 
 /**
  * Applies one live agent event to the last known state. Used by the hub (so
@@ -12,7 +12,8 @@ export function applyEvent<S extends AgentState>(s: S, ev: AgentEvent): S {
     case "player_join": {
       const name = String(d.name ?? "");
       if (!name || s.players.some((p) => p.name === name)) return s;
-      return { ...s, players: [...s.players, { name, since: ev.ts }] };
+      const platform = typeof d.platform === "string" ? (d.platform as Platform) : undefined;
+      return { ...s, players: [...s.players, platform ? { name, since: ev.ts, platform } : { name, since: ev.ts }] };
     }
     case "player_leave":
       return { ...s, players: s.players.filter((p) => p.name !== d.name) };
