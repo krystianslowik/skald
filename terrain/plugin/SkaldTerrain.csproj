@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Skald's terrain sampler, a BepInEx 5 plugin. It binds to the game by
+    reflection at run time, so it compiles without any game files: only
+    BepInEx and Unity reference assemblies from the BepInEx NuGet feed
+    (nuget.config). Nothing from Valheim is referenced, copied or shipped.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net462</TargetFramework>
+    <AssemblyName>SkaldTerrain</AssemblyName>
+    <RootNamespace>Skald.Terrain</RootNamespace>
+    <Version>0.7.0</Version>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <Deterministic>true</Deterministic>
+    <DebugType>none</DebugType>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <PackageReference Include="BepInEx.Core" Version="5.4.21" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="UnityEngine.Modules" Version="6000.0.75" PrivateAssets="all" ExcludeAssets="runtime" />
+  </ItemGroup>
+</Project>
