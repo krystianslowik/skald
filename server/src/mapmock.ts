@@ -1,3 +1,4 @@
+import { MOCK_GROUND } from "./mockpieces";
 import type { MapContainer, MapItem, MapLocation, MapLocationKind, MapSnapshot } from "./types";
 
 /**
@@ -147,13 +148,25 @@ const GRID: Record<string, [number, number]> = { piece_chest_wood: [5, 2], piece
  * world chests, like the agent.
  */
 function mockStorage(showNames: boolean): MapContainer[] {
-  const c = (prefab: string, x: number, z: number, stacks: Stack[]): MapContainer => {
+  const c = (prefab: string, x: number, z: number, stacks: Stack[], y = MOCK_GROUND.home + 0.05): MapContainer => {
     const [width, height] = GRID[prefab] ?? [5, 2];
     const kind = prefab === "Cart" ? "cart" : prefab === "Karve" || prefab === "Raft" ? "ship" : "chest";
-    return { id: `${prefab}@${x},${z}`, kind, prefab, x, z, width, height, items: fill(width, stacks, showNames) };
+    return { id: `${prefab}@${x},${z}`, kind, prefab, x, y: +y.toFixed(2), z, width, height, items: fill(width, stacks, showNames) };
   };
-  return [
-    c("piece_chest_wood", 208, -352, [["Wood", 50], ["Wood", 50], ["Wood", 50], ["Wood", 50], ["Wood", 37], ["FineWood", 50], ["FineWood", 22], ["RoundLog", 50], ["ElderBark", 31], ["Resin", 44]]),
+  // A chest stacked on another one, about 0.9 m up.
+  const on = (below: MapContainer, stacks: Stack[]): MapContainer => c(below.prefab, below.x, below.z, stacks, below.y! + 0.9);
+  const two = c("piece_chest_wood", 208, -352, [["Wood", 50], ["Wood", 50], ["Wood", 50], ["Wood", 50], ["Wood", 37], ["FineWood", 50], ["FineWood", 22], ["RoundLog", 50], ["ElderBark", 31], ["Resin", 44]]);
+  const three = c("piece_chest_wood", 233, -346, [["LeatherScraps", 50], ["LeatherScraps", 22], ["DeerHide", 26], ["TrollHide", 4]]);
+  const middle = on(three, [["Feathers", 48], ["Resin", 30], ["GreydwarfEye", 17]]);
+  const all = [
+    two,
+    on(two, [["Wood", 50], ["Wood", 50], ["FineWood", 50], ["RoundLog", 18]]),
+    three,
+    middle,
+    on(middle, [["Flint", 30], ["Stone", 50], ["Stone", 50]]),
+    // Up in the loft of the longhouse.
+    c("piece_chest", 226, -348, [["Coal", 50], ["Coal", 50], ["Coal", 31], ["Copper", 20], ["Tin", 12]], MOCK_GROUND.upper + 0.05),
+    c("piece_chest_wood", 230, -354, [["Honey", 20], ["QueensJam", 4], ["Raspberry", 12]], MOCK_GROUND.upper + 0.05),
     c("piece_chest_wood", 211, -352, [["Stone", 50], ["Stone", 50], ["Stone", 18], ["Flint", 27], ["Coal", 50], ["Coal", 12], ["SurtlingCore", 9], ["BoneFragments", 36]]),
     c("piece_chest", 214, -352, [
       ["CopperOre", 30], ["CopperOre", 30], ["CopperOre", 11], ["TinOre", 30], ["TinOre", 4], ["Copper", 50], ["Copper", 23], ["Tin", 18],
@@ -173,13 +186,21 @@ function mockStorage(showNames: boolean): MapContainer[] {
     c("piece_chest_wood", 229, -352, [["TrophyDeer", 6], ["TrophyBoar", 4], ["TrophyGreydwarf", 11], ["TrophyTroll", 2], ["TrophyEikthyr", 1], ["Wishbone", 1], ["CryptKey", 1], ["Ruby", 4], ["Amber", 7]]),
     c("piece_chest_barrel", 236, -334, [["MeadHealthMinor", 10], ["MeadStaminaMinor", 10], ["MeadPoisonResist", 6], ["MeadFrostResist", 4], ["CarrotSoup", 9], ["TurnipStew", 5]]),
     c("piece_chest_wood", 202, -330, []),
-    c("piece_chest_wood", -1466, 986, [["Guck", 14], ["Iron", 18], ["IronScrap", 30], ["IronScrap", 22], ["Chitin", 8], ["SerpentStew", 3], ["CookedDeerMeat", 7], ["Wood", 41]]),
-    c("piece_chest_wood", -1452, 990, [["TrollHide", 9], ["DeerHide", 26], ["LeatherScraps", 31], ["Feathers", 48], ["GreydwarfEye", 37], ["WolfPelt", 6], ["FreezeGland", 5]]),
-    c("piece_chest_wood", 1574, 1726, [["Silver", 30], ["Silver", 12], ["Obsidian", 40], ["WolfPelt", 11], ["FreezeGland", 13]]),
-    c("Cart", 160, -300, [["CopperOre", 30], ["CopperOre", 30], ["CopperOre", 30], ["TinOre", 30], ["TinOre", 18], ["Stone", 50], ["Wood", 50], ["Wood", 50], ["Resin", 12]]),
-    c("Karve", 420, -520, [["IronScrap", 30], ["IronScrap", 30], ["Wood", 50], ["CookedMeat", 8]]),
-    c("Raft", -980, 640, []),
+    c("piece_chest_wood", -1466, 986, [["Guck", 14], ["Iron", 18], ["IronScrap", 30], ["IronScrap", 22], ["Chitin", 8], ["SerpentStew", 3], ["CookedDeerMeat", 7], ["Wood", 41]], MOCK_GROUND.swamp + 0.05 + 16 * 0.06),
+    c("piece_chest_wood", -1452, 990, [["TrollHide", 9], ["DeerHide", 26], ["LeatherScraps", 31], ["Feathers", 48], ["GreydwarfEye", 37], ["WolfPelt", 6], ["FreezeGland", 5]], MOCK_GROUND.swamp + 0.05 + 20 * 0.06),
+    c("piece_chest_wood", 1574, 1726, [["Silver", 30], ["Silver", 12], ["Obsidian", 40], ["WolfPelt", 11], ["FreezeGland", 13]], MOCK_GROUND.mountain + 0.05),
+    c("Cart", 160, -300, [["CopperOre", 30], ["CopperOre", 30], ["CopperOre", 30], ["TinOre", 30], ["TinOre", 18], ["Stone", 50], ["Wood", 50], ["Wood", 50], ["Resin", 12]], 33.1),
+    c("Karve", 420, -520, [["IronScrap", 30], ["IronScrap", 30], ["Wood", 50], ["CookedMeat", 8]], 29.85),
+    c("Raft", -980, 640, [], 30),
   ];
+  // Chests on one metre get "#n" from the bottom up, as the agent names them.
+  const seen = new Map<string, number>();
+  for (const s of all) {
+    const n = seen.get(s.id) ?? 0;
+    seen.set(s.id, n + 1);
+    if (n > 0) s.id = `${s.id}#${n}`;
+  }
+  return all;
 }
 
 export function mockMap(opts: { generation?: number; netTime?: number; savedAt?: string; now?: number; showNames?: boolean } = {}): MapSnapshot {

@@ -567,6 +567,35 @@ export interface ApiStorage {
   containers: MapContainer[];
 }
 
+/** How a built piece is drawn on a floor plan. */
+export type PieceKind = "wall" | "floor" | "roof" | "door" | "stair" | "beam" | "pole" | "fence" | "station" | "furniture" | "storage" | "light" | "portal" | "plant" | "other";
+
+/**
+ * A prefab on a floor plan: its plan-view rectangle in metres along the
+ * piece's local x and z, the pitch of a roof in degrees (0 for anything
+ * else), and whether the agent knows it (unknown ones are "#hash", 1 x 1 m).
+ */
+export type PiecePrefab = [name: string, kind: PieceKind, width: number, depth: number, slope: number, known: boolean];
+
+/**
+ * One built piece: index into `prefabs`, position and height in metres, yaw
+ * in whole degrees clockwise seen from above (local +x points along
+ * (cos yaw, -sin yaw) in world x, z), flags bit 0 for a piece tilted more
+ * than 10 degrees.
+ */
+export type PieceRow = [prefab: number, x: number, z: number, y: number, yaw: number, flags: number];
+
+/** Agent GET /pieces and web GET /api/pieces: what players built inside a box. */
+export interface ApiPieces {
+  generation: number;
+  bbox: [x0: number, z0: number, x1: number, z1: number];
+  prefabs: PiecePrefab[];
+  pieces: PieceRow[];
+  count: number;
+  /** More pieces lie in the box than one answer carries (20,000). */
+  truncated: boolean;
+}
+
 // ---- admin (the Skald bridge plugin, through the agent) --------------------
 
 /**

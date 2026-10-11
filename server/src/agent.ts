@@ -22,6 +22,9 @@ export interface MapSourceResult {
 /** Files the agent serves as they are: the item icon sheet and its map, the terrain image and its facts. */
 export type AgentAsset = "icons/map.json" | "icons/sheet.webp" | "terrain.png" | "terrain.json";
 
+/** A world-space box for floor plans: [x0, z0, x1, z1] in metres. */
+export type PiecesBox = readonly [x0: number, z0: number, x1: number, z1: number];
+
 /** One bridge call, proxied to the agent (or answered by the mock). */
 export type BridgeRequest =
   | { op: "status" }
@@ -44,6 +47,8 @@ export interface AgentSource {
   map(etag: string | null): Promise<MapSourceResult>;
   /** Raw agent file response (200 with a body, 304, 404, 503); the caller owns the body. */
   asset(path: AgentAsset, etag: string | null, signal: AbortSignal): Promise<Response>;
+  /** Raw `GET /pieces` for a box (200, 304, 400, 404, 503); the caller owns the body. */
+  pieces(box: PiecesBox, etag: string | null, signal: AbortSignal): Promise<Response>;
   /** The admin bridge: 404 when the agent has no BRIDGE_TOKEN. */
   bridge(req: BridgeRequest): Promise<Proxied>;
 }
@@ -136,6 +141,13 @@ export class HttpAgent implements AgentSource {
     const headers: Record<string, string> = this.headers();
     if (etag) headers["If-None-Match"] = etag;
     return this.fetchImpl(`${this.baseUrl}/${path}`, { headers, signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]) });
+  }
+
+  pieces(box: PiecesBox, etag: string | null, signal: AbortSignal): Promise<Response> {
+    const headers: Record<string, string> = { ...this.headers(), "Accept-Encoding": "gzip" };
+    if (etag) headers["If-None-Match"] = etag;
+    const [x0, z0, x1, z1] = box;
+    return this.fetchImpl(`${this.baseUrl}/pieces?x0=${x0}&z0=${z0}&x1=${x1}&z1=${z1}`, { headers, signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) });
   }
 
   async bridge(req: BridgeRequest): Promise<Proxied> {

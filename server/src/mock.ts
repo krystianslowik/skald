@@ -1,5 +1,6 @@
-import type { ActionResponse, AgentAsset, AgentSource, BridgeRequest, MapSourceResult, Proxied } from "./agent";
+import type { ActionResponse, AgentAsset, AgentSource, BridgeRequest, MapSourceResult, PiecesBox, Proxied } from "./agent";
 import { mockMap } from "./mapmock";
+import { mockPieces, piecesIn } from "./mockpieces";
 import { mockIcons, type MockIcons } from "./mockicons";
 import { MOCK_TERRAIN_RADIUS, mockTerrain } from "./mockterrain";
 import { addDays, calendar } from "./profiles";
@@ -172,6 +173,7 @@ export class MockAgent implements AgentSource {
   private mapBase: MapSnapshot | null = null;
   private iconSet: MockIcons | null = null;
   private mapGeneration = 1;
+  private piecesAll: ReturnType<typeof mockPieces> | null = null;
   // The fake bridge plugin.
   private pos = new Map<string, MockPos>();
   private bans: { id: string; platform: Platform; name?: string }[] = [{ id: "5e1d0c3b2a190807", platform: "steam", name: "Hrafn" }, { id: "0f9e8d7c6b5a4f3e", platform: "xbox" }];
@@ -316,6 +318,16 @@ export class MockAgent implements AgentSource {
       meta: { ...this.mapBase.meta, generation: this.mapGeneration, netTime: meta?.netTime ?? 0, day: meta?.day ?? 0, savedAt: meta?.savedAt ?? this.mapBase.meta.savedAt },
     };
     return { status: 200, etag: tag, body };
+  }
+
+  /** Floor plans: the mock's bases, cut to the box like the agent does (gzip is the web tier's job). */
+  async pieces(box: PiecesBox, etag: string | null): Promise<Response> {
+    this.mapBase ??= mockMap({ now: this.clock() });
+    this.piecesAll ??= mockPieces(this.mapBase.storage ?? []);
+    // Like the agent's: what was built and the box, not the save generation.
+    const tag = `"mock-pieces-${box.join(",")}"`;
+    if (etag === tag) return new Response(null, { status: 304, headers: { ETag: tag } });
+    return new Response(JSON.stringify(piecesIn(this.piecesAll, box, this.mapGeneration)), { headers: { ETag: tag, "Content-Type": "application/json" } });
   }
 
   /** A generated sheet for every item the mock map holds. */

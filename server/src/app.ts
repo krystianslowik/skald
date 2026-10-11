@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import { getConnInfo } from "hono/bun";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import type { AgentAsset, AgentSource } from "./agent";
+import type { AgentAsset, AgentSource, PiecesBox } from "./agent";
 import { ADMIN_COOKIE, ADMIN_IDLE_MS, createAdminSession, createSession, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS, sessionHash, verifyAdminSession, verifySession } from "./auth";
 import type { Hub } from "./hub";
 import type { MapCache, MapView } from "./map";
@@ -63,6 +63,28 @@ function clientIp(c: Context, trustedHeader: string): string {
   } catch {
     return "unknown";
   }
+}
+
+/** The agent's limit on each side of a floor-plan box, in metres. */
+export const PIECES_MAX_SIDE = 1024;
+const WORLD_EDGE = 10_500;
+
+/**
+ * The box of a floor-plan request from x0, z0, x1, z1, clamped to the world
+ * disc's square, or why it is refused.
+ */
+export function parsePiecesBox(query: (k: string) => string | undefined): PiecesBox | string {
+  const v: number[] = [];
+  for (const k of ["x0", "z0", "x1", "z1"]) {
+    const raw = query(k)?.trim();
+    const n = raw ? Number(raw) : Number.NaN;
+    if (!Number.isFinite(n)) return "x0, z0, x1 and z1 must be numbers";
+    v.push(Math.min(WORLD_EDGE, Math.max(-WORLD_EDGE, n)));
+  }
+  const [x0, z0, x1, z1] = v as [number, number, number, number];
+  if (x1 < x0 || z1 < z0) return "the box needs x0 <= x1 and z0 <= z1";
+  if (x1 - x0 > PIECES_MAX_SIDE || z1 - z0 > PIECES_MAX_SIDE) return `the box is limited to ${PIECES_MAX_SIDE} m a side`;
+  return [x0, z0, x1, z1];
 }
 
 export function createApp(deps: AppDeps): Hono {
@@ -198,6 +220,47 @@ export function createApp(deps: AppDeps): Hono {
   };
   app.get("/api/map", (c) => serveMap(c, "map"));
   app.get("/api/storage", (c) => serveMap(c, "storage"));
+
+  // Floor plans of what players built inside a box, for close zoom. The box is
+  // checked here so a bad one never reaches the agent; the answer passes
+  // through with the agent's ETag, re-compressed for this client.
+  app.get("/api/pieces", async (c) => {
+    if (!deps.map) return c.json({ error: "world map off" }, 404);
+    const box = parsePiecesBox((k) => c.req.query(k));
+    if (typeof box === "string") return c.json({ error: box }, 400);
+    let up: Response;
+    try {
+      up = await deps.agent.pieces(box, c.req.header("If-None-Match") ?? null, c.req.raw.signal);
+    } catch {
+      return c.json({ error: "agent unreachable" }, 502);
+    }
+    const headers: Record<string, string> = { "Cache-Control": "private, no-cache", Vary: "Accept-Encoding" };
+    const etag = up.headers.get("ETag");
+    if (etag) headers.ETag = etag;
+    if (up.status === 304) {
+      await up.body?.cancel();
+      return new Response(null, { status: 304, headers });
+    }
+    if (up.status !== 200) {
+      await up.body?.cancel();
+      if (up.status === 503) return c.json({ error: "world map not ready" }, 503, { "Retry-After": up.headers.get("Retry-After") ?? "30" });
+      if (up.status === 404) return c.json({ error: "not available" }, 404);
+      return c.json({ error: "agent error" }, 502);
+    }
+    let json: string;
+    try {
+      // Read whole: fetch has already undone the agent's gzip.
+      json = await up.text();
+    } catch {
+      return c.json({ error: "agent unreachable" }, 502);
+    }
+    headers["Content-Type"] = "application/json";
+    if (/\bgzip\b/.test(c.req.header("Accept-Encoding") ?? "")) {
+      headers["Content-Encoding"] = "gzip";
+      return new Response(Bun.gzipSync(json), { status: 200, headers });
+    }
+    return new Response(json, { status: 200, headers });
+  });
 
   // Files the agent serves as they are, passed through with their ETag. The
   // URL of a sheet carries its build (?v=), so it can be cached for good.

@@ -34,6 +34,9 @@ function setup(
     async map() {
       return { status: 404, etag: null, body: null };
     },
+    async pieces() {
+      return new Response(null, { status: 404 });
+    },
     async asset(path, etag, signal) {
       return opts.asset ? opts.asset(path, etag, signal) : new Response(null, { status: 404 });
     },
