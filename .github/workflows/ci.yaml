@@ -21,8 +21,8 @@ jobs:
       run:
         working-directory: agent
     steps:
-      - uses: actions/checkout@v4.2.2
-      - uses: actions/setup-go@v5.5.0
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
         with:
           go-version-file: agent/go.mod
           cache-dependency-path: agent/go.sum
@@ -38,8 +38,8 @@ jobs:
       run:
         working-directory: server
     steps:
-      - uses: actions/checkout@v4.2.2
-      - uses: oven-sh/setup-bun@v2.0.2
+      - uses: actions/checkout@v7.0.1
+      - uses: oven-sh/setup-bun@v2.2.0
         with:
           bun-version: 1.3.10
       - run: bun install --frozen-lockfile
@@ -53,8 +53,8 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4.2.2
-      - uses: actions/setup-node@v4.4.0
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -71,8 +71,8 @@ jobs:
       run:
         working-directory: icons
     steps:
-      - uses: actions/checkout@v4.2.2
-      - uses: actions/setup-python@v5.6.0
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.13"
       # The same pinned set as the image, without fmod_toolkit (see requirements.txt).
@@ -86,15 +86,15 @@ jobs:
       run:
         working-directory: terrain
     steps:
-      - uses: actions/checkout@v4.2.2
-      - uses: actions/setup-dotnet@v4.3.1
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.0.0
         with:
           dotnet-version: 9.0.x
       # Bound to the game by reflection: builds against BepInEx and Unity
       # reference assemblies from the BepInEx feed, no game files needed.
       - run: dotnet build plugin -c Release -o out
       - run: bash -n run.sh && bash -n hook.sh
-      - uses: actions/upload-artifact@v4.6.2
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: SkaldTerrain
           path: terrain/out/SkaldTerrain.dll
@@ -107,14 +107,14 @@ jobs:
       run:
         working-directory: bridge
     steps:
-      - uses: actions/checkout@v4.2.2
-      - uses: actions/setup-dotnet@v4.3.1
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.0.0
         with:
           dotnet-version: 9.0.x
       - run: dotnet test tests
       # The reference DLLs only change with a game build, so keep them between
       # runs instead of fetching them from Steam every time.
-      - uses: actions/cache@v4.2.3
+      - uses: actions/cache@v6.1.0
         with:
           path: bridge/refs
           key: bridge-refs-${{ hashFiles('bridge/build.sh') }}
@@ -122,7 +122,7 @@ jobs:
       # it needs (about 2 MB, anonymous) and BepInEx.dll, never committed.
       - run: sh build.sh
       - run: sh -n install.sh
-      - uses: actions/upload-artifact@v4.6.2
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: SkaldBridge
           path: bridge/out/SkaldBridge.dll
@@ -133,10 +133,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [agent, server, web, icons, terrain, bridge]
     steps:
-      - uses: actions/checkout@v4.2.2
-      - uses: docker/setup-buildx-action@v3.11.1
+      - uses: actions/checkout@v7.0.1
+      - uses: docker/setup-buildx-action@v4.4.1
       - name: skald-agent
-        uses: docker/build-push-action@v6.18.0
+        uses: docker/build-push-action@v7.4.0
         with:
           context: agent
           platforms: linux/amd64
@@ -144,7 +144,7 @@ jobs:
           cache-from: type=gha,scope=skald-agent
           cache-to: type=gha,mode=max,scope=skald-agent
       - name: skald-web
-        uses: docker/build-push-action@v6.18.0
+        uses: docker/build-push-action@v7.4.0
         with:
           context: .
           file: server/Dockerfile
@@ -153,7 +153,7 @@ jobs:
           cache-from: type=gha,scope=skald-web
           cache-to: type=gha,mode=max,scope=skald-web
       - name: skald-icons
-        uses: docker/build-push-action@v6.18.0
+        uses: docker/build-push-action@v7.4.0
         with:
           context: icons
           platforms: linux/amd64
@@ -161,7 +161,7 @@ jobs:
           cache-from: type=gha,scope=skald-icons
           cache-to: type=gha,mode=max,scope=skald-icons
       - name: skald-terrain
-        uses: docker/build-push-action@v6.18.0
+        uses: docker/build-push-action@v7.4.0
         with:
           context: terrain
           platforms: linux/amd64
@@ -169,7 +169,7 @@ jobs:
           cache-from: type=gha,scope=skald-terrain
           cache-to: type=gha,mode=max,scope=skald-terrain
       - name: skald-bridge
-        uses: docker/build-push-action@v6.18.0
+        uses: docker/build-push-action@v7.4.0
         with:
           context: bridge
           platforms: linux/amd64
