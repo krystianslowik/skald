@@ -52,3 +52,8 @@ updates:
     groups:
       docker: {patterns: ["*"], update-types: [minor, patch]}
       docker-major: {patterns: ["*"], update-types: [major]}
+    ignore:
+      # Production images follow Node's LTS lines only (even majors); odd
+      # majors are short-lived current releases.
+      - dependency-name: node
+        versions: ["25.x", "27.x", "29.x"]
