@@ -32,6 +32,7 @@ var (
 	keyData        = stableHash("data")
 	keyTCData      = stableHash("TCData")
 	keyItems       = stableHash("items")
+	keyScale       = stableHash("scale")
 )
 
 // What a prefab means for the map.

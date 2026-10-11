@@ -42,7 +42,7 @@ type Options struct {
 	// /settings routes are then not registered at all (404).
 	Settings *settings.Store
 	// Map is the world map builder; nil or disabled answers GET /map and
-	// GET /pieces with 404.
+	// GET /pieces and GET /nature with 404.
 	Map *worldmap.Builder
 	// Icons is ICONS_DIR; nil answers the /icons routes with 404.
 	Icons *icons.Dir
@@ -100,6 +100,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /action/{name}", s.actionHandler)
 	mux.HandleFunc("GET /map", s.mapHandler)
 	mux.HandleFunc("GET /pieces", s.piecesHandler)
+	mux.HandleFunc("GET /nature", s.natureHandler)
 	mux.HandleFunc("GET /icons/map.json", s.iconsMap)
 	mux.HandleFunc("GET /icons/sheet.webp", s.iconsSheet)
 	mux.HandleFunc("GET /terrain.png", s.terrainPNG)

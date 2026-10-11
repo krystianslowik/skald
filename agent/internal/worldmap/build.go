@@ -57,7 +57,9 @@ type Options struct {
 type Encoded struct {
 	Snapshot *Snapshot
 	// Pieces is the floor plan index (GET /pieces); it is not part of JSON.
-	Pieces     *Pieces
+	Pieces *Pieces
+	// Nature is the nature index (GET /nature); it is not part of JSON.
+	Nature     *Nature
 	JSON       []byte
 	Gzip       []byte
 	ETag       string
@@ -153,7 +155,7 @@ func (b *Builder) Refresh() (bool, error) {
 		return false, nil
 	}
 	start := time.Now()
-	snap, pieces, err := b.build(gen)
+	snap, pieces, nature, err := b.build(gen)
 	if err != nil {
 		return false, err
 	}
@@ -162,7 +164,7 @@ func (b *Builder) Refresh() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	enc.Pieces = pieces
+	enc.Pieces, enc.Nature = pieces, nature
 	b.mu.Lock()
 	b.cur = enc
 	b.lastBuild = time.Since(start).Seconds()
@@ -255,12 +257,12 @@ func readFileCapped(path string, max int64) ([]byte, error) {
 	return b, nil
 }
 
-func (b *Builder) build(gen int) (*Snapshot, *Pieces, error) {
+func (b *Builder) build(gen int) (*Snapshot, *Pieces, *Nature, error) {
 	dir := b.opt.Dir
 	base := filepath.Join(dir, "_main."+strconv.Itoa(gen))
 	rows, err := readIndex(base + ".chunks")
 	if err != nil {
-		return nil, nil, fmt.Errorf("chunk index: %w", err)
+		return nil, nil, nil, fmt.Errorf("chunk index: %w", err)
 	}
 	snap := &Snapshot{}
 	seen := make(map[chunkID]bool, len(rows))
@@ -306,8 +308,8 @@ func (b *Builder) build(gen int) (*Snapshot, *Pieces, error) {
 	for _, e := range b.cache {
 		chunks = append(chunks, e.data)
 	}
-	assemble(snap, chunks, b.lastDB2, b.opt.ShowNames)
-	return snap, buildPieces(chunks), nil
+	found := assemble(snap, chunks, b.lastDB2, b.opt.ShowNames)
+	return snap, buildPieces(chunks), buildNature(chunks, found), nil
 }
 
 // The land grid covers the playable disc: zones -164..164 on both axes.
@@ -316,7 +318,10 @@ const (
 	landSize = 329
 )
 
-func assemble(snap *Snapshot, chunks []*chunkData, db *db2Data, showNames bool) {
+// assemble fills the snapshot from the chunks and the .db2. It returns the
+// "found" test that gates locations (inside the explored area or within 64 m
+// of a built piece), for the nature index.
+func assemble(snap *Snapshot, chunks []*chunkData, db *db2Data, showNames bool) func(x, z float32) bool {
 	name := func(s string) string {
 		if showNames {
 			return s
@@ -425,16 +430,18 @@ func assemble(snap *Snapshot, chunks []*chunkData, db *db2Data, showNames bool) 
 		snap.TerrainEdits = append(snap.TerrainEdits, TerrainEdit{X: int(k.x) * 64, Z: int(k.z) * 64, Cells: n})
 	}
 
+	found := func(x, z float32) bool { return isExplored(explored, x, z) || nearPieces(pieces, x, z) }
 	if db != nil {
 		snap.Stats.LocationsTotal, snap.Stats.LocationsPlaced = db.total, db.placed
 		for _, l := range db.locations {
 			snap.Locations = append(snap.Locations, Location{
 				Kind: l.info.kind, Name: l.info.name, X: iround(l.x), Z: iround(l.z), Placed: l.placed,
-				Explored: isExplored(explored, l.x, l.z) || nearPieces(pieces, l.x, l.z),
+				Explored: found(l.x, l.z),
 			})
 		}
 	}
 	sortSnapshot(snap)
+	return found
 }
 
 func storeID(prefab string, x, z float32) string {

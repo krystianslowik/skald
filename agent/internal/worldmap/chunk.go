@@ -107,6 +107,7 @@ type chunkData struct {
 	vehicles []rawVehicle
 	stores   []rawStore
 	built    []rawPiece
+	nature   []natureItem
 	tables   int
 	explored []uint64 // exploredWords words, nil when the chunk holds no table
 	pins     []rawPin
@@ -137,6 +138,8 @@ type zdoFields struct {
 	data        []byte
 	tcdata      []byte
 	items       []byte
+	// scale is the x of the "scale" Vector3 (vegetation sets it), 0 when absent.
+	scale float32
 }
 
 // parseChunk decodes a whole chunk file. A panic is turned into an error as a
@@ -219,6 +222,12 @@ func parseChunk(b []byte) (cd *chunkData, err error) {
 				cd.built = append(cd.built, rawPiece{hash: prefab, x: x, y: y, z: z, yaw: yaw, tilted: tilted})
 			}
 		}
+		if !f.creator && y <= maxNatureY {
+			if kind, ok := natureByHash[prefab]; ok {
+				yaw, _ := rotation(flags&flagRotation != 0, rot)
+				cd.nature = append(cd.nature, newNatureItem(kind, x, z, yaw, f.scale))
+			}
+		}
 		if !interesting {
 			continue
 		}
@@ -282,7 +291,12 @@ func readMaps(r *buf, flags uint16, keep bool, f *zdoFields) {
 			case 0x02, 0x10:
 				r.skip(4)
 			case 0x04:
-				r.skip(12)
+				if key == keyScale {
+					f.scale = r.f32()
+					r.skip(8)
+				} else {
+					r.skip(12)
+				}
 			case 0x08:
 				r.skip(16)
 			case 0x20:

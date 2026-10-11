@@ -596,6 +596,39 @@ export interface ApiPieces {
   truncated: boolean;
 }
 
+/** What a world object on the nature layer is. */
+export type NatureCategory = "tree" | "stump" | "log" | "rock" | "bush" | "ore" | "pickable";
+
+/**
+ * A nature prefab: its category, a short species ("beech", "copper",
+ * "raspberry", ...) and its plan-view size in metres at scale 1 (a tree's
+ * crown, a log's length, a rock's width), a drawing hint.
+ */
+export type NatureKind = [name: string, category: NatureCategory, species: string, size: number];
+
+/**
+ * One object: index into `kinds`, position in metres (0.1 m), yaw in whole
+ * degrees clockwise seen from above, and its scale (1 when the save holds
+ * none). Its drawn size is the kind's size times the scale.
+ */
+export type NatureRow = [kind: number, x: number, z: number, yaw: number, scale: number];
+
+/**
+ * Agent GET /nature: the trees, stumps, logs, rocks, bushes, ore and
+ * pickables the world generated inside a box. Without `spoilers` only those
+ * on explored land or near a base are sent.
+ */
+export interface ApiNature {
+  generation: number;
+  bbox: [x0: number, z0: number, x1: number, z1: number];
+  spoilers: boolean;
+  kinds: NatureKind[];
+  items: NatureRow[];
+  count: number;
+  /** More objects lie in the box than one answer carries (30,000). */
+  truncated: boolean;
+}
+
 // ---- admin (the Skald bridge plugin, through the agent) --------------------
 
 /**
