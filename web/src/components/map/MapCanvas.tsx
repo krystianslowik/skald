@@ -22,7 +22,8 @@ import { useIconSheet } from "../../lib/itemicons";
 import { COARSE, useMedia } from "../../lib/useMedia";
 import { inertiaStep, releaseVelocity, REST_SPEED, springStep } from "../../lib/mapmotion";
 import { MapRenderer, type Relief } from "../../lib/maprender";
-import { PieceLoader } from "../../lib/pieceload";
+import { NATURE_MIN_SCALE, natureLoader, type NatureItem } from "../../lib/nature";
+import { PieceLoader, type ChunkLoader } from "../../lib/pieceload";
 import { PLAN_MIN_SCALE, viewBox, type StoreyInfo, type StoreyPick } from "../../lib/planrender";
 import type { ApiMap } from "../../types";
 
@@ -109,10 +110,12 @@ export const MapCanvas = forwardRef<
     onLongPress?: (p: { x: number; z: number }) => void;
     /** A tap on empty map, at a world point (alongside `onSelect(null)`). */
     onTapWorld?: (p: { x: number; z: number }) => void;
+    /** A tap on an ore deposit (instead of `onSelect`); null when a tap lands anywhere else. */
+    onOre?: (ore: NatureItem | null) => void;
     interactive?: boolean;
     className?: string;
   }
->(function MapCanvas({ map, mask, markers, layers, selected, highlighted, relief = null, storey = null, onStoreys, onSelect, onGroup, onAnchor, onPointerWorld, onFrame, onLongPress, onTapWorld, remember = false, insets = NO_INSETS, interactive = true, className = "relative" }, ref) {
+>(function MapCanvas({ map, mask, markers, layers, selected, highlighted, relief = null, storey = null, onStoreys, onSelect, onGroup, onAnchor, onPointerWorld, onFrame, onLongPress, onTapWorld, onOre, remember = false, insets = NO_INSETS, interactive = true, className = "relative" }, ref) {
   const { t } = useI18n();
   const reduced = useReducedMotion() ?? false;
   const coarse = useMedia(COARSE);
@@ -130,6 +133,7 @@ export const MapCanvas = forwardRef<
   const props = useRef({ markers, layers, selected, highlighted, onAnchor, onFrame, coarse, reduced, remember, storey, onStoreys, generation: map.meta.generation });
   props.current = { markers, layers, selected, highlighted, onAnchor, onFrame, coarse, reduced, remember, storey, onStoreys, generation: map.meta.generation };
   const loader = useRef<PieceLoader | null>(null);
+  const natureLoad = useRef<ChunkLoader<NatureItem> | null>(null);
   const reported = useRef<string | null>(null);
 
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -156,6 +160,8 @@ export const MapCanvas = forwardRef<
       if (p.remember) storeView(v);
       // Settled: floor plans for what the cached map covers, and the floor switcher's base.
       if (p.layers.buildings && v.scale >= PLAN_MIN_SCALE) loader.current?.want(viewBox({ ...v, w: v.w * 1.5, h: v.h * 1.5 }, 8), String(p.generation));
+      // Nature is denser: only the view and a little round it.
+      if ((p.layers.nature || p.layers.resources) && v.scale >= NATURE_MIN_SCALE) natureLoad.current?.want(viewBox({ ...v, w: v.w * 1.2, h: v.h * 1.2 }, 8), String(p.generation));
       const info = r.storeys(v, p.layers);
       const key = info ? `${info.base}:${info.storeys}:${info.hasRoof ? 1 : 0}:${info.main}` : "";
       if (key !== reported.current) {
@@ -317,6 +323,18 @@ export const MapCanvas = forwardRef<
     };
   }, [draw]);
 
+  // Nature: fetched as the view settles close in, like the floor plans.
+  useEffect(() => {
+    const l = (natureLoad.current ??= natureLoader());
+    l.onChange = () => {
+      renderer.current?.setNature(l.loaded);
+      draw("full");
+    };
+    return () => {
+      l.onChange = null;
+    };
+  }, [draw]);
+
   // Item icons for the contents strips under containers, once the sheet has decoded.
   const iconSheet = useIconSheet();
   useEffect(() => {
@@ -471,7 +489,7 @@ export const MapCanvas = forwardRef<
         onPointerWorld?.(((w) => ({ x: Math.round(w[0]), z: Math.round(w[1]) }))(screenToWorld(view.current, p.x, p.y)));
         const hit = renderer.current ? pickItem(renderer.current.visible, p.x, p.y) : null;
         const id = hit?.m.id ?? null;
-        el.style.cursor = id ? "pointer" : "grab";
+        el.style.cursor = id || (onOre && renderer.current?.oreAt(p.x, p.y, 4)) ? "pointer" : "grab";
         if (id !== hovered.current) {
           hovered.current = id;
           schedule();
@@ -539,10 +557,19 @@ export const MapCanvas = forwardRef<
         const hit = renderer.current ? pickItem(renderer.current.visible, p.x, p.y, touch ? 28 : 16) : null;
         if (hit) {
           lastTap = null;
+          onOre?.(null);
           if (hit.members && hit.members.length > 1) openCluster(hit.members);
           else onSelect(hit.m);
           return;
         }
+        const ore = onOre && renderer.current ? renderer.current.oreAt(p.x, p.y, touch ? 14 : 6) : null;
+        if (ore) {
+          lastTap = null;
+          onSelect(null);
+          onOre!(ore);
+          return;
+        }
+        onOre?.(null);
         // Empty map: a second tap close by zooms in; the first one only clears the selection.
         if (lastTap && e.timeStamp - lastTap.t < DOUBLE_TAP_MS && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < DOUBLE_TAP_PX) {
           lastTap = null;
@@ -598,7 +625,7 @@ export const MapCanvas = forwardRef<
       el.removeEventListener("pointerleave", leave);
       el.removeEventListener("wheel", wheel);
     };
-  }, [interactive, onPointerWorld, onSelect, onLongPress, onTapWorld, openCluster, glideTo, reduced, schedule, setView]);
+  }, [interactive, onPointerWorld, onSelect, onLongPress, onTapWorld, onOre, openCluster, glideTo, reduced, schedule, setView]);
 
   const onKey = (e: ReactKeyboardEvent) => {
     const v = view.current;

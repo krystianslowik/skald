@@ -30,7 +30,9 @@ import {
   type View,
 } from "./mapgeo";
 import { ICONS } from "./mapicons";
-import type { Piece } from "./pieces";
+import { natureTint, wobble, type NatureItem } from "./nature";
+import { NatureLayer, natureAlpha } from "./naturerender";
+import type { ChunkKey, Piece } from "./pieces";
 import { FloorPlan, PLAN_FULL_SCALE, PLAN_MIN_SCALE, planAlpha, STOREY_SCALE, viewBox, type StoreyInfo, type StoreyPick } from "./planrender";
 
 const PAPER = "#d9c7a0";
@@ -341,6 +343,10 @@ export class MapRenderer {
   private activeBase: string | null = null;
   /** Each chest mark's base and storey, for the current plan. */
   private markStorey = new Map<string, StoreyPick | null>();
+  /** Trees, rocks, ore and the rest, as loaded so far. */
+  private nature = new NatureLayer();
+  /** Ore deposits drawn in the last frame, in screen space, for tapping. */
+  visibleOre: { item: NatureItem; sx: number; sy: number; r: number }[] = [];
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext("2d");
@@ -402,6 +408,26 @@ export class MapRenderer {
     this.plan = pieces.length ? new FloorPlan(pieces) : null;
     this.planVersion++;
     this.markStorey.clear();
+  }
+
+  /** What the world generated, as loaded so far, by chunk. */
+  setNature(loaded: ReadonlyMap<ChunkKey, readonly NatureItem[]>): void {
+    if (!this.ctx) return;
+    this.nature.set(loaded);
+  }
+
+  /** The ore deposit drawn under a screen point, within `slop` px of its edge. */
+  oreAt(x: number, y: number, slop: number): NatureItem | null {
+    let best: NatureItem | null = null;
+    let bestD = Infinity;
+    for (const o of this.visibleOre) {
+      const d = Math.hypot(o.sx - x, o.sy - y) - o.r;
+      if (d <= slop && d < bestD) {
+        best = o.item;
+        bestD = d;
+      }
+    }
+    return best;
   }
 
   /** The base the floor switcher is for at this view, or null (too far out, one storey, none loaded). */
@@ -493,7 +519,8 @@ export class MapRenderer {
     if (!g) return false;
     const v = f.view;
     const plan = f.layers.buildings && this.plan ? `${this.planVersion}:${f.storey ? `${f.storey.base}/${f.storey.level}` : ""}:${this.storeys(v, f.layers)?.base ?? ""}` : "";
-    const key = `${f.layers.fog ? 1 : 0}${f.layers.terrain ? 1 : 0}${f.layers.relief ? 1 : 0}:${this.version}:${v.w}x${v.h}:${this.dpr}:${plan}`;
+    const nature = f.layers.nature || f.layers.resources ? `${f.layers.nature ? 1 : 0}${f.layers.resources ? 1 : 0}:${this.nature.version}` : "";
+    const key = `${f.layers.fog ? 1 : 0}${f.layers.terrain ? 1 : 0}${f.layers.relief ? 1 : 0}:${this.version}:${v.w}x${v.h}:${this.dpr}:${plan}:${nature}`;
     let b = this.base;
     const covers = (c: NonNullable<typeof b>) => {
       const k = v.scale / c.scale;
@@ -518,6 +545,7 @@ export class MapRenderer {
     }
     this.screen(g);
     if (f.layers.grid) this.drawGrid(g, v);
+    this.drawOres(g, f);
     if (this.prep && f.layers.portals) this.drawLinks(g, v, this.prep);
     return this.drawMarkers(g, f);
   }
@@ -591,6 +619,7 @@ export class MapRenderer {
       }
       g.restore();
       if (layers.terrain) this.drawTerrain(g, v, p);
+      this.drawNature(g, v, layers);
       this.drawFog(g, v, p, layers);
     } else if (p) {
       g.fillStyle = SEA;
@@ -616,6 +645,7 @@ export class MapRenderer {
       g.lineWidth = Math.max(1.1, Math.min(2.2, v.scale * 6)) / v.scale;
       g.stroke(p.coast);
       if (layers.terrain) this.drawTerrain(g, v, p);
+      this.drawNature(g, v, layers);
       this.drawFog(g, v, p, layers);
     }
     // Floor plans over the fog: what was built is always somewhere explored.
@@ -631,6 +661,61 @@ export class MapRenderer {
     g.strokeStyle = COAST;
     g.lineWidth = 1.5 / v.scale;
     g.stroke();
+  }
+
+  /** Woods, rocks and pickables, under the fog and the floor plans. */
+  private drawNature(g: CanvasRenderingContext2D, v: View, layers: Record<LayerId, boolean>) {
+    if (!layers.nature && !layers.resources) return;
+    this.nature.draw(g, viewBox(v, 4), v.scale, { nature: layers.nature, pickables: layers.resources });
+  }
+
+  /**
+   * Ore deposits, in screen space so they keep their size during a pinch:
+   * a stone in the metal's colour with a dark edge, never under 6 px across.
+   */
+  private drawOres(g: CanvasRenderingContext2D, f: FrameState) {
+    const v = f.view;
+    const alpha = natureAlpha(v.scale);
+    this.visibleOre = [];
+    if (!f.layers.resources || alpha <= 0) return;
+    const ores = this.nature.ores(viewBox(v, 20));
+    if (!ores.length) return;
+    g.lineJoin = "round";
+    for (const o of ores) {
+      const [sx, sy] = worldToScreen(v, o.x, o.z);
+      const r = Math.max(5, (o.size / 2) * v.scale * 0.9);
+      if (sx < -r || sy < -r || sx > v.w + r || sy > v.h + r) continue;
+      this.visibleOre.push({ item: o, sx, sy, r });
+      const tint = natureTint("ore", o.species);
+      // The same stone at every zoom: corners seeded by the deposit, yaw turning it clockwise.
+      const a0 = (o.yaw * Math.PI) / 180;
+      g.beginPath();
+      for (let i = 0; i < 7; i++) {
+        const a = a0 + ((i + 0.3 * wobble(o, 40 + i)) / 7) * Math.PI * 2;
+        const ri = r * (1 + 0.22 * wobble(o, i));
+        if (i === 0) g.moveTo(sx + Math.cos(a) * ri, sy + Math.sin(a) * ri);
+        else g.lineTo(sx + Math.cos(a) * ri, sy + Math.sin(a) * ri);
+      }
+      g.closePath();
+      g.globalAlpha = alpha;
+      g.fillStyle = tint;
+      g.fill();
+      g.strokeStyle = "#20160d";
+      g.lineWidth = r > 12 ? 2 : 1.4;
+      g.stroke();
+      // A glint: two short light strokes across the stone, like veins of metal.
+      if (r >= 7) {
+        g.strokeStyle = "rgba(255, 246, 220, 0.75)";
+        g.lineWidth = r > 20 ? 1.6 : 1.1;
+        g.beginPath();
+        g.moveTo(sx - r * 0.45, sy - r * 0.1);
+        g.lineTo(sx - r * 0.05, sy - r * 0.35);
+        g.moveTo(sx + r * 0.05, sy + r * 0.3);
+        g.lineTo(sx + r * 0.4, sy + r * 0.05);
+        g.stroke();
+      }
+    }
+    g.globalAlpha = 1;
   }
 
   private drawFog(g: CanvasRenderingContext2D, v: View, p: Prepared, layers: Record<LayerId, boolean>) {

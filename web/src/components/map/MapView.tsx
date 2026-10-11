@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
 import { buildMarkers, decodeRLE, DEFAULT_LAYERS, FOCUS_MAX_SCALE, layerCounts, LAYERS, mainBase, markerStores, type Insets, type LayerId, type Marker } from "../../lib/mapgeo";
+import type { NatureItem } from "../../lib/nature";
 import type { StoreyInfo, StoreyPick } from "../../lib/planrender";
 import { COARSE, PHONE, useMedia } from "../../lib/useMedia";
 import { useTerrain } from "../../lib/useTerrain";
@@ -13,6 +14,7 @@ import { LiveLayer, type LiveLayerHandle } from "./LiveLayer";
 import { MapCanvas, type MapCanvasHandle } from "./MapCanvas";
 import { DetailsBody, DetailsHead, MapDetails, markerTitle } from "./MapDetails";
 import { MapLayers } from "./MapLayers";
+import { OrePopover } from "./OrePopover";
 import { StoreySwitcher } from "./StoreySwitcher";
 
 const LAYERS_KEY = "skald.map.layers";
@@ -203,6 +205,9 @@ function SaveMap({
   const admin = useAdmin();
   const [layers, setLayers] = useState(storedLayers);
   const [sel, setSel] = useState<Selection | null>(null);
+  // A tapped ore deposit, and the box that follows it over the map.
+  const [ore, setOre] = useState<NatureItem | null>(null);
+  const oreBox = useRef<HTMLDivElement>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const pop = useRef<HTMLDivElement>(null);
   const coords = useRef<HTMLSpanElement>(null);
@@ -417,8 +422,45 @@ function SaveMap({
     [coarse, wide, landscape],
   );
 
+  // A tapped deposit's box: above it when there is room, else below; always inside the map.
+  const oreAt = useRef(ore);
+  oreAt.current = ore;
+  const placeOre = useCallback(() => {
+    const el = oreBox.current;
+    const o = oreAt.current;
+    if (!el || !o || !canvas.current) return;
+    const [px, py] = canvas.current.project(o.x, o.z);
+    const W = el.parentElement?.clientWidth ?? 0;
+    const H = el.parentElement?.clientHeight ?? 0;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    let y = py - h - 18;
+    if (y < 8) y = py + 18;
+    const x = Math.max(8, Math.min(W - w - 8, px - w / 2));
+    y = Math.max(8, Math.min(H - h - 8, y));
+    el.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+    el.style.visibility = px < 0 || py < 0 || px > W || py > H ? "hidden" : "visible";
+  }, []);
+  useEffect(() => {
+    placeOre();
+    if (!ore) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || document.getElementById("map-layers-h")) return;
+      e.preventDefault();
+      setOre(null);
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [ore, placeOre]);
+  useEffect(() => {
+    if (!layers.resources) setOre(null);
+  }, [layers.resources]);
+
   // Live players follow the view; admin long presses open what can happen at the spot.
-  const onFrame = useCallback(() => live.current?.place(), []);
+  const onFrame = useCallback(() => {
+    live.current?.place();
+    placeOre();
+  }, [placeOre]);
   const pick = admin?.pick ?? null;
   const onLongPress = useMemo(() => {
     if (!admin?.present) return undefined;
@@ -461,11 +503,17 @@ function SaveMap({
         onFrame={onFrame}
         onLongPress={onLongPress}
         onTapWorld={onTapWorld}
+        onOre={setOre}
         remember
         insets={insets}
         className="absolute inset-0"
       />
       <LiveLayer ref={live} canvas={canvas} onOpen={openPlayer} />
+      {ore && (
+        <div ref={oreBox} className="pointer-events-none absolute left-0 top-0 z-20 max-w-[min(18rem,calc(100%-1rem))]" style={{ visibility: "hidden" }}>
+          <OrePopover ore={ore} onClose={() => setOre(null)} />
+        </div>
+      )}
 
       {/* Layers, legend and search: a side board on wide screens, a sheet on phones. */}
       <aside aria-label={t("map.layers")} className="plank plank-smooth scroll-quiet absolute bottom-3 left-3 top-3 z-10 hidden w-70 overflow-y-auto px-4 py-4 lg:block">

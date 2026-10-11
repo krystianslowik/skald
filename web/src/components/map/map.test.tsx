@@ -8,6 +8,7 @@ import { buildMarkers, DEFAULT_LAYERS, layerCounts, type LayerId, type Marker } 
 import { WorldClock } from "../WorldClock";
 import { MapDetails } from "./MapDetails";
 import { MapLayers } from "./MapLayers";
+import { OrePopover } from "./OrePopover";
 import MapView, { TerrainFrame } from "./MapView";
 
 const inLocale = (ui: ReactElement, locale: "en" | "pl" = "en") => render(<I18nProvider locale={locale}>{ui}</I18nProvider>);
@@ -135,5 +136,27 @@ describe("MapView", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })));
     inLocale(<MapView seedName="" saveKey="b" now={Date.now()} onClose={() => {}} />);
     expect(await screen.findByText(/No world map/)).toBeInTheDocument();
+  });
+});
+
+describe("OrePopover", () => {
+  const copper = { category: "ore" as const, species: "copper", x: 268.4, z: -128.6, yaw: 30, size: 6.6 };
+
+  it("names the deposit, what it yields and where, and closes", () => {
+    const onClose = vi.fn();
+    inLocale(<OrePopover ore={copper} onClose={onClose} />);
+    expect(screen.getByRole("dialog", { name: "Copper deposit" })).toBeInTheDocument();
+    expect(screen.getByText("Yields Copper Ore")).toBeInTheDocument();
+    expect(screen.getByText("at x 268, z -129")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close details" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("speaks Polish and copes with a deposit it has no name for", () => {
+    inLocale(<OrePopover ore={{ ...copper, species: "tin" }} onClose={() => {}} />, "pl");
+    expect(screen.getByRole("dialog", { name: "Złoże cyny" })).toBeInTheDocument();
+    expect(screen.getByText("Daje: Ruda cyny")).toBeInTheDocument();
+    inLocale(<OrePopover ore={{ ...copper, species: "moonstone" }} onClose={() => {}} />);
+    expect(screen.getByRole("dialog", { name: "Ore deposit" })).toBeInTheDocument();
   });
 });

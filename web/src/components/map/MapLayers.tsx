@@ -36,6 +36,22 @@ function Swatch({ layer }: { layer: LayerId }) {
         <path d="M4 13c2-3 4-1 6-3s5-2 8 1" stroke="#9c8b6a" strokeWidth="1.4" fill="none" strokeLinecap="round" />
       </svg>
     );
+  if (layer === "nature")
+    return (
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden className="shrink-0">
+        <circle cx="11" cy="11" r="10" fill="#d9c7a0" />
+        <path d="M5.5 12.5a3.6 3.6 0 0 1 3-5.6 3.8 3.8 0 0 1 6.8.6 3.4 3.4 0 0 1 .9 6.4 3.6 3.6 0 0 1-5.2 1.9 3.6 3.6 0 0 1-5.5-3.3z" fill="#9aae62" stroke="#3f4d22" strokeWidth="1.2" />
+        <circle cx="15.5" cy="16.5" r="1.6" fill="#8d8a82" stroke="#4a463f" strokeWidth="0.8" />
+      </svg>
+    );
+  if (layer === "resources")
+    return (
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden className="shrink-0">
+        <circle cx="11" cy="11" r="10" fill="#d9c7a0" />
+        <path d="M6 13l2.5-5.5 5-1.5 3 4-1.5 5-6 1z" fill="#d27a32" stroke="#20160d" strokeWidth="1.3" strokeLinejoin="round" />
+        <path d="M9 10.5l2.5-1.5M11.5 14l2-1.5" stroke="#fff6dc" strokeOpacity="0.8" strokeWidth="1" strokeLinecap="round" />
+      </svg>
+    );
   if (layer === "buildings")
     return (
       <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden className="shrink-0">
@@ -66,6 +82,9 @@ function Swatch({ layer }: { layer: LayerId }) {
     );
   return <MapIcon icon={LAYER_ICON[layer] ?? "pin-point"} />;
 }
+
+/** Layers without a count: drawn from what loads as the map is zoomed, or nothing to count. */
+const NO_COUNT = new Set<LayerId>(["grid", "fog", "relief", "nature", "resources"]);
 
 const LEGEND: { icon: IconId; key: TextKey }[] = [
   { icon: "loc-start", key: "map.locKind.start" },
@@ -188,7 +207,7 @@ export function MapLayers({
                 >
                   <Swatch layer={l} />
                   <span className="flex-1 text-bone">{label}</span>
-                  {l !== "grid" && l !== "fog" && l !== "relief" && <span className="text-xs tabular-nums text-ash">{number(counts[l])}</span>}
+                  {!NO_COUNT.has(l) && <span className="text-xs tabular-nums text-ash">{number(counts[l])}</span>}
                   {/* A wider switch for a thumb. */}
                   <span aria-hidden className={`h-3.5 w-6 rounded-full p-[2px] transition-colors coarse:h-7 coarse:w-12 coarse:p-[3px] ${on && !disabled ? "bg-select" : "bg-black/50"}`}>
                     <span

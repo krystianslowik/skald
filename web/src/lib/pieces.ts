@@ -76,25 +76,25 @@ export function uphill(yaw: number): [number, number] {
 
 // ---- fetching in chunks --------------------------------------------------------
 
-/** Floor plans are fetched in aligned squares this many metres a side. */
+/** Floor plans are fetched in aligned squares this many metres a side (nature in smaller ones). */
 export const CHUNK = 512;
 
 export type ChunkKey = string;
 
-/** The aligned chunks a box touches. */
-export function chunksFor(box: readonly [number, number, number, number]): ChunkKey[] {
+/** The aligned chunks of `size` metres a box touches. */
+export function chunksFor(box: readonly [number, number, number, number], size = CHUNK): ChunkKey[] {
   const [x0, z0, x1, z1] = box;
   const out: ChunkKey[] = [];
-  for (let i = Math.floor(x0 / CHUNK); i <= Math.floor(x1 / CHUNK); i++) {
-    for (let j = Math.floor(z0 / CHUNK); j <= Math.floor(z1 / CHUNK); j++) out.push(`${i},${j}`);
+  for (let i = Math.floor(x0 / size); i <= Math.floor(x1 / size); i++) {
+    for (let j = Math.floor(z0 / size); j <= Math.floor(z1 / size); j++) out.push(`${i},${j}`);
   }
   return out;
 }
 
 /** A chunk's world box. */
-export function chunkBox(key: ChunkKey): [number, number, number, number] {
+export function chunkBox(key: ChunkKey, size = CHUNK): [number, number, number, number] {
   const [i, j] = key.split(",").map(Number) as [number, number];
-  return [i * CHUNK, j * CHUNK, (i + 1) * CHUNK, (j + 1) * CHUNK];
+  return [i * size, j * size, (i + 1) * size, (j + 1) * size];
 }
 
 /** A box cut into four, for an answer that came back truncated. */
