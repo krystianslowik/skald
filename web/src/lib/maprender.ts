@@ -43,6 +43,18 @@ const FONT = "'Averia Serif Libre', Georgia, serif";
 const ICON_PX = 22;
 /** The cached base covers this many times the view, so pans reuse it. */
 const BASE_MARGIN = 1.5;
+/**
+ * The most pixels the cached base (and the woods' layer of the same size)
+ * may have: Safari draws nothing into a canvas over 16,777,216 pixels, which
+ * a big retina screen with the margin reaches (2560 x 1440 CSS px at 2x: 33
+ * million). Phones stay far below it.
+ */
+export const BASE_PIXELS = 16_000_000;
+
+/** The cached base's pixel ratio: at most 2 (it is redrawn at rest anyway) and within BASE_PIXELS. */
+export function baseDpr(w: number, h: number, dpr: number): number {
+  return Math.min(dpr, 2, Math.sqrt(BASE_PIXELS / Math.max(1, w * h)));
+}
 
 function makeCanvas(w: number, h: number): HTMLCanvasElement | OffscreenCanvas {
   if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(w, h);
@@ -505,8 +517,7 @@ export class MapRenderer {
     const v = f.view;
     const w = Math.ceil(v.w * BASE_MARGIN);
     const h = Math.ceil(v.h * BASE_MARGIN);
-    // The cache need not be sharper than 2x: it is redrawn at rest anyway.
-    const dpr = Math.min(this.dpr, 2);
+    const dpr = baseDpr(w, h, this.dpr);
     let canvas = this.base?.canvas;
     if (!canvas || canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) canvas = makeCanvas(Math.round(w * dpr), Math.round(h * dpr));
     const g = ctx2d(canvas) as CanvasRenderingContext2D | null;

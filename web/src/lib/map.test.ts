@@ -472,6 +472,19 @@ describe("valheim-map.world links", () => {
   });
 });
 
+describe("base cache size", () => {
+  it("keeps phones at 2x and big screens within Safari's canvas limit", async () => {
+    const { baseDpr, BASE_PIXELS } = await import("./maprender");
+    // A phone's view with the margin, at 3x: drawn at 2x.
+    expect(baseDpr(585, 1266, 3)).toBe(2);
+    expect(baseDpr(585, 1266, 1)).toBe(1);
+    // A 2560 x 1440 retina window with the margin would be 33 million pixels.
+    const k = baseDpr(3840, 2160, 2);
+    expect(k).toBeLessThan(2);
+    expect(Math.round(3840 * k) * Math.round(2160 * k)).toBeLessThanOrEqual(BASE_PIXELS + 4000);
+  });
+});
+
 describe("contents strip", () => {
   it("picks the kinds held most of, by total count", async () => {
     const { topItems } = await import("./maprender");
