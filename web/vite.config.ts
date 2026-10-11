@@ -1,12 +1,13 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath } from "node:url";
 
 // `npm run dev` talks to the Skald server on :8080 (run it with `bun run dev` for the mock agent).
 const SERVER = process.env.SERVER_URL ?? "http://127.0.0.1:8080";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: { "@server": fileURLToPath(new URL("../server/src", import.meta.url)) },
   },

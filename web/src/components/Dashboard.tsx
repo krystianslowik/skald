@@ -127,7 +127,7 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
 
   if (!state) {
     return (
-      <main className="relative grid min-h-[100dvh] place-items-center">
+      <main className="relative grid min-h-dvh place-items-center">
         <Atmosphere dim />
         <p className="on-world relative z-10 text-lg font-bold uppercase tracking-[0.09em] text-flame">{t("app.loading")}</p>
       </main>
@@ -234,7 +234,7 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
   return (
     <AdminProvider state={state} online={online} onUnauthorized={onUnauthorized} onShowMap={showMap}>
     <ProfileProvider value={openProfile}>
-      <div className="relative min-h-[100dvh]">
+      <div className="relative min-h-dvh">
         <Atmosphere dim={!online} />
         {!online && <OfflineBanner />}
         {phone ? (
@@ -274,7 +274,7 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
           </main>
         ) : (
           <motion.main
-            className="relative z-10 mx-auto max-w-[82.5rem] space-y-5 px-4 pb-28 pt-6 sm:px-6 lg:space-y-6 lg:pt-10"
+            className="relative z-10 mx-auto max-w-330 space-y-5 px-4 pb-28 pt-6 sm:px-6 lg:space-y-6 lg:pt-10"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.8 }}

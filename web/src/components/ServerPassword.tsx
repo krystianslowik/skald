@@ -92,7 +92,7 @@ export const ServerPassword = memo(function ServerPassword({ pw }: { pw: Passwor
       <p className="on-world text-xs font-bold uppercase tracking-[0.16em] text-flame">{t("serverPass.title")}</p>
       <div className="mt-1.5 flex items-center gap-1.5">
         <span
-          className="slot flex h-10 min-w-[9.5rem] items-center justify-center px-4 font-mono text-lg font-bold tracking-[0.12em] text-gold coarse:h-11"
+          className="slot flex h-10 min-w-38 items-center justify-center px-4 font-mono text-lg font-bold tracking-[0.12em] text-gold coarse:h-11"
           aria-label={shown && value !== null ? undefined : t("serverPass.hidden")}
         >
           {shown && value !== null ? value : <span aria-hidden className="tracking-[0.2em] text-gold/60">{MASK}</span>}

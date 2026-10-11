@@ -25,7 +25,7 @@ export const TabBar = memo(function TabBar({ tab, tabs, onTab }: { tab: Tab; tab
       aria-label={t("tabs.label")}
       className="tabbar fixed inset-x-0 bottom-0 z-40 border-t border-black/60 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
     >
-      <ul className="mx-auto flex h-[3.75rem] max-w-lg">
+      <ul className="mx-auto flex h-15 max-w-lg">
         {tabs.map((id) => {
           const on = id === tab;
           return (

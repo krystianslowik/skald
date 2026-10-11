@@ -253,7 +253,7 @@ export function MapDetails({
   onClose: () => void;
 }) {
   return (
-    <div className={`${!group && markerItems(marker)?.length ? "w-[19rem]" : "w-[16.5rem]"} max-w-[calc(100vw-2rem)] text-sm`}>
+    <div className={`${!group && markerItems(marker)?.length ? "w-76" : "w-66"} max-w-[calc(100vw-2rem)] text-sm`}>
       <DetailsHead marker={marker} group={group} onClose={onClose} />
       <DetailsBody marker={marker} group={group} seedName={seedName} onGo={onGo} onPick={onPick} />
     </div>

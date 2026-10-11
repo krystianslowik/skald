@@ -126,7 +126,7 @@ export const Progress = memo(function Progress({ bosses }: { bosses: readonly Bo
           );
         })}
       </ol>
-      <div aria-hidden className="mt-3 flex min-h-[2.75rem] flex-col items-center justify-center text-center">
+      <div aria-hidden className="mt-3 flex min-h-11 flex-col items-center justify-center text-center">
         {read && (
           <>
             <span className="boss-title text-xl">{lookup(`boss.${read.key}`) ?? read.key}</span>

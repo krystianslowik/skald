@@ -61,7 +61,7 @@ export const LiveLayer = forwardRef<LiveLayerHandle, { canvas: RefObject<MapCanv
 
   if (live.players.length === 0) return null;
   return (
-    <div className="pointer-events-none absolute inset-0 z-[5] overflow-hidden" aria-label={t("map.live.label")} role="group">
+    <div className="pointer-events-none absolute inset-0 z-5 overflow-hidden" aria-label={t("map.live.label")} role="group">
       {live.players.map((p) => {
         const hp = p.health != null && p.maxHealth ? Math.max(0, Math.min(1, p.health / p.maxHealth)) : null;
         return (
@@ -78,10 +78,10 @@ export const LiveLayer = forwardRef<LiveLayerHandle, { canvas: RefObject<MapCanv
               type="button"
               onClick={() => onOpen?.(p.name)}
               aria-label={t("map.live.player", { name: p.name })}
-              className="pointer-events-auto absolute -left-[22px] -top-[22px] grid h-11 w-11 place-items-center"
+              className="pointer-events-auto absolute left-[-22px] top-[-22px] grid h-11 w-11 place-items-center"
             >
               <span aria-hidden className="live-pulse absolute h-7 w-7 rounded-full bg-select/35" />
-              <span aria-hidden className="relative grid h-[1.125rem] w-[1.125rem] place-items-center rounded-full border-2 border-[#10161d] bg-[radial-gradient(circle_at_35%_30%,#ffe58a,#f3b867_45%,#c2812f)] shadow-[0_0_10px_rgba(243,184,103,0.75)]" />
+              <span aria-hidden className="relative grid h-4.5 w-4.5 place-items-center rounded-full border-2 border-[#10161d] bg-[radial-gradient(circle_at_35%_30%,#ffe58a,#f3b867_45%,#c2812f)] shadow-[0_0_10px_rgba(243,184,103,0.75)]" />
             </button>
             <button
               type="button"

@@ -8,7 +8,7 @@ export const Treasury = memo(function Treasury({ backups, now }: { backups: Back
   const { t, ago, bytes, fullDate } = useI18n();
   if (backups.length === 0) return <p className="text-sm text-ash">{t("treasury.empty")}</p>;
   return (
-    <ul className="scroll-quiet max-h-[18.75rem] space-y-1 overflow-y-auto pr-1">
+    <ul className="scroll-quiet max-h-75 space-y-1 overflow-y-auto pr-1">
       {backups.map((b, i) => (
         <li
           key={b.name}

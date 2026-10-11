@@ -260,7 +260,7 @@ export const Saga = memo(function Saga({ events, now }: { events: AgentEvent[]; 
   );
   let lastDay = "";
   return (
-    <div className="scroll-quiet relative max-h-[26.25rem] overflow-y-auto pr-2 [mask-image:linear-gradient(180deg,#000_85%,transparent)]">
+    <div className="scroll-quiet relative max-h-105 overflow-y-auto pr-2 mask-[linear-gradient(180deg,#000_85%,transparent)]">
       {rows.length === 0 && <p className="text-sm text-ash">{t("saga.empty")}</p>}
       <ol className="relative">
         <AnimatePresence initial={false}>
@@ -284,7 +284,7 @@ export const Saga = memo(function Saga({ events, now }: { events: AgentEvent[]; 
                 {header && (
                   <div className="mb-1 mt-3 flex items-center gap-3 first:mt-0">
                     <span className="label-caps shrink-0">{header}</span>
-                    <span aria-hidden className="h-px flex-1 bg-gradient-to-r from-iron/60 to-transparent" />
+                    <span aria-hidden className="h-px flex-1 bg-linear-to-r from-iron/60 to-transparent" />
                   </div>
                 )}
                 {d.tone === "raid" ? (

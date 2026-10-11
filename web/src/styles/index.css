@@ -1,6 +1,47 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Theme tokens for the utilities (bg-coal, text-flame, coarse: ...). Colour
+   names kept from the first theme; values follow the Valheim palette in
+   docs/design/valheim-ui-research.md (section 7). */
+@theme {
+  --color-coal: #0e0b09;
+  --color-soot: #1e140d;
+  --color-wood: #3a2618;
+  --color-wood-dark: #2a1c12;
+  --color-wood-light: #4a3322;
+  --color-wood-rim: #644631;
+  --color-slot: #2e1f15;
+  --color-iron: #6b5745;
+  --color-ember: #c2812f;
+  --color-flame: #f3b867;
+  --color-gold: #ecc212;
+  --color-ash: #b3a596;
+  --color-label: #e0c7c2;
+  --color-bone: #f1eeeb;
+  --color-blood: #e86a5a;
+  --color-hp: #c8303a;
+  --color-stamina: #cea83e;
+  --color-eitr: #b83ca0;
+  --color-boss: #e2453f;
+  --color-select: #5e97cc;
+  --color-select-hi: #8cbce6;
+
+  --font-display: "Averia Serif Libre", Georgia, serif;
+  --font-sans: "Averia Serif Libre", Georgia, serif;
+  --font-rune: "Noto Sans Runic", serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Touch screens: larger targets where a finger, not a cursor, does the pointing. */
+@custom-variant coarse (@media (pointer: coarse));
+
+/* Tailwind 4's preflight leaves buttons on the default cursor; keep the hand. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
 
 /* Palette sampled from the game's UI (docs/design/valheim-ui-research.md, section 7):
    opaque wood boards, cream text, amber headings, blue for what is selected. */

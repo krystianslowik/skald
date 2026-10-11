@@ -54,13 +54,13 @@ export const Chronicle = memo(function Chronicle({ source }: { source: LogStore 
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        <label className="relative min-w-[12rem] flex-1">
+        <label className="relative min-w-48 flex-1">
           <span className="sr-only">{t("chronicle.filter")}</span>
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder={t("chronicle.search")}
-            className="slot w-full border border-transparent px-3 py-1.5 text-sm coarse:min-h-11 text-bone placeholder:text-ash/80 focus:border-select-hi focus:outline-none"
+            className="slot w-full border border-transparent px-3 py-1.5 text-sm coarse:min-h-11 text-bone placeholder:text-ash/80 focus:border-select-hi focus:outline-hidden"
           />
         </label>
         <label className="press flex cursor-pointer items-center gap-2 text-xs text-ash coarse:min-h-11">

@@ -87,7 +87,7 @@ export default function MapView({
       role="dialog"
       aria-modal="true"
       aria-labelledby="worldmap-h"
-      className={`fixed inset-x-0 top-0 flex flex-col bg-coal ${asTab ? "z-30 h-[calc(100dvh-var(--tabbar-h))]" : "z-50 h-[100dvh]"}`}
+      className={`fixed inset-x-0 top-0 flex flex-col bg-coal ${asTab ? "z-30 h-[calc(100dvh-var(--tabbar-h))]" : "z-50 h-dvh"}`}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -431,7 +431,7 @@ function SaveMap({
       <LiveLayer ref={live} canvas={canvas} onOpen={openPlayer} />
 
       {/* Layers, legend and search: a side board on wide screens, a sheet on phones. */}
-      <aside aria-label={t("map.layers")} className="plank plank-smooth scroll-quiet absolute bottom-3 left-3 top-3 z-10 hidden w-[17.5rem] overflow-y-auto px-4 py-4 lg:block">
+      <aside aria-label={t("map.layers")} className="plank plank-smooth scroll-quiet absolute bottom-3 left-3 top-3 z-10 hidden w-70 overflow-y-auto px-4 py-4 lg:block">
         {panel}
       </aside>
       <button
@@ -473,7 +473,7 @@ function SaveMap({
       <div className={`pointer-events-none absolute ${bottom} left-1/2 z-10 -translate-x-1/2 lg:left-[calc(50%+9rem)]`}>
         <span ref={coords} aria-hidden className="material rounded-[2px] px-2.5 py-1 font-mono text-xs text-bone empty:hidden" />
       </div>
-      <div className="pointer-events-none absolute inset-x-3 top-3 z-10 flex flex-col items-center gap-2 lg:left-[19rem] lg:items-start">
+      <div className="pointer-events-none absolute inset-x-3 top-3 z-10 flex flex-col items-center gap-2 lg:left-76 lg:items-start">
         {pick && (
           <div role="status" className="material pointer-events-auto flex max-w-full items-center gap-2 rounded-full border border-select-hi/60 py-0.5 pl-4 pr-0.5 text-sm font-bold text-bone shadow-[0_0_18px_rgba(94,151,204,0.45)]">
             <span className="min-w-0 truncate">{pick.label}</span>

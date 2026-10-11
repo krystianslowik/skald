@@ -11,19 +11,19 @@ export const Hearth = memo(function Hearth({ players, now }: { players: Player[]
   const { t, duration } = useI18n();
   const reduced = useReducedMotion();
   return (
-    <div className="flex min-h-[11.25rem] flex-wrap content-start justify-center gap-x-3 gap-y-5 pt-1">
+    <div className="flex min-h-45 flex-wrap content-start justify-center gap-x-3 gap-y-5 pt-1">
       <AnimatePresence mode="popLayout">
         {players.map((p) => (
           <motion.figure
             key={p.name}
             layout={!reduced}
-            className="flex w-[5.75rem] flex-col items-center text-center"
+            className="flex w-23 flex-col items-center text-center"
             initial={reduced ? { opacity: 0 } : { opacity: 0, y: 18, scale: 0.85, filter: "brightness(0) blur(4px)" }}
             animate={{ opacity: 1, y: 0, scale: 1, filter: "brightness(1) blur(0px)" }}
             exit={reduced ? { opacity: 0 } : { opacity: 0, y: -34, scale: 1.08, filter: "grayscale(1) blur(10px) brightness(1.6)" }}
             transition={{ type: "spring", bounce: 0, visualDuration: 0.4, opacity: { duration: 0.5 }, filter: { duration: 0.8 } }}
           >
-            <span className="slot grid h-[5.25rem] w-[5.25rem] place-items-center">
+            <span className="slot grid h-21 w-21 place-items-center">
               <Shield name={p.name} size={68} />
             </span>
             <figcaption className="mt-1.5 w-full">

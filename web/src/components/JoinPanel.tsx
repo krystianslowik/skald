@@ -142,7 +142,7 @@ export const JoinPanel = memo(function JoinPanel({
             onPointerDown={warm}
             onClick={() => void share()}
             aria-label={t("share.aria")}
-            className="plaque press inline-flex min-h-11 items-center gap-2 px-6 text-base font-bold !text-flame enabled:hover:!text-gold"
+            className="plaque press inline-flex min-h-11 items-center gap-2 px-6 text-base font-bold text-flame! enabled:hover:text-gold!"
           >
             <Glyph d={SHARE_PATH} size={20} />
             {t("share.button")}
@@ -152,9 +152,9 @@ export const JoinPanel = memo(function JoinPanel({
               <input type="checkbox" checked={include} onChange={toggleInclude} className="peer sr-only" />
               <span
                 aria-hidden
-                className="h-6 w-10 shrink-0 rounded-full bg-black/55 p-[3px] shadow-[inset_0_1px_3px_rgba(0,0,0,0.8)] transition-colors peer-checked:bg-select peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-select-hi"
+                className="h-6 w-10 shrink-0 rounded-full bg-black/55 p-[3px] shadow-[inset_0_1px_3px_rgba(0,0,0,0.8)] transition-colors peer-checked:bg-select peer-focus-visible:outline-solid peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-select-hi"
               >
-                <span className={`block h-[1.125rem] w-[1.125rem] rounded-full bg-bone shadow-[0_1px_2px_rgba(0,0,0,0.5)] transition-transform duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none ${include ? "translate-x-4" : ""}`} />
+                <span className={`block h-4.5 w-4.5 rounded-full bg-bone shadow-[0_1px_2px_rgba(0,0,0,0.5)] transition-transform duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none ${include ? "translate-x-4" : ""}`} />
               </span>
               {t("share.includePassword")}
             </label>
@@ -184,7 +184,7 @@ export const JoinPanel = memo(function JoinPanel({
               <button type="button" onClick={() => void copyCode()} aria-label={t("joinCode.copy")} className="plaque press grid h-11 w-11 place-items-center">
                 <Glyph d={COPY_PATH} size={20} />
               </button>
-              <button type="button" onPointerDown={warm} onClick={() => void share()} aria-label={t("share.aria")} className="plaque press grid h-11 w-11 place-items-center !text-flame">
+              <button type="button" onPointerDown={warm} onClick={() => void share()} aria-label={t("share.aria")} className="plaque press grid h-11 w-11 place-items-center text-flame!">
                 <Glyph d={SHARE_PATH} size={20} />
               </button>
             </div>
