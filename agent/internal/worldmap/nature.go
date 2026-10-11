@@ -122,6 +122,7 @@ var natureGroups = []struct {
 	{NatureOre, "silver", 6, []string{"rock3_silver"}},
 	{NatureOre, "obsidian", 3, []string{"MineRock_Obsidian"}},
 	{NatureOre, "tar", 3, []string{"tarlump1"}},
+	{NatureOre, "guck", 1, []string{"GuckSack", "GuckSack_small"}},
 	{NatureOre, "meteorite", 4, []string{"MineRock_Meteorite"}},
 	{NatureOre, "giant", 6, []string{"giant_skull", "giant_ribs", "giant_sword1", "giant_sword2"}},
 	{NatureOre, "softtissue", 4, []string{"giant_brain"}},
@@ -152,7 +153,6 @@ var natureGroups = []struct {
 	{NaturePickable, "fiddlehead", 0.5, []string{"Pickable_Fiddlehead"}},
 	{NaturePickable, "royaljelly", 0.5, []string{"Pickable_RoyalJelly"}},
 	{NaturePickable, "tar", 0.8, []string{"Pickable_Tar", "Pickable_TarBig"}},
-	{NaturePickable, "guck", 0.8, []string{"GuckSack", "GuckSack_small"}},
 	{NaturePickable, "obsidian", 0.5, []string{"Pickable_Obsidian"}},
 	{NaturePickable, "tin", 0.5, []string{"Pickable_Tin"}},
 	{NaturePickable, "iron", 0.5, []string{"Pickable_BogIronOre"}},
@@ -279,8 +279,8 @@ func buildNature(chunks []*chunkData, found func(x, z float32) bool) *Nature {
 	}
 	h := sha256.New()
 	for _, k := range natureKinds {
-		h.Write([]byte(k.name))
-		h.Write([]byte{0})
+		h.Write([]byte(k.name + "\x00" + k.category + "\x00" + k.species + "\x00"))
+		_ = binary.Write(h, binary.LittleEndian, k.size)
 	}
 	var rec [12]byte
 	for _, it := range out.items {

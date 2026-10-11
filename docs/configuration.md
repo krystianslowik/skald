@@ -183,7 +183,9 @@ with what the world generated in the box and is still there: trees, stumps,
 fallen logs, rocks, bushes, ore deposits and pickables. Objects a player
 placed (a creator), creatures, spawners, dropped items, location and
 dungeon pieces never show; a cut tree or a mined rock is gone from the save
-and so from the answer.
+and so from the answer. Dungeon interiors are left out whole, so the muddy
+scrap piles inside sunken crypts do not show either; iron on the map is the
+buried piles a wishbone finds and any lying in the open.
 
 ```json
 {"generation":12,"bbox":[100,-220,140,-180],"spoilers":false,

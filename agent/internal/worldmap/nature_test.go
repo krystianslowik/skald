@@ -37,7 +37,7 @@ func TestNatureKindOf(t *testing.T) {
 		{"RaspberryBush", NaturePickable, "raspberry"},
 		{"Pickable_Mushroom_JotunPuffs", NaturePickable, "jotunpuffs"},
 		{"Pickable_Barley_Wild", NaturePickable, "barley"},
-		{"GuckSack", NaturePickable, "guck"},
+		{"GuckSack", NatureOre, "guck"},
 	} {
 		k, ok := natureKindOf(c.name)
 		if !ok || k.category != c.category || k.species != c.species || k.size <= 0 {
