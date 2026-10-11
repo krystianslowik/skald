@@ -49,6 +49,11 @@ export interface AgentSource {
   asset(path: AgentAsset, etag: string | null, signal: AbortSignal): Promise<Response>;
   /** Raw `GET /pieces` for a box (200, 304, 400, 404, 503); the caller owns the body. */
   pieces(box: PiecesBox, etag: string | null, signal: AbortSignal): Promise<Response>;
+  /**
+   * Raw `GET /nature` for a box, like `pieces`. `spoilers` asks for nature on
+   * land nobody explored too; only MAP_SPOILERS may set it.
+   */
+  nature(box: PiecesBox, spoilers: boolean, etag: string | null, signal: AbortSignal): Promise<Response>;
   /** The admin bridge: 404 when the agent has no BRIDGE_TOKEN. */
   bridge(req: BridgeRequest): Promise<Proxied>;
 }
@@ -148,6 +153,14 @@ export class HttpAgent implements AgentSource {
     if (etag) headers["If-None-Match"] = etag;
     const [x0, z0, x1, z1] = box;
     return this.fetchImpl(`${this.baseUrl}/pieces?x0=${x0}&z0=${z0}&x1=${x1}&z1=${z1}`, { headers, signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) });
+  }
+
+  nature(box: PiecesBox, spoilers: boolean, etag: string | null, signal: AbortSignal): Promise<Response> {
+    const headers: Record<string, string> = { ...this.headers(), "Accept-Encoding": "gzip" };
+    if (etag) headers["If-None-Match"] = etag;
+    const [x0, z0, x1, z1] = box;
+    const url = `${this.baseUrl}/nature?x0=${x0}&z0=${z0}&x1=${x1}&z1=${z1}${spoilers ? "&spoilers=true" : ""}`;
+    return this.fetchImpl(url, { headers, signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) });
   }
 
   async bridge(req: BridgeRequest): Promise<Proxied> {

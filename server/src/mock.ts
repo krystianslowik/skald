@@ -1,5 +1,6 @@
 import type { ActionResponse, AgentAsset, AgentSource, BridgeRequest, MapSourceResult, PiecesBox, Proxied } from "./agent";
 import { mockMap } from "./mapmock";
+import { mockNature, natureIn } from "./mocknature";
 import { mockPieces, piecesIn } from "./mockpieces";
 import { mockIcons, type MockIcons } from "./mockicons";
 import { MOCK_TERRAIN_RADIUS, mockTerrain } from "./mockterrain";
@@ -174,6 +175,7 @@ export class MockAgent implements AgentSource {
   private iconSet: MockIcons | null = null;
   private mapGeneration = 1;
   private piecesAll: ReturnType<typeof mockPieces> | null = null;
+  private natureAll: ReturnType<typeof mockNature> | null = null;
   // The fake bridge plugin.
   private pos = new Map<string, MockPos>();
   private bans: { id: string; platform: Platform; name?: string }[] = [{ id: "5e1d0c3b2a190807", platform: "steam", name: "Hrafn" }, { id: "0f9e8d7c6b5a4f3e", platform: "xbox" }];
@@ -328,6 +330,15 @@ export class MockAgent implements AgentSource {
     const tag = `"mock-pieces-${box.join(",")}"`;
     if (etag === tag) return new Response(null, { status: 304, headers: { ETag: tag } });
     return new Response(JSON.stringify(piecesIn(this.piecesAll, box, this.mapGeneration)), { headers: { ETag: tag, "Content-Type": "application/json" } });
+  }
+
+  /** Nature round the mock's bases, cut to the box like the agent does. */
+  async nature(box: PiecesBox, spoilers: boolean, etag: string | null): Promise<Response> {
+    this.natureAll ??= mockNature();
+    // Like the agent's: the world's objects, the box and whether spoilers were asked for.
+    const tag = `"mock-nature-${box.join(",")}-${spoilers ? 1 : 0}"`;
+    if (etag === tag) return new Response(null, { status: 304, headers: { ETag: tag } });
+    return new Response(JSON.stringify(natureIn(this.natureAll, box, this.mapGeneration, spoilers)), { headers: { ETag: tag, "Content-Type": "application/json" } });
   }
 
   /** A generated sheet for every item the mock map holds. */

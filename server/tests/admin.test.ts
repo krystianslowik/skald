@@ -31,6 +31,9 @@ function fakeAgent(calls: BridgeRequest[], status = 200): AgentSource {
     async pieces() {
       return new Response(null, { status: 404 });
     },
+    async nature() {
+      return new Response(null, { status: 404 });
+    },
     async asset() {
       return new Response(null, { status: 404 });
     },

@@ -38,7 +38,7 @@ export class MapCache {
 
   constructor(
     private readonly fetchMap: (etag: string | null) => Promise<MapSourceResult>,
-    private readonly spoilers: boolean,
+    readonly spoilers: boolean,
     private readonly clock: () => number = Date.now,
   ) {}
 

@@ -37,6 +37,9 @@ function setup(
     async pieces() {
       return new Response(null, { status: 404 });
     },
+    async nature() {
+      return new Response(null, { status: 404 });
+    },
     async asset(path, etag, signal) {
       return opts.asset ? opts.asset(path, etag, signal) : new Response(null, { status: 404 });
     },

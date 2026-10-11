@@ -221,16 +221,17 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/map", (c) => serveMap(c, "map"));
   app.get("/api/storage", (c) => serveMap(c, "storage"));
 
-  // Floor plans of what players built inside a box, for close zoom. The box is
-  // checked here so a bad one never reaches the agent; the answer passes
-  // through with the agent's ETag, re-compressed for this client.
-  app.get("/api/pieces", async (c) => {
+  // Floor plans of what players built, and the nature the world generated,
+  // inside a box, for close zoom. The box is checked here so a bad one never
+  // reaches the agent; the answer passes through with the agent's ETag,
+  // re-compressed for this client.
+  const proxyBox = async (c: Context, ask: (box: PiecesBox, etag: string | null, signal: AbortSignal) => Promise<Response>) => {
     if (!deps.map) return c.json({ error: "world map off" }, 404);
     const box = parsePiecesBox((k) => c.req.query(k));
     if (typeof box === "string") return c.json({ error: box }, 400);
     let up: Response;
     try {
-      up = await deps.agent.pieces(box, c.req.header("If-None-Match") ?? null, c.req.raw.signal);
+      up = await ask(box, c.req.header("If-None-Match") ?? null, c.req.raw.signal);
     } catch {
       return c.json({ error: "agent unreachable" }, 502);
     }
@@ -260,7 +261,11 @@ export function createApp(deps: AppDeps): Hono {
       return new Response(Bun.gzipSync(json), { status: 200, headers });
     }
     return new Response(json, { status: 200, headers });
-  });
+  };
+  app.get("/api/pieces", (c) => proxyBox(c, (box, etag, signal) => deps.agent.pieces(box, etag, signal)));
+  // Nature beyond explored land is a spoiler: only MAP_SPOILERS asks for it,
+  // never the client's query.
+  app.get("/api/nature", (c) => proxyBox(c, (box, etag, signal) => deps.agent.nature(box, deps.map?.spoilers ?? false, etag, signal)));
 
   // Files the agent serves as they are, passed through with their ETag. The
   // URL of a sheet carries its build (?v=), so it can be cached for good.
