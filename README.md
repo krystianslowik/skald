@@ -44,7 +44,8 @@ Skald reads the world save and draws what's in it on parchment: the land, the
 part your cartography tables have explored, and everything people built or left
 behind. Tap a chest and it opens as a slot grid like the game's. Tap a portal and
 it shows where it leads. Places nobody has found stay hidden, and so do dungeon
-and shipwreck chests.
+and shipwreck chests. Zoom in on a base and it turns into an inked floor plan,
+storey by storey, with stacked chests counted from the bottom up.
 
 Two extras are opt-in, because they use your own copy of the game:
 
