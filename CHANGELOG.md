@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The map zooms four times closer than before, down to about 16 metres across a phone screen: walls, doors, stairs and single chests read one by one, and live players can be followed from room to room. Marks and labels keep their size at every zoom, and a jump from search or the village stores made while zoomed all the way in lands a little further out, so the surroundings stay in view.
+- The floor switcher opens on a base's main storey, the one with the most floor, instead of the lowest one, so a yard or jetty of floor pieces under the house no longer hides the house behind "1st floor". Ground is still the lowest level, and a storey you pick stays picked for that base until the page is reloaded.
+
 ## [0.9.0] - 2026-10-11
 
 Floor plans and chest stacks need the 0.9.0 agent; with an older agent the web keeps working without them.
