@@ -3,7 +3,7 @@ import { mockNature, natureIn } from "@server/mocknature";
 import { en } from "../i18n/en";
 import { pl } from "../i18n/pl";
 import { decodeNature, NATURE_CHUNK, natureLayer, natureLoader, natureTint, ORE_YIELD, oreKey, wobble } from "./nature";
-import { natureAlpha } from "./naturerender";
+import { NatureLayer, natureAlpha } from "./naturerender";
 
 const all = mockNature();
 const settle = () => new Promise((r) => setTimeout(r, 0));
@@ -135,5 +135,17 @@ describe("the nature loader", () => {
     p.want([600, 0, 610, 10], "1");
     await settle();
     expect(pieces).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("nature layer", () => {
+  it("finds the ore in a box without building any paths", () => {
+    const items = decodeNature(natureIn(all, [0, -512, 512, 0], 1, false))!;
+    const layer = new NatureLayer();
+    layer.set(new Map([["0,-1", items]]));
+    const box = [180, -200, 420, -80] as const;
+    const ores = layer.ores(box);
+    expect(ores.length).toBeGreaterThan(0);
+    expect(ores).toEqual(items.filter((o) => o.category === "ore" && o.x >= box[0] && o.x <= box[2] && o.z >= box[1] && o.z <= box[3]));
   });
 });

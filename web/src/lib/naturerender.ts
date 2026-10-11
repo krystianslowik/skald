@@ -29,7 +29,6 @@ interface ChunkPaths {
   bushes: Path2D;
   /** Points, stroked as dots a few pixels wide, by tint. */
   pickables: Map<string, Path2D>;
-  ores: NatureItem[];
   trees: number;
 }
 
@@ -107,7 +106,7 @@ const dot = (path: Path2D, x: number, z: number) => {
 };
 
 function build(key: ChunkKey, items: readonly NatureItem[]): ChunkPaths {
-  const out: ChunkPaths = { box: chunkBox(key, NATURE_CHUNK), crowns: new Map(), coarse: new Map(), trunks: new Path2D(), stumps: new Path2D(), logs: new Path2D(), rocks: new Map(), cliffs: new Path2D(), bushes: new Path2D(), pickables: new Map(), ores: [], trees: 0 };
+  const out: ChunkPaths = { box: chunkBox(key, NATURE_CHUNK), crowns: new Map(), coarse: new Map(), trunks: new Path2D(), stumps: new Path2D(), logs: new Path2D(), rocks: new Map(), cliffs: new Path2D(), bushes: new Path2D(), pickables: new Map(), trees: 0 };
   // The big crowns first, so smaller trees sit on top of them.
   const trees = items.filter((it) => it.category === "tree").sort((a, b) => b.size - a.size);
   for (const it of trees) {
@@ -147,7 +146,7 @@ function build(key: ChunkKey, items: readonly NatureItem[]): ChunkPaths {
         dot(bucket(out.pickables, natureTint("pickable", it.species)), it.x, it.z);
         break;
       case "ore":
-        out.ores.push(it);
+        // Drawn by the renderer, in screen space.
         break;
     }
   }
@@ -167,18 +166,32 @@ export function natureAlpha(scale: number): number {
   return t * t * (3 - 2 * t);
 }
 
+/** Time a draw may spend building chunks' paths; the rest are built in later tasks. */
+const BUILD_MS = 6;
+
+interface Chunk {
+  items: readonly NatureItem[];
+  paths: ChunkPaths | null;
+  ores: NatureItem[] | null;
+}
+
 export class NatureLayer {
-  private chunks = new Map<ChunkKey, { items: readonly NatureItem[]; paths: ChunkPaths | null }>();
-  /** Bumped whenever a chunk arrives or leaves, for the renderer's cache key. */
+  private chunks = new Map<ChunkKey, Chunk>();
+  /** Bumped whenever a chunk arrives or leaves or its paths are built, for the renderer's cache key. */
   version = 0;
   private scratch: HTMLCanvasElement | OffscreenCanvas | null = null;
+  /** Chunks a draw wanted but left unbuilt, built one per task. */
+  private pending = new Set<ChunkKey>();
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  /** Called when chunks left out of a draw have been built and the woods should be drawn again. */
+  onBuilt: (() => void) | null = null;
 
   /** The loaded chunks; paths are kept for chunks whose items did not change. */
   set(loaded: ReadonlyMap<ChunkKey, readonly NatureItem[]>): void {
-    const next = new Map<ChunkKey, { items: readonly NatureItem[]; paths: ChunkPaths | null }>();
+    const next = new Map<ChunkKey, Chunk>();
     for (const [k, items] of loaded) {
       const had = this.chunks.get(k);
-      next.set(k, had && had.items === items ? had : { items, paths: null });
+      next.set(k, had && had.items === items ? had : { items, paths: null, ores: null });
     }
     this.chunks = next;
     this.version++;
@@ -188,22 +201,58 @@ export class NatureLayer {
     return this.chunks.size === 0;
   }
 
+  /**
+   * The built chunks the box touches. A dense chunk takes milliseconds to
+   * build (tens on a slow phone), and a zoom can bring a dozen into view at
+   * once: past BUILD_MS the rest wait for later tasks, one each, so no frame
+   * is held up for long; the woods fill in once they are all built.
+   */
   private visible(box: readonly [number, number, number, number]): ChunkPaths[] {
     const out: ChunkPaths[] = [];
+    if (typeof Path2D === "undefined") return out;
+    const t0 = performance.now();
     for (const [k, c] of this.chunks) {
       const b = chunkBox(k, NATURE_CHUNK);
       if (b[2] + SPILL < box[0] || b[0] - SPILL > box[2] || b[3] + SPILL < box[1] || b[1] - SPILL > box[3]) continue;
-      if (typeof Path2D === "undefined") continue;
-      c.paths ??= build(k, c.items);
+      if (!c.paths) {
+        if (performance.now() - t0 > BUILD_MS) {
+          this.pending.add(k);
+          continue;
+        }
+        c.paths = build(k, c.items);
+      }
       out.push(c.paths);
     }
+    if (this.pending.size && !this.timer) this.timer = setTimeout(() => this.buildPending(), 0);
     return out;
   }
 
-  /** Ore deposits in `box`, for the renderer's screen-space pass. */
+  private buildPending() {
+    this.timer = null;
+    for (const k of this.pending) {
+      this.pending.delete(k);
+      const c = this.chunks.get(k);
+      if (!c || c.paths) continue;
+      c.paths = build(k, c.items);
+      break;
+    }
+    if (this.pending.size) this.timer = setTimeout(() => this.buildPending(), 0);
+    else {
+      // All in: one redraw of the woods for the lot.
+      this.version++;
+      this.onBuilt?.();
+    }
+  }
+
+  /** Ore deposits in `box`, for the renderer's screen-space pass (every frame: no paths needed). */
   ores(box: readonly [number, number, number, number]): NatureItem[] {
     const out: NatureItem[] = [];
-    for (const c of this.visible(box)) for (const o of c.ores) if (o.x >= box[0] && o.x <= box[2] && o.z >= box[1] && o.z <= box[3]) out.push(o);
+    for (const [k, c] of this.chunks) {
+      const b = chunkBox(k, NATURE_CHUNK);
+      if (b[2] + SPILL < box[0] || b[0] - SPILL > box[2] || b[3] + SPILL < box[1] || b[1] - SPILL > box[3]) continue;
+      c.ores ??= c.items.filter((it) => it.category === "ore");
+      for (const o of c.ores) if (o.x >= box[0] && o.x <= box[2] && o.z >= box[1] && o.z <= box[3]) out.push(o);
+    }
     return out;
   }
 

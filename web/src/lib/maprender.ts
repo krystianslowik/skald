@@ -236,12 +236,14 @@ export class MapRenderer {
   private spoilers = false;
   /** Floor plans of the loaded bases, and which base the floor switcher is for. */
   private plan: FloorPlan | null = null;
+  private planOf: readonly Piece[] | null = null;
   private planVersion = 0;
   private activeBase: string | null = null;
   /** Each chest mark's base and storey, for the current plan. */
   private markStorey = new Map<string, StoreyPick | null>();
   /** Trees, rocks, ore and the rest, as loaded so far. */
   private nature = new NatureLayer();
+  private natureOf: ReadonlyMap<ChunkKey, readonly NatureItem[]> | null = null;
   /** The base being drawn is for a moving view: the woods may be rough. */
   private roughNature = false;
   /** Ore deposits drawn in the last frame, in screen space, for tapping. */
@@ -249,6 +251,7 @@ export class MapRenderer {
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext("2d");
+    this.nature.onBuilt = () => this.onChange?.();
   }
 
   get ready(): boolean {
@@ -338,7 +341,8 @@ export class MapRenderer {
 
   /** What players built, as loaded so far. */
   setPieces(pieces: readonly Piece[]): void {
-    if (!this.ctx) return;
+    if (!this.ctx || pieces === this.planOf) return;
+    this.planOf = pieces;
     this.plan = pieces.length ? new FloorPlan(pieces) : null;
     this.planVersion++;
     this.markStorey.clear();
@@ -346,7 +350,8 @@ export class MapRenderer {
 
   /** What the world generated, as loaded so far, by chunk. */
   setNature(loaded: ReadonlyMap<ChunkKey, readonly NatureItem[]>): void {
-    if (!this.ctx) return;
+    if (!this.ctx || loaded === this.natureOf) return;
+    this.natureOf = loaded;
     this.nature.set(loaded);
   }
 

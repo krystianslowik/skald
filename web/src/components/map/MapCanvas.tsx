@@ -50,6 +50,8 @@ const DOUBLE_TAP_PX = 30;
 const TWO_TAP_MS = 300;
 /** A finger held this long without moving is a long press. */
 const LONG_PRESS_MS = 520;
+/** Chunks of floor plans and nature arriving within this time are drawn together. */
+const ARRIVAL_MS = 120;
 /** The view is remembered for the browser session (per tab). */
 const VIEW_KEY = "skald.map.view";
 const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
@@ -309,31 +311,35 @@ export const MapCanvas = forwardRef<
     schedule();
   }, [relief, schedule]);
 
-  // Floor plans: fetched as the view settles close in, drawn as they arrive.
+  // Floor plans and nature: fetched as the view settles close in. Chunks
+  // arrive one by one, and each full redraw of the map costs a frame or more
+  // on a phone: what arrives within ARRIVAL_MS is drawn together, and in the
+  // middle of a move only by the move's own frames.
+  const arrival = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const arrived = useCallback(() => {
+    if (arrival.current) return;
+    arrival.current = setTimeout(() => {
+      arrival.current = null;
+      const r = renderer.current;
+      if (loader.current) r?.setPieces(loader.current.pieces);
+      if (natureLoad.current) r?.setNature(natureLoad.current.loaded);
+      if (frame.current === null) draw("full");
+    }, ARRIVAL_MS);
+  }, [draw]);
   useEffect(() => {
     const l = (loader.current ??= new PieceLoader());
     l.onChange = () => {
-      renderer.current?.setPieces(l.pieces);
       // The switcher's base may have changed with what arrived: ask again on the next settle.
       reported.current = null;
-      draw("full");
+      arrived();
     };
+    const n = (natureLoad.current ??= natureLoader());
+    n.onChange = arrived;
     return () => {
       l.onChange = null;
+      n.onChange = null;
     };
-  }, [draw]);
-
-  // Nature: fetched as the view settles close in, like the floor plans.
-  useEffect(() => {
-    const l = (natureLoad.current ??= natureLoader());
-    l.onChange = () => {
-      renderer.current?.setNature(l.loaded);
-      draw("full");
-    };
-    return () => {
-      l.onChange = null;
-    };
-  }, [draw]);
+  }, [arrived]);
 
   // Item icons for the contents strips under containers, once the sheet has decoded.
   const iconSheet = useIconSheet();
@@ -393,6 +399,7 @@ export const MapCanvas = forwardRef<
     () => () => {
       if (frame.current !== null) cancelAnimationFrame(frame.current);
       if (idle.current) clearTimeout(idle.current);
+      if (arrival.current) clearTimeout(arrival.current);
     },
     [],
   );
