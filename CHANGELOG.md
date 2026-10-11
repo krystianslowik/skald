@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-11
+
+### Changed
+
+- Every dependency is up to date, majors included: TypeScript 7, Tailwind 4, Vite 8, Vitest 5, motion 14, Go 1.27, Bun 1.4, Node 24 LTS for the web build, Python 3.14, .NET 10 SDK (plugins still target the Unity runtime), xunit v3, and the newest release of every GitHub Action.
+- Node stays on the 24 LTS line rather than 25 (end of life), and Python on 3.14 until 3.15 has images and wheels.
+- Dependabot groups updates per ecosystem each month, with majors in their own group.
+- Contributing, security, configuration and bridge docs brought up to date; the raid log line is confirmed on Valheim 1.0.
+
 ## [0.8.1] - 2026-10-11
 
 ### Changed

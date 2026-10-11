@@ -209,7 +209,7 @@ Recommended for web: 120-180 ms opacity/colour transitions only; center messages
 
 ## 7. Recommendations for skald (React + Tailwind)
 
-**Tokens** (CSS variables; map them into `tailwind.config` `theme.extend.colors`):
+**Tokens** (CSS variables; with Tailwind 4 they live in the `@theme` block of `web/src/styles/index.css`):
 
 ```css
 :root {
