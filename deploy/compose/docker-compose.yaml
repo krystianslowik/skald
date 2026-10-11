@@ -92,7 +92,7 @@ services:
   # The agent and the icons extractor run as uid 65532 and cannot chown; a
   # new named volume is root-owned. Runs once per `up` and exits.
   settings-init:
-    image: busybox:1.37
+    image: busybox:1.38
     command: ["sh", "-c", "chown 65532:65532 /settings /icons && chmod 0755 /settings /icons"]
     volumes:
       - skald-settings:/settings

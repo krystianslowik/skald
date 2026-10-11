@@ -36,7 +36,7 @@ spec:
         # (uid 65532) writes them, the game reads them. Create the directory
         # and hand it to the agent before the agent starts.
         - name: settings-init
-          image: busybox:1.37
+          image: busybox:1.38
           imagePullPolicy: IfNotPresent
           command: [sh, -c, "mkdir -p /config/skald && chown 65532:65532 /config/skald && chmod 0755 /config/skald"]
           resources:
