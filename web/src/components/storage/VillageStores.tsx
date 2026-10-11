@@ -1,12 +1,14 @@
 import { memo, useCallback, useDeferredValue, useId, useMemo, useState, type ReactNode } from "react";
 import { useI18n } from "../../i18n";
 import type { IconId } from "../../lib/mapgeo";
+import { groupStacks, stackIndex, type StackPlace } from "../../lib/stacks";
 import { aggregate, CATEGORIES, searchStore, type Category, type StoreEntry } from "../../lib/storage";
 import { useStorage } from "../../lib/useStorage";
 import type { MapContainer } from "../../types";
 import { MapIcon } from "../map/MapIcon";
 import { Sheet, SheetClose } from "../Sheet";
 import { ItemGlyph, ItemIcon } from "./ItemIcon";
+import { StackLevel } from "./StackLevel";
 
 const ICON: Record<MapContainer["kind"], IconId> = { chest: "chest", cart: "cart", ship: "ship" };
 
@@ -108,6 +110,7 @@ export function VillageStores({ saveKey, onShow }: { saveKey: string; onShow: (e
 
   const containers = load.status === "ready" ? load.storage.containers : null;
   const entries = useMemo(() => (containers ? aggregate(containers, lookup) : []), [containers, lookup]);
+  const stacks = useMemo(() => stackIndex(groupStacks(containers ?? [])), [containers]);
   const found = useMemo(() => searchStore(entries, deferred), [entries, deferred]);
   const counts = useMemo(() => {
     const by = new Map<Category, number>();
@@ -204,13 +207,13 @@ export function VillageStores({ saveKey, onShow }: { saveKey: string; onShow: (e
         {t("store.totals", { kinds: entries.length, containers: containers!.length })}
         {unreadable > 0 && <> {tn("store.unreadable", unreadable)}</>}
       </p>
-      {open && <WhereSheet entry={open} onClose={() => setOpen(null)} onShow={show} />}
+      {open && <WhereSheet entry={open} stacks={stacks} onClose={() => setOpen(null)} onShow={show} />}
     </div>
   );
 }
 
 /** Where one item is: every container holding it, most first, each a way onto the map. */
-function WhereSheet({ entry, onClose, onShow }: { entry: StoreEntry; onClose: () => void; onShow: (entry: StoreEntry, open: string) => void }) {
+function WhereSheet({ entry, stacks, onClose, onShow }: { entry: StoreEntry; stacks: ReadonlyMap<string, StackPlace>; onClose: () => void; onShow: (entry: StoreEntry, open: string) => void }) {
   const { t, tn, lookup, number } = useI18n();
   return (
     <Sheet
@@ -235,26 +238,30 @@ function WhereSheet({ entry, onClose, onShow }: { entry: StoreEntry; onClose: ()
     >
       <h3 className="label-caps mt-1">{t("store.where")}</h3>
       <ul className="mt-2 space-y-1">
-        {entry.places.map((p) => (
-          <li key={p.container.id}>
-            <button
-              type="button"
-              onClick={() => onShow(entry, p.container.id)}
-              className="press-soft flex min-h-12 w-full items-center gap-3 rounded-[2px] px-2 py-1.5 text-left hover:bg-black/25"
-            >
-              <MapIcon icon={ICON[p.container.kind]} size={28} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-bone">{containerTitle(p.container, t, lookup)}</span>
-                <span className="block text-xs text-ash">{t("map.at", { x: p.container.x, z: p.container.z })}</span>
-              </span>
-              <span className="shrink-0 font-bold tabular-nums text-flame">{number(p.count)}</span>
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-ash">
-                <path d="M6 3l5 5-5 5" />
-              </svg>
-              <span className="sr-only">{t("store.showOnMap")}</span>
-            </button>
-          </li>
-        ))}
+        {entry.places.map((p) => {
+          const at = stacks.get(p.container.id);
+          return (
+            <li key={p.container.id}>
+              <button
+                type="button"
+                onClick={() => onShow(entry, p.container.id)}
+                className="press-soft flex min-h-12 w-full items-center gap-3 rounded-[2px] px-2 py-1.5 text-left hover:bg-black/25"
+              >
+                <MapIcon icon={ICON[p.container.kind]} size={28} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-bone">{containerTitle(p.container, t, lookup)}</span>
+                  <span className="block text-xs text-ash">{t("map.at", { x: p.container.x, z: p.container.z })}</span>
+                  {at && at.stack.chests.length > 1 && <StackLevel index={at.index} total={at.stack.chests.length} ordered={at.stack.ordered} className="mt-0.5 text-xs text-bone" />}
+                </span>
+                <span className="shrink-0 font-bold tabular-nums text-flame">{number(p.count)}</span>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-ash">
+                  <path d="M6 3l5 5-5 5" />
+                </svg>
+                <span className="sr-only">{t("store.showOnMap")}</span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
       <button type="button" onClick={() => onShow(entry, entry.places[0]!.container.id)} className="plaque press mt-4 w-full px-4 py-2.5 text-sm font-bold coarse:min-h-11">
         {entry.places.length > 1 ? t("store.showAll") : t("store.showOnMap")}

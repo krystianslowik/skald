@@ -30,6 +30,8 @@ import {
   type View,
 } from "./mapgeo";
 import { ICONS } from "./mapicons";
+import type { Piece } from "./pieces";
+import { FloorPlan, PLAN_FULL_SCALE, PLAN_MIN_SCALE, planAlpha, STOREY_SCALE, viewBox, type StoreyInfo, type StoreyPick } from "./planrender";
 
 const PAPER = "#d9c7a0";
 const PAPER_DARK = "#c2aa7c";
@@ -279,6 +281,8 @@ export interface FrameState {
   labels?: { max: number; px: number };
   /** No split animation. */
   reduced?: boolean;
+  /** The storey picked in the floor switcher; every other base shows its ground. */
+  storey?: StoreyPick | null;
 }
 
 /** 0 at or below `a`, 1 at or above `b`, smooth between. */
@@ -331,6 +335,12 @@ export class MapRenderer {
   onChange: (() => void) | null = null;
   /** Spoilers on: the terrain is not cut to where the world has been generated. */
   private spoilers = false;
+  /** Floor plans of the loaded bases, and which base the floor switcher is for. */
+  private plan: FloorPlan | null = null;
+  private planVersion = 0;
+  private activeBase: string | null = null;
+  /** Each chest mark's base and storey, for the current plan. */
+  private markStorey = new Map<string, StoreyPick | null>();
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext("2d");
@@ -384,6 +394,25 @@ export class MapRenderer {
       .catch(() => {
         // an image the browser will not hand over: no coast line
       });
+  }
+
+  /** What players built, as loaded so far. */
+  setPieces(pieces: readonly Piece[]): void {
+    if (!this.ctx) return;
+    this.plan = pieces.length ? new FloorPlan(pieces) : null;
+    this.planVersion++;
+    this.markStorey.clear();
+  }
+
+  /** The base the floor switcher is for at this view, or null (too far out, one storey, none loaded). */
+  storeys(v: View, layers: Record<LayerId, boolean>): StoreyInfo | null {
+    if (!this.plan || !layers.buildings || v.scale < STOREY_SCALE) return null;
+    return this.plan.active(viewBox(v));
+  }
+
+  /** The base and storey a point stands on, once its floor plan is loaded. */
+  storeyAt(x: number, z: number, y: number | undefined): StoreyPick | null {
+    return this.plan?.storeyAt(x, z, y) ?? null;
   }
 
   /** The decoded item icon sheet, or null to draw no contents strips. */
@@ -463,7 +492,8 @@ export class MapRenderer {
     const g = this.ctx;
     if (!g) return false;
     const v = f.view;
-    const key = `${f.layers.fog ? 1 : 0}${f.layers.terrain ? 1 : 0}${f.layers.relief ? 1 : 0}:${this.version}:${v.w}x${v.h}:${this.dpr}`;
+    const plan = f.layers.buildings && this.plan ? `${this.planVersion}:${f.storey ? `${f.storey.base}/${f.storey.level}` : ""}:${this.storeys(v, f.layers)?.base ?? ""}` : "";
+    const key = `${f.layers.fog ? 1 : 0}${f.layers.terrain ? 1 : 0}${f.layers.relief ? 1 : 0}:${this.version}:${v.w}x${v.h}:${this.dpr}:${plan}`;
     let b = this.base;
     const covers = (c: NonNullable<typeof b>) => {
       const k = v.scale / c.scale;
@@ -504,13 +534,14 @@ export class MapRenderer {
     if (!g) return null;
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, canvas.width, canvas.height);
-    this.drawWorld(g, { ...v, w, h }, f.layers, dpr);
+    this.activeBase = this.storeys(v, f.layers)?.base ?? null;
+    this.drawWorld(g, { ...v, w, h }, f.layers, dpr, f.storey ?? null);
     this.base = { canvas, key, cx: v.cx, cz: v.cz, scale: v.scale, w, h };
     return this.base;
   }
 
   /** Paper, sea, land, terrain heat, fog and the world's edge, for view `v` at `dpr`. */
-  private drawWorld(g: CanvasRenderingContext2D, v: View, layers: Record<LayerId, boolean>, dpr: number) {
+  private drawWorld(g: CanvasRenderingContext2D, v: View, layers: Record<LayerId, boolean>, dpr: number, storey: StoreyPick | null) {
     const p = this.prep;
     const s = v.scale * dpr;
     g.setTransform(s, 0, 0, -s, (v.w / 2 - v.cx * v.scale) * dpr, (v.h / 2 + v.cz * v.scale) * dpr);
@@ -587,6 +618,9 @@ export class MapRenderer {
       if (layers.terrain) this.drawTerrain(g, v, p);
       this.drawFog(g, v, p, layers);
     }
+    // Floor plans over the fog: what was built is always somewhere explored.
+    const planA = this.plan && layers.buildings ? planAlpha(v.scale) : 0;
+    if (planA > 0) this.plan!.draw(g, viewBox(v, 4), v.scale, planA, storey, this.activeBase);
     g.restore();
     // The edge of the world.
     g.strokeStyle = PAPER_DARK;
@@ -766,6 +800,7 @@ export class MapRenderer {
     const icons: Box[] = [];
     const labels: { sx: number; sy: number; text: string; priority: number; r: number }[] = [];
     const crowd = v.scale < 0.06;
+    const onPlan = !!this.plan && f.layers.buildings && v.scale >= PLAN_FULL_SCALE;
     const now = performance.now();
     let animating = false;
     const list = this.clustersFor(f, crowd);
@@ -803,8 +838,14 @@ export class MapRenderer {
       }
       const [sx, sy] = worldToScreen(v, wx, wz);
       if (sx < -pad || sy < -pad || sx > v.w + pad || sy > v.h + pad) continue;
+      // A chest on a storey above the one picked is not drawn; one below is a ghost.
+      // A cluster shows as its most visible member does.
+      const storey = members.length <= 1 ? this.storeyShade(m, f) : Math.max(...members.map((x) => this.storeyShade(x, f)));
+      if (storey === 0) continue;
+      alpha *= storey;
       const loc = m.data.type === "location" ? m.data : null;
-      const px = m.data.type === "base" ? Math.round(18 + Math.min(12, Math.log2(m.data.pieces + 1))) : loc?.kind === "dungeon" ? 18 : ICON_PX;
+      // Over a floor plan, chests are smaller marks, so the plan under them still reads.
+      const px = m.data.type === "base" ? Math.round(18 + Math.min(12, Math.log2(m.data.pieces + 1))) : loc?.kind === "dungeon" ? 18 : m.data.type === "storage" && onPlan ? 19 : ICON_PX;
       const dim = loc !== null && !loc.explored;
       const sp = this.sprite(m.icon, px, dim);
       if (!sp) continue;
@@ -837,6 +878,11 @@ export class MapRenderer {
       if (count > 1) {
         const badge = this.drawBadge(g, sx + px / 2 - 1, sy - px / 2 + 1, count);
         icons.push(badge);
+      } else if (m.data.type === "storage" && m.data.stack) {
+        // A stack of chests: its height on a light seal, apart from a cluster's dark one.
+        g.globalAlpha = alpha;
+        icons.push(this.drawBadge(g, sx + px / 2 - 1, sy - px / 2 + 1, m.data.stack.length, true));
+        g.globalAlpha = 1;
       }
       visible.push(count > 1 ? { m, sx, sy, members } : { m, sx, sy });
       icons.push({ x: sx - px / 2, y: sy - px / 2, w: px, h: px });
@@ -894,21 +940,40 @@ export class MapRenderer {
     return { x, y, w, h };
   }
 
-  /** A cluster's count: a small dark seal on the icon's shoulder. */
-  private drawBadge(g: CanvasRenderingContext2D, x: number, y: number, n: number): Box {
-    const text = n > 99 ? "99+" : String(n);
+  /**
+   * How a chest mark shows under the floor switcher: 1 on the picked storey
+   * (or outside any floor plan), a ghost below it, 0 (hidden) above it. A
+   * picked or highlighted chest is never hidden.
+   */
+  private storeyShade(m: Marker, f: FrameState): number {
+    if (m.data.type !== "storage" || !this.plan || !f.layers.buildings || f.view.scale < PLAN_MIN_SCALE) return 1;
+    let st = this.markStorey.get(m.id);
+    if (st === undefined) {
+      st = this.plan.storeyAt(m.data.store.x, m.data.store.z, m.data.store.y);
+      this.markStorey.set(m.id, st);
+    }
+    if (!st) return 1;
+    const picked = f.storey && f.storey.base === st.base ? f.storey.level : 0;
+    if (st.level === picked) return 1;
+    if (st.level < picked || m.id === f.selected || f.highlighted?.has(m.id)) return 0.4;
+    return 0;
+  }
+
+  /** A cluster's count: a small dark seal on the icon's shoulder; `light` for a stack's height. */
+  private drawBadge(g: CanvasRenderingContext2D, x: number, y: number, n: number, light = false): Box {
+    const text = light ? `\u00d7${n}` : n > 99 ? "99+" : String(n);
     g.font = `700 10px ${FONT}`;
     const w = Math.max(15, this.measure(g, `10:${text}`, text) + 8);
     const h = 15;
-    g.fillStyle = "#2b1d12";
-    g.strokeStyle = "rgba(240, 228, 200, 0.95)";
+    g.fillStyle = light ? "#efe2c2" : "#2b1d12";
+    g.strokeStyle = light ? "#2b1d12" : "rgba(240, 228, 200, 0.95)";
     g.lineWidth = 1.5;
     g.beginPath();
     if (typeof g.roundRect === "function") g.roundRect(x - w / 2, y - h / 2, w, h, h / 2);
     else g.rect(x - w / 2, y - h / 2, w, h);
     g.fill();
     g.stroke();
-    g.fillStyle = "#f3b867";
+    g.fillStyle = light ? "#2b1d12" : "#f3b867";
     g.textAlign = "center";
     g.textBaseline = "middle";
     g.fillText(text, x, y + 0.5);

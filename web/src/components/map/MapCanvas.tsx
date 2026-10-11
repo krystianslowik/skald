@@ -22,6 +22,8 @@ import { useIconSheet } from "../../lib/itemicons";
 import { COARSE, useMedia } from "../../lib/useMedia";
 import { inertiaStep, releaseVelocity, REST_SPEED, springStep } from "../../lib/mapmotion";
 import { MapRenderer, type Relief } from "../../lib/maprender";
+import { PieceLoader } from "../../lib/pieceload";
+import { PLAN_MIN_SCALE, viewBox, type StoreyInfo, type StoreyPick } from "../../lib/planrender";
 import type { ApiMap } from "../../types";
 
 export interface MapCanvasHandle {
@@ -34,6 +36,8 @@ export interface MapCanvasHandle {
   fit(): void;
   /** Screen position (px in the canvas box) of a world point, for overlays. */
   project(x: number, z: number): [number, number];
+  /** The base and storey a point (a chest) stands on, once its floor plan has loaded. */
+  storeyAt(x: number, z: number, y: number | undefined): StoreyPick | null;
 }
 
 /** Pointer travel before a press becomes a pan, so taps stay taps. */
@@ -84,6 +88,10 @@ export const MapCanvas = forwardRef<
     highlighted?: ReadonlySet<string>;
     /** The world generator's terrain, drawn under everything when the relief layer is on. */
     relief?: Relief | null;
+    /** The storey picked in the floor switcher. */
+    storey?: StoreyPick | null;
+    /** The base the floor switcher is for, whenever it changes (null: no switcher), and when floor plans arrive. */
+    onStoreys?: (info: StoreyInfo | null) => void;
     onSelect: (m: Marker | null) => void;
     /** A tap on a cluster that cannot be zoomed apart any further (marks a few metres apart). */
     onGroup?: (members: readonly Marker[]) => void;
@@ -104,7 +112,7 @@ export const MapCanvas = forwardRef<
     interactive?: boolean;
     className?: string;
   }
->(function MapCanvas({ map, mask, markers, layers, selected, highlighted, relief = null, onSelect, onGroup, onAnchor, onPointerWorld, onFrame, onLongPress, onTapWorld, remember = false, insets = NO_INSETS, interactive = true, className = "relative" }, ref) {
+>(function MapCanvas({ map, mask, markers, layers, selected, highlighted, relief = null, storey = null, onStoreys, onSelect, onGroup, onAnchor, onPointerWorld, onFrame, onLongPress, onTapWorld, remember = false, insets = NO_INSETS, interactive = true, className = "relative" }, ref) {
   const { t } = useI18n();
   const reduced = useReducedMotion() ?? false;
   const coarse = useMedia(COARSE);
@@ -119,8 +127,10 @@ export const MapCanvas = forwardRef<
   const fling = useRef<{ vx: number; vy: number } | null>(null);
   const glide = useRef<{ cx: number; cz: number; ls: number; v: [number, number, number] } | null>(null);
   const last = useRef(0);
-  const props = useRef({ markers, layers, selected, highlighted, onAnchor, onFrame, coarse, reduced, remember });
-  props.current = { markers, layers, selected, highlighted, onAnchor, onFrame, coarse, reduced, remember };
+  const props = useRef({ markers, layers, selected, highlighted, onAnchor, onFrame, coarse, reduced, remember, storey, onStoreys, generation: map.meta.generation });
+  props.current = { markers, layers, selected, highlighted, onAnchor, onFrame, coarse, reduced, remember, storey, onStoreys, generation: map.meta.generation };
+  const loader = useRef<PieceLoader | null>(null);
+  const reported = useRef<string | null>(null);
 
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draw = useCallback((quality: "fast" | "full" = "fast") => {
@@ -131,7 +141,7 @@ export const MapCanvas = forwardRef<
     // Fingers need wider clusters and fewer, larger labels on a small screen.
     const labels = p.coarse ? { max: Math.round(Math.max(8, Math.min(40, (v.w * v.h) / 9000))), px: 13 } : { max: 160, px: 12 };
     const animating = r.draw(
-      { view: v, layers: p.layers, markers: p.markers, selected: p.selected?.id ?? null, highlighted: p.highlighted, hovered: hovered.current, cluster: p.coarse ? 30 : 24, labels, reduced: p.reduced },
+      { view: v, layers: p.layers, markers: p.markers, selected: p.selected?.id ?? null, highlighted: p.highlighted, hovered: hovered.current, cluster: p.coarse ? 30 : 24, labels, reduced: p.reduced, storey: p.storey },
       quality,
     );
     // A mark leaving its cluster keeps the frames coming.
@@ -142,7 +152,17 @@ export const MapCanvas = forwardRef<
     // Once nothing has moved for a moment, redraw the map itself at full detail.
     if (idle.current) clearTimeout(idle.current);
     if (quality === "fast") idle.current = setTimeout(() => draw("full"), 140);
-    else if (p.remember) storeView(v);
+    else {
+      if (p.remember) storeView(v);
+      // Settled: floor plans for what the cached map covers, and the floor switcher's base.
+      if (p.layers.buildings && v.scale >= PLAN_MIN_SCALE) loader.current?.want(viewBox({ ...v, w: v.w * 1.5, h: v.h * 1.5 }, 8), String(p.generation));
+      const info = r.storeys(v, p.layers);
+      const key = info ? `${info.base}:${info.storeys}:${info.hasRoof ? 1 : 0}` : "";
+      if (key !== reported.current) {
+        reported.current = key;
+        p.onStoreys?.(info);
+      }
+    }
     if (p.onAnchor) {
       const sel = p.selected;
       if (!sel) p.onAnchor(null);
@@ -262,6 +282,9 @@ export const MapCanvas = forwardRef<
       project(x, z) {
         return worldToScreen(view.current, x, z);
       },
+      storeyAt(x, z, y) {
+        return renderer.current?.storeyAt(x, z, y) ?? null;
+      },
     }),
     [glideTo, fit],
   );
@@ -279,6 +302,20 @@ export const MapCanvas = forwardRef<
     renderer.current?.setRelief(relief);
     schedule();
   }, [relief, schedule]);
+
+  // Floor plans: fetched as the view settles close in, drawn as they arrive.
+  useEffect(() => {
+    const l = (loader.current ??= new PieceLoader());
+    l.onChange = () => {
+      renderer.current?.setPieces(l.pieces);
+      // The switcher's base may have changed with what arrived: ask again on the next settle.
+      reported.current = null;
+      draw("full");
+    };
+    return () => {
+      l.onChange = null;
+    };
+  }, [draw]);
 
   // Item icons for the contents strips under containers, once the sheet has decoded.
   const iconSheet = useIconSheet();
@@ -307,7 +344,7 @@ export const MapCanvas = forwardRef<
   // Anything drawn that is not the view.
   useEffect(() => {
     schedule();
-  }, [markers, layers, selected, highlighted, schedule]);
+  }, [markers, layers, selected, highlighted, storey, schedule]);
 
   // Size: follow the box; the first size fits the view to what people made.
   useEffect(() => {

@@ -1,10 +1,14 @@
+import { useEffect, useRef } from "react";
 import { useI18n } from "../../i18n";
 import { markerItems, markerStore, type Marker } from "../../lib/mapgeo";
 import { countItems } from "../../lib/storage";
 import { mapUrlAt } from "../../lib/world";
+import type { MapContainer } from "../../types";
 import { clusterSummary, contentsOf, sortCluster, stackText, summarize, type Summary } from "../../lib/clusterlist";
 import { InventoryGrid } from "../storage/Inventory";
+import { containerTitle } from "../storage/VillageStores";
 import { ItemIcon } from "../storage/ItemIcon";
+import { StackLevel } from "../storage/StackLevel";
 import { MapIcon } from "./MapIcon";
 
 /** What a mark is, in a few words: the popover heading and the search hint. */
@@ -97,7 +101,7 @@ export function DetailsHead({ marker, group, onClose, headingId }: { marker: Mar
       <MapIcon icon={marker.icon} size={30} />
       <div className="min-w-0 flex-1">
         <h3 id={headingId} className="font-bold leading-tight text-flame">
-          {group ? tn("map.group.title", group.length) : markerTitle(marker, t, lookup)}
+          {group ? tn("map.group.title", group.length) : marker.data.type === "storage" && marker.data.stack ? tn("stack.title", marker.data.stack.length) : markerTitle(marker, t, lookup)}
         </h3>
         <p className="mt-0.5 text-xs text-ash">{t("map.at", { x: marker.x, z: marker.z })}</p>
       </div>
@@ -166,6 +170,42 @@ function ClusterList({ group, onPick }: { group: readonly Marker[]; onPick?: (m:
 }
 
 /**
+ * A stack of chests, bottom to top: where each one sits, what it holds and
+ * its slots. `level` (from the stores or a search) is picked out and
+ * scrolled to.
+ */
+function StackList({ chests, level, names }: { chests: readonly MapContainer[]; level?: number; names: boolean }) {
+  const { t, tn, lookup } = useI18n();
+  const picked = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    picked.current?.scrollIntoView?.({ block: "nearest" });
+  }, [level]);
+  const ordered = chests.every((c) => typeof c.y === "number");
+  return (
+    <ol className="mt-2 space-y-2">
+      {chests.map((c, i) => {
+        const n = countItems(c.items);
+        const on = i === level;
+        return (
+          <li key={c.id} ref={on ? picked : undefined} aria-current={on ? "true" : undefined} className={`rounded-[2px] px-2 py-1.5 ${on ? "bg-select/20 ring-1 ring-select-hi/70" : "bg-black/20"}`}>
+            <p className="flex flex-wrap items-baseline justify-between gap-x-3">
+              <span className="font-bold text-bone">{containerTitle(c, t, lookup)}</span>
+              <span className="text-xs text-ash">{c.unreadable ? t("map.storage.unreadable") : n === 0 ? t("map.storage.empty") : tn("map.storage.holds", n)}</span>
+            </p>
+            <StackLevel index={i} total={chests.length} ordered={ordered} className="mt-0.5 text-xs text-bone" />
+            {!c.unreadable && c.width > 0 && (
+              <div className="mt-1.5">
+                <InventoryGrid items={c.items} width={c.width} height={c.height} names={names} />
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/**
  * The facts the save holds about a mark, "Go to the other end" for a portal
  * and a link to the same spot on valheim-map.world; for a pile of marks too
  * close to zoom apart, the list of them to pick from.
@@ -176,6 +216,7 @@ export function DetailsBody({
   seedName,
   onGo,
   onPick,
+  level,
   roomy = false,
 }: {
   marker: Marker;
@@ -183,11 +224,14 @@ export function DetailsBody({
   seedName: string;
   onGo?: (x: number, z: number) => void;
   onPick?: (m: Marker) => void;
+  /** For a stack of chests: the one to pick out, 0 for the bottom. */
+  level?: number;
   /** Phone sheet: full-width, finger-sized actions. */
   roomy?: boolean;
 }) {
   const { t, tn, lookup, number } = useI18n();
   if (group) return <ClusterList group={group} onPick={onPick} />;
+  if (marker.data.type === "storage" && marker.data.stack) return <StackList chests={marker.data.stack} level={level} names={roomy} />;
   const lines = marksLines(marker, t, tn, lookup);
   const d = marker.data;
   const items = markerItems(marker);
@@ -242,6 +286,7 @@ export function MapDetails({
   seedName,
   onGo,
   onPick,
+  level,
   onClose,
 }: {
   marker: Marker;
@@ -250,12 +295,14 @@ export function MapDetails({
   /** Moves the map to a world point (the other end of a portal). */
   onGo?: (x: number, z: number) => void;
   onPick?: (m: Marker) => void;
+  level?: number;
   onClose: () => void;
 }) {
+  const stack = !group && marker.data.type === "storage" && marker.data.stack;
   return (
-    <div className={`${!group && markerItems(marker)?.length ? "w-76" : "w-66"} max-w-[calc(100vw-2rem)] text-sm`}>
+    <div className={`${stack ? "scroll-quiet max-h-[min(30rem,70vh)] w-80 overflow-y-auto" : !group && markerItems(marker)?.length ? "w-76" : "w-66"} max-w-[calc(100vw-2rem)] text-sm`}>
       <DetailsHead marker={marker} group={group} onClose={onClose} />
-      <DetailsBody marker={marker} group={group} seedName={seedName} onGo={onGo} onPick={onPick} />
+      <DetailsBody marker={marker} group={group} seedName={seedName} onGo={onGo} onPick={onPick} level={level} />
     </div>
   );
 }

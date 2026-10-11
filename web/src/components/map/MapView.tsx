@@ -1,7 +1,8 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
-import { buildMarkers, decodeRLE, DEFAULT_LAYERS, layerCounts, LAYERS, mainBase, markerStore, type Insets, type LayerId, type Marker } from "../../lib/mapgeo";
+import { buildMarkers, decodeRLE, DEFAULT_LAYERS, layerCounts, LAYERS, mainBase, markerStores, type Insets, type LayerId, type Marker } from "../../lib/mapgeo";
+import type { StoreyInfo, StoreyPick } from "../../lib/planrender";
 import { COARSE, PHONE, useMedia } from "../../lib/useMedia";
 import { useTerrain } from "../../lib/useTerrain";
 import { useWorldMap } from "../../lib/useWorldMap";
@@ -12,6 +13,7 @@ import { LiveLayer, type LiveLayerHandle } from "./LiveLayer";
 import { MapCanvas, type MapCanvasHandle } from "./MapCanvas";
 import { DetailsBody, DetailsHead, MapDetails, markerTitle } from "./MapDetails";
 import { MapLayers } from "./MapLayers";
+import { StoreySwitcher } from "./StoreySwitcher";
 
 const LAYERS_KEY = "skald.map.layers";
 
@@ -172,8 +174,8 @@ function MapMessage({ load, onRetry }: { load: string; onRetry: () => void }) {
   );
 }
 
-/** A mark, or a pile of marks too close to zoom apart, that the details are about. */
-type Selection = { m: Marker; group?: readonly Marker[] };
+/** A mark, or a pile of marks too close to zoom apart, that the details are about; `level` picks a chest of a stack. */
+type Selection = { m: Marker; group?: readonly Marker[]; level?: number };
 
 function SaveMap({
   map,
@@ -215,17 +217,34 @@ function SaveMap({
   const counts = useMemo(() => layerCounts(markers, map), [markers, map]);
   const home = useMemo(() => mainBase(markers), [markers]);
   const selected = sel?.m ?? null;
-  // Marks of the focused containers, by container id.
+  // Marks of the focused containers, by container id (every chest of a stack is its stack's mark).
   const focusMarks = useMemo(() => {
     if (!focus) return null;
     const want = new Set(focus.ids);
     const byStore = new Map<string, Marker>();
-    for (const m of markers) {
-      const id = markerStore(m)?.id;
-      if (id && want.has(id)) byStore.set(id, m);
-    }
+    for (const m of markers) for (const c of markerStores(m)) if (want.has(c.id)) byStore.set(c.id, m);
     return byStore;
   }, [focus, markers]);
+
+  // The floor switcher: the base it is for (from the canvas) and the storey picked there.
+  const [storeys, setStoreys] = useState<StoreyInfo | null>(null);
+  const [storey, setStorey] = useState<StoreyPick | null>(null);
+  // A chest shown from the stores whose storey is known once its floor plan arrives.
+  const wantStorey = useRef<{ x: number; z: number; y?: number } | null>(null);
+  const settleStorey = useCallback(() => {
+    const w = wantStorey.current;
+    const st = w ? canvas.current?.storeyAt(w.x, w.z, w.y) : null;
+    if (!st) return;
+    wantStorey.current = null;
+    setStorey(st);
+  }, []);
+  const onStoreys = useCallback(
+    (info: StoreyInfo | null) => {
+      setStoreys(info);
+      settleStorey();
+    },
+    [settleStorey],
+  );
   const highlighted = useMemo(() => (focusMarks ? new Set([...focusMarks.values()].map((m) => m.id)) : undefined), [focusMarks]);
 
   // Keep the selection when a new save arrives, by id.
@@ -234,7 +253,7 @@ function SaveMap({
       if (!s) return null;
       const m = markers.find((x) => x.id === s.m.id);
       if (!m) return null;
-      return s.group ? { m, group: s.group.map((g) => markers.find((x) => x.id === g.id)).filter((x): x is Marker => !!x) } : { m };
+      return s.group ? { m, group: s.group.map((g) => markers.find((x) => x.id === g.id)).filter((x): x is Marker => !!x) } : { m, level: s.level };
     });
   }, [markers]);
 
@@ -285,17 +304,28 @@ function SaveMap({
     const need = new Set([...focusMarks.values()].map((m) => m.layer));
     setLayers((prev) => (LAYERS.some((l) => need.has(l) && !prev[l]) ? Object.fromEntries(LAYERS.map((l) => [l, prev[l] || need.has(l)])) as Record<LayerId, boolean> : prev));
     if (!target) return;
-    choose({ m: target });
+    const stores = markerStores(target);
+    const level = Math.max(0, stores.findIndex((c) => c.id === focus.open));
+    const chest = stores[level];
+    choose(stores.length > 1 ? { m: target, level } : { m: target });
+    // Its storey: now if the floor plan is here, else when it arrives.
+    wantStorey.current = chest ? { x: chest.x, z: chest.z, y: chest.y } : null;
+    settleStorey();
     canvas.current?.flyTo(target.x, target.z, 0.9);
-  }, [focus, focusMarks, choose]);
+  }, [focus, focusMarks, choose, settleStorey]);
 
   const pickResult = useCallback(
-    (m: Marker) => {
+    (m: Marker, level?: number) => {
       setPanelOpen(false);
-      choose({ m });
+      choose(level === undefined ? { m } : { m, level });
+      const chest = markerStores(m)[level ?? 0];
+      if (chest && m.data.type === "storage") {
+        wantStorey.current = { x: chest.x, z: chest.z, y: chest.y };
+        settleStorey();
+      }
       canvas.current?.flyTo(m.x, m.z, 0.35);
     },
-    [choose],
+    [choose, settleStorey],
   );
 
   const onSelect = useCallback(
@@ -417,6 +447,8 @@ function SaveMap({
         selected={selected}
         highlighted={highlighted}
         relief={relief}
+        storey={storey}
+        onStoreys={onStoreys}
         onSelect={onSelect}
         onGroup={onGroup}
         onAnchor={phone ? undefined : onAnchor}
@@ -462,7 +494,13 @@ function SaveMap({
         </Sheet>
       )}
 
-      <div className={`absolute ${bottom} right-[max(0.75rem,env(safe-area-inset-right))] z-10 flex flex-col gap-1.5 coarse:gap-2`}>
+      <div className={`absolute ${bottom} right-[max(0.75rem,env(safe-area-inset-right))] z-10 flex flex-col items-end gap-1.5 coarse:gap-2`}>
+        {/* The storeys of the base in the frame, above the zoom buttons like a lift's panel. */}
+        {storeys && (
+          <div className="mb-1.5">
+            <StoreySwitcher info={storeys} level={storey?.base === storeys.base ? storey.level : 0} onChange={(level) => setStorey({ base: storeys.base, level })} />
+          </div>
+        )}
         {/* A finger pinches and double taps; +/- are for mice and trackpads. */}
         {!coarse && <ZoomButton label={t("map.zoomIn")} onClick={() => canvas.current?.zoomBy(1.8)} d="M8 3v10M3 8h10" />}
         {!coarse && <ZoomButton label={t("map.zoomOut")} onClick={() => canvas.current?.zoomBy(1 / 1.8)} d="M3 8h10" />}
@@ -515,7 +553,7 @@ function SaveMap({
             onClose={onSheetClosed}
             header={(close) => <DetailsHead marker={sel.m} group={sel.group} onClose={close} headingId="map-details-h" />}
           >
-            <DetailsBody marker={sel.m} group={sel.group} seedName={seed} onGo={goTo} onPick={pickFromGroup} roomy />
+            <DetailsBody marker={sel.m} group={sel.group} seedName={seed} onGo={goTo} onPick={pickFromGroup} level={sel.level} roomy />
           </Sheet>
         )
       ) : (
@@ -533,7 +571,7 @@ function SaveMap({
                 exit={{ opacity: 0, scale: 0.96 }}
                 transition={{ type: "spring", bounce: 0, visualDuration: 0.2 }}
               >
-                <MapDetails marker={sel.m} group={sel.group} seedName={seed} onGo={goTo} onPick={pickFromGroup} onClose={() => setSel(null)} />
+                <MapDetails marker={sel.m} group={sel.group} seedName={seed} onGo={goTo} onPick={pickFromGroup} level={sel.level} onClose={() => setSel(null)} />
               </motion.div>
             )}
           </AnimatePresence>

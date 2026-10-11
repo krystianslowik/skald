@@ -1,10 +1,11 @@
 import { useId, useMemo, useState } from "react";
 import { useI18n, type TextKey } from "../../i18n";
-import { LAYERS, markerItems, searchMarkers, type IconId, type LayerId, type Marker } from "../../lib/mapgeo";
+import { LAYERS, markerItems, markerStores, searchMarkers, type IconId, type LayerId, type Marker } from "../../lib/mapgeo";
 import { fold, matchingItems } from "../../lib/storage";
 import type { ApiMap } from "../../types";
 import { markerKind, markerTitle } from "./MapDetails";
 import { ItemIcon } from "../storage/ItemIcon";
+import { StackLevel } from "../storage/StackLevel";
 import { MapIcon } from "./MapIcon";
 
 /** The mark each layer row shows; the fog and grid get small drawn swatches instead. */
@@ -33,6 +34,14 @@ function Swatch({ layer }: { layer: LayerId }) {
       <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden className="shrink-0">
         <circle cx="11" cy="11" r="10" fill="#e9dfc6" />
         <path d="M4 13c2-3 4-1 6-3s5-2 8 1" stroke="#9c8b6a" strokeWidth="1.4" fill="none" strokeLinecap="round" />
+      </svg>
+    );
+  if (layer === "buildings")
+    return (
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden className="shrink-0">
+        <circle cx="11" cy="11" r="10" fill="#d9c7a0" />
+        <path d="M6 6h10v10H6z" fill="#ecdcb4" />
+        <path d="M11 16H6V6h10v10h-2M11 6v5h5" fill="none" stroke="#3a2a1a" strokeWidth="1.6" strokeLinecap="square" />
       </svg>
     );
   if (layer === "terrain")
@@ -89,7 +98,8 @@ export function MapLayers({
   /** The world generator's terrain: none (no row), ready, or from an older game build. */
   relief?: "none" | "ready" | "stale";
   onToggle: (l: LayerId) => void;
-  onPick: (m: Marker) => void;
+  /** `level`: the chest of a stack that holds what was searched for. */
+  onPick: (m: Marker, level?: number) => void;
   now: number;
 }) {
   const { t, tn, lookup, number, ago } = useI18n();
@@ -101,7 +111,7 @@ export function MapLayers({
     // Then whatever holds a matching item, the most of it first.
     const q = fold(query.trim());
     const seen = new Set(byName.map((m) => m.id));
-    const held: { m: Marker; hint: string; count: number; item?: string }[] = [];
+    const held: { m: Marker; hint: string; count: number; item?: string; level?: number }[] = [];
     if (q.length >= 2) {
       for (const m of shown) {
         const items = markerItems(m);
@@ -109,11 +119,18 @@ export function MapLayers({
         const hits = matchingItems(items, q, lookup);
         if (!hits.length) continue;
         const top = hits[0]!;
-        held.push({ m, count: top.count, item: top.name, hint: t("map.searchItem", { item: top.label, n: number(top.count) }) });
+        // In a stack, the chest that holds the most of it.
+        const stores = markerStores(m);
+        let level: number | undefined;
+        if (stores.length > 1) {
+          const counts = stores.map((c) => matchingItems(c.items, q, lookup).find((h) => h.name === top.name)?.count ?? 0);
+          level = counts.indexOf(Math.max(...counts));
+        }
+        held.push({ m, count: top.count, item: top.name, level, hint: t("map.searchItem", { item: top.label, n: number(top.count) }) });
       }
       held.sort((a, b) => b.count - a.count);
     }
-    return [...byName.map((m): { m: Marker; hint: string; item?: string } => ({ m, hint: "" })), ...held.slice(0, 10)];
+    return [...byName.map((m): { m: Marker; hint: string; item?: string; level?: number } => ({ m, hint: "" })), ...held.slice(0, 10)];
   }, [markers, layers, query, t, lookup, number]);
   return (
     <div className="space-y-5 text-sm">
@@ -133,11 +150,14 @@ export function MapLayers({
         {query.trim() && (
           <ul className="mt-2 space-y-1" aria-live="polite">
             {results.length === 0 && <li className="text-xs text-ash">{t("map.searchEmpty")}</li>}
-            {results.map(({ m, hint, item }) => (
+            {results.map(({ m, hint, item, level }) => (
               <li key={m.id}>
-                <button type="button" onClick={() => onPick(m)} className="press-soft flex w-full items-center gap-2 rounded-[2px] px-1.5 py-1 text-left hover:bg-black/25 coarse:min-h-11">
+                <button type="button" onClick={() => onPick(m, level)} className="press-soft flex w-full items-center gap-2 rounded-[2px] px-1.5 py-1 text-left hover:bg-black/25 coarse:min-h-11">
                   <MapIcon icon={m.icon} size={20} />
-                  <span className="min-w-0 flex-1 truncate text-bone">{markerTitle(m, t, lookup)}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-bone">{markerTitle(m, t, lookup)}</span>
+                    {level !== undefined && m.data.type === "storage" && m.data.stack && <StackLevel index={level} total={m.data.stack.length} ordered={m.data.stack.every((c) => typeof c.y === "number")} className="text-xs text-ash" />}
+                  </span>
                   {item && <ItemIcon name={item} size={14} iconSize={22} className="text-flame/80" />}
                   <span className={`shrink-0 text-xs ${hint ? "font-bold tabular-nums text-flame" : "text-ash"}`}>
                     {hint || (markerKind(m, t, lookup) === markerTitle(m, t, lookup) ? "" : markerKind(m, t, lookup))}

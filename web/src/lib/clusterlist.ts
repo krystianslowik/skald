@@ -49,7 +49,7 @@ export function contentsOf(m: Marker): Contents {
   if (store) {
     if (store.unreadable) return { kind: "unreadable" };
     if (store.width === 0) return { kind: "noHold" };
-    return { kind: "items", items: store.items };
+    return { kind: "items", items: markerItems(m) ?? store.items };
   }
   const items = markerItems(m);
   return items ? { kind: "items", items } : { kind: "none" };

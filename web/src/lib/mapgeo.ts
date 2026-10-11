@@ -8,6 +8,7 @@
 // explored mask are both row-major from the south-west corner.
 
 import type { ApiMap, MapContainer, MapItem, MapLand, MapLocation } from "../types";
+import { groupStacks } from "./stacks";
 
 /** Radius of the playable world in metres. */
 export const WORLD_RADIUS = 10_500;
@@ -457,14 +458,16 @@ export function fitBounds(w: number, h: number, box: readonly [number, number, n
 
 // ---- markers ---------------------------------------------------------------
 
-export type LayerId = "relief" | "fog" | "bases" | "portals" | "graves" | "beds" | "vehicles" | "storage" | "pins" | "locations" | "terrain" | "grid";
+export type LayerId = "relief" | "fog" | "buildings" | "bases" | "portals" | "graves" | "beds" | "vehicles" | "storage" | "pins" | "locations" | "terrain" | "grid";
 
-export const LAYERS: readonly LayerId[] = ["relief", "fog", "bases", "portals", "graves", "beds", "vehicles", "storage", "pins", "locations", "terrain", "grid"];
+export const LAYERS: readonly LayerId[] = ["relief", "fog", "buildings", "bases", "portals", "graves", "beds", "vehicles", "storage", "pins", "locations", "terrain", "grid"];
 
 export const DEFAULT_LAYERS: Record<LayerId, boolean> = {
   // The world generator's terrain, under everything; only drawn when the server has one.
   relief: true,
   fog: true,
+  // Floor plans of what players built, at close zoom.
+  buildings: true,
   bases: true,
   portals: true,
   graves: true,
@@ -503,7 +506,8 @@ export type MarkerData =
   | { type: "grave"; owner: string; day: number; items: MapItem[] }
   | { type: "bed"; owner: string }
   | { type: "vehicle"; kind: string; store?: MapContainer }
-  | { type: "storage"; store: MapContainer }
+  /** A chest, or a stack of chests on one spot: `store` is the bottom one, `stack` all of them bottom to top. */
+  | { type: "storage"; store: MapContainer; stack?: MapContainer[] }
   | { type: "pin"; kind: string; name: string }
   | { type: "location"; kind: MapLocation["kind"]; name: string; placed: boolean; explored: boolean };
 
@@ -630,10 +634,12 @@ export function buildMarkers(map: ApiMap, lookup: (key: string) => string | unde
       data: { type: "vehicle", kind: v.kind, store: v.id ? stores.get(v.id) : undefined },
     });
   }
-  // Carts and ships are drawn as vehicles; the storage layer adds the chests.
-  for (const c of map.storage) {
-    if (c.kind !== "chest") continue;
-    out.push({ id: `store:${c.id}`, layer: "storage", icon: "chest", x: c.x, z: c.z, priority: 35, tier: 1, rank: 60, label: "", labelScale: Infinity, data: { type: "storage", store: c } });
+  // Carts and ships are drawn as vehicles; the storage layer adds the chests,
+  // one mark for each stack of them.
+  for (const { chests } of groupStacks(map.storage)) {
+    const c = chests[0]!;
+    const data: MarkerData = chests.length > 1 ? { type: "storage", store: c, stack: chests } : { type: "storage", store: c };
+    out.push({ id: `store:${c.id}`, layer: "storage", icon: "chest", x: c.x, z: c.z, priority: 35, tier: 1, rank: 60, label: "", labelScale: Infinity, data });
   }
   for (const [i, p] of map.pins.entries()) {
     out.push({
@@ -681,11 +687,12 @@ export function mainBase(markers: readonly Marker[]): Marker | null {
 
 export function layerCounts(markers: readonly Marker[], map: ApiMap): Record<LayerId, number> {
   const c = Object.fromEntries(LAYERS.map((l) => [l, 0])) as Record<LayerId, number>;
-  for (const m of markers) c[m.layer]++;
+  for (const m of markers) c[m.layer] += m.data.type === "storage" && m.data.stack ? m.data.stack.length : 1;
   c.terrain = map.terrainEdits.length;
   c.fog = map.explored.available ? map.explored.tables : 0;
   c.grid = 0;
   c.relief = 0;
+  c.buildings = map.stats.pieces;
   return c;
 }
 
@@ -884,9 +891,17 @@ export function markerStore(m: Marker): MapContainer | undefined {
   return m.data.type === "storage" ? m.data.store : m.data.type === "vehicle" ? m.data.store : undefined;
 }
 
-/** What a mark holds: a container's items or a grave's. */
+/** What a mark holds: a container's items (every chest of a stack) or a grave's. */
 export function markerItems(m: Marker): readonly MapItem[] | undefined {
+  if (m.data.type === "storage" && m.data.stack) return m.data.stack.flatMap((c) => c.items);
   return m.data.type === "grave" ? m.data.items : markerStore(m)?.items;
+}
+
+/** The containers a mark stands for: every chest of a stack, or its one container. */
+export function markerStores(m: Marker): readonly MapContainer[] {
+  if (m.data.type === "storage") return m.data.stack ?? [m.data.store];
+  const s = markerStore(m);
+  return s ? [s] : [];
 }
 
 /** Markers whose label, owner, tag or kind name contains the query, best first. */

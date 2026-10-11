@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { gateMap, storageOf } from "@server/mapgate";
 import { mockMap } from "@server/mapmock";
 import { I18nProvider, makeI18n } from "../../i18n";
-import { buildMarkers, DEFAULT_LAYERS, layerCounts, markerStore, type Marker } from "../../lib/mapgeo";
+import { buildMarkers, DEFAULT_LAYERS, layerCounts, markerStore, markerStores, type Marker } from "../../lib/mapgeo";
 import { aggregate, fold, itemCategory, itemLabel, matchingItems, prettify, searchStore } from "../../lib/storage";
 import type { MapContainer } from "../../types";
 import { MapDetails } from "../map/MapDetails";
@@ -67,11 +67,14 @@ describe("storage helpers", () => {
 });
 
 describe("map storage", () => {
-  it("draws chests on their own layer and gives carts and ships their hold", () => {
+  it("draws chests on their own layer, a stack as one mark, and gives carts and ships their hold", () => {
     const chests = markers.filter((m) => m.layer === "storage");
-    expect(chests.length).toBe(snap.storage.filter((c) => c.kind === "chest").length);
+    const all = snap.storage.filter((c) => c.kind === "chest");
+    expect(chests.flatMap(markerStores)).toHaveLength(all.length);
+    expect(chests.filter((m) => m.data.type === "storage" && m.data.stack).map((m) => markerStores(m).length).sort()).toEqual([2, 3]);
     expect(DEFAULT_LAYERS.storage).toBe(true);
-    expect(layerCounts(markers, snap).storage).toBe(chests.length);
+    // The layer counts chests, not marks.
+    expect(layerCounts(markers, snap).storage).toBe(all.length);
     const cart = find((m) => m.data.type === "vehicle" && m.data.kind === "Cart");
     expect(markerStore(cart)?.items.length).toBeGreaterThan(0);
   });
