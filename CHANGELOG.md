@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-11
+
 ### Changed
 
 - The map zooms four times closer than before, down to about 16 metres across a phone screen: walls, doors, stairs and single chests read one by one, and live players can be followed from room to room. Marks and labels keep their size at every zoom, and a jump from search or the village stores made while zoomed all the way in lands a little further out, so the surroundings stay in view.
