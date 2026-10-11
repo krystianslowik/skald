@@ -208,7 +208,8 @@ var table = []rule{
 		ms, _ := strconv.ParseFloat(s[1], 64)
 		return []Match{{Kind: KindWorldSaved, Ms: ms}}
 	}},
-	// Unconfirmed for 1.0: the random-event (raid) start line. Name is the
+	// The random-event (raid) start line, confirmed on 1.0.17 ("Random event
+	// set:army_bonemass", no space after the colon). Name is the
 	// internal event id (army_eikthyr, foresttrolls, ...).
 	{regexp.MustCompile(`Random event set:\s*(\S+)`), func(s []string) []Match {
 		return []Match{{Kind: KindRaid, Name: s[1]}}
