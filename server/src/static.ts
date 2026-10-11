@@ -4,7 +4,9 @@ import { serveStatic } from "hono/bun";
 /**
  * Serves the built SPA (`web/dist`) plus its PWA files. The HTML shell, the web
  * manifest and `sw.js` revalidate on every load so a deploy (and a new service
- * worker) is picked up; hashed `/assets/*` keep the default caching.
+ * worker) is picked up. Vite's `/assets/*` carry a content hash in their names,
+ * so they are cached for good: without a service worker (plain http) nothing
+ * else keeps a phone from downloading the whole app on every visit.
  */
 export function mountStatic(app: Hono, webRoot: string): void {
   app.use("/*", async (c, next) => {
@@ -13,6 +15,8 @@ export function mountStatic(app: Hono, webRoot: string): void {
     const type = c.res.headers.get("Content-Type") ?? "";
     if (path === "/sw.js" || path.endsWith(".webmanifest") || type.startsWith("text/html")) {
       c.res.headers.set("Cache-Control", "no-cache");
+    } else if (path.startsWith("/assets/") && c.res.status === 200) {
+      c.res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
     }
   });
   app.use("/*", serveStatic({ root: webRoot }));

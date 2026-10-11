@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { Hono } from "hono";
@@ -11,6 +11,8 @@ writeFileSync(join(root, "sw.js"), "self.addEventListener('fetch', () => {});");
 writeFileSync(join(root, "manifest.webmanifest"), "{}");
 writeFileSync(join(root, "icon.svg"), "<svg xmlns='http://www.w3.org/2000/svg'/>");
 writeFileSync(join(root, "icon-192.png"), new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+mkdirSync(join(root, "assets"));
+writeFileSync(join(root, "assets", "index-AbC123.js"), "export {};");
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 describe("mountStatic", () => {
@@ -33,5 +35,14 @@ describe("mountStatic", () => {
     expect(spa.headers.get("content-type")).toContain("text/html");
     expect(spa.headers.get("cache-control")).toBe("no-cache");
     expect((await app.request("/api/x")).headers.get("cache-control")).toBeNull();
+  });
+
+  it("caches hashed assets for good, but not the shell served for a missing one", async () => {
+    const js = await app.request("/assets/index-AbC123.js");
+    expect(js.headers.get("content-type")).toContain("javascript");
+    expect(js.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    const gone = await app.request("/assets/index-Old999.js");
+    expect(gone.headers.get("content-type")).toContain("text/html");
+    expect(gone.headers.get("cache-control")).toBe("no-cache");
   });
 });
