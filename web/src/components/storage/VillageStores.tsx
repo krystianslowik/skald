@@ -250,7 +250,7 @@ function WhereSheet({ entry, stacks, onClose, onShow }: { entry: StoreEntry; sta
                 <MapIcon icon={ICON[p.container.kind]} size={28} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-bone">{containerTitle(p.container, t, lookup)}</span>
-                  <span className="block text-xs text-ash">{t("map.at", { x: p.container.x, z: p.container.z })}</span>
+                  <span className="block text-xs text-ash">{t("map.at", { x: Math.round(p.container.x), z: Math.round(p.container.z) })}</span>
                   {at && at.stack.chests.length > 1 && <StackLevel index={at.index} total={at.stack.chests.length} ordered={at.stack.ordered} className="mt-0.5 text-xs text-bone" />}
                 </span>
                 <span className="shrink-0 font-bold tabular-nums text-flame">{number(p.count)}</span>

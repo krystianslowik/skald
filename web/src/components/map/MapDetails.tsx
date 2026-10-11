@@ -103,7 +103,7 @@ export function DetailsHead({ marker, group, onClose, headingId }: { marker: Mar
         <h3 id={headingId} className="font-bold leading-tight text-flame">
           {group ? tn("map.group.title", group.length) : marker.data.type === "storage" && marker.data.stack ? tn("stack.title", marker.data.stack.length) : markerTitle(marker, t, lookup)}
         </h3>
-        <p className="mt-0.5 text-xs text-ash">{t("map.at", { x: marker.x, z: marker.z })}</p>
+        <p className="mt-0.5 text-xs text-ash">{t("map.at", { x: Math.round(marker.x), z: Math.round(marker.z) })}</p>
       </div>
       <button data-autofocus type="button" onClick={onClose} aria-label={t("map.closeDetails")} className="plaque press tap -mr-1 -mt-1 grid h-7 w-7 shrink-0 place-items-center coarse:h-9 coarse:w-9">
         <svg width="11" height="11" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>

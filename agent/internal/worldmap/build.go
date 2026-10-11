@@ -485,7 +485,7 @@ func exportStorage(stores []rawStore, vehicles []Vehicle, showNames bool) []Cont
 		items := exportItems(s.items, showNames)
 		w, h := gridOf(s.prefab, s.items)
 		out = append(out, Container{
-			ID: id, Kind: storeKind(s.prefab), Prefab: s.prefab, X: iround(s.x), Y: math.Round(float64(s.y)*20) / 20, Z: iround(s.z),
+			ID: id, Kind: storeKind(s.prefab), Prefab: s.prefab, X: r05(s.x), Y: r05(s.y), Z: r05(s.z),
 			Width: w, Height: h, Items: items, Unreadable: s.unreadable,
 		})
 	}
@@ -513,6 +513,10 @@ func densityLevel(n int32) byte {
 }
 
 func iround(v float32) int { return int(math.Round(float64(v))) }
+
+// r05 rounds to 5 cm: fine enough to tell stacked chests that drift a few
+// tens of centimetres apart from a row of chests next to each other.
+func r05(v float32) float64 { return math.Round(float64(v)*20) / 20 }
 
 // pinKind names Valheim's Minimap.PinType values in the game's enum order.
 func pinKind(t int32) string {

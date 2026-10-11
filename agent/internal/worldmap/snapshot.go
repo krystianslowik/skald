@@ -149,9 +149,9 @@ type Container struct {
 	ID         string  `json:"id"`
 	Kind       string  `json:"kind"`
 	Prefab     string  `json:"prefab"`
-	X          int     `json:"x"`
+	X          float64 `json:"x"`
 	Y          float64 `json:"y"`
-	Z          int     `json:"z"`
+	Z          float64 `json:"z"`
 	Width      int     `json:"width"`
 	Height     int     `json:"height"`
 	Items      []Item  `json:"items"`
