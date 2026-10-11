@@ -9,20 +9,26 @@ import {
   decodeRLE,
   exploredBounds,
   fitBounds,
+  fieldLoops,
   fitView,
+  gridOutline,
   interestBounds,
   mainBase,
   type Marker,
   isExplored,
   isoPolygons,
   isoSegments,
+  isWater,
   layerCounts,
+  loopArea,
   pick,
   pickItem,
   placeLabels,
   portalLinks,
   screenToWorld,
   searchMarkers,
+  simplifyLoop,
+  smoothLoop,
   worldToScreen,
   zoomAt,
   type Box,
@@ -66,6 +72,109 @@ describe("marching squares", () => {
       ends.set(k, (ends.get(k) ?? 0) + 1);
     }
     expect([...ends.values()].every((n) => n === 2)).toBe(true);
+  });
+});
+
+describe("outlines", () => {
+  const grid = (w: number, h: number, on: (i: number, j: number) => boolean) => {
+    const f = new Float32Array(w * h);
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) f[j * w + i] = on(i, j) ? 1 : 0;
+    return f;
+  };
+
+  it("finds nothing in an empty field", () => {
+    expect(fieldLoops(new Float32Array(16), 4, 4)).toEqual([]);
+  });
+
+  it("closes a block on the grid's edge into one counter-clockwise loop", () => {
+    // Filled to the border: beyond the grid counts as low, so it still closes.
+    const loops = fieldLoops(grid(3, 3, () => true), 3, 3);
+    expect(loops).toHaveLength(1);
+    const loop = loops[0]!;
+    // Crossings halfway between the nodes: a 3 x 3 square around nodes 0..2,
+    // centred on 1, its corners cut by a quarter cell each.
+    expect(loopArea(loop) / 2).toBeCloseTo(8.5, 5);
+    for (let i = 0; i < loop.length; i += 2) {
+      expect(Math.max(Math.abs(loop[i]! - 1), Math.abs(loop[i + 1]! - 1))).toBeCloseTo(1.5, 5);
+    }
+  });
+
+  it("gives a ring an outer loop and a hole that winds the other way", () => {
+    const loops = fieldLoops(
+      grid(7, 7, (i, j) => Math.max(Math.abs(i - 3), Math.abs(j - 3)) <= 2 && !(i === 3 && j === 3)),
+      7,
+      7,
+    );
+    expect(loops).toHaveLength(2);
+    const areas = loops.map(loopArea).sort((a, b) => a - b);
+    expect(areas[0]).toBeLessThan(0);
+    expect(areas[1]).toBeGreaterThan(0);
+  });
+
+  it("keeps diagonal neighbours together, as isoSegments does", () => {
+    const loops = fieldLoops(grid(2, 2, (i, j) => i === j), 2, 2);
+    expect(loops).toHaveLength(1);
+  });
+
+  it("thins straight runs and rounds the corners, staying closed", () => {
+    const square = Float32Array.from([0, 0, 1, 0, 2, 0, 3, 0, 3, 1, 3, 2, 3, 3, 2, 3, 1, 3, 0, 3, 0, 2, 0, 1]);
+    const thin = simplifyLoop(square, 0.1);
+    expect(thin.length / 2).toBe(4);
+    expect(Math.abs(loopArea(thin))).toBeCloseTo(18, 5);
+    const round = smoothLoop(thin, 2);
+    expect(round.length / 2).toBe(16);
+    // Chaikin cuts the corners: a little smaller, never larger.
+    const a = Math.abs(loopArea(round)) / 2;
+    expect(a).toBeLessThan(9);
+    expect(a).toBeGreaterThan(7);
+  });
+
+  it("outlines the mock's explored mask as round loops, dropping specks", () => {
+    const disc = grid(40, 40, (i, j) => (i - 20) ** 2 + (j - 20) ** 2 <= 100);
+    disc[0] = 1; // a single-cell speck
+    const loops = gridOutline(disc, 40, 40);
+    expect(loops).toHaveLength(1);
+    const loop = loops[0]!;
+    for (let i = 0; i < loop.length; i += 2) {
+      const r = Math.hypot(loop[i]! - 20, loop[i + 1]! - 20);
+      expect(r).toBeGreaterThan(9);
+      expect(r).toBeLessThan(11);
+    }
+  });
+});
+
+describe("terrain water", () => {
+  // The agent's palette (agent/internal/terrain): biome colours at seven
+  // light levels, then eight water depths from shallow to deep. The Ocean
+  // biome above water is left out: reading it as sea is right.
+  const biomes = [
+    [128, 116, 92],
+    [156, 172, 92],
+    [118, 102, 72],
+    [226, 226, 230],
+    [78, 102, 64],
+    [208, 188, 116],
+    [150, 66, 48],
+    [206, 220, 232],
+    [112, 98, 124],
+  ];
+  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+
+  it("tells every water depth from every lit biome", () => {
+    for (let d = 0; d < 8; d++) {
+      const k = d / 7;
+      expect(isWater(clamp(116 + (38 - 116) * k), clamp(156 + (66 - 156) * k), clamp(164 + (92 - 164) * k), 255)).toBe(true);
+    }
+    for (const c of biomes) {
+      for (let s = 0; s < 7; s++) {
+        const f = 0.62 + s * (0.68 / 6);
+        expect(isWater(clamp(c[0]! * f), clamp(c[1]! * f), clamp(c[2]! * f), 255)).toBe(false);
+      }
+    }
+  });
+
+  it("counts beyond the world's edge as sea, so the rim draws no coast", () => {
+    expect(isWater(0, 0, 0, 0)).toBe(true);
   });
 });
 

@@ -72,34 +72,26 @@ export interface LandFields {
   raw: Uint8Array;
 }
 
-function blur3(src: Float32Array, n: number): Float32Array {
-  const out = new Float32Array(src.length);
-  const k = [1, 2, 1];
+/** A 1-2-1 blur of a row-major grid, `n` wide and `h` tall; the edges weigh only what is there. */
+export function blur3(src: Float32Array, n: number, h = n): Float32Array {
   const tmp = new Float32Array(src.length);
-  for (let j = 0; j < n; j++) {
+  const out = new Float32Array(src.length);
+  for (let j = 0; j < h; j++) {
+    const r = j * n;
     for (let i = 0; i < n; i++) {
-      let s = 0;
-      let w = 0;
-      for (let d = -1; d <= 1; d++) {
-        const ii = i + d;
-        if (ii < 0 || ii >= n) continue;
-        s += src[j * n + ii]! * k[d + 1]!;
-        w += k[d + 1]!;
-      }
-      tmp[j * n + i] = s / w;
+      const l = i > 0 ? src[r + i - 1]! : -1;
+      const x = i < n - 1 ? src[r + i + 1]! : -1;
+      const c = src[r + i]!;
+      tmp[r + i] = l < 0 ? (x < 0 ? c : (2 * c + x) / 3) : x < 0 ? (2 * c + l) / 3 : (l + 2 * c + x) / 4;
     }
   }
-  for (let j = 0; j < n; j++) {
+  for (let j = 0; j < h; j++) {
+    const r = j * n;
     for (let i = 0; i < n; i++) {
-      let s = 0;
-      let w = 0;
-      for (let d = -1; d <= 1; d++) {
-        const jj = j + d;
-        if (jj < 0 || jj >= n) continue;
-        s += tmp[jj * n + i]! * k[d + 1]!;
-        w += k[d + 1]!;
-      }
-      out[j * n + i] = s / w;
+      const c = tmp[r + i]!;
+      if (j > 0 && j < h - 1) out[r + i] = (tmp[r + i - n]! + 2 * c + tmp[r + i + n]!) / 4;
+      else if (h === 1) out[r + i] = c;
+      else out[r + i] = (2 * c + tmp[j > 0 ? r + i - n : r + i + n]!) / 3;
     }
   }
   return out;
@@ -207,6 +199,185 @@ export function isoSegments(field: Float32Array, n: number, origin: number, step
     }
   }
   return Float32Array.from(out);
+}
+
+/**
+ * Closed outlines of where a w x h grid field is at or above `iso`, as loops
+ * [x0, y0, x1, y1, ...] in grid units (node i, j at x = i, y = j), the high
+ * side on the left. Marching squares with linear interpolation, linked into
+ * loops by the grid edge each crossing sits on, so the joins are exact.
+ * Beyond the grid counts as low, so every loop closes. Saddles connect the
+ * high corners, as in isoSegments.
+ */
+export function fieldLoops(field: Float32Array, w: number, h: number, iso = 0.5): Float32Array[] {
+  const W = w + 2;
+  const at = (i: number, j: number) => (i < 0 || j < 0 || i >= w || j >= h ? 0 : field[j * w + i]!);
+  // Edge ids: 2 * node for the edge east of a node, 2 * node + 1 for the one north of it.
+  const node = (i: number, j: number) => (j + 1) * W + i + 1;
+  const next = new Map<number, number>();
+  // High or low per node, with the low border around the grid.
+  const hi = new Uint8Array(W * (h + 2));
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) hi[node(i, j)] = field[j * w + i]! >= iso ? 1 : 0;
+  const e = [0, 0, 0, 0];
+  for (let j = -1; j < h; j++) {
+    for (let i = -1; i < w; i++) {
+      // Corners counter-clockwise from the south-west; edge k runs from corner k to k + 1.
+      const a = node(i, j);
+      const c = hi[a]! | (hi[a + 1]! << 1) | (hi[a + W + 1]! << 2) | (hi[a + W]! << 3);
+      if (c === 0 || c === 15) continue;
+      e[0] = 2 * node(i, j);
+      e[1] = 2 * node(i + 1, j) + 1;
+      e[2] = 2 * node(i, j + 1);
+      e[3] = 2 * node(i, j) + 1;
+      // A segment leaves through an edge going high to low and ends on the
+      // next edge going low to high (in a saddle, the very next edge).
+      for (let k = 0; k < 4; k++) {
+        if (!(c & (1 << k)) || c & (1 << ((k + 1) % 4))) continue;
+        for (let d = 1; d < 4; d++) {
+          const m = (k + d) % 4;
+          if (!(c & (1 << m)) && c & (1 << ((m + 1) % 4))) {
+            next.set(e[k]!, e[m]!);
+            break;
+          }
+        }
+      }
+    }
+  }
+  const point = (id: number, out: number[]) => {
+    const n = id >> 1;
+    const i = (n % W) - 1;
+    const j = Math.floor(n / W) - 1;
+    const [i2, j2] = id & 1 ? [i, j + 1] : [i + 1, j];
+    const a = at(i, j);
+    const t = (iso - a) / (at(i2, j2) - a);
+    out.push(i + (i2 - i) * t, j + (j2 - j) * t);
+  };
+  const loops: Float32Array[] = [];
+  for (const start of next.keys()) {
+    if (!next.has(start)) continue;
+    const pts: number[] = [];
+    let id = start;
+    for (;;) {
+      const to = next.get(id);
+      if (to === undefined) break;
+      next.delete(id);
+      point(id, pts);
+      id = to;
+      if (id === start) break;
+    }
+    if (pts.length >= 6) loops.push(Float32Array.from(pts));
+  }
+  return loops;
+}
+
+/** Twice the signed area of a loop (counter-clockwise is positive). */
+export function loopArea(loop: Float32Array): number {
+  let a = 0;
+  const n = loop.length;
+  for (let i = 0; i < n; i += 2) {
+    const j = (i + 2) % n;
+    a += loop[i]! * loop[j + 1]! - loop[j]! * loop[i + 1]!;
+  }
+  return a;
+}
+
+/** A closed loop with the points within `tol` of the line between their neighbours dropped (Douglas-Peucker). */
+export function simplifyLoop(loop: Float32Array, tol: number): Float32Array {
+  const n = loop.length / 2;
+  if (n < 4) return loop;
+  // Split at the point farthest from the first, so both halves are open runs.
+  let far = 0;
+  let best = -1;
+  for (let i = 1; i < n; i++) {
+    const d = (loop[2 * i]! - loop[0]!) ** 2 + (loop[2 * i + 1]! - loop[1]!) ** 2;
+    if (d > best) {
+      best = d;
+      far = i;
+    }
+  }
+  const keep = new Uint8Array(n);
+  keep[0] = 1;
+  keep[far] = 1;
+  const stack: [number, number][] = [
+    [0, far],
+    [far, n],
+  ];
+  const t2 = tol * tol;
+  while (stack.length) {
+    const [a, b] = stack.pop()!;
+    if (b - a < 2) continue;
+    const ax = loop[2 * a]!;
+    const ay = loop[2 * a + 1]!;
+    const bx = loop[2 * (b % n)]!;
+    const by = loop[2 * (b % n) + 1]!;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    let worst = -1;
+    let at = -1;
+    for (let i = a + 1; i < b; i++) {
+      const px = loop[2 * i]! - ax;
+      const py = loop[2 * i + 1]! - ay;
+      const d = len2 > 0 ? (px * dy - py * dx) ** 2 / len2 : px * px + py * py;
+      if (d > worst) {
+        worst = d;
+        at = i;
+      }
+    }
+    if (worst > t2) {
+      keep[at] = 1;
+      stack.push([a, at], [at, b]);
+    }
+  }
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) if (keep[i]) out.push(loop[2 * i]!, loop[2 * i + 1]!);
+  return Float32Array.from(out);
+}
+
+/** Chaikin's corner cutting on a closed loop: each pass doubles the points and rounds the corners. */
+export function smoothLoop(loop: Float32Array, passes = 2): Float32Array {
+  let cur = loop;
+  for (let p = 0; p < passes; p++) {
+    const n = cur.length / 2;
+    const out = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const ax = cur[2 * i]!;
+      const ay = cur[2 * i + 1]!;
+      const bx = cur[2 * j]!;
+      const by = cur[2 * j + 1]!;
+      out[4 * i] = ax * 0.75 + bx * 0.25;
+      out[4 * i + 1] = ay * 0.75 + by * 0.25;
+      out[4 * i + 2] = ax * 0.25 + bx * 0.75;
+      out[4 * i + 3] = ay * 0.25 + by * 0.75;
+    }
+    cur = out;
+  }
+  return cur;
+}
+
+/**
+ * Smooth outlines of a 0/1 grid: blurred so the edge falls between cells,
+ * traced, thinned to `tol` cells and rounded in `passes`. Loops under
+ * `minArea` square cells (specks and pinholes) are dropped. Grid units, as
+ * fieldLoops.
+ */
+export function gridOutline(cells: Float32Array, w: number, h: number, tol = 0.3, minArea = 3, passes = 3): Float32Array[] {
+  const out: Float32Array[] = [];
+  for (const loop of fieldLoops(blur3(cells, w, h), w, h)) {
+    if (Math.abs(loopArea(loop)) < 2 * minArea) continue;
+    out.push(smoothLoop(simplifyLoop(loop, tol), passes));
+  }
+  return out;
+}
+
+/**
+ * Whether a terrain image pixel is sea: the agent paints water as a ramp from
+ * shallow (116, 156, 164) to deep (38, 66, 92), bluer than any lit biome.
+ * Transparent pixels lie beyond the world's edge and count as sea.
+ */
+export function isWater(r: number, g: number, b: number, a: number): boolean {
+  return a < 128 || (b - r >= 30 && g - r >= 18);
 }
 
 // ---- view -------------------------------------------------------------------

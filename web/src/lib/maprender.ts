@@ -1,7 +1,7 @@
 // Canvas 2D renderer for the world map: a parchment sheet like the game's own
-// map, land inked from the zone grid with marching-squares coasts, a blue-grey
-// sea, fog as cloudy paper over what nobody has explored, and the marks on
-// top. Geometry is built once per snapshot; a frame only replays paths and
+// map, land inked from the zone grid with marching-squares coasts (or the
+// world generator's terrain with its coast traced), a blue-grey sea, fog as
+// cloudy paper over what nobody has explored, and the marks on top. Geometry is built once per snapshot; a frame only replays paths and
 // sprites under the current transform, so it stays crisp at any zoom.
 // Every method is a no-op without a 2D context (jsdom in tests).
 
@@ -9,6 +9,8 @@ import type { ApiMap, MapItem } from "../types";
 import type { IconSheet } from "./itemicons";
 import {
   clusterMarkers,
+  exploredBounds,
+  gridOutline,
   isoPolygons,
   isoSegments,
   landFields,
@@ -149,9 +151,8 @@ interface Prepared {
   density: HTMLCanvasElement | OffscreenCanvas | null;
   gridOrigin: number;
   gridExtent: number;
-  fog: HTMLCanvasElement | OffscreenCanvas | null;
-  fogOrigin: number;
-  fogExtent: number;
+  /** The explored area's outline, and the world with it cut out (fill even-odd). */
+  fog: { edge: Path2D; area: Path2D } | null;
   links: [number, number, number, number][];
   terrain: { x: number; z: number; cells: number }[];
 }
@@ -163,6 +164,22 @@ function pathFromPolys(polys: number[][]): Path2D {
     for (let i = 2; i < poly.length; i += 2) p.lineTo(poly[i]!, poly[i + 1]!);
     p.closePath();
   }
+  return p;
+}
+
+/** Loops in grid units into `into`, in world units: node i, j at x0 + i * step, z0 + j * step. */
+function pathFromLoops(loops: readonly Float32Array[], x0: number, z0: number, step: number, into = new Path2D()): Path2D {
+  for (const l of loops) {
+    into.moveTo(x0 + l[0]! * step, z0 + l[1]! * step);
+    for (let i = 2; i < l.length; i += 2) into.lineTo(x0 + l[i]! * step, z0 + l[i + 1]! * step);
+    into.closePath();
+  }
+  return into;
+}
+
+function worldDisc(): Path2D {
+  const p = new Path2D();
+  p.arc(0, 0, WORLD_RADIUS, 0, Math.PI * 2);
   return p;
 }
 
@@ -200,57 +217,35 @@ export function prepare(map: ApiMap, mask: Uint8Array | null): Prepared {
     density = dc;
   }
 
-  // Fog: cloudy paper with the explored area cut out, soft at the edges.
+  // Fog: the explored area traced as smooth loops once, in world units, so
+  // its edge stays sharp at any zoom. Only the explored box is walked.
   let fog: Prepared["fog"] = null;
   const ex = map.explored;
   if (ex.available && mask) {
-    const S = 512;
-    const k = ex.size / S;
-    const mc = makeCanvas(S, S);
-    const mg = ctx2d(mc);
-    const clouds = cloudTile();
-    const fc = makeCanvas(1024, 1024);
-    const fg = ctx2d(fc);
-    if (mg && fg && clouds) {
-      const img = mg.createImageData(S, S);
-      for (let row = 0; row < ex.size; row++) {
-        const r = Math.floor(row / k);
-        for (let col = 0; col < ex.size; col++) {
-          if (mask[row * ex.size + col]) img.data[(r * S + Math.floor(col / k)) * 4 + 3] = 255;
-        }
+    const area = worldDisc();
+    const edge = new Path2D();
+    const mpp = ex.metersPerPixel;
+    const b = exploredBounds(mask, ex.size, mpp);
+    if (b) {
+      // Mask pixel (col, row) sits at ((col - size / 2) * mpp, (row - size / 2) * mpp).
+      const px = (w: number) => Math.round(w / mpp + ex.size / 2);
+      const c0 = Math.max(0, px(b[0]) - 2);
+      const r0 = Math.max(0, px(b[1]) - 2);
+      const c1 = Math.min(ex.size - 1, px(b[2]) + 2);
+      const r1 = Math.min(ex.size - 1, px(b[3]) + 2);
+      const w = c1 - c0 + 1;
+      const cells = new Float32Array(w * (r1 - r0 + 1));
+      for (let r = r0; r <= r1; r++) {
+        for (let c = c0; c <= c1; c++) cells[(r - r0) * w + c - c0] = mask[r * ex.size + c]!;
       }
-      mg.putImageData(img, 0, 0);
-      fg.fillStyle = fg.createPattern(clouds, "repeat") ?? "#e7dcc2";
-      fg.fillRect(0, 0, 1024, 1024);
-      fg.globalCompositeOperation = "destination-out";
-      fg.imageSmoothingEnabled = true;
-      // A soft rim: a canvas blur where the browser has one, else a stack of
-      // ever coarser copies (smoothing does the blurring).
-      if ("filter" in fg && typeof fg.filter === "string") {
-        fg.filter = "blur(5px)";
-        fg.drawImage(mc, 0, 0, 1024, 1024);
-        fg.filter = "none";
-      } else {
-        for (const [s, a] of [
-          [512, 0.55],
-          [256, 0.5],
-          [128, 0.5],
-        ] as const) {
-          const lo = makeCanvas(s, s);
-          const lg = ctx2d(lo);
-          if (!lg) continue;
-          lg.imageSmoothingEnabled = true;
-          lg.drawImage(mc, 0, 0, s, s);
-          fg.globalAlpha = a;
-          fg.drawImage(lo, 0, 0, 1024, 1024);
-        }
-      }
-      fg.globalAlpha = 1;
-      fg.globalCompositeOperation = "source-over";
-      fog = fc;
+      const loops = gridOutline(cells, w, r1 - r0 + 1);
+      const x0 = (c0 - ex.size / 2) * mpp;
+      const z0 = (r0 - ex.size / 2) * mpp;
+      pathFromLoops(loops, x0, z0, mpp, edge);
+      pathFromLoops(loops, x0, z0, mpp, area);
     }
+    fog = { edge, area };
   }
-  const half = (ex.size / 2) * ex.metersPerPixel;
   return {
     land,
     sea,
@@ -259,8 +254,6 @@ export function prepare(map: ApiMap, mask: Uint8Array | null): Prepared {
     gridOrigin: f.origin - f.step / 2,
     gridExtent: n * f.step,
     fog,
-    fogOrigin: -half - ex.metersPerPixel / 2,
-    fogExtent: ex.size * ex.metersPerPixel,
     links: portalLinks(map),
     terrain: map.terrainEdits,
   };
@@ -288,6 +281,12 @@ export interface FrameState {
   reduced?: boolean;
 }
 
+/** 0 at or below `a`, 1 at or above `b`, smooth between. */
+function ramp(x: number, a: number, b: number): number {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+
 /** How long a mark takes to leave its cluster when the map zooms in. */
 const SPLIT_MS = 280;
 /** Zoomed in this far (px per metre), a container shows what it holds most of. */
@@ -311,6 +310,7 @@ export class MapRenderer {
   private prep: Prepared | null = null;
   private sprites = new Map<string, HTMLCanvasElement | OffscreenCanvas>();
   private paper: HTMLCanvasElement | OffscreenCanvas | null = null;
+  private clouds: HTMLCanvasElement | OffscreenCanvas | null = null;
   private measureCache = new Map<string, number>();
   /** Bumped on new data, so the cached base is re-rendered. */
   private version = 0;
@@ -324,6 +324,11 @@ export class MapRenderer {
   /** The item icon sheet, decoded, for the contents strips under containers. */
   private icons: { img: CanvasImageSource; sheet: IconSheet } | null = null;
   private relief: Relief | null = null;
+  /** The relief's traced coast: land loops and the sea around them, `mpp` metres per image pixel. */
+  private coast: { of: Relief; path: Path2D; sea: Path2D; mpp: number } | null = null;
+  private coastFor: Relief | null = null;
+  /** Called when something arrives later (the traced coast) and wants a redraw. */
+  onChange: (() => void) | null = null;
   /** Spoilers on: the terrain is not cut to where the world has been generated. */
   private spoilers = false;
 
@@ -341,12 +346,44 @@ export class MapRenderer {
     this.spoilers = map.spoilers;
     this.version++;
     this.paper ??= paperTile();
+    this.clouds ??= cloudTile();
   }
 
   /** The decoded terrain image, or null for the land inked from the save. */
   setRelief(relief: Relief | null): void {
     this.relief = relief;
     this.version++;
+    if (relief !== this.coastFor) {
+      this.coastFor = relief;
+      if (relief) this.traceCoast(relief);
+    }
+  }
+
+  /** Traces the relief's coast in a worker, once per image; no worker, no coast line. */
+  private traceCoast(relief: Relief) {
+    if (!this.ctx || typeof Worker === "undefined" || typeof createImageBitmap === "undefined" || typeof OffscreenCanvas === "undefined") return;
+    createImageBitmap(relief.img as ImageBitmapSource)
+      .then((bitmap) => {
+        if (this.coastFor !== relief) return bitmap.close();
+        const worker = new Worker(new URL("./coast.worker.ts", import.meta.url), { type: "module" });
+        worker.onmessage = (e: MessageEvent<{ w: number; loops: Float32Array[] }>) => {
+          worker.terminate();
+          const { w, loops } = e.data;
+          if (this.coastFor !== relief || !loops.length) return;
+          const mpp = (2 * relief.radius) / w;
+          const o = -relief.radius + mpp / 2;
+          const sea = new Path2D();
+          sea.arc(0, 0, relief.radius, 0, Math.PI * 2);
+          this.coast = { of: relief, path: pathFromLoops(loops, o, o, mpp), sea: pathFromLoops(loops, o, o, mpp, sea), mpp };
+          this.version++;
+          this.onChange?.();
+        };
+        worker.onerror = () => worker.terminate();
+        worker.postMessage({ bitmap }, [bitmap]);
+      })
+      .catch(() => {
+        // an image the browser will not hand over: no coast line
+      });
   }
 
   /** The decoded item icon sheet, or null to draw no contents strips. */
@@ -486,20 +523,44 @@ export class MapRenderer {
     this.drawPaper(g, v);
     const relief = layers.relief ? this.relief : null;
     if (p && relief) {
+      const coast = this.coast?.of === relief ? this.coast : null;
+      // Screen px per image pixel. Close in, the image is only blur: it fades
+      // to a light wash over a flat sea, and the traced coast, inked at a
+      // constant width, carries the shape.
+      const px = coast ? v.scale * coast.mpp : 0;
+      const near = ramp(px, 2.5, 6);
       // The world generator's own land, multiplied into the parchment so it
       // reads as ink on paper. Without spoilers it is cut to the zones the
       // world has generated (where someone has been); the fog does the rest.
       g.save();
       if (!this.spoilers) g.clip(p.sea);
+      g.save();
       g.globalCompositeOperation = "multiply";
-      g.globalAlpha = 0.9;
+      g.globalAlpha = 0.9 * (1 - 0.55 * near);
       g.imageSmoothingEnabled = true;
       // The image is north up; the world transform flips rows, so flip them back.
       g.scale(1, -1);
       g.drawImage(relief.img, -relief.radius, -relief.radius, relief.radius * 2, relief.radius * 2);
       g.restore();
+      if (coast && near > 0) {
+        g.globalAlpha = near;
+        g.fillStyle = SEA;
+        g.fill(coast.sea, "evenodd");
+        g.globalAlpha = 1;
+        this.drawPaper(g, v, 0.6 * near);
+      }
+      const ink = ramp(px, 1, 2.5);
+      if (coast && ink > 0) {
+        g.globalAlpha = ink;
+        g.strokeStyle = COAST;
+        g.lineJoin = "round";
+        g.lineWidth = (1.1 + 0.5 * near) / v.scale;
+        g.stroke(coast.path);
+        g.globalAlpha = 1;
+      }
+      g.restore();
       if (layers.terrain) this.drawTerrain(g, v, p);
-      this.drawFog(g, p, layers);
+      this.drawFog(g, v, p, layers);
     } else if (p) {
       g.fillStyle = SEA;
       g.fill(p.sea);
@@ -524,7 +585,7 @@ export class MapRenderer {
       g.lineWidth = Math.max(1.1, Math.min(2.2, v.scale * 6)) / v.scale;
       g.stroke(p.coast);
       if (layers.terrain) this.drawTerrain(g, v, p);
-      this.drawFog(g, p, layers);
+      this.drawFog(g, v, p, layers);
     }
     g.restore();
     // The edge of the world.
@@ -538,31 +599,58 @@ export class MapRenderer {
     g.stroke();
   }
 
-  private drawFog(g: CanvasRenderingContext2D, p: Prepared, layers: Record<LayerId, boolean>) {
-    if (!layers.fog || !p.fog) return;
-    g.imageSmoothingEnabled = true;
-    g.globalAlpha = 0.96;
-    g.drawImage(p.fog as CanvasImageSource, p.fogOrigin, p.fogOrigin, p.fogExtent, p.fogExtent);
-    g.globalAlpha = 1;
+  private drawFog(g: CanvasRenderingContext2D, v: View, p: Prepared, layers: Record<LayerId, boolean>) {
+    if (!layers.fog || !p.fog || !this.clouds) return;
+    g.save();
+    g.clip(p.fog.area, "evenodd");
+    this.drawTiled(g, v, this.clouds, 768, 1, true);
+    this.drawPaper(g, v, 0.35);
+    g.restore();
+    // A soft rim on the explored side: bands of cloud a fixed few screen px
+    // wide, so the edge stays sharp however close the view.
+    const pat = g.createPattern(this.clouds as CanvasImageSource, "repeat");
+    if (!pat || typeof DOMMatrix === "undefined") return;
+    g.save();
+    g.clip(p.fog.edge, "evenodd");
+    // The fog's coarser cloud octave, so the rim matches what it fades from.
+    const size = 2 ** Math.floor(Math.log2(768 / v.scale));
+    pat.setTransform(new DOMMatrix().scale(size / this.clouds.width, size / this.clouds.width));
+    g.strokeStyle = pat;
+    g.lineJoin = "round";
+    // About half a kilometre zoomed out, as the old blurred fog was, and never
+    // wider than a thumb's breadth close in.
+    const rim = Math.min(36, Math.max(14, 500 * v.scale));
+    for (let k = 6; k >= 1; k--) {
+      g.globalAlpha = 0.1;
+      g.lineWidth = (rim * k) / 6 / v.scale;
+      g.stroke(p.fog.edge);
+    }
+    g.restore();
   }
 
-  private drawPaper(g: CanvasRenderingContext2D, v: View) {
-    if (!this.paper) return;
-    const pat = g.createPattern(this.paper as CanvasImageSource, "repeat");
+  private drawPaper(g: CanvasRenderingContext2D, v: View, alpha = 0.9) {
+    if (this.paper) this.drawTiled(g, v, this.paper, 256, alpha, false);
+  }
+
+  /**
+   * A tile over the world, anchored to it, at about `px` screen px whatever
+   * the zoom: two octaves whose size steps by powers of two and cross-fade.
+   * `solid` lays the coarser one down whole, for an opaque tile.
+   */
+  private drawTiled(g: CanvasRenderingContext2D, v: View, tile: HTMLCanvasElement | OffscreenCanvas, px: number, alpha: number, solid: boolean) {
+    const pat = g.createPattern(tile as CanvasImageSource, "repeat");
     if (!pat || typeof DOMMatrix === "undefined") return;
-    // Two texture octaves anchored to the world; their size steps by powers of
-    // two with zoom and cross-fades, so the grain stays paper-sized on screen.
-    const ideal = Math.log2(256 / v.scale);
+    const ideal = Math.log2(px / v.scale);
     const base = Math.floor(ideal);
     const t = ideal - base;
-    for (const [lvl, alpha] of [
-      [base, 1 - t],
+    for (const [lvl, a] of [
+      [base, solid ? 1 : 1 - t],
       [base + 1, t],
     ] as const) {
-      if (alpha < 0.02) continue;
-      const tile = 2 ** lvl;
-      pat.setTransform(new DOMMatrix().scale(tile / 256, tile / 256));
-      g.globalAlpha = alpha * 0.9;
+      if (a < 0.02) continue;
+      const size = 2 ** lvl;
+      pat.setTransform(new DOMMatrix().scale(size / tile.width, size / tile.width));
+      g.globalAlpha = a * alpha;
       g.fillStyle = pat;
       g.fillRect(-WORLD_RADIUS, -WORLD_RADIUS, WORLD_RADIUS * 2, WORLD_RADIUS * 2);
     }

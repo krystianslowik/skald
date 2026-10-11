@@ -270,6 +270,7 @@ export const MapCanvas = forwardRef<
   useEffect(() => {
     if (!canvas.current) return;
     renderer.current ??= new MapRenderer(canvas.current);
+    renderer.current.onChange = schedule;
     renderer.current.setData(map, mask);
     schedule();
   }, [map, mask, schedule]);
