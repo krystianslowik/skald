@@ -1,22 +1,54 @@
+# One pull request per ecosystem per month for minor and patch updates, and
+# a second one ("<ecosystem>-major") for major updates, so majors stay
+# visible without arriving as a dozen separate PRs.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: {interval: monthly}
+    groups:
+      actions: {patterns: ["*"], update-types: [minor, patch]}
+      actions-major: {patterns: ["*"], update-types: [major]}
   - package-ecosystem: gomod
     directory: /agent
     schedule: {interval: monthly}
+    groups:
+      gomod: {patterns: ["*"], update-types: [minor, patch]}
+      gomod-major: {patterns: ["*"], update-types: [major]}
   - package-ecosystem: npm
     directory: /web
     schedule: {interval: monthly}
     groups:
-      web: {patterns: ["*"]}
+      npm: {patterns: ["*"], update-types: [minor, patch]}
+      npm-major: {patterns: ["*"], update-types: [major]}
   - package-ecosystem: bun
     directory: /server
     schedule: {interval: monthly}
+    groups:
+      bun: {patterns: ["*"], update-types: [minor, patch]}
+      bun-major: {patterns: ["*"], update-types: [major]}
   - package-ecosystem: pip
     directory: /icons
     schedule: {interval: monthly}
+    groups:
+      pip: {patterns: ["*"], update-types: [minor, patch]}
+      pip-major: {patterns: ["*"], update-types: [major]}
+  - package-ecosystem: nuget
+    directories: [/bridge/plugin, /bridge/tests, /terrain/plugin]
+    schedule: {interval: monthly}
+    ignore:
+      # Pinned to the Unity engine the game ships (6000.0.75f1); it moves
+      # with a Valheim update, not with the package feed.
+      - dependency-name: UnityEngine.Modules
+      # BepInEx 6 is pre-release; BepInExPack_Valheim ships BepInEx 5.
+      - dependency-name: BepInEx.Core
+        update-types: [version-update:semver-major]
+    groups:
+      nuget: {patterns: ["*"], update-types: [minor, patch]}
+      nuget-major: {patterns: ["*"], update-types: [major]}
   - package-ecosystem: docker
     directories: [/agent, /server, /icons, /terrain, /bridge]
     schedule: {interval: monthly}
+    groups:
+      docker: {patterns: ["*"], update-types: [minor, patch]}
+      docker-major: {patterns: ["*"], update-types: [major]}
