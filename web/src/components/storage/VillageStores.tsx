@@ -1,4 +1,4 @@
-import { memo, useCallback, useDeferredValue, useId, useMemo, useState } from "react";
+import { memo, useCallback, useDeferredValue, useId, useMemo, useState, type ReactNode } from "react";
 import { useI18n } from "../../i18n";
 import type { IconId } from "../../lib/mapgeo";
 import { aggregate, CATEGORIES, searchStore, type Category, type StoreEntry } from "../../lib/storage";
@@ -16,53 +16,119 @@ export function containerTitle(c: MapContainer, t: ReturnType<typeof useI18n>["t
   return lookup(`map.vehicle.${c.prefab}`) ?? c.prefab;
 }
 
-const Row = memo(function Row({ entry, onOpen }: { entry: StoreEntry; onOpen: (e: StoreEntry) => void }) {
-  const { tn, number } = useI18n();
+/** Slots shown before "Show all": four rows of six on a phone, three rows of ~64 px slots wider. */
+const PHONE = 640;
+const SLOT = 64;
+const GAP = 3;
+
+/** How many columns the bag gets, and how many slots fit before "Show all". */
+function useBagSize() {
+  const [width, setWidth] = useState(0);
+  const ref = useCallback((el: HTMLElement | null) => {
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setWidth(Math.round(e!.contentRect.width)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const cols = width < PHONE ? 6 : Math.max(6, Math.floor((width + GAP) / (SLOT + GAP)));
+  return { ref, cols, collapsed: cols * (width < PHONE ? 4 : 3) };
+}
+const OPEN_KEY = "skald.stores.open";
+
+function readOpen(): boolean {
+  try {
+    return localStorage.getItem(OPEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeOpen(open: boolean) {
+  try {
+    if (open) localStorage.setItem(OPEN_KEY, "1");
+    else localStorage.removeItem(OPEN_KEY);
+  } catch {
+    // Private mode or blocked storage: the choice just does not stick.
+  }
+}
+
+const Slot = memo(function Slot({ entry, onOpen }: { entry: StoreEntry; onOpen: (e: StoreEntry) => void }) {
+  const { t, tn, number } = useI18n();
   return (
     <li>
       <button
         type="button"
         onClick={() => onOpen(entry)}
         aria-haspopup="dialog"
-        className="press-soft flex min-h-9 w-full items-center gap-2.5 rounded-[2px] px-1.5 py-1 text-left hover:bg-black/25 coarse:min-h-11"
+        aria-label={`${t("inv.slot", { item: entry.label, n: number(entry.total) })}, ${tn("store.places", entry.places.length)}`}
+        title={entry.label}
+        className="slot press-soft relative grid aspect-square w-full place-items-center overflow-hidden p-0.5 text-flame hover:brightness-125"
       >
-        <ItemIcon name={entry.name} category={entry.category} size={18} iconSize={26} className="text-flame/80" />
-        <span className="min-w-0 flex-1 truncate text-bone">{entry.label}</span>
-        <span className="shrink-0 text-[0.6875rem] text-ash">{tn("store.places", entry.places.length)}</span>
-        <span className="w-12 shrink-0 text-right font-bold tabular-nums text-flame">{number(entry.total)}</span>
+        <ItemIcon name={entry.name} category={entry.category} size={20} iconSize={30} className="opacity-90" />
+        <span className="absolute bottom-0.5 right-1 text-[0.625rem] font-bold tabular-nums leading-none text-bone [text-shadow:1px_0_0_#000,-1px_0_0_#000,0_1px_0_#000,0_-1px_0_#000]">
+          {number(entry.total)}
+        </span>
       </button>
     </li>
   );
 });
 
+function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={onClick}
+      className={`press-soft flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-bold whitespace-nowrap coarse:min-h-11 ${
+        on ? "border-flame/70 bg-flame/15 text-bone" : "border-iron/40 text-ash hover:text-bone"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 /**
  * Everything the village keeps in the chests, carts and ships players built,
- * added up, searchable in either language and grouped by kind. An item opens
- * the list of places it is in, most first; each one goes to the map, where
- * every place holding it is ringed.
+ * added up into one bag of slots, biggest stacks first. Chips narrow it to a
+ * kind, search works in either language, and the bag stays a few rows tall
+ * until asked for the rest. A slot opens the list of places the item is in;
+ * each one goes to the map, where every place holding it is ringed.
  */
 export function VillageStores({ saveKey, onShow }: { saveKey: string; onShow: (entry: StoreEntry, open: string) => void }) {
-  const { t, tn, lookup } = useI18n();
+  const { t, tn, lookup, number } = useI18n();
   const [load, retry] = useStorage(saveKey);
   const [query, setQuery] = useState("");
   const deferred = useDeferredValue(query);
+  const [category, setCategory] = useState<Category | null>(null);
+  const [expanded, setExpanded] = useState(readOpen);
   const [open, setOpen] = useState<StoreEntry | null>(null);
   const searchId = useId();
+  const bag = useBagSize();
 
   const containers = load.status === "ready" ? load.storage.containers : null;
   const entries = useMemo(() => (containers ? aggregate(containers, lookup) : []), [containers, lookup]);
-  const groups = useMemo(() => {
-    const found = searchStore(entries, deferred);
-    const by = new Map<Category, StoreEntry[]>();
-    for (const e of found) {
-      const list = by.get(e.category);
-      if (list) list.push(e);
-      else by.set(e.category, [e]);
-    }
-    return CATEGORIES.filter((c) => by.has(c)).map((c) => ({ category: c, entries: by.get(c)! }));
-  }, [entries, deferred]);
+  const found = useMemo(() => searchStore(entries, deferred), [entries, deferred]);
+  const counts = useMemo(() => {
+    const by = new Map<Category, number>();
+    for (const e of found) by.set(e.category, (by.get(e.category) ?? 0) + 1);
+    return CATEGORIES.filter((c) => by.has(c)).map((c) => ({ category: c, n: by.get(c)! }));
+  }, [found]);
+  const active = category && counts.some((c) => c.category === category) ? category : null;
+  const shown = useMemo(
+    () => (active ? found.filter((e) => e.category === active) : found).toSorted((a, b) => b.total - a.total || a.label.localeCompare(b.label)),
+    [found, active],
+  );
+  const searching = deferred.trim() !== "";
+  const clipped = !expanded && !searching && shown.length > bag.collapsed;
   const unreadable = useMemo(() => containers?.filter((c) => c.unreadable).length ?? 0, [containers]);
   const onOpen = useCallback((e: StoreEntry) => setOpen(e), []);
+  const toggle = useCallback(() => {
+    setExpanded((was) => {
+      writeOpen(!was);
+      return !was;
+    });
+  }, []);
   const show = useCallback(
     (e: StoreEntry, id: string) => {
       setOpen(null);
@@ -87,7 +153,7 @@ export function VillageStores({ saveKey, onShow }: { saveKey: string; onShow: (e
   if (entries.length === 0) return <p className="py-4 text-center text-sm text-ash">{t("store.empty")}</p>;
 
   return (
-    <div className="text-sm">
+    <div ref={bag.ref} className="text-sm">
       <div role="search">
         <label htmlFor={searchId} className="sr-only">
           {t("store.search")}
@@ -103,31 +169,41 @@ export function VillageStores({ saveKey, onShow }: { saveKey: string; onShow: (e
           enterKeyHint="search"
         />
       </div>
-      <p className="mt-2 text-xs text-ash">
-        {t("store.totals", { kinds: entries.length, containers: containers!.length })}
-        {unreadable > 0 && <> {tn("store.unreadable", unreadable)}</>}
-      </p>
-      {groups.length === 0 ? (
+      {counts.length > 0 && (
+        <div role="group" aria-label={t("store.kinds")} className="-mx-1 mt-2 flex gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
+          <Chip on={active === null} onClick={() => setCategory(null)}>
+            {t("store.all")} <span className="tabular-nums text-ash">{number(found.length)}</span>
+          </Chip>
+          {counts.map(({ category: c, n }) => (
+            <Chip key={c} on={active === c} onClick={() => setCategory(active === c ? null : c)}>
+              <ItemGlyph category={c} size={13} />
+              {t(`store.cat.${c}`)} <span className="tabular-nums text-ash">{number(n)}</span>
+            </Chip>
+          ))}
+        </div>
+      )}
+      {shown.length === 0 ? (
         <p className="mt-4 text-center text-ash" aria-live="polite">
           {t("store.searchEmpty")}
         </p>
       ) : (
-        <div className="mt-3 grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-          {groups.map((g) => (
-            <section key={g.category} aria-label={t(`store.cat.${g.category}`)} className="min-w-0">
-              <h3 className="label-caps flex items-center gap-1.5 border-b border-iron/30 pb-1">
-                <ItemGlyph category={g.category} size={14} />
-                {t(`store.cat.${g.category}`)}
-              </h3>
-              <ul className="mt-1">
-                {g.entries.map((e) => (
-                  <Row key={e.name} entry={e} onOpen={onOpen} />
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
+        <>
+          <ul aria-label={active ? t(`store.cat.${active}`) : t("store.title")} className="mt-2 grid gap-[3px]" style={{ gridTemplateColumns: `repeat(${bag.cols}, minmax(0, 1fr))` }}>
+            {(clipped ? shown.slice(0, bag.collapsed) : shown).map((e) => (
+              <Slot key={e.name} entry={e} onOpen={onOpen} />
+            ))}
+          </ul>
+          {!searching && shown.length > bag.collapsed && (
+            <button type="button" onClick={toggle} aria-expanded={expanded} className="press-soft mt-2 w-full rounded-[2px] py-2 text-xs font-bold text-flame hover:bg-black/25 coarse:min-h-11">
+              {expanded ? t("store.less") : t("store.more", { n: number(shown.length) })}
+            </button>
+          )}
+        </>
       )}
+      <p className="mt-2 text-xs text-ash">
+        {t("store.totals", { kinds: entries.length, containers: containers!.length })}
+        {unreadable > 0 && <> {tn("store.unreadable", unreadable)}</>}
+      </p>
       {open && <WhereSheet entry={open} onClose={() => setOpen(null)} onShow={show} />}
     </div>
   );

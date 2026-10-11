@@ -167,6 +167,41 @@ describe("VillageStores", () => {
     expect(storage.containers.every((c) => !/Treasure|shipwreck/.test(c.prefab))).toBe(true);
   });
 
+  it("shows a few rows of slots, biggest first, and the rest on request", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(storage)));
+    localStorage.removeItem("skald.stores.open");
+    inLocale(<VillageStores saveKey="d" onShow={() => {}} />);
+    const bag = await screen.findByRole("list", { name: "Village stores" });
+    const totals = within(bag)
+      .getAllByRole("button")
+      .map((b) => Number(b.getAttribute("aria-label")!.split(", ")[1]!.replace(/\D/g, "")));
+    expect(totals).toEqual(totals.toSorted((a, b) => b - a));
+    const more = screen.queryByRole("button", { name: /Show all \d+/ });
+    expect(more).not.toBeNull();
+    if (more) {
+      expect(within(bag).getAllByRole("button")).toHaveLength(24);
+      fireEvent.click(more);
+      expect(within(bag).getAllByRole("button").length).toBeGreaterThan(24);
+      expect(localStorage.getItem("skald.stores.open")).toBe("1");
+      fireEvent.click(screen.getByRole("button", { name: "Show less" }));
+      expect(within(bag).getAllByRole("button")).toHaveLength(24);
+    }
+  });
+
+  it("narrows the bag to one kind with a chip", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(storage)));
+    inLocale(<VillageStores saveKey="e" onShow={() => {}} />);
+    const group = await screen.findByRole("group", { name: "Kinds of things" });
+    const metal = within(group).getByRole("button", { name: /^Metal \d+/ });
+    const n = Number(metal.textContent!.replace(/\D/g, ""));
+    fireEvent.click(metal);
+    expect(metal).toHaveAttribute("aria-pressed", "true");
+    const bag = screen.getByRole("list", { name: "Metal" });
+    expect(within(bag).getAllByRole("button")).toHaveLength(Math.min(n, 24));
+    fireEvent.click(within(group).getByRole("button", { name: /^All/ }));
+    expect(screen.getByRole("list", { name: "Village stores" })).toBeInTheDocument();
+  });
+
   it("explains a failure and retries", async () => {
     const fetchMock = vi.fn(async () => new Response("{}", { status: 502 }));
     vi.stubGlobal("fetch", fetchMock);
