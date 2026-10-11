@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The agent serves the land's nature for close zoom: `GET /nature` returns the trees (by species), stumps, fallen logs, rocks, bushes, ore deposits and pickables the world generated inside a box, as they are now. Without map spoilers only what lies on explored land or near a base is sent.
+
 ## [0.9.1] - 2026-10-11
 
 ### Changed

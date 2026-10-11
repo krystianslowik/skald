@@ -177,6 +177,32 @@ degrees clockwise seen from above (the local x axis points along
 Within each 64 m zone pieces come lowest first. Pieces carry no names or
 ids, so `MAP_SHOW_NAMES` and `MAP_SPOILERS` do not change this answer.
 
+Nature: `GET /nature?x0=&z0=&x1=&z1=[&spoilers=true]` (same token, ETag,
+gzip, status and box rules as `/pieces`, at most 30,000 objects) answers
+with what the world generated in the box and is still there: trees, stumps,
+fallen logs, rocks, bushes, ore deposits and pickables. Objects a player
+placed (a creator), creatures, spawners, dropped items, location and
+dungeon pieces never show; a cut tree or a mined rock is gone from the save
+and so from the answer.
+
+```json
+{"generation":12,"bbox":[100,-220,140,-180],"spoilers":false,
+ "kinds":[["Beech1","tree","beech",8],["rock4_copper","ore","copper",6]],
+ "items":[[0,104.2,-211.7,148,1.15],[1,131,-190.4,0,1]],
+ "count":2,"truncated":false}
+```
+
+A kind is `[name, category, species, size]`: categories tree, stump, log,
+rock, bush, ore, pickable; species a short name such as beech, fir, swamp,
+copper, tin, iron, raspberry or mushroom_yellow; size the plan-view size in
+metres at scale 1 (a crown, a log's length), a drawing hint. An item is
+`[kind, x, z, yaw, scale]`: metres rounded to 0.1, yaw in degrees as for
+pieces, and the object's own scale (1 when the save holds none), so it is
+drawn `size x scale` across. Without `spoilers=true` only objects inside the
+explored area or within 64 m of a built piece are sent, the rule locations
+follow, so ore in land nobody has found never leaves the agent. The web
+asks with `spoilers=true` only when `MAP_SPOILERS=true`.
+
 Spoilers: the agent marks a location explored when it is inside the
 explored area or within 64 m of a built piece. The web tier drops everything
 else unless `MAP_SPOILERS=true`. The seed alone tells where every boss is, so
