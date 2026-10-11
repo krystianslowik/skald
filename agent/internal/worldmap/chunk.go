@@ -15,7 +15,7 @@ import (
 //	ZDO: u16 flags
 //	     pos: flags&0x2000 ? (i16 x, i16 z) : (f32 x, f32 y, f32 z)
 //	     i32 prefab hash
-//	     flags&0x1000: rotation, 2 bytes when bit 15 of its first u16 is set, else 4
+//	     flags&0x1000: rotation as Euler angles in half degrees (see rotation)
 //	     flags&0x01:   connection, u8 type + i32 target hash
 //	     then one typed map per set bit, in this order:
 //	       0x02 f32, 0x04 Vector3, 0x08 Quaternion, 0x10 i32, 0x20 i64,
@@ -106,6 +106,7 @@ type chunkData struct {
 	beds     []rawBed
 	vehicles []rawVehicle
 	stores   []rawStore
+	built    []rawPiece
 	tables   int
 	explored []uint64 // exploredWords words, nil when the chunk holds no table
 	pins     []rawPin
@@ -127,7 +128,9 @@ func inWorld(x, z float32) bool {
 
 // zdoFields is the subset of one ZDO's maps the map cares about.
 type zdoFields struct {
-	creator     bool
+	creator bool
+	// built is a creator that is not 0: a piece a player placed.
+	built       bool
 	tag         string
 	ownerName   string
 	timeOfDeath int64
@@ -157,18 +160,20 @@ func parseChunk(b []byte) (cd *chunkData, err error) {
 	var f zdoFields
 	for i := 0; i < count; i++ {
 		flags := r.u16()
-		var x, z float32
+		var x, y, z float32
 		if flags&flagShortPos != 0 {
 			x, z = float32(r.i16()), float32(r.i16())
 		} else {
 			x = r.f32()
-			r.f32()
+			y = r.f32()
 			z = r.f32()
 		}
 		prefab := r.i32()
+		var rot [2]uint16
 		if flags&flagRotation != 0 {
-			if r.u16()&0x8000 == 0 {
-				r.skip(2)
+			rot[0] = r.u16()
+			if rot[0]&0x8000 == 0 {
+				rot[1] = r.u16()
 			}
 		}
 		var connType byte
@@ -208,6 +213,10 @@ func parseChunk(b []byte) (cd *chunkData, err error) {
 			}
 			if info.role == roleBed {
 				zp.bed = true
+			}
+			if f.built {
+				yaw, tilted := rotation(flags&flagRotation != 0, rot)
+				cd.built = append(cd.built, rawPiece{hash: prefab, x: x, y: y, z: z, yaw: yaw, tilted: tilted})
 			}
 		}
 		if !interesting {
@@ -280,6 +289,7 @@ func readMaps(r *buf, flags uint16, keep bool, f *zdoFields) {
 				v := r.i64()
 				if key == keyCreator {
 					f.creator = true
+					f.built = v != 0
 				} else if keep && key == keyTimeOfDeath {
 					f.timeOfDeath = v
 				}

@@ -55,7 +55,9 @@ type Options struct {
 
 // Encoded is a built snapshot, serialised once.
 type Encoded struct {
-	Snapshot   *Snapshot
+	Snapshot *Snapshot
+	// Pieces is the floor plan index (GET /pieces); it is not part of JSON.
+	Pieces     *Pieces
 	JSON       []byte
 	Gzip       []byte
 	ETag       string
@@ -151,7 +153,7 @@ func (b *Builder) Refresh() (bool, error) {
 		return false, nil
 	}
 	start := time.Now()
-	snap, err := b.build(gen)
+	snap, pieces, err := b.build(gen)
 	if err != nil {
 		return false, err
 	}
@@ -160,6 +162,7 @@ func (b *Builder) Refresh() (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	enc.Pieces = pieces
 	b.mu.Lock()
 	b.cur = enc
 	b.lastBuild = time.Since(start).Seconds()
@@ -252,12 +255,12 @@ func readFileCapped(path string, max int64) ([]byte, error) {
 	return b, nil
 }
 
-func (b *Builder) build(gen int) (*Snapshot, error) {
+func (b *Builder) build(gen int) (*Snapshot, *Pieces, error) {
 	dir := b.opt.Dir
 	base := filepath.Join(dir, "_main."+strconv.Itoa(gen))
 	rows, err := readIndex(base + ".chunks")
 	if err != nil {
-		return nil, fmt.Errorf("chunk index: %w", err)
+		return nil, nil, fmt.Errorf("chunk index: %w", err)
 	}
 	snap := &Snapshot{}
 	seen := make(map[chunkID]bool, len(rows))
@@ -304,7 +307,7 @@ func (b *Builder) build(gen int) (*Snapshot, error) {
 		chunks = append(chunks, e.data)
 	}
 	assemble(snap, chunks, b.lastDB2, b.opt.ShowNames)
-	return snap, nil
+	return snap, buildPieces(chunks), nil
 }
 
 // The land grid covers the playable disc: zones -164..164 on both axes.

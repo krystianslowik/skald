@@ -152,6 +152,31 @@ On the real 1.0 world used to work out the format (about 376,000 objects
 in 35 chunks) a full build takes about 0.04 s and 22 MB of allocations, and
 the map is 26 KB gzipped (30 KB with the 47 containers and their items).
 
+Floor plans: `GET /pieces?x0=&z0=&x1=&z1=` (same token, ETag, gzip and
+404/503 rules as `/map`) answers with the pieces players built (a creator
+that is not 0; ships, carts and world or dungeon pieces never) whose
+position lies in the box, at most 1024 m a side and 20,000 pieces
+(`"truncated": true` past that):
+
+```json
+{"generation":12,"bbox":[100,-220,140,-180],
+ "prefabs":[["wood_floor","floor",2,2,0,true],["woodwall","wall",2,0.25,0,true]],
+ "pieces":[[0,118,-200,31.65,270,0],[1,118,-201,32.65,0,0]],
+ "count":2,"truncated":false}
+```
+
+A prefab is `[name, kind, width, depth, roof slope, known]`: a plan-view
+rectangle in metres along the piece's local x and z, centred on its
+position. Kinds: wall, floor, roof, door, stair, beam, pole, fence, station,
+furniture, storage, light, portal, plant, other. A prefab outside the
+agent's table is `"#<hash>"`, kind `other`, 1 x 1 m, `known: false`. A piece
+is `[prefab, x, z, y, yaw, flags]`: metres rounded to 0.05, yaw in whole
+degrees clockwise seen from above (the local x axis points along
+(cos yaw, -sin yaw) in world x, z), flags bit 0 for a piece tilted more than
+10 degrees off upright. Roofs and stairs climb towards their local -z.
+Within each 64 m zone pieces come lowest first. Pieces carry no names or
+ids, so `MAP_SHOW_NAMES` and `MAP_SPOILERS` do not change this answer.
+
 Spoilers: the agent marks a location explored when it is inside the
 explored area or within 64 m of a built piece. The web tier drops everything
 else unless `MAP_SPOILERS=true`. The seed alone tells where every boss is, so
