@@ -23,6 +23,8 @@ import {
   isWater,
   layerCounts,
   loopArea,
+  mapShapes,
+  shapeBuffers,
   pick,
   pickItem,
   placeLabels,
@@ -175,6 +177,26 @@ describe("outlines", () => {
     // Half the circle in the box: cut to it.
     const cut = set.near([0, -200, 200, 200], 2);
     expect(ringBox(cut[0]!)[0]).toBeCloseTo(0, 5);
+  });
+
+  it("builds the land and fog shapes as transferable arrays in world units", () => {
+    const shapes = mapShapes(snap.land, snap.explored);
+    expect(shapes.land.length).toBeGreaterThan(0);
+    expect(shapes.sea.length).toBeGreaterThan(0);
+    expect(shapes.coast.length % 4).toBe(0);
+    expect(shapes.density.length).toBe(shapes.size * shapes.size * 4);
+    expect(shapes.fog!.length).toBeGreaterThan(0);
+    // The fog's outline lies inside the explored box, in metres.
+    const box = exploredBounds(decodeRLE(snap.explored.rle, snap.explored.size), snap.explored.size, snap.explored.metersPerPixel)!;
+    for (const r of shapes.fog!) {
+      const b = ringBox(r);
+      expect(b[0]).toBeGreaterThanOrEqual(box[0] - 3 * shapes.fogStep);
+      expect(b[3]).toBeLessThanOrEqual(box[3] + 3 * shapes.fogStep);
+    }
+    // Every buffer once, so a worker can transfer them all.
+    const bufs = shapeBuffers(shapes);
+    expect(new Set(bufs).size).toBe(bufs.length);
+    expect(mapShapes(snap.land, { ...snap.explored, available: false }).fog).toBeNull();
   });
 
   it("closes a ring by going back to the start and over the first edge, not with closePath", () => {

@@ -9,13 +9,8 @@ import type { ApiMap, MapItem } from "../types";
 import type { IconSheet } from "./itemicons";
 import {
   clusterMarkers,
-  exploredBounds,
-  gridOutline,
-  isoPolygons,
-  isoSegments,
-  landFields,
   LAYERS,
-  LAND_LEVEL,
+  mapShapes,
   markerItems,
   placeLabels,
   portalLinks,
@@ -26,11 +21,13 @@ import {
   type Cluster,
   type IconId,
   type LayerId,
+  type MapShapes,
   type Marker,
   type ScreenMarker,
   type View,
 } from "./mapgeo";
 import { ICONS } from "./mapicons";
+import { CLOUD_TILE, PAPER_TILE, textures as paperTextures, type Textures } from "./paper";
 import { natureTint, wobble, type NatureItem } from "./nature";
 import { NatureLayer, natureAlpha } from "./naturerender";
 import type { ChunkKey, Piece } from "./pieces";
@@ -58,96 +55,18 @@ function makeCanvas(w: number, h: number): HTMLCanvasElement | OffscreenCanvas {
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 const ctx2d = (c: HTMLCanvasElement | OffscreenCanvas): Ctx2D | null => c.getContext("2d") as Ctx2D | null;
 
-/** Deterministic value noise in 0..1. */
-function noise(x: number, y: number, seed: number): number {
-  const h = (ix: number, iy: number) => {
-    let n = Math.imul(ix, 374761393) ^ Math.imul(iy, 668265263) ^ Math.imul(seed, 1442695041);
-    n = Math.imul(n ^ (n >>> 13), 1274126177);
-    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
-  };
-  const xi = Math.floor(x);
-  const yi = Math.floor(y);
-  const fx = x - xi;
-  const fy = y - yi;
-  const s = (t: number) => t * t * (3 - 2 * t);
-  const a = h(xi, yi);
-  const b = h(xi + 1, yi);
-  const c = h(xi, yi + 1);
-  const d = h(xi + 1, yi + 1);
-  return a + (b - a) * s(fx) + (c - a) * s(fy) + (a - b - c + d) * s(fx) * s(fy);
-}
-
-/** Fractal noise on a torus of `period` cells, so the tile repeats seamlessly. */
-function tiledNoise(x: number, y: number, period: number, octaves: number, seed: number): number {
-  let sum = 0;
-  let amp = 0.5;
-  let f = 1;
-  for (let o = 0; o < octaves; o++) {
-    const p = period * f;
-    const u = ((x * f) % p + p) % p;
-    const v = ((y * f) % p + p) % p;
-    // Blend the four wrapped copies so the edges meet.
-    const wx = u / p;
-    const wy = v / p;
-    const n =
-      noise(u, v, seed + o) * (1 - wx) * (1 - wy) +
-      noise(u - p, v, seed + o) * wx * (1 - wy) +
-      noise(u, v - p, seed + o) * (1 - wx) * wy +
-      noise(u - p, v - p, seed + o) * wx * wy;
-    sum += n * amp;
-    amp *= 0.5;
-    f *= 2;
-  }
-  return sum;
-}
-
-/** A seamless paper tile: fibres, blotches and specks, as alpha over the paper colour. */
-function paperTile(size = 256): HTMLCanvasElement | OffscreenCanvas | null {
+/** A tile from its pixels, or null without a 2D context. */
+function tileOf(px: Uint8ClampedArray<ArrayBuffer>, size: number): HTMLCanvasElement | OffscreenCanvas | null {
   const c = makeCanvas(size, size);
   const g = ctx2d(c);
-  if (!g) return null;
-  const img = g.createImageData(size, size);
-  const cells = 8;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const u = (x / size) * cells;
-      const v = (y / size) * cells;
-      const blot = tiledNoise(u, v, cells, 4, 3);
-      const fibre = tiledNoise(u * 6, v * 0.8, cells * 6, 2, 9);
-      let a = Math.max(0, blot - 0.45) * 0.55 + Math.max(0, fibre - 0.55) * 0.35;
-      if (noise(x * 13.1, y * 7.7, 5) > 0.985) a += 0.25;
-      const i = (y * size + x) * 4;
-      img.data[i] = 92;
-      img.data[i + 1] = 64;
-      img.data[i + 2] = 32;
-      img.data[i + 3] = Math.min(255, a * 255);
-    }
-  }
-  g.putImageData(img, 0, 0);
+  if (!g || typeof ImageData === "undefined") return null;
+  g.putImageData(new ImageData(px, size, size), 0, 0);
   return c;
 }
 
-/** Cloudy paper for the fog: light, with soft billows. */
-function cloudTile(size = 512): HTMLCanvasElement | OffscreenCanvas | null {
-  const c = makeCanvas(size, size);
-  const g = ctx2d(c);
-  if (!g) return null;
-  const img = g.createImageData(size, size);
-  const cells = 6;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const n = tiledNoise((x / size) * cells, (y / size) * cells, cells, 5, 21);
-      const i = (y * size + x) * 4;
-      const l = 0.86 + (n - 0.5) * 0.22;
-      img.data[i] = Math.min(255, 236 * l);
-      img.data[i + 1] = Math.min(255, 224 * l);
-      img.data[i + 2] = Math.min(255, 196 * l);
-      img.data[i + 3] = 255;
-    }
-  }
-  g.putImageData(img, 0, 0);
-  return c;
-}
+/** The paper and cloud tiles, made once per page (in the map worker, the first time). */
+let textures: { paper: HTMLCanvasElement | OffscreenCanvas | null; clouds: HTMLCanvasElement | OffscreenCanvas | null } | null = null;
+const setTextures = (t: Textures) => (textures ??= { paper: tileOf(t.paper, PAPER_TILE), clouds: tileOf(t.clouds, CLOUD_TILE) });
 
 interface Prepared {
   land: Path2D;
@@ -162,7 +81,7 @@ interface Prepared {
   terrain: { x: number; z: number; cells: number }[];
 }
 
-function pathFromPolys(polys: number[][]): Path2D {
+function pathFromPolys(polys: readonly Float32Array[]): Path2D {
   const p = new Path2D();
   for (const poly of polys) {
     p.moveTo(poly[0]!, poly[1]!);
@@ -208,65 +127,24 @@ function pathFromSegments(seg: Float32Array): Path2D {
   return p;
 }
 
-export function prepare(map: ApiMap, mask: Uint8Array | null): Prepared {
-  const f = landFields(map.land);
-  const n = f.size;
-  const land = pathFromPolys(isoPolygons(f.land, n, f.origin, f.step));
-  const sea = pathFromPolys(isoPolygons(f.generated, n, f.origin, f.step));
-  const coast = pathFromSegments(isoSegments(f.land, n, f.origin, f.step));
-
-  // Vegetation and building density as an ink wash inside the land.
+/** The shapes built in the worker, made drawable. */
+export function prepare(shapes: MapShapes, map: ApiMap): Prepared {
+  const n = shapes.size;
   let density: Prepared["density"] = null;
   const dc = makeCanvas(n, n);
   const dg = ctx2d(dc);
-  if (dg) {
-    const img = dg.createImageData(n, n);
-    for (let i = 0; i < n * n; i++) {
-      const v = f.raw[i] ?? 0;
-      const a = v < LAND_LEVEL ? 0 : Math.min(1, (v - LAND_LEVEL) / (230 - LAND_LEVEL));
-      img.data[i * 4] = 62;
-      img.data[i * 4 + 1] = 74;
-      img.data[i * 4 + 2] = 38;
-      img.data[i * 4 + 3] = a * 150;
-    }
-    dg.putImageData(img, 0, 0);
+  if (dg && typeof ImageData !== "undefined") {
+    dg.putImageData(new ImageData(shapes.density, n, n), 0, 0);
     density = dc;
   }
-
-  // Fog: the explored area traced as smooth loops once, in world units, so
-  // its edge stays sharp at any zoom. Only the explored box is walked.
-  let fog: Prepared["fog"] = null;
-  const ex = map.explored;
-  if (ex.available && mask) {
-    const mpp = ex.metersPerPixel;
-    const b = exploredBounds(mask, ex.size, mpp);
-    let rings: Float32Array[] = [];
-    if (b) {
-      // Mask pixel (col, row) sits at ((col - size / 2) * mpp, (row - size / 2) * mpp).
-      const px = (w: number) => Math.round(w / mpp + ex.size / 2);
-      const c0 = Math.max(0, px(b[0]) - 2);
-      const r0 = Math.max(0, px(b[1]) - 2);
-      const c1 = Math.min(ex.size - 1, px(b[2]) + 2);
-      const r1 = Math.min(ex.size - 1, px(b[3]) + 2);
-      const w = c1 - c0 + 1;
-      const cells = new Float32Array(w * (r1 - r0 + 1));
-      for (let r = r0; r <= r1; r++) {
-        for (let c = c0; c <= c1; c++) cells[(r - r0) * w + c - c0] = mask[r * ex.size + c]!;
-      }
-      const x0 = (c0 - ex.size / 2) * mpp;
-      const z0 = (r0 - ex.size / 2) * mpp;
-      rings = gridOutline(cells, w, r1 - r0 + 1).map((l) => l.map((v, i) => (i % 2 ? z0 : x0) + v * mpp));
-    }
-    fog = new RingSet(rings, mpp);
-  }
   return {
-    land,
-    sea,
-    coast,
+    land: pathFromPolys(shapes.land),
+    sea: pathFromPolys(shapes.sea),
+    coast: pathFromSegments(shapes.coast),
     density,
-    gridOrigin: f.origin - f.step / 2,
-    gridExtent: n * f.step,
-    fog,
+    gridOrigin: shapes.gridOrigin,
+    gridExtent: shapes.gridExtent,
+    fog: shapes.fog ? new RingSet(shapes.fog, shapes.fogStep) : null,
     links: portalLinks(map),
     terrain: map.terrainEdits,
   };
@@ -324,11 +202,12 @@ export class MapRenderer {
   private dpr = 1;
   private prep: Prepared | null = null;
   private sprites = new Map<string, HTMLCanvasElement | OffscreenCanvas>();
-  private paper: HTMLCanvasElement | OffscreenCanvas | null = null;
-  private clouds: HTMLCanvasElement | OffscreenCanvas | null = null;
   private measureCache = new Map<string, number>();
   /** Bumped on new data, so the cached base is re-rendered. */
   private version = 0;
+  /** The land and explored mask the shapes are (being) built from, and the newest request. */
+  private shapesKey = "";
+  private shapesReq = 0;
   private base: { canvas: HTMLCanvasElement | OffscreenCanvas; key: string; cx: number; cz: number; scale: number; w: number; h: number; rough: boolean } | null = null;
   /** Markers drawn in the last frame, in screen space, for picking. */
   visible: ScreenMarker[] = [];
@@ -367,13 +246,48 @@ export class MapRenderer {
     return this.ctx !== null;
   }
 
-  setData(map: ApiMap, mask: Uint8Array | null): void {
+  /**
+   * A new snapshot. Its land and fog shapes are built in a worker; until they
+   * arrive the last ones stay on screen (with the new portal links and
+   * terrain edits), and before the first nothing is drawn. A save that did
+   * not change the land or the explored area reuses the shapes it has.
+   */
+  setData(map: ApiMap): void {
     if (!this.ctx) return;
-    this.prep = prepare(map, mask);
     this.spoilers = map.spoilers;
-    this.version++;
-    this.paper ??= paperTile();
-    this.clouds ??= cloudTile();
+    const key = `${map.land.size}:${map.land.data}|${map.explored.available ? `${map.explored.size}:${map.explored.rle}` : ""}`;
+    if (this.prep) {
+      this.prep = { ...this.prep, links: portalLinks(map), terrain: map.terrainEdits };
+      this.version++;
+    }
+    if (key === this.shapesKey) return;
+    this.shapesKey = key;
+    const req = ++this.shapesReq;
+    const done = (shapes: MapShapes, tex?: Textures) => {
+      if (tex) setTextures(tex);
+      if (req !== this.shapesReq) return;
+      this.prep = prepare(shapes, map);
+      this.version++;
+      this.onChange?.();
+    };
+    const here = () => done(mapShapes(map.land, map.explored), textures ? undefined : paperTextures());
+    if (typeof Worker === "undefined") return here();
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("./map.worker.ts", import.meta.url), { type: "module" });
+    } catch {
+      return here();
+    }
+    worker.onmessage = (e: MessageEvent<{ shapes?: MapShapes; textures?: Textures; error?: string }>) => {
+      worker.terminate();
+      if (e.data.shapes) done(e.data.shapes, e.data.textures);
+      else if (req === this.shapesReq) here();
+    };
+    worker.onerror = () => {
+      worker.terminate();
+      if (req === this.shapesReq) here();
+    };
+    worker.postMessage({ land: map.land, explored: map.explored, textures: !textures });
   }
 
   /** The decoded terrain image, or null for the land inked from the save. */
@@ -529,6 +443,15 @@ export class MapRenderer {
     const g = this.ctx;
     if (!g) return false;
     const v = f.view;
+    if (!this.prep) {
+      // The first shapes are on their way: the map appears whole, not paper first.
+      this.screen(g);
+      g.fillStyle = VOID;
+      g.fillRect(0, 0, v.w, v.h);
+      this.visible = [];
+      this.visibleOre = [];
+      return false;
+    }
     const plan = f.layers.buildings && this.plan ? `${this.planVersion}:${f.storey ? `${f.storey.base}/${f.storey.level}` : ""}:${this.storeys(v, f.layers)?.base ?? ""}` : "";
     const nature = f.layers.nature || f.layers.resources ? `${f.layers.nature ? 1 : 0}${f.layers.resources ? 1 : 0}:${this.nature.version}` : "";
     const key = `${f.layers.fog ? 1 : 0}${f.layers.terrain ? 1 : 0}${f.layers.relief ? 1 : 0}:${this.version}:${v.w}x${v.h}:${this.dpr}:${plan}:${nature}`;
@@ -735,7 +658,8 @@ export class MapRenderer {
   }
 
   private drawFog(g: CanvasRenderingContext2D, v: View, p: Prepared, layers: Record<LayerId, boolean>) {
-    if (!layers.fog || !p.fog || !this.clouds) return;
+    const clouds = textures?.clouds;
+    if (!layers.fog || !p.fog || !clouds) return;
     // Only the outline near what is drawn, as fine as the zoom shows: a big
     // explored world has thousands of loops, and every clip and stroke below
     // walks all it is given. The box reaches past the widest rim, so where the
@@ -745,18 +669,18 @@ export class MapRenderer {
     const area = ringsPath(rings, worldDisc());
     g.save();
     g.clip(area, "evenodd");
-    this.drawTiled(g, v, this.clouds, 768, 1, true);
+    this.drawTiled(g, v, clouds, 768, 1, true);
     this.drawPaper(g, v, 0.35);
     g.restore();
     // A soft rim on the explored side: bands of cloud a fixed few screen px
     // wide, so the edge stays sharp however close the view.
-    const pat = g.createPattern(this.clouds as CanvasImageSource, "repeat");
+    const pat = g.createPattern(clouds as CanvasImageSource, "repeat");
     if (!pat || typeof DOMMatrix === "undefined") return;
     g.save();
     g.clip(edge, "evenodd");
     // The fog's coarser cloud octave, so the rim matches what it fades from.
     const size = 2 ** Math.floor(Math.log2(768 / v.scale));
-    pat.setTransform(new DOMMatrix().scale(size / this.clouds.width, size / this.clouds.width));
+    pat.setTransform(new DOMMatrix().scale(size / clouds.width, size / clouds.width));
     g.strokeStyle = pat;
     g.lineJoin = "round";
     g.lineCap = "round";
@@ -772,7 +696,7 @@ export class MapRenderer {
   }
 
   private drawPaper(g: CanvasRenderingContext2D, v: View, alpha = 0.9) {
-    if (this.paper) this.drawTiled(g, v, this.paper, 256, alpha, false);
+    if (textures?.paper) this.drawTiled(g, v, textures.paper, 256, alpha, false);
   }
 
   /**

@@ -7,7 +7,7 @@
 // up, so screen y = centre - (z - cz) * scale. The land grid and the
 // explored mask are both row-major from the south-west corner.
 
-import type { ApiMap, MapContainer, MapItem, MapLand, MapLocation } from "../types";
+import type { ApiMap, MapContainer, MapExplored, MapItem, MapLand, MapLocation } from "../types";
 import { groupStacks } from "./stacks";
 
 /** Radius of the playable world in metres. */
@@ -424,6 +424,86 @@ export function clipRing(ring: Float32Array, box: readonly [number, number, numb
     pts = out;
   }
   return pts.length >= 6 ? Float32Array.from(pts) : null;
+}
+
+/**
+ * Everything the map draws of the land and the fog, as plain arrays in world
+ * units: land and generated-zone polygons, the coast as segments, the
+ * vegetation wash as RGBA (one pixel per zone), and the explored area's
+ * outline. Pure and transferable, so it is built in a worker (map.worker.ts):
+ * on a big explored world tracing the fog takes long enough to stall a phone.
+ */
+export interface MapShapes {
+  land: Float32Array[];
+  sea: Float32Array[];
+  coast: Float32Array;
+  /** `size` x `size` RGBA, rows from the south; drawn over [gridOrigin, gridOrigin + gridExtent] on both axes. */
+  density: Uint8ClampedArray<ArrayBuffer>;
+  size: number;
+  gridOrigin: number;
+  gridExtent: number;
+  /** The explored area's outline, in world units; null without a mask. */
+  fog: Float32Array[] | null;
+  /** Metres per mask pixel, the fog's grid step. */
+  fogStep: number;
+}
+
+export function mapShapes(land: MapLand, explored: MapExplored): MapShapes {
+  const f = landFields(land);
+  const n = f.size;
+  const polys = (field: Float32Array) => isoPolygons(field, n, f.origin, f.step).map((p) => Float32Array.from(p));
+  // Vegetation and building density as an ink wash inside the land.
+  const density = new Uint8ClampedArray(n * n * 4);
+  for (let i = 0; i < n * n; i++) {
+    const v = f.raw[i] ?? 0;
+    const a = v < LAND_LEVEL ? 0 : Math.min(1, (v - LAND_LEVEL) / (230 - LAND_LEVEL));
+    density[i * 4] = 62;
+    density[i * 4 + 1] = 74;
+    density[i * 4 + 2] = 38;
+    density[i * 4 + 3] = a * 150;
+  }
+  // Fog: the explored area traced as smooth loops once, in world units, so
+  // its edge stays sharp at any zoom. Only the explored box is walked.
+  let fog: Float32Array[] | null = null;
+  const mpp = explored.metersPerPixel;
+  if (explored.available) {
+    const size = explored.size;
+    const mask = decodeRLE(explored.rle, size);
+    const b = exploredBounds(mask, size, mpp);
+    fog = [];
+    if (b) {
+      // Mask pixel (col, row) sits at ((col - size / 2) * mpp, (row - size / 2) * mpp).
+      const px = (w: number) => Math.round(w / mpp + size / 2);
+      const c0 = Math.max(0, px(b[0]) - 2);
+      const r0 = Math.max(0, px(b[1]) - 2);
+      const c1 = Math.min(size - 1, px(b[2]) + 2);
+      const r1 = Math.min(size - 1, px(b[3]) + 2);
+      const w = c1 - c0 + 1;
+      const cells = new Float32Array(w * (r1 - r0 + 1));
+      for (let r = r0; r <= r1; r++) {
+        for (let c = c0; c <= c1; c++) cells[(r - r0) * w + c - c0] = mask[r * size + c]!;
+      }
+      const x0 = (c0 - size / 2) * mpp;
+      const z0 = (r0 - size / 2) * mpp;
+      fog = gridOutline(cells, w, r1 - r0 + 1).map((l) => l.map((v, i) => (i % 2 ? z0 : x0) + v * mpp));
+    }
+  }
+  return {
+    land: polys(f.land),
+    sea: polys(f.generated),
+    coast: isoSegments(f.land, n, f.origin, f.step),
+    density,
+    size: n,
+    gridOrigin: f.origin - f.step / 2,
+    gridExtent: n * f.step,
+    fog,
+    fogStep: mpp,
+  };
+}
+
+/** The buffers of `s`, to transfer it from a worker without copying. */
+export function shapeBuffers(s: MapShapes): ArrayBuffer[] {
+  return [...s.land, ...s.sea, s.coast, s.density, ...(s.fog ?? [])].map((a) => a.buffer as ArrayBuffer);
 }
 
 /** Simplification steps, in the rings' own unit, tried from the coarsest. */

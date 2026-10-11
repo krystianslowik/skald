@@ -237,14 +237,14 @@ export const MapCanvas = forwardRef<
     [schedule],
   );
 
-  /** The explored area; without fog what people built; with nothing yet the whole world. */
-  const bounds = useMemo(
-    () => exploredBounds(mask, map.explored.size, map.explored.metersPerPixel) ?? interestBounds(map) ?? ([-WORLD_RADIUS, -WORLD_RADIUS, WORLD_RADIUS, WORLD_RADIUS] as const),
-    [map, mask],
-  );
+  /** The explored area; without fog what people built; with nothing yet the whole world. Only worked out when a fit needs it. */
+  const bounds = useMemo(() => {
+    let box: readonly [number, number, number, number] | null = null;
+    return () => (box ??= exploredBounds(mask, map.explored.size, map.explored.metersPerPixel) ?? interestBounds(map) ?? ([-WORLD_RADIUS, -WORLD_RADIUS, WORLD_RADIUS, WORLD_RADIUS] as const));
+  }, [map, mask]);
   const fitInsets = useRef(insets);
   fitInsets.current = insets;
-  const fitFor = useCallback((w: number, h: number) => fitBounds(w, h, bounds, fitInsets.current), [bounds]);
+  const fitFor = useCallback((w: number, h: number) => fitBounds(w, h, bounds(), fitInsets.current), [bounds]);
   const fit = useCallback(() => fitFor(view.current.w, view.current.h), [fitFor]);
 
   const glideTo = useCallback(
@@ -300,9 +300,9 @@ export const MapCanvas = forwardRef<
     if (!canvas.current) return;
     renderer.current ??= new MapRenderer(canvas.current);
     renderer.current.onChange = schedule;
-    renderer.current.setData(map, mask);
+    renderer.current.setData(map);
     schedule();
-  }, [map, mask, schedule]);
+  }, [map, schedule]);
 
   useEffect(() => {
     renderer.current?.setRelief(relief);
