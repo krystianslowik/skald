@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-11
+
+### Changed
+
+- The map is much smoother on phones. Panning no longer stalls on the fog edge in Safari, dense woods and the fog no longer freeze Chrome on Android for seconds, opening the map and a world save no longer block the page (the map's shapes are built in a background worker), and newly loaded woods and floor plans arrive in small steps instead of all at once.
+- Pinching past the closest or farthest zoom stretches a little and springs back, a quick pinch keeps zooming briefly after you let go, and a finger that stopped before lifting no longer flings the map.
+- The app's hashed files are cached by the browser for good, so returning visits load almost nothing.
+
+### Fixed
+
+- A fling or zoom that started while clustered marks were splitting apart did not move.
+- On large retina screens the map could stay blank in Safari, which refuses very large canvases.
+
 ## [0.10.0] - 2026-10-11
 
 Nature and resources on the map need the 0.10.0 agent; with an older agent the web keeps working without them.
