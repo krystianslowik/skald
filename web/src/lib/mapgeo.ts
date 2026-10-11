@@ -372,6 +372,114 @@ export function gridOutline(cells: Float32Array, w: number, h: number, tol = 0.3
   return out;
 }
 
+/** A ring's bounding box: [x0, y0, x1, y1]. */
+export function ringBox(ring: Float32Array): [number, number, number, number] {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (let i = 0; i < ring.length; i += 2) {
+    const x = ring[i]!;
+    const y = ring[i + 1]!;
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+  }
+  return [x0, y0, x1, y1];
+}
+
+/**
+ * A closed ring cut to the box [x0, y0, x1, y1] (Sutherland-Hodgman), or
+ * null when nothing of it is inside. Where the ring leaves the box the cut
+ * runs along the box's sides, so a fill inside the box is unchanged; strokes
+ * along those sides must lie outside what is drawn.
+ */
+export function clipRing(ring: Float32Array, box: readonly [number, number, number, number]): Float32Array | null {
+  let pts: number[] = Array.from(ring);
+  // Each side as (axis, bound, keep the greater side).
+  for (const [axis, bound, greater] of [
+    [0, box[0], true],
+    [0, box[2], false],
+    [1, box[1], true],
+    [1, box[3], false],
+  ] as const) {
+    const n = pts.length / 2;
+    if (n === 0) break;
+    const out: number[] = [];
+    const inside = (i: number) => (greater ? pts[2 * i + axis]! >= bound : pts[2 * i + axis]! <= bound);
+    for (let i = 0; i < n; i++) {
+      const j = (i + n - 1) % n;
+      const a = inside(j);
+      const b = inside(i);
+      if (a !== b) {
+        // Where the edge from j to i crosses the side.
+        const t = (bound - pts[2 * j + axis]!) / (pts[2 * i + axis]! - pts[2 * j + axis]!);
+        const x = pts[2 * j]! + (pts[2 * i]! - pts[2 * j]!) * t;
+        const y = pts[2 * j + 1]! + (pts[2 * i + 1]! - pts[2 * j + 1]!) * t;
+        out.push(axis === 0 ? bound : x, axis === 1 ? bound : y);
+      }
+      if (b) out.push(pts[2 * i]!, pts[2 * i + 1]!);
+    }
+    pts = out;
+  }
+  return pts.length >= 6 ? Float32Array.from(pts) : null;
+}
+
+/** Simplification steps, in the rings' own unit, tried from the coarsest. */
+const RING_LODS = [12, 4, 1.5, 0.5, 0];
+
+/**
+ * Closed rings (in world units) drawn only near the view and only as finely
+ * as the zoom can show: a coarser copy of every ring, simplified to well
+ * under a pixel, is made the first time a zoom wants it, and rings away from
+ * the box are skipped. `unit` is the metres of one step of the rings'
+ * grid (a mask cell), the scale for how far they may be simplified.
+ */
+export class RingSet {
+  private lods = new Map<number, { rings: Float32Array[]; boxes: [number, number, number, number][] }>();
+
+  constructor(
+    private readonly rings: readonly Float32Array[],
+    private readonly unit: number,
+  ) {}
+
+  get size(): number {
+    return this.rings.length;
+  }
+
+  /** The step (in units) for `scale` px per metre: the coarsest that moves no point more than `px` screen pixels. */
+  lodFor(scale: number, px = 0.6): number {
+    return RING_LODS.find((t) => t * this.unit * scale <= px) ?? 0;
+  }
+
+  private lod(tol: number) {
+    let l = this.lods.get(tol);
+    if (!l) {
+      const rings = tol > 0 ? this.rings.map((r) => simplifyLoop(r, tol * this.unit)) : [...this.rings];
+      l = { rings, boxes: rings.map(ringBox) };
+      this.lods.set(tol, l);
+    }
+    return l;
+  }
+
+  /** The rings that reach into `box`, cut to it where they cross its sides, simplified for `scale`. */
+  near(box: readonly [number, number, number, number], scale: number): Float32Array[] {
+    const { rings, boxes } = this.lod(this.lodFor(scale));
+    const out: Float32Array[] = [];
+    for (let i = 0; i < rings.length; i++) {
+      const b = boxes[i]!;
+      if (b[2] < box[0] || b[0] > box[2] || b[3] < box[1] || b[1] > box[3]) continue;
+      if (b[0] >= box[0] && b[2] <= box[2] && b[1] >= box[1] && b[3] <= box[3]) out.push(rings[i]!);
+      else {
+        const c = clipRing(rings[i]!, box);
+        if (c) out.push(c);
+      }
+    }
+    return out;
+  }
+}
+
 /**
  * Ends a ring that started at (x0, y0) and went on to (x1, y1) without
  * closePath(): in Chromium a Path2D's closePath() costs time in proportion to

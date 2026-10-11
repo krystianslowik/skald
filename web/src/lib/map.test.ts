@@ -5,6 +5,7 @@ import { makeI18n } from "../i18n";
 import {
   buildMarkers,
   clampView,
+  clipRing,
   closeRing,
   clusterMarkers,
   decodeRLE,
@@ -26,6 +27,8 @@ import {
   pickItem,
   placeLabels,
   portalLinks,
+  ringBox,
+  RingSet,
   screenToWorld,
   searchMarkers,
   simplifyLoop,
@@ -141,6 +144,37 @@ describe("outlines", () => {
       expect(r).toBeGreaterThan(9);
       expect(r).toBeLessThan(11);
     }
+  });
+
+  it("cuts a ring to a box along the box's sides, keeping the area inside", () => {
+    const square = Float32Array.from([0, 0, 10, 0, 10, 10, 0, 10]);
+    expect(clipRing(square, [-5, -5, 20, 20])).toEqual(square);
+    const half = clipRing(square, [5, -5, 20, 20])!;
+    expect(ringBox(half)).toEqual([5, 0, 10, 10]);
+    expect(Math.abs(loopArea(half)) / 2).toBeCloseTo(50, 5);
+    // A ring round the whole box becomes the box.
+    expect(Math.abs(loopArea(clipRing(square, [2, 3, 4, 8])!)) / 2).toBeCloseTo(10, 5);
+    expect(clipRing(square, [20, 20, 30, 30])).toBeNull();
+  });
+
+  it("gives the rings near a box, simplified only as far as the zoom hides", () => {
+    // A finely sampled circle of radius 100 m and a small ring far away; 12 m per unit.
+    const circle = Float32Array.from({ length: 720 }, (_, i) => (i % 2 ? Math.sin : Math.cos)((Math.floor(i / 2) / 360) * Math.PI * 2) * 100);
+    const far = Float32Array.from([5000, 5000, 5010, 5000, 5010, 5010]);
+    const set = new RingSet([circle, far], 12);
+    expect(set.lodFor(2)).toBe(0);
+    expect(set.lodFor(0.01)).toBe(4);
+    const close = set.near([-200, -200, 200, 200], 2);
+    expect(close).toHaveLength(1);
+    expect(close[0]!.length).toBe(circle.length);
+    // Zoomed far out: every ring, with far fewer points, still round.
+    const out = set.near([-10000, -10000, 10000, 10000], 0.01);
+    expect(out).toHaveLength(2);
+    expect(out[0]!.length).toBeLessThan(circle.length / 4);
+    for (let i = 0; i < out[0]!.length; i += 2) expect(Math.hypot(out[0]![i]!, out[0]![i + 1]!)).toBeCloseTo(100, 0);
+    // Half the circle in the box: cut to it.
+    const cut = set.near([0, -200, 200, 200], 2);
+    expect(ringBox(cut[0]!)[0]).toBeCloseTo(0, 5);
   });
 
   it("closes a ring by going back to the start and over the first edge, not with closePath", () => {

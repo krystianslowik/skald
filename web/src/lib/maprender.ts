@@ -19,6 +19,7 @@ import {
   markerItems,
   placeLabels,
   portalLinks,
+  RingSet,
   WORLD_RADIUS,
   worldToScreen,
   type Box,
@@ -155,8 +156,8 @@ interface Prepared {
   density: HTMLCanvasElement | OffscreenCanvas | null;
   gridOrigin: number;
   gridExtent: number;
-  /** The explored area's outline, and the world with it cut out (fill even-odd). */
-  fog: { edge: Path2D; area: Path2D } | null;
+  /** The explored area's outline in world units: near the view, it is the fog's edge, and the world with it cut out (fill even-odd). */
+  fog: RingSet | null;
   links: [number, number, number, number][];
   terrain: { x: number; z: number; cells: number }[];
 }
@@ -178,6 +179,16 @@ function pathFromLoops(loops: readonly Float32Array[], x0: number, z0: number, s
     for (let i = 2; i < l.length; i += 2) into.lineTo(x0 + l[i]! * step, z0 + l[i + 1]! * step);
     // Filled even-odd, so only back to the start (see closeRing); strokes of these use round caps.
     into.lineTo(x0 + l[0]! * step, z0 + l[1]! * step);
+  }
+  return into;
+}
+
+/** Rings in world units into `into`; each only back to its start, as they are filled even-odd (see closeRing). */
+function ringsPath(rings: readonly Float32Array[], into = new Path2D()): Path2D {
+  for (const r of rings) {
+    into.moveTo(r[0]!, r[1]!);
+    for (let i = 2; i < r.length; i += 2) into.lineTo(r[i]!, r[i + 1]!);
+    into.lineTo(r[0]!, r[1]!);
   }
   return into;
 }
@@ -227,10 +238,9 @@ export function prepare(map: ApiMap, mask: Uint8Array | null): Prepared {
   let fog: Prepared["fog"] = null;
   const ex = map.explored;
   if (ex.available && mask) {
-    const area = worldDisc();
-    const edge = new Path2D();
     const mpp = ex.metersPerPixel;
     const b = exploredBounds(mask, ex.size, mpp);
+    let rings: Float32Array[] = [];
     if (b) {
       // Mask pixel (col, row) sits at ((col - size / 2) * mpp, (row - size / 2) * mpp).
       const px = (w: number) => Math.round(w / mpp + ex.size / 2);
@@ -243,13 +253,11 @@ export function prepare(map: ApiMap, mask: Uint8Array | null): Prepared {
       for (let r = r0; r <= r1; r++) {
         for (let c = c0; c <= c1; c++) cells[(r - r0) * w + c - c0] = mask[r * ex.size + c]!;
       }
-      const loops = gridOutline(cells, w, r1 - r0 + 1);
       const x0 = (c0 - ex.size / 2) * mpp;
       const z0 = (r0 - ex.size / 2) * mpp;
-      pathFromLoops(loops, x0, z0, mpp, edge);
-      pathFromLoops(loops, x0, z0, mpp, area);
+      rings = gridOutline(cells, w, r1 - r0 + 1).map((l) => l.map((v, i) => (i % 2 ? z0 : x0) + v * mpp));
     }
-    fog = { edge, area };
+    fog = new RingSet(rings, mpp);
   }
   return {
     land,
@@ -728,8 +736,15 @@ export class MapRenderer {
 
   private drawFog(g: CanvasRenderingContext2D, v: View, p: Prepared, layers: Record<LayerId, boolean>) {
     if (!layers.fog || !p.fog || !this.clouds) return;
+    // Only the outline near what is drawn, as fine as the zoom shows: a big
+    // explored world has thousands of loops, and every clip and stroke below
+    // walks all it is given. The box reaches past the widest rim, so where the
+    // loops are cut at its sides stays out of the picture.
+    const rings = p.fog.near(viewBox(v, 40 / v.scale), v.scale);
+    const edge = ringsPath(rings);
+    const area = ringsPath(rings, worldDisc());
     g.save();
-    g.clip(p.fog.area, "evenodd");
+    g.clip(area, "evenodd");
     this.drawTiled(g, v, this.clouds, 768, 1, true);
     this.drawPaper(g, v, 0.35);
     g.restore();
@@ -738,7 +753,7 @@ export class MapRenderer {
     const pat = g.createPattern(this.clouds as CanvasImageSource, "repeat");
     if (!pat || typeof DOMMatrix === "undefined") return;
     g.save();
-    g.clip(p.fog.edge, "evenodd");
+    g.clip(edge, "evenodd");
     // The fog's coarser cloud octave, so the rim matches what it fades from.
     const size = 2 ** Math.floor(Math.log2(768 / v.scale));
     pat.setTransform(new DOMMatrix().scale(size / this.clouds.width, size / this.clouds.width));
@@ -751,7 +766,7 @@ export class MapRenderer {
     for (let k = 6; k >= 1; k--) {
       g.globalAlpha = 0.1;
       g.lineWidth = (rim * k) / 6 / v.scale;
-      g.stroke(p.fog.edge);
+      g.stroke(edge);
     }
     g.restore();
   }
