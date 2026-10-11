@@ -42,7 +42,7 @@ updates:
       - dependency-name: UnityEngine.Modules
       # BepInEx 6 is pre-release; BepInExPack_Valheim ships BepInEx 5.
       - dependency-name: BepInEx.Core
-        update-types: [version-update:semver-major]
+        update-types: ["version-update:semver-major"]
     groups:
       nuget: {patterns: ["*"], update-types: [minor, patch]}
       nuget-major: {patterns: ["*"], update-types: [major]}
