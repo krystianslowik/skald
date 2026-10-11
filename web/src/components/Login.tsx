@@ -6,7 +6,7 @@ import { Atmosphere } from "./Atmosphere";
 
 function Campfire({ lit }: { lit: boolean }) {
   return (
-    <svg viewBox="0 0 200 170" className="w-[13.75rem] overflow-visible sm:w-[16.25rem]" aria-hidden>
+    <svg viewBox="0 0 200 170" className="w-55 overflow-visible sm:w-65" aria-hidden>
       <defs>
         <radialGradient id="cf-glow" cx="50%" cy="78%" r="55%">
           <stop offset="0%" stopColor="#ff7a1a" stopOpacity="0.45" />
@@ -79,7 +79,7 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
   };
 
   return (
-    <main className="relative flex min-h-[100dvh] flex-col items-center justify-center overflow-hidden px-4 py-10">
+    <main className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden px-4 py-10">
       <Atmosphere dim={!lit} />
       <LocaleToggle className="absolute right-4 top-4 z-20" />
       <div className="relative z-10 flex w-full max-w-sm flex-col items-center text-center">
@@ -117,16 +117,16 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
             disabled={busy || lit}
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? "word-err" : undefined}
-            className="slot w-full border border-transparent px-4 py-3 text-center text-lg font-bold tracking-[0.2em] text-flame placeholder:font-normal placeholder:tracking-wider placeholder:text-ash/90 focus:border-select-hi focus:shadow-[inset_0_2px_7px_rgba(0,0,0,0.65),0_0_0_1px_rgba(140,188,230,0.5)] focus:outline-none"
+            className="slot w-full border border-transparent px-4 py-3 text-center text-lg font-bold tracking-[0.2em] text-flame placeholder:font-normal placeholder:tracking-wider placeholder:text-ash/90 focus:border-select-hi focus:shadow-[inset_0_2px_7px_rgba(0,0,0,0.65),0_0_0_1px_rgba(140,188,230,0.5)] focus:outline-hidden"
           />
           <button
             type="submit"
             disabled={busy || lit || !word}
-            className="plaque press mt-3 w-full py-2.5 text-xl font-bold !text-flame enabled:hover:!text-gold disabled:opacity-50"
+            className="plaque press mt-3 w-full py-2.5 text-xl font-bold text-flame! enabled:hover:text-gold! disabled:opacity-50"
           >
             {busy ? t("login.busy") : t("login.submit")}
           </button>
-          <p id="word-err" role="alert" className="mt-3 min-h-[1.25rem] text-sm text-blood">
+          <p id="word-err" role="alert" className="mt-3 min-h-5 text-sm text-blood">
             {error}
           </p>
         </motion.form>

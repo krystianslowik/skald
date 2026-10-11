@@ -324,7 +324,7 @@ export function createApp(deps: AppDeps): Hono {
     if (!APPLY_MODES.includes(mode as ApplyMode)) return c.json({ ok: false, message: 'mode must be "now" or "when_empty"' }, 400);
     return settings(c, { op: "apply", mode: mode as ApplyMode });
   });
-  app.delete("/api/settings/apply", (c) => needAdmin(c) ?? settings(c, { op: "cancel" }));
+  app.delete("/api/settings/apply", async (c) => needAdmin(c) ?? settings(c, { op: "cancel" }));
 
   // ---- admin: the bridge plugin, through the agent ---------------------------
 
@@ -419,7 +419,7 @@ export function createApp(deps: AppDeps): Hono {
 
   app.get("/api/admin/players", (c) => passBridge(c, { op: "players" }));
 
-  app.get("/api/admin/read/:name", (c) => {
+  app.get("/api/admin/read/:name", async (c) => {
     const name = c.req.param("name") as AdminRead;
     if (!ADMIN_READS.includes(name)) return c.json({ ok: false, error: "unknown read" }, 404);
     return passBridge(c, { op: "read", name });

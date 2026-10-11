@@ -109,7 +109,7 @@ export function ItemPicker({ target: initial, lines: initialLines, onClose }: { 
     <Sheet
       labelledBy="items-h"
       onClose={onClose}
-      width="sm:w-[34rem]"
+      width="sm:w-136"
       header={(close) => (
         <AdminHead
           id="items-h"
@@ -238,7 +238,7 @@ export function ItemPicker({ target: initial, lines: initialLines, onClose }: { 
                   type="button"
                   onClick={() => add(i.name)}
                   title={i.label}
-                  className={`press relative flex h-[5.25rem] w-full flex-col items-center justify-center gap-1 rounded-[3px] px-1 ${n ? "slot-selected" : "slot"}`}
+                  className={`press relative flex h-21 w-full flex-col items-center justify-center gap-1 rounded-[3px] px-1 ${n ? "slot-selected" : "slot"}`}
                 >
                   <ItemIcon name={i.name} size={26} iconSize={40} className="text-label" />
                   <span className="line-clamp-2 w-full text-center text-[0.6875rem] leading-tight text-bone">{i.label}</span>

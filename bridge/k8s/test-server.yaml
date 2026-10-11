@@ -76,7 +76,7 @@ spec:
         # Drops the plugin into /config/bepinex/plugins; the image syncs that
         # directory into the BepInEx install on every server start.
         - name: plugin
-          image: busybox:1.37
+          image: busybox:1.38
           imagePullPolicy: IfNotPresent
           command:
             - sh

@@ -31,7 +31,7 @@ export function Sheet({
   header,
   children,
   footer,
-  width = "sm:w-[28.75rem]",
+  width = "sm:w-115",
   modal = true,
   peek = false,
   closeRef,

@@ -45,7 +45,7 @@ export function AdminPanel({ picked, onClose }: { picked?: { x: number; z: numbe
     <Sheet
       labelledBy="admin-h"
       onClose={onClose}
-      width="sm:w-[36rem]"
+      width="sm:w-xl"
       header={(close) => (
         <AdminHead
           id="admin-h"
@@ -396,9 +396,9 @@ function WorldKeys({ catalog, onChange }: { catalog: AdminCatalog | null; onChan
                     setConfirm(null);
                     set(key, !on);
                   }}
-                  className={`press relative h-8 w-14 shrink-0 rounded-full border transition-colors disabled:opacity-40 coarse:h-11 coarse:w-[4.5rem] ${on ? "border-select-hi/70 bg-select/50" : confirm === key ? "border-flame bg-ember/30" : "border-iron/60 bg-black/40"}`}
+                  className={`press relative h-8 w-14 shrink-0 rounded-full border transition-colors disabled:opacity-40 coarse:h-11 coarse:w-18 ${on ? "border-select-hi/70 bg-select/50" : confirm === key ? "border-flame bg-ember/30" : "border-iron/60 bg-black/40"}`}
                 >
-                  <span className={`absolute top-1/2 h-6 w-6 -translate-y-1/2 rounded-full bg-bone shadow transition-[left] coarse:h-8 coarse:w-8 ${on ? "left-[calc(100%-1.75rem)] coarse:left-[calc(100%-2.25rem)]" : "left-1"}`} />
+                  <span className={`absolute top-1/2 h-6 w-6 -translate-y-1/2 rounded-full bg-bone shadow-sm transition-[left] coarse:h-8 coarse:w-8 ${on ? "left-[calc(100%-1.75rem)] coarse:left-[calc(100%-2.25rem)]" : "left-1"}`} />
                 </button>
               )}
             </li>

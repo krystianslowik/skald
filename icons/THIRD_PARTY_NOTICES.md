@@ -3,8 +3,8 @@
 The `skald-icons` image contains Skald's own `extract.py` (Apache-2.0) and the
 Python packages below, installed from PyPI with `pip install --no-deps`. Each
 package's full licence text ships inside the image, in its `*.dist-info`
-directory under `/usr/local/lib/python3.13/site-packages/`. The base image is
-the official `python:3.13-slim` (Python Software Foundation License, Debian
+directory under `/usr/local/lib/python3.14/site-packages/`. The base image is
+the official `python:3.14-slim` (Python Software Foundation License, Debian
 packages under their own licences).
 
 | Package | Version | Licence | Source |

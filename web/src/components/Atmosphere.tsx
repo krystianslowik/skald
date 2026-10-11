@@ -122,7 +122,7 @@ export const Embers = memo(function Embers({ intensity = 1 }: { intensity?: numb
     };
   }, [reduced, intensity]);
 
-  return <canvas ref={ref} aria-hidden className="pointer-events-none fixed inset-0 z-[1] h-full w-full" />;
+  return <canvas ref={ref} aria-hidden className="pointer-events-none fixed inset-0 z-1 h-full w-full" />;
 });
 
 export const Atmosphere = memo(function Atmosphere({ dim = false }: { dim?: boolean }) {

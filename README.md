@@ -174,7 +174,7 @@ password in plain text. More in [SECURITY.md](SECURITY.md).
 
 ## Development
 
-You need Go 1.26+, Bun 1.3+ and Node 22+. A built-in mock fakes a month of
+You need Go 1.27+, Bun 1.4+ and Node 24+. A built-in mock fakes a month of
 history and players walking around the map (password `ognisko`).
 
 ```sh

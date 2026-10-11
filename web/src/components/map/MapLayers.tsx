@@ -172,7 +172,7 @@ export function MapLayers({
                   {/* A wider switch for a thumb. */}
                   <span aria-hidden className={`h-3.5 w-6 rounded-full p-[2px] transition-colors coarse:h-7 coarse:w-12 coarse:p-[3px] ${on && !disabled ? "bg-select" : "bg-black/50"}`}>
                     <span
-                      className={`block h-2.5 w-2.5 rounded-full bg-bone shadow-[0_1px_2px_rgba(0,0,0,0.5)] transition-transform duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none coarse:h-[1.375rem] coarse:w-[1.375rem] ${on && !disabled ? "translate-x-2.5 coarse:translate-x-5" : ""}`}
+                      className={`block h-2.5 w-2.5 rounded-full bg-bone shadow-[0_1px_2px_rgba(0,0,0,0.5)] transition-transform duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none coarse:h-5.5 coarse:w-5.5 ${on && !disabled ? "translate-x-2.5 coarse:translate-x-5" : ""}`}
                     />
                   </span>
                 </button>

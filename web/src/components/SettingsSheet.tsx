@@ -169,10 +169,10 @@ export default function SettingsSheet({
     <Sheet
       labelledBy="settings-h"
       onClose={onClose}
-      width="sm:w-[35rem]"
+      width="sm:w-140"
       header={(close) => (
         <div className="flex items-center gap-4 pl-2">
-          <span className="slot grid h-[4.5rem] w-[4.5rem] shrink-0 place-items-center">
+          <span className="slot grid h-18 w-18 shrink-0 place-items-center">
             <SettingsGlyph size={40} />
           </span>
           <div className="min-w-0 flex-1">
@@ -242,7 +242,7 @@ function Section({ id, title, aside, children }: { id: string; title: string; as
 function FieldError({ id, code, field }: { id: string; code: string | undefined; field: string }) {
   const { t, lookup } = useI18n();
   return (
-    <p id={id} aria-live="polite" className="mt-1.5 min-h-[1rem] text-xs text-blood">
+    <p id={id} aria-live="polite" className="mt-1.5 min-h-4 text-xs text-blood">
       {code ? (lookup(`err.${field}.${code}`) ?? t("err.other", { field })) : ""}
     </p>
   );
@@ -648,7 +648,7 @@ const WorldModifiers = memo(function WorldModifiers({
                 tabIndex={(custom ? preset === p : on) ? 0 : -1}
                 onClick={() => edit({ type: "preset", value: p })}
                 onKeyDown={(e) => onKey(e, i)}
-                className={`press relative flex h-[4.25rem] flex-col items-center justify-center gap-1 transition-[box-shadow] hover:shadow-[inset_0_2px_7px_rgba(0,0,0,0.65),inset_0_0_0_1px_rgba(243,184,103,0.55)] ${on ? "slot-selected" : "slot"}`}
+                className={`press relative flex h-17 flex-col items-center justify-center gap-1 transition-shadow hover:shadow-[inset_0_2px_7px_rgba(0,0,0,0.65),inset_0_0_0_1px_rgba(243,184,103,0.55)] ${on ? "slot-selected" : "slot"}`}
               >
                 <PresetGlyph id={p} selected={on} />
                 <span className={`text-[0.625rem] font-bold uppercase leading-none tracking-[0.06em] ${on ? "text-[#10161d]" : "text-label"}`}>{lookup(`preset.${p}`) ?? p}</span>
@@ -657,12 +657,12 @@ const WorldModifiers = memo(function WorldModifiers({
           })}
         </div>
         {/* Not a choice: lights up when individual modifiers are set, like the game's Custom. */}
-        <div aria-hidden className={`flex h-[4.25rem] flex-col items-center justify-center gap-1 ${custom ? "slot-selected" : "slot opacity-50"}`}>
+        <div aria-hidden className={`flex h-17 flex-col items-center justify-center gap-1 ${custom ? "slot-selected" : "slot opacity-50"}`}>
           <PresetGlyph id="custom" selected={custom} />
           <span className={`text-[0.625rem] font-bold uppercase leading-none tracking-[0.06em] ${custom ? "text-[#10161d]" : "text-ash"}`}>{t("settings.custom")}</span>
         </div>
       </div>
-      <div className="mt-2 min-h-[2.25rem]" aria-live="polite">
+      <div className="mt-2 min-h-9" aria-live="polite">
         <AnimatePresence mode="wait" initial={false}>
           <motion.p key={description} initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: 0.15 }} className="text-sm text-bone">
             {description}
@@ -728,7 +728,7 @@ const Stepper = memo(function Stepper({ name, value, preset, edit }: { name: Mod
               tabIndex={on ? 0 : -1}
               onClick={() => edit({ type: "modifier", name, value: v })}
               onKeyDown={(e) => onKey(e, i)}
-              className={`press-soft relative min-h-[2.25rem] rounded-[2px] px-0.5 text-[0.6875rem] font-bold leading-tight ${on ? "text-[#10161d]" : v === null ? "text-ash hover:text-flame" : "text-label hover:text-flame"}`}
+              className={`press-soft relative min-h-9 rounded-[2px] px-0.5 text-[0.6875rem] font-bold leading-tight ${on ? "text-[#10161d]" : v === null ? "text-ash hover:text-flame" : "text-label hover:text-flame"}`}
             >
               {on && <motion.span layoutId={`seg-${name}`} transition={SWAP} className="slot-selected absolute inset-0 rounded-[2px]" />}
               <span className="relative">{label(v)}</span>
@@ -887,7 +887,7 @@ function Footer({ changes, invalid, saving, pending, armed, applying, message, o
           {mode === "applying" && <p className="py-1.5 text-sm font-bold text-flame">{t("settings.applying")}</p>}
         </motion.div>
       </AnimatePresence>
-      <p aria-live="polite" className={`mt-1.5 min-h-[1rem] text-xs ${message ? (message.tone === "err" ? "text-blood" : "text-flame") : "text-blood"}`}>
+      <p aria-live="polite" className={`mt-1.5 min-h-4 text-xs ${message ? (message.tone === "err" ? "text-blood" : "text-flame") : "text-blood"}`}>
         {message?.text ?? (mode === "edit" && invalid && changes > 0 ? t("settings.invalid") : "")}
       </p>
     </div>

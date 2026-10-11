@@ -46,7 +46,7 @@ export default function ProfileSheet({ name, now, onClose }: { name: string; now
       onClose={onClose}
       header={(close) => (
         <div className="flex items-center gap-4 pl-2">
-          <span className="slot grid h-[4.5rem] w-[4.5rem] shrink-0 place-items-center">
+          <span className="slot grid h-18 w-18 shrink-0 place-items-center">
             <Shield name={name} size={58} />
           </span>
           <div className="min-w-0 flex-1">
@@ -131,13 +131,13 @@ function DailyBars({ days }: { days: DailyPlay[] }) {
   const H = 84;
   const slot = W / Math.max(1, days.length);
   if (total === 0) {
-    return <div className="slot grid h-[5.25rem] place-items-center text-xs text-ash">{t("profile.dailyEmpty")}</div>;
+    return <div className="slot grid h-21 place-items-center text-xs text-ash">{t("profile.dailyEmpty")}</div>;
   }
   return (
     <figure>
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        className="slot block h-[5.25rem] w-full"
+        className="slot block h-21 w-full"
         preserveAspectRatio="none"
         role="img"
         aria-label={t("profile.dailyAria", { days: tn("profile.days", played), total: duration(total) })}

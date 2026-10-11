@@ -174,7 +174,7 @@ const Rune = memo(function Rune({ def, disabled, onFire }: { def: RuneDef; disab
       <p className="mt-1 max-w-[18ch] text-xs leading-snug text-ash">{t(def.hint)}</p>
       <p
         aria-live="polite"
-        className={`mt-2 min-h-[1.25rem] text-xs ${phase.kind === "done" ? (phase.ok ? "text-flame" : "text-blood") : "text-ash"}`}
+        className={`mt-2 min-h-5 text-xs ${phase.kind === "done" ? (phase.ok ? "text-flame" : "text-blood") : "text-ash"}`}
       >
         {status}
       </p>

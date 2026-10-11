@@ -73,7 +73,7 @@ export const InventoryGrid = memo(function InventoryGrid({
           >
             {it.quality && it.quality > 1 ? <Stars n={it.quality} /> : null}
             <ItemIcon name={it.name} type={it.type} size={roomy ? 20 : 17} iconSize={roomy ? 26 : 28} className="opacity-90" />
-            {roomy && <span className="line-clamp-2 w-full break-words text-center text-[0.5625rem] font-bold leading-[1.1] text-bone">{label}</span>}
+            {roomy && <span className="line-clamp-2 w-full wrap-break-word text-center text-[0.5625rem] font-bold leading-[1.1] text-bone">{label}</span>}
             {it.stack > 1 && (
               <span className="absolute bottom-0.5 right-1 text-[0.625rem] font-bold tabular-nums leading-none text-bone [text-shadow:1px_0_0_#000,-1px_0_0_#000,0_1px_0_#000,0_-1px_0_#000]">
                 {number(it.stack)}
@@ -90,7 +90,7 @@ export const InventoryGrid = memo(function InventoryGrid({
       <ul aria-label={t("inv.label")} className="grid gap-[3px]" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
         {cells}
       </ul>
-      <p id={detailId} aria-live="polite" className="mt-2 min-h-[2.5rem] text-xs leading-snug text-ash">
+      <p id={detailId} aria-live="polite" className="mt-2 min-h-10 text-xs leading-snug text-ash">
         {sel ? (
           <>
             <span className="font-bold text-bone">

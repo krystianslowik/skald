@@ -38,7 +38,7 @@ export default function App() {
     void logout().finally(() => setAuth("out"));
   }, []);
 
-  if (auth === "checking" || !locale) return <div className="min-h-[100dvh] bg-coal" />;
+  if (auth === "checking" || !locale) return <div className="min-h-dvh bg-coal" />;
   return (
     <I18nProvider locale={locale}>
       {/* Reduced motion: transforms and layout animations are dropped app-wide, opacity cross-fades stay. */}

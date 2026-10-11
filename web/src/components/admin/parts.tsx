@@ -16,7 +16,7 @@ export function Section({ title, aside, children, id }: { title: string; aside?:
         <h3 id={hid} className="plank-title text-base">
           {title}
         </h3>
-        <span aria-hidden className="h-px flex-1 bg-gradient-to-r from-iron/60 to-transparent" />
+        <span aria-hidden className="h-px flex-1 bg-linear-to-r from-iron/60 to-transparent" />
         {aside && <span className="text-xs text-ash">{aside}</span>}
       </div>
       {children}
@@ -171,7 +171,7 @@ export function BridgeBanner({ compact = false }: { compact?: boolean }) {
   return (
     <div role="status" className={`rounded-[3px] border border-ember/50 bg-black/35 ${compact ? "px-3 py-2" : "px-4 py-3"} text-sm`}>
       <p className="font-bold text-flame">{t(BLOCKER_TEXT[admin.blocker], { build })}</p>
-      {!compact && admin.blocker === "disabled" && b?.message && <p className="mt-1 break-words font-mono text-xs text-ash">{b.message}</p>}
+      {!compact && admin.blocker === "disabled" && b?.message && <p className="mt-1 wrap-break-word font-mono text-xs text-ash">{b.message}</p>}
       {!compact && admin.blocker === "untested" && (
         <div className="mt-2">
           <p className="mb-2 text-xs text-ash">{t("admin.untested.body", { tested: (b?.testedBuilds ?? []).join(", ") || "-" })}</p>

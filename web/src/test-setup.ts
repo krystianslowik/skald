@@ -1,4 +1,4 @@
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/vitest";
 
 // jsdom gaps: matchMedia (motion's reduced-motion hook), canvas, ResizeObserver, WebSocket.
 // Everything is a desktop with a mouse unless a test sets `window.__media[query] = true`.

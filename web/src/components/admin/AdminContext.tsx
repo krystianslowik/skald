@@ -236,7 +236,7 @@ export function AdminProvider({
 function Toasts({ toasts }: { toasts: Toast[] }) {
   if (toasts.length === 0) return null;
   return (
-    <div aria-live="polite" className="pointer-events-none fixed inset-x-0 top-[max(0.75rem,env(safe-area-inset-top))] z-[60] flex flex-col items-center gap-2 px-4">
+    <div aria-live="polite" className="pointer-events-none fixed inset-x-0 top-[max(0.75rem,env(safe-area-inset-top))] z-60 flex flex-col items-center gap-2 px-4">
       {toasts.map((x) => (
         <p
           key={x.id}
