@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-10-11
+
+### Added
+
+- English and Polish names for 972 of the game's 983 items, as the game itself names them, so chests, village stores and search read like the game in both languages.
+
+### Changed
+
+- Map places use the game's own English and Polish names.
+
 ## [0.8.3] - 2026-10-11
 
 ### Fixed
