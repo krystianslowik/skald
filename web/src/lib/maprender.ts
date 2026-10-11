@@ -64,6 +64,13 @@ function tileOf(px: Uint8ClampedArray<ArrayBuffer>, size: number): HTMLCanvasEle
   return c;
 }
 
+let fontLoaded = false;
+/** Whether the map's font is in, for what is drawn once and kept. */
+function fontReady(): boolean {
+  fontLoaded ||= typeof document === "undefined" || !document.fonts || document.fonts.check(`700 10px ${FONT}`);
+  return fontLoaded;
+}
+
 /** The paper and cloud tiles, made once per page (in the map worker, the first time). */
 let textures: { paper: HTMLCanvasElement | OffscreenCanvas | null; clouds: HTMLCanvasElement | OffscreenCanvas | null } | null = null;
 const setTextures = (t: Textures) => (textures ??= { paper: tileOf(t.paper, PAPER_TILE), clouds: tileOf(t.clouds, CLOUD_TILE) });
@@ -213,6 +220,8 @@ export class MapRenderer {
   visible: ScreenMarker[] = [];
   /** Clusters for one zoom level, layer set and marker list; a pan reuses them. */
   private clusters: { key: string; markers: readonly Marker[]; list: Cluster[]; leadOf: Map<string, Marker> } | null = null;
+  /** The clusters as drawn, in draw order, for one cluster list and one set of picked marks. */
+  private items: { list: Cluster[]; selected: string | null; highlighted: ReadonlySet<string> | undefined; items: { m: Marker; members: readonly Marker[] }[] } | null = null;
   /** Marks on their way out of a cluster: where they started and when. */
   private splits = new Map<string, { x: number; z: number; t0: number }>();
   /** The item icon sheet, decoded, for the contents strips under containers. */
@@ -837,21 +846,26 @@ export class MapRenderer {
     const now = performance.now();
     let animating = false;
     const list = this.clustersFor(f, crowd);
-    // The selected mark and highlighted ones leave their clusters, so they are always seen.
-    const own = new Set(f.highlighted ?? []);
-    if (f.selected) own.add(f.selected);
-    const items: { m: Marker; members: readonly Marker[] }[] = [];
-    for (const c of list) {
-      if (own.size === 0) {
-        items.push({ m: c.lead, members: c.members });
-        continue;
+    // Kept while the clusters and the picked marks stay: a pan or a pinch within a zoom level reuses them.
+    let items = this.items?.list === list && this.items.selected === f.selected && this.items.highlighted === f.highlighted ? this.items.items : null;
+    if (!items) {
+      // The selected mark and highlighted ones leave their clusters, so they are always seen.
+      const own = new Set(f.highlighted ?? []);
+      if (f.selected) own.add(f.selected);
+      items = [];
+      for (const c of list) {
+        if (own.size === 0) {
+          items.push({ m: c.lead, members: c.members });
+          continue;
+        }
+        const rest = c.members.filter((m) => m.id === c.lead.id || !own.has(m.id));
+        items.push({ m: c.lead, members: rest });
+        for (const m of c.members) if (m.id !== c.lead.id && own.has(m.id)) items.push({ m, members: [] });
       }
-      const rest = c.members.filter((m) => m.id === c.lead.id || !own.has(m.id));
-      items.push({ m: c.lead, members: rest });
-      for (const m of c.members) if (m.id !== c.lead.id && own.has(m.id)) items.push({ m, members: [] });
+      // Draw order: low priority first, so the important marks sit on top.
+      items.sort((a, b) => a.m.priority - b.m.priority);
+      this.items = { list, selected: f.selected, highlighted: f.highlighted, items };
     }
-    // Draw order: low priority first, so the important marks sit on top.
-    items.sort((a, b) => a.m.priority - b.m.priority);
     for (const { m, members } of items) {
       let wx = m.x;
       let wz = m.z;
@@ -993,25 +1007,41 @@ export class MapRenderer {
     return 0;
   }
 
-  /** A cluster's count: a small dark seal on the icon's shoulder; `light` for a stack's height. */
+  /** A cluster's count: a small dark seal on the icon's shoulder; `light` for a stack's height. Drawn once per text, then stamped. */
   private drawBadge(g: CanvasRenderingContext2D, x: number, y: number, n: number, light = false): Box {
     const text = light ? `\u00d7${n}` : n > 99 ? "99+" : String(n);
+    const key = `badge:${light ? 1 : 0}:${text}`;
+    let sp = this.sprites.get(key);
     g.font = `700 10px ${FONT}`;
     const w = Math.max(15, this.measure(g, `10:${text}`, text) + 8);
     const h = 15;
-    g.fillStyle = light ? "#efe2c2" : "#2b1d12";
-    g.strokeStyle = light ? "#2b1d12" : "rgba(240, 228, 200, 0.95)";
-    g.lineWidth = 1.5;
-    g.beginPath();
-    if (typeof g.roundRect === "function") g.roundRect(x - w / 2, y - h / 2, w, h, h / 2);
-    else g.rect(x - w / 2, y - h / 2, w, h);
-    g.fill();
-    g.stroke();
-    g.fillStyle = light ? "#2b1d12" : "#f3b867";
-    g.textAlign = "center";
-    g.textBaseline = "middle";
-    g.fillText(text, x, y + 0.5);
-    g.textAlign = "left";
+    if (!sp) {
+      // The seal with a pixel of room for its edge, at the screen's resolution.
+      const c = makeCanvas(Math.ceil((w + 2) * this.dpr), Math.ceil((h + 2) * this.dpr));
+      const b = ctx2d(c) as CanvasRenderingContext2D | null;
+      if (!b) return { x: x - w / 2, y: y - h / 2, w, h };
+      b.scale(this.dpr, this.dpr);
+      b.translate(1, 1);
+      b.font = `700 10px ${FONT}`;
+      b.fillStyle = light ? "#efe2c2" : "#2b1d12";
+      b.strokeStyle = light ? "#2b1d12" : "rgba(240, 228, 200, 0.95)";
+      b.lineWidth = 1.5;
+      b.beginPath();
+      if (typeof b.roundRect === "function") b.roundRect(0, 0, w, h, h / 2);
+      else b.rect(0, 0, w, h);
+      b.fill();
+      b.stroke();
+      b.fillStyle = light ? "#2b1d12" : "#f3b867";
+      b.textAlign = "center";
+      b.textBaseline = "middle";
+      b.fillText(text, w / 2, h / 2 + 0.5);
+      sp = c;
+      // Kept only once the map's font has loaded, or a fallback face would stay for good.
+      if (fontReady()) this.sprites.set(key, c);
+    }
+    // On a device pixel, so the stamped text stays as sharp as drawn text.
+    const px = (u: number) => Math.round(u * this.dpr) / this.dpr;
+    g.drawImage(sp as CanvasImageSource, px(x - w / 2 - 1), px(y - h / 2 - 1), sp.width / this.dpr, sp.height / this.dpr);
     return { x: x - w / 2, y: y - h / 2, w, h };
   }
 }
