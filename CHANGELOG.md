@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - The agent serves the land's nature for close zoom: `GET /nature` returns the trees (by species), stumps, fallen logs, rocks, bushes, ore deposits and pickables the world generated inside a box, as they are now. Without map spoilers only what lies on explored land or near a base is sent.
+- Nature and Resources layers on the map: zoomed in, the land fills with hand-drawn woods (tinted by tree species), rocks, stumps, fallen logs and bushes, and ore deposits are marked in their metal's colour. Tap a deposit to see what it is, what it yields and where. Closer still, berries, mushrooms, flint, stones and branches show as small dots. With an agent that has no nature yet, both layers simply stay empty.
 
 ## [0.9.1] - 2026-10-11
 

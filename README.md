@@ -45,7 +45,9 @@ part your cartography tables have explored, and everything people built or left
 behind. Tap a chest and it opens as a slot grid like the game's. Tap a portal and
 it shows where it leads. Places nobody has found stay hidden, and so do dungeon
 and shipwreck chests. Zoom in on a base and it turns into an inked floor plan,
-storey by storey, with stacked chests counted from the bottom up.
+storey by storey, with stacked chests counted from the bottom up. Around it the
+land fills with woods, rocks and ore deposits you can tap, and berries and
+flint once you are close enough to pick them.
 
 Two extras are opt-in, because they use your own copy of the game:
 
