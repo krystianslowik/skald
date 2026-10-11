@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-10-11
+
+### Changed
+
+- The map stays sharp up close: the edge of the explored land and the coastline are drawn as clean ink lines at every zoom, and the blurry terrain image fades into parchment as you zoom in.
+
 ## [0.8.5] - 2026-10-11
 
 ### Changed
