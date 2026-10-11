@@ -7,6 +7,7 @@
 // tapped.
 
 import type { ChunkKey } from "./pieces";
+import { closeRing } from "./mapgeo";
 import { chunkBox } from "./pieces";
 import { NATURE_CHUNK, NATURE_FADE_FROM, NATURE_FADE_FULL, natureTint, PICKABLE_SCALE, TREE_DETAIL_SCALE, wobble, type NatureItem } from "./nature";
 
@@ -48,7 +49,7 @@ function crownCoarse(path: Path2D, it: NatureItem) {
     if (i === 0) path.moveTo(it.x + Math.cos(a) * ri, it.z + Math.sin(a) * ri);
     else path.lineTo(it.x + Math.cos(a) * ri, it.z + Math.sin(a) * ri);
   }
-  path.closePath();
+  // Only ever filled, and a fill closes the ring (see closeRing for why not closePath).
 }
 
 /** A crown: a soft lobed ring, each lobe a little in or out, turned by the tree's yaw. */
@@ -75,22 +76,29 @@ function crown(path: Path2D, it: NatureItem) {
     const m = mid(i);
     path.quadraticCurveTo(p[0] + (p[0] - it.x) * 0.12, p[1] + (p[1] - it.z) * 0.12, m[0], m[1]);
   }
-  path.closePath();
+  // The ring ends where it began, on a lobe's round middle, and is stroked with round caps: no closePath (see closeRing).
 }
 
 /** A stone: an irregular polygon seeded by the item, so the same rock keeps its shape. */
 function stone(path: Path2D, it: NatureItem, corners = 7, rough = 0.28) {
   const r = it.size / 2;
   const a0 = (it.yaw * Math.PI) / 180;
+  let x0 = 0;
+  let z0 = 0;
+  let x1 = 0;
+  let z1 = 0;
   for (let i = 0; i < corners; i++) {
     const a = a0 + ((i + 0.3 * wobble(it, 40 + i)) / corners) * Math.PI * 2;
     const ri = r * (1 + rough * wobble(it, i));
     const x = it.x + Math.cos(a) * ri;
     const z = it.z + Math.sin(a) * ri;
-    if (i === 0) path.moveTo(x, z);
-    else path.lineTo(x, z);
+    if (i === 0) {
+      path.moveTo(x, z);
+      [x0, z0] = [x, z];
+    } else path.lineTo(x, z);
+    if (i === 1) [x1, z1] = [x, z];
   }
-  path.closePath();
+  closeRing(path, x0, z0, x1, z1);
 }
 
 const dot = (path: Path2D, x: number, z: number) => {

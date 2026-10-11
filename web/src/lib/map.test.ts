@@ -5,6 +5,7 @@ import { makeI18n } from "../i18n";
 import {
   buildMarkers,
   clampView,
+  closeRing,
   clusterMarkers,
   decodeRLE,
   exploredBounds,
@@ -140,6 +141,15 @@ describe("outlines", () => {
       expect(r).toBeGreaterThan(9);
       expect(r).toBeLessThan(11);
     }
+  });
+
+  it("closes a ring by going back to the start and over the first edge, not with closePath", () => {
+    const calls: number[][] = [];
+    closeRing({ lineTo: (x, y) => calls.push([x, y]) }, 1, 2, 3, 4);
+    expect(calls).toEqual([
+      [1, 2],
+      [3, 4],
+    ]);
   });
 });
 

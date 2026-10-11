@@ -4,7 +4,7 @@
 // they stay crisp at any zoom and cost nothing to rebuild while panning.
 
 import { activeBase, baseAt, groupBases, pieceCorners, pieceLocal, pieceStorey, storeyOf, type Base, type Piece } from "./pieces";
-import type { View } from "./mapgeo";
+import { closeRing, type View } from "./mapgeo";
 
 /** Below this scale (px per metre) nothing is drawn or fetched; full strength from FULL on. */
 export const PLAN_MIN_SCALE = 1.2;
@@ -69,7 +69,7 @@ function rect(path: Path2D, p: Piece) {
   const c = pieceCorners(p);
   path.moveTo(c[0]![0], c[0]![1]);
   for (let i = 1; i < 4; i++) path.lineTo(c[i]![0], c[i]![1]);
-  path.closePath();
+  closeRing(path, c[0]![0], c[0]![1], c[1]![0], c[1]![1]);
 }
 
 function line(path: Path2D, p: Piece, ax: number, az: number, bx: number, bz: number) {

@@ -166,7 +166,7 @@ function pathFromPolys(polys: number[][]): Path2D {
   for (const poly of polys) {
     p.moveTo(poly[0]!, poly[1]!);
     for (let i = 2; i < poly.length; i += 2) p.lineTo(poly[i]!, poly[i + 1]!);
-    p.closePath();
+    // Land and sea are only filled, and a fill closes the ring (see closeRing for why not closePath).
   }
   return p;
 }
@@ -176,7 +176,8 @@ function pathFromLoops(loops: readonly Float32Array[], x0: number, z0: number, s
   for (const l of loops) {
     into.moveTo(x0 + l[0]! * step, z0 + l[1]! * step);
     for (let i = 2; i < l.length; i += 2) into.lineTo(x0 + l[i]! * step, z0 + l[i + 1]! * step);
-    into.closePath();
+    // Filled even-odd, so only back to the start (see closeRing); strokes of these use round caps.
+    into.lineTo(x0 + l[0]! * step, z0 + l[1]! * step);
   }
   return into;
 }
@@ -619,6 +620,7 @@ export class MapRenderer {
         g.globalAlpha = ink;
         g.strokeStyle = COAST;
         g.lineJoin = "round";
+        g.lineCap = "round";
         g.lineWidth = (1.1 + 0.5 * near) / v.scale;
         g.stroke(coast.path);
         g.globalAlpha = 1;
@@ -742,6 +744,7 @@ export class MapRenderer {
     pat.setTransform(new DOMMatrix().scale(size / this.clouds.width, size / this.clouds.width));
     g.strokeStyle = pat;
     g.lineJoin = "round";
+    g.lineCap = "round";
     // About half a kilometre zoomed out, as the old blurred fog was, and never
     // wider than a thumb's breadth close in.
     const rim = Math.min(36, Math.max(14, 500 * v.scale));

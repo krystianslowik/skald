@@ -373,6 +373,21 @@ export function gridOutline(cells: Float32Array, w: number, h: number, tol = 0.3
 }
 
 /**
+ * Ends a ring that started at (x0, y0) and went on to (x1, y1) without
+ * closePath(): in Chromium a Path2D's closePath() costs time in proportion to
+ * the whole path, so closing thousands of rings is quadratic (16k rings:
+ * 1.7 s, against 9 ms in WebKit). Back to the start and over the first edge
+ * again gives a stroke the same corner a closed ring has; a fill closes every
+ * ring anyway. Not for even-odd fills, where the doubled edge flips the
+ * inside: those rings only go back to the start and are stroked with round
+ * caps, which meet as a round join would.
+ */
+export function closeRing(path: { lineTo(x: number, y: number): void }, x0: number, y0: number, x1: number, y1: number): void {
+  path.lineTo(x0, y0);
+  path.lineTo(x1, y1);
+}
+
+/**
  * Whether a terrain image pixel is sea: the agent paints water as a ramp from
  * shallow (116, 156, 164) to deep (38, 66, 92), bluer than any lit biome.
  * Transparent pixels lie beyond the world's edge and count as sea.
