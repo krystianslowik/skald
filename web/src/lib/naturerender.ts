@@ -204,7 +204,7 @@ export class NatureLayer {
    * for view scale `scale`: `nature` the woods, rocks and the rest, `pickables`
    * the small things to gather (from PICKABLE_SCALE on).
    */
-  draw(g: Ctx, box: readonly [number, number, number, number], scale: number, layers: { nature: boolean; pickables: boolean }): void {
+  draw(g: Ctx, box: readonly [number, number, number, number], scale: number, layers: { nature: boolean; pickables: boolean }, rough = false): void {
     const alpha = natureAlpha(scale);
     if (alpha <= 0) return;
     const list = this.visible(box);
@@ -248,7 +248,7 @@ export class NatureLayer {
         g.fill(c.bushes);
         if (detail) g.stroke(c.bushes);
       }
-      this.drawWoods(g, list, scale, alpha);
+      this.drawWoods(g, list, scale, alpha, rough);
       if (detail) {
         // Close in, every tree its own: a faint rim round each crown and its trunk.
         const near = Math.min(1, (scale - TREE_DETAIL_SCALE) / 4);
@@ -286,24 +286,30 @@ export class NatureLayer {
    * map as one wash, only a wood's outer edge keeps the ink, so a forest
    * reads as one mass rather than a heap of circles.
    */
-  private drawWoods(g: Ctx, list: readonly ChunkPaths[], scale: number, alpha: number) {
+  private drawWoods(g: Ctx, list: readonly ChunkPaths[], scale: number, alpha: number, rough: boolean) {
     if (!list.some((c) => c.trees > 0)) return;
-    const W = g.canvas.width;
-    const H = g.canvas.height;
-    if (!this.scratch || this.scratch.width !== W || this.scratch.height !== H) {
-      this.scratch = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(W, H) : Object.assign(document.createElement("canvas"), { width: W, height: H });
+    // While the map moves, the layer is drawn at half resolution (a quarter of
+    // the pixels; nobody sees it) into its top-left corner.
+    const k = rough ? 0.5 : 1;
+    const FW = g.canvas.width;
+    const FH = g.canvas.height;
+    const W = Math.ceil(FW * k);
+    const H = Math.ceil(FH * k);
+    if (!this.scratch || this.scratch.width !== FW || this.scratch.height !== FH) {
+      this.scratch = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(FW, FH) : Object.assign(document.createElement("canvas"), { width: FW, height: FH });
     }
     const s = this.scratch.getContext("2d") as Ctx | null;
     if (!s) return;
     s.setTransform(1, 0, 0, 1, 0, 0);
     s.clearRect(0, 0, W, H);
-    const m = g.getTransform();
+    const t = g.getTransform();
+    const m = new DOMMatrix([t.a * k, t.b * k, t.c * k, t.d * k, t.e * k, t.f * k]);
     // The rim is the wood's own shape a little down and right, in ink: a
     // shadow on the far side, as a woodland is shaded on a drawn map. A fill
     // costs far less than stroking every crown.
     const off = (1.5 * m.a) / scale;
     const tints = new Set<string>();
-    for (const c of list) for (const t of c.crowns.keys()) tints.add(t);
+    for (const c of list) for (const tint of c.crowns.keys()) tints.add(tint);
     const shape = (c: ChunkPaths) => (scale < TREE_DETAIL_SCALE ? c.coarse : c.crowns);
     for (const tint of tints) {
       s.setTransform(m.a, m.b, m.c, m.d, m.e + off, m.f + off);
@@ -322,7 +328,7 @@ export class NatureLayer {
     g.save();
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.globalAlpha = alpha * 0.62;
-    g.drawImage(this.scratch as CanvasImageSource, 0, 0);
+    g.drawImage(this.scratch as CanvasImageSource, 0, 0, W, H, 0, 0, FW, FH);
     g.restore();
   }
 }

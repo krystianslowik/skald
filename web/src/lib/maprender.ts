@@ -320,7 +320,7 @@ export class MapRenderer {
   private measureCache = new Map<string, number>();
   /** Bumped on new data, so the cached base is re-rendered. */
   private version = 0;
-  private base: { canvas: HTMLCanvasElement | OffscreenCanvas; key: string; cx: number; cz: number; scale: number; w: number; h: number } | null = null;
+  private base: { canvas: HTMLCanvasElement | OffscreenCanvas; key: string; cx: number; cz: number; scale: number; w: number; h: number; rough: boolean } | null = null;
   /** Markers drawn in the last frame, in screen space, for picking. */
   visible: ScreenMarker[] = [];
   /** Clusters for one zoom level, layer set and marker list; a pan reuses them. */
@@ -345,6 +345,8 @@ export class MapRenderer {
   private markStorey = new Map<string, StoreyPick | null>();
   /** Trees, rocks, ore and the rest, as loaded so far. */
   private nature = new NatureLayer();
+  /** The base being drawn is for a moving view: the woods may be rough. */
+  private roughNature = false;
   /** Ore deposits drawn in the last frame, in screen space, for tapping. */
   visibleOre: { item: NatureItem; sx: number; sy: number; r: number }[] = [];
 
@@ -524,7 +526,7 @@ export class MapRenderer {
     let b = this.base;
     const covers = (c: NonNullable<typeof b>) => {
       const k = v.scale / c.scale;
-      if (quality === "full" ? Math.abs(k - 1) > 1e-6 : k < 0.6 || k > 1.8) return false;
+      if (quality === "full" ? Math.abs(k - 1) > 1e-6 || c.rough : k < 0.6 || k > 1.8) return false;
       // The view's corners must fall inside the cached area.
       const halfW = v.w / 2 / v.scale;
       const halfH = v.h / 2 / v.scale;
@@ -532,7 +534,7 @@ export class MapRenderer {
       const ch = c.h / 2 / c.scale;
       return Math.abs(v.cx - c.cx) + halfW <= cw + 0.5 / v.scale && Math.abs(v.cz - c.cz) + halfH <= ch + 0.5 / v.scale;
     };
-    if (!b || b.key !== key || !covers(b)) b = this.renderBase(f, key);
+    if (!b || b.key !== key || !covers(b)) b = this.renderBase(f, key, quality === "fast");
     this.screen(g);
     g.fillStyle = VOID;
     g.fillRect(0, 0, v.w, v.h);
@@ -550,7 +552,8 @@ export class MapRenderer {
     return this.drawMarkers(g, f);
   }
 
-  private renderBase(f: FrameState, key: string): MapRenderer["base"] {
+  /** `rough`: mid-gesture, the woods may be drawn at half resolution; a full frame redraws them. */
+  private renderBase(f: FrameState, key: string, rough = false): MapRenderer["base"] {
     const v = f.view;
     const w = Math.ceil(v.w * BASE_MARGIN);
     const h = Math.ceil(v.h * BASE_MARGIN);
@@ -563,8 +566,9 @@ export class MapRenderer {
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, canvas.width, canvas.height);
     this.activeBase = this.storeys(v, f.layers)?.base ?? null;
+    this.roughNature = rough;
     this.drawWorld(g, { ...v, w, h }, f.layers, dpr, f.storey ?? null);
-    this.base = { canvas, key, cx: v.cx, cz: v.cz, scale: v.scale, w, h };
+    this.base = { canvas, key, cx: v.cx, cz: v.cz, scale: v.scale, w, h, rough };
     return this.base;
   }
 
@@ -666,7 +670,7 @@ export class MapRenderer {
   /** Woods, rocks and pickables, under the fog and the floor plans. */
   private drawNature(g: CanvasRenderingContext2D, v: View, layers: Record<LayerId, boolean>) {
     if (!layers.nature && !layers.resources) return;
-    this.nature.draw(g, viewBox(v, 4), v.scale, { nature: layers.nature, pickables: layers.resources });
+    this.nature.draw(g, viewBox(v, 4), v.scale, { nature: layers.nature, pickables: layers.resources }, this.roughNature);
   }
 
   /**
