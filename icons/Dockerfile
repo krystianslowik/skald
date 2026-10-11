@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.28
 #
 # skald-icons: builds the item icon sheet from the operator's own Valheim
 # server install (mounted read-only). Contains no game files.
@@ -7,7 +7,7 @@
 # Wheels are built in a full Python image: not every package publishes a
 # wheel for every architecture (UnityPy has none for linux/arm64), and the
 # runtime image carries no compiler.
-FROM python:3.13 AS wheels
+FROM python:3.14 AS wheels
 WORKDIR /src
 COPY requirements.txt .
 # --no-deps: UnityPy's fmod_toolkit dependency bundles the proprietary libfmod;
@@ -15,7 +15,7 @@ COPY requirements.txt .
 # MIT, BSD or Apache licensed; see THIRD_PARTY_NOTICES.md.
 RUN pip wheel --no-cache-dir --no-deps -r requirements.txt -w /wheels
 
-FROM python:3.13-slim
+FROM python:3.14-slim
 ARG VERSION=dev
 LABEL org.opencontainers.image.title=skald-icons \
       org.opencontainers.image.description="Item icon sheet for Skald, from the operator's own Valheim server files" \
@@ -26,7 +26,7 @@ WORKDIR /app
 RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
     pip install --no-cache-dir --no-deps --no-index /wheels/*.whl \
  && python -c "import sys, types; sys.modules['fmod_toolkit'] = types.ModuleType('fmod_toolkit'); import lz4.block, PIL.WebPImagePlugin, texture2ddecoder, UnityPy" \
- && python -m compileall -q /usr/local/lib/python3.13/site-packages
+ && python -m compileall -q /usr/local/lib/python3.14/site-packages
 COPY extract.py THIRD_PARTY_NOTICES.md ./
 RUN python -m compileall -q /app
 USER 65532:65532
