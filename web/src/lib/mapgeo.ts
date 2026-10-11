@@ -395,35 +395,41 @@ export function ringBox(ring: Float32Array): [number, number, number, number] {
  * runs along the box's sides, so a fill inside the box is unchanged; strokes
  * along those sides must lie outside what is drawn.
  */
-export function clipRing(ring: Float32Array, box: readonly [number, number, number, number]): Float32Array | null {
-  let pts: number[] = Array.from(ring);
-  // Each side as (axis, bound, keep the greater side).
+export function clipRing(ring: Float32Array, box: readonly [number, number, number, number], bounds: readonly number[] = ringBox(ring)): Float32Array | null {
+  let pts: ArrayLike<number> = ring;
+  let len = ring.length;
+  // Each side as (axis, bound, keep the greater side); a side the ring lies wholly inside is skipped.
   for (const [axis, bound, greater] of [
     [0, box[0], true],
     [0, box[2], false],
     [1, box[1], true],
     [1, box[3], false],
   ] as const) {
-    const n = pts.length / 2;
+    if (greater ? bounds[axis]! >= bound : bounds[axis + 2]! <= bound) continue;
+    const n = len / 2;
     if (n === 0) break;
     const out: number[] = [];
-    const inside = (i: number) => (greater ? pts[2 * i + axis]! >= bound : pts[2 * i + axis]! <= bound);
+    const src = pts;
+    const inside = (i: number) => (greater ? src[2 * i + axis]! >= bound : src[2 * i + axis]! <= bound);
+    let a = inside(n - 1);
     for (let i = 0; i < n; i++) {
-      const j = (i + n - 1) % n;
-      const a = inside(j);
+      const j = i === 0 ? n - 1 : i - 1;
       const b = inside(i);
       if (a !== b) {
         // Where the edge from j to i crosses the side.
-        const t = (bound - pts[2 * j + axis]!) / (pts[2 * i + axis]! - pts[2 * j + axis]!);
-        const x = pts[2 * j]! + (pts[2 * i]! - pts[2 * j]!) * t;
-        const y = pts[2 * j + 1]! + (pts[2 * i + 1]! - pts[2 * j + 1]!) * t;
+        const t = (bound - src[2 * j + axis]!) / (src[2 * i + axis]! - src[2 * j + axis]!);
+        const x = src[2 * j]! + (src[2 * i]! - src[2 * j]!) * t;
+        const y = src[2 * j + 1]! + (src[2 * i + 1]! - src[2 * j + 1]!) * t;
         out.push(axis === 0 ? bound : x, axis === 1 ? bound : y);
       }
-      if (b) out.push(pts[2 * i]!, pts[2 * i + 1]!);
+      if (b) out.push(src[2 * i]!, src[2 * i + 1]!);
+      a = b;
     }
     pts = out;
+    len = out.length;
   }
-  return pts.length >= 6 ? Float32Array.from(pts) : null;
+  if (len < 6) return null;
+  return pts === ring ? ring : Float32Array.from(pts);
 }
 
 /**
@@ -518,6 +524,8 @@ const RING_LODS = [12, 4, 1.5, 0.5, 0];
  */
 export class RingSet {
   private lods = new Map<number, { rings: Float32Array[]; boxes: [number, number, number, number][] }>();
+  /** The last answers, for boxes snapped outwards to a grid: renders of a moving view mostly fall in the same one. */
+  private cache: { key: string; rings: Float32Array[] }[] = [];
 
   constructor(
     private readonly rings: readonly Float32Array[],
@@ -543,16 +551,33 @@ export class RingSet {
     return l;
   }
 
-  /** The rings that reach into `box`, cut to it where they cross its sides, simplified for `scale`. */
+  /**
+   * The rings that reach into `box`, cut where they cross the sides of a box
+   * a little larger (snapped outwards to a quarter of its size, so nearby
+   * views share the work), simplified for `scale`.
+   */
   near(box: readonly [number, number, number, number], scale: number): Float32Array[] {
-    const { rings, boxes } = this.lod(this.lodFor(scale));
+    const tol = this.lodFor(scale);
+    // Grid steps by powers of two, so a little zoom keeps the grid.
+    const grid = 2 ** Math.ceil(Math.log2(Math.max(box[2] - box[0], box[3] - box[1]) / 4));
+    const snapped = [Math.floor(box[0] / grid) * grid, Math.floor(box[1] / grid) * grid, Math.ceil(box[2] / grid) * grid, Math.ceil(box[3] / grid) * grid] as const;
+    const key = `${tol}:${snapped.join(",")}`;
+    const hit = this.cache.find((c) => c.key === key);
+    if (hit) return hit.rings;
+    const rings = this.cut(snapped, tol);
+    this.cache = [{ key, rings }, ...this.cache.slice(0, 1)];
+    return rings;
+  }
+
+  private cut(box: readonly [number, number, number, number], tol: number): Float32Array[] {
+    const { rings, boxes } = this.lod(tol);
     const out: Float32Array[] = [];
     for (let i = 0; i < rings.length; i++) {
       const b = boxes[i]!;
       if (b[2] < box[0] || b[0] > box[2] || b[3] < box[1] || b[1] > box[3]) continue;
       if (b[0] >= box[0] && b[2] <= box[2] && b[1] >= box[1] && b[3] <= box[3]) out.push(rings[i]!);
       else {
-        const c = clipRing(rings[i]!, box);
+        const c = clipRing(rings[i]!, box, b);
         if (c) out.push(c);
       }
     }

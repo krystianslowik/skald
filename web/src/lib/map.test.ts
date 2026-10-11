@@ -177,6 +177,9 @@ describe("outlines", () => {
     // Half the circle in the box: cut to it.
     const cut = set.near([0, -200, 200, 200], 2);
     expect(ringBox(cut[0]!)[0]).toBeCloseTo(0, 5);
+    // A view moved a little reuses the cut; one moved far cuts again.
+    expect(set.near([10, -190, 210, 210], 2)).toBe(cut);
+    expect(set.near([-150, -200, 50, 200], 2)).not.toBe(cut);
   });
 
   it("builds the land and fog shapes as transferable arrays in world units", () => {
