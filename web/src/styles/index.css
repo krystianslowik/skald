@@ -30,6 +30,18 @@
   --font-sans: "Averia Serif Libre", Georgia, serif;
   --font-rune: "Noto Sans Runic", serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Fixed line heights, as the layout was designed with: a text-* size sets
+     an absolute leading that children with a smaller arbitrary size (badges,
+     the language switch) inherit, rather than a ratio of their own size. */
+  --text-xs--line-height: 1rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg--line-height: 1.75rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl--line-height: 2rem;
+  --text-3xl--line-height: 2.25rem;
+  --text-4xl--line-height: 2.5rem;
 }
 
 /* Touch screens: larger targets where a finger, not a cursor, does the pointing. */
