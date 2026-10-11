@@ -415,6 +415,8 @@ export const MapCanvas = forwardRef<
       if (frame.current !== null) cancelAnimationFrame(frame.current);
       if (idle.current) clearTimeout(idle.current);
       if (arrival.current) clearTimeout(arrival.current);
+      // Woods still being built, or a coast still being traced, must not draw a closed map.
+      if (renderer.current) renderer.current.onChange = null;
     },
     [],
   );
