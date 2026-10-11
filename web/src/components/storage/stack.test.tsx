@@ -79,7 +79,7 @@ describe("a stack on the map", () => {
 describe("StoreySwitcher", () => {
   it("lists the storeys top down and moves with the arrow keys", () => {
     const picks: number[] = [];
-    inLocale(<StoreySwitcher info={{ base: "b", storeys: 3, hasRoof: true }} level={0} onChange={(l) => picks.push(l)} />, "pl");
+    inLocale(<StoreySwitcher info={{ base: "b", storeys: 3, hasRoof: true, main: 0 }} level={0} onChange={(l) => picks.push(l)} />, "pl");
     const group = screen.getByRole("radiogroup", { name: "Kondygnacje" });
     expect(within(group).getAllByRole("radio").map((r) => r.textContent)).toEqual(["Dach", "2. piętro", "1. piętro", "Parter"]);
     expect(within(group).getByRole("radio", { name: "Parter" })).toHaveAttribute("aria-checked", "true");
@@ -90,7 +90,7 @@ describe("StoreySwitcher", () => {
   });
 
   it("names English floors with ordinals", () => {
-    inLocale(<StoreySwitcher info={{ base: "b", storeys: 2, hasRoof: false }} level={1} onChange={() => {}} />);
+    inLocale(<StoreySwitcher info={{ base: "b", storeys: 2, hasRoof: false, main: 0 }} level={1} onChange={() => {}} />);
     expect(screen.getAllByRole("radio").map((r) => r.textContent)).toEqual(["1st floor", "Ground"]);
     expect(screen.getByRole("radio", { name: "1st floor" })).toHaveAttribute("tabindex", "0");
   });

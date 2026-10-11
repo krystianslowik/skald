@@ -23,6 +23,8 @@ export interface StoreyInfo {
   base: string;
   storeys: number;
   hasRoof: boolean;
+  /** The storey shown until one is picked: where most of the floor is. */
+  main: number;
 }
 
 const INK = "#3a2a1a";
@@ -184,9 +186,16 @@ function addPiece(out: Paths, p: Piece) {
 export class FloorPlan {
   readonly bases: Base[];
   private storeyPaths = new Map<string, Paths[]>();
+  private byKey: Map<string, Base>;
 
   constructor(private readonly pieces: readonly Piece[]) {
     this.bases = typeof Path2D === "undefined" ? [] : groupBases(pieces);
+    this.byKey = new Map(this.bases.map((b) => [b.key, b]));
+  }
+
+  /** The storey a base shows: the one picked for it, else its main one. */
+  levelOf(base: string, pick: StoreyPick | null): number {
+    return pick && pick.base === base ? pick.level : (this.byKey.get(base)?.main ?? 0);
   }
 
   private paths(b: Base): Paths[] {
@@ -213,13 +222,13 @@ export class FloorPlan {
   /** The base the floor switcher is for, seen in `box`. */
   active(box: readonly [number, number, number, number]): StoreyInfo | null {
     const b = activeBase(this.bases, box);
-    return b ? { base: b.key, storeys: b.levels.length, hasRoof: b.hasRoof } : null;
+    return b ? { base: b.key, storeys: b.levels.length, hasRoof: b.hasRoof, main: b.main } : null;
   }
 
   /**
    * Draws the bases inside `box` under a world transform (x right, z up) for
    * view scale `scale`. The picked base shows its picked storey, the one
-   * under it as a ghost, and nothing above; every other base its ground.
+   * under it as a ghost, and nothing above; every other base its main storey.
    */
   draw(g: CanvasRenderingContext2D, box: readonly [number, number, number, number], scale: number, alpha: number, pick: StoreyPick | null, active: string | null) {
     const px = 1 / scale;
@@ -227,7 +236,7 @@ export class FloorPlan {
       const [x0, z0, x1, z1] = b.box;
       if (x1 < box[0] || x0 > box[2] || z1 < box[1] || z0 > box[3]) continue;
       const list = this.paths(b);
-      const level = pick && pick.base === b.key ? Math.min(pick.level, list.length - 1) : 0;
+      const level = Math.min(this.levelOf(b.key, pick), list.length - 1);
       if (level > 0) {
         g.globalAlpha = alpha * 0.22;
         this.drawStorey(g, list[level - 1]!, px, scale, true);
@@ -292,10 +301,11 @@ export class FloorPlan {
     g.strokeStyle = ROOF_EDGE;
     g.lineWidth = 0.7 * px;
     g.stroke(s.roofs);
-    // Walls: thick ink along their length, never thinner than a couple of pixels.
+    // Walls: thick ink along their length, never thinner than a couple of
+    // pixels; close in, their own thickness takes over.
     g.strokeStyle = INK;
     g.lineCap = "square";
-    const min = (1.3 + 0.3 * scale) * px;
+    const min = (1.3 + 0.3 * Math.min(scale, 8)) * px;
     for (const [d, path] of s.walls) {
       g.lineWidth = Math.max(min, d);
       g.stroke(path);

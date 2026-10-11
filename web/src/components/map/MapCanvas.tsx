@@ -27,8 +27,8 @@ import { PLAN_MIN_SCALE, viewBox, type StoreyInfo, type StoreyPick } from "../..
 import type { ApiMap } from "../../types";
 
 export interface MapCanvasHandle {
-  /** Glide (or jump, with reduced motion) to a world point, zooming in to at least `minScale`. */
-  flyTo(x: number, z: number, minScale?: number): void;
+  /** Glide (or jump, with reduced motion) to a world point, zooming in to at least `minScale` and out to at most `maxScale`. */
+  flyTo(x: number, z: number, minScale?: number, maxScale?: number): void;
   /** Glide just enough to show a world point above the bottom `hidden` px (a sheet), or not at all. */
   reveal(x: number, z: number, hidden: number): void;
   zoomBy(factor: number): void;
@@ -93,7 +93,7 @@ export const MapCanvas = forwardRef<
     /** The base the floor switcher is for, whenever it changes (null: no switcher), and when floor plans arrive. */
     onStoreys?: (info: StoreyInfo | null) => void;
     onSelect: (m: Marker | null) => void;
-    /** A tap on a cluster that cannot be zoomed apart any further (marks a few metres apart). */
+    /** A tap on a cluster that cannot be zoomed apart any further (marks a metre or two apart). */
     onGroup?: (members: readonly Marker[]) => void;
     /** Remember the view for this browser session and start from it next time. */
     remember?: boolean;
@@ -157,7 +157,7 @@ export const MapCanvas = forwardRef<
       // Settled: floor plans for what the cached map covers, and the floor switcher's base.
       if (p.layers.buildings && v.scale >= PLAN_MIN_SCALE) loader.current?.want(viewBox({ ...v, w: v.w * 1.5, h: v.h * 1.5 }, 8), String(p.generation));
       const info = r.storeys(v, p.layers);
-      const key = info ? `${info.base}:${info.storeys}:${info.hasRoof ? 1 : 0}` : "";
+      const key = info ? `${info.base}:${info.storeys}:${info.hasRoof ? 1 : 0}:${info.main}` : "";
       if (key !== reported.current) {
         reported.current = key;
         p.onStoreys?.(info);
@@ -261,8 +261,8 @@ export const MapCanvas = forwardRef<
   useImperativeHandle(
     ref,
     () => ({
-      flyTo(x, z, minScale) {
-        glideTo({ ...view.current, cx: x, cz: z, scale: Math.max(view.current.scale, minScale ?? 0) });
+      flyTo(x, z, minScale, maxScale) {
+        glideTo({ ...view.current, cx: x, cz: z, scale: Math.max(Math.min(view.current.scale, maxScale ?? Infinity), minScale ?? 0) });
       },
       reveal(x, z, hidden) {
         const v = glide.current ? { ...view.current, cx: glide.current.cx, cz: glide.current.cz, scale: Math.exp(glide.current.ls) } : view.current;
@@ -384,7 +384,7 @@ export const MapCanvas = forwardRef<
     (members: readonly Marker[]) => {
       const v = view.current;
       const [x0, z0, x1, z1] = markerBounds(members);
-      // At the closest zoom, clusters are a few metres wide: beyond that, zooming cannot help.
+      // At the closest zoom, clusters are about a metre wide: beyond that, zooming cannot help.
       const apartAtMax = Math.hypot(x1 - x0, z1 - z0) * MAX_SCALE > 40;
       if (!apartAtMax || v.scale >= MAX_SCALE * 0.95) {
         onGroup?.(members);

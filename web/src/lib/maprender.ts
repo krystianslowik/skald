@@ -942,8 +942,9 @@ export class MapRenderer {
 
   /**
    * How a chest mark shows under the floor switcher: 1 on the picked storey
-   * (or outside any floor plan), a ghost below it, 0 (hidden) above it. A
-   * picked or highlighted chest is never hidden.
+   * (the base's main one until one is picked, or outside any floor plan), a
+   * ghost below it, 0 (hidden) above it. A picked or highlighted chest is
+   * never hidden.
    */
   private storeyShade(m: Marker, f: FrameState): number {
     if (m.data.type !== "storage" || !this.plan || !f.layers.buildings || f.view.scale < PLAN_MIN_SCALE) return 1;
@@ -953,7 +954,7 @@ export class MapRenderer {
       this.markStorey.set(m.id, st);
     }
     if (!st) return 1;
-    const picked = f.storey && f.storey.base === st.base ? f.storey.level : 0;
+    const picked = this.plan.levelOf(st.base, f.storey ?? null);
     if (st.level === picked) return 1;
     if (st.level < picked || m.id === f.selected || f.highlighted?.has(m.id)) return 0.4;
     return 0;

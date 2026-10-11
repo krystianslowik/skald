@@ -125,6 +125,8 @@ export const STOREY_GAP = 1.2;
 export const STOREY_MIN_FLOORS = 2;
 /** A piece this little below a storey's floor still stands on it. */
 export const STOREY_EPS = 0.3;
+/** A lower storey with at least this share of the largest one's floor area is still the main one. */
+export const MAIN_SHARE = 0.6;
 
 export interface Base {
   /** Stable while the base stays as built: its rounded centre. */
@@ -134,6 +136,8 @@ export interface Base {
   cz: number;
   /** Floor height of each storey, ground first. One entry for a single storey. */
   levels: number[];
+  /** The storey the floor switcher opens on: where most of the floor is (see `mainStorey`). */
+  main: number;
   hasRoof: boolean;
   /** Indexes into the pieces given to `groupBases`. */
   members: number[];
@@ -158,6 +162,19 @@ export function storeyOf(levels: readonly number[], y: number): number {
   let level = 0;
   for (let i = 1; i < levels.length; i++) if (levels[i]! <= y + STOREY_EPS) level = i;
   return level;
+}
+
+/**
+ * The main storey of a base from each storey's floor area: the largest one,
+ * unless a storey below has nearly as much (a plain two-storey house opens on
+ * its ground floor). A yard, a jetty or a terrace of floor pieces a step under
+ * the house has far less floor than the house, so it is kept as its own level
+ * but never preselected.
+ */
+export function mainStorey(areas: readonly number[]): number {
+  const most = Math.max(0, ...areas);
+  const i = areas.findIndex((a) => a >= most * MAIN_SHARE);
+  return Math.max(0, i);
 }
 
 /** A piece's storey in its base; roofs are on their own level, one past the top storey. */
@@ -219,6 +236,7 @@ export function groupBases(pieces: readonly Piece[]): Base[] {
     let x1 = -Infinity;
     let z1 = -Infinity;
     const floorYs: number[] = [];
+    const floors: Piece[] = [];
     let hasRoof = false;
     for (const i of members) {
       const p = pieces[i]!;
@@ -227,12 +245,17 @@ export function groupBases(pieces: readonly Piece[]): Base[] {
       z0 = Math.min(z0, p.z - r);
       x1 = Math.max(x1, p.x + r);
       z1 = Math.max(z1, p.z + r);
-      if (p.kind === "floor") floorYs.push(p.y);
-      else if (p.kind === "roof") hasRoof = true;
+      if (p.kind === "floor") {
+        floorYs.push(p.y);
+        floors.push(p);
+      } else if (p.kind === "roof") hasRoof = true;
     }
     const cx = (x0 + x1) / 2;
     const cz = (z0 + z1) / 2;
-    out.push({ key: `${Math.round(cx)},${Math.round(cz)}`, box: [x0, z0, x1, z1], cx, cz, levels: storeyLevels(floorYs), hasRoof, members });
+    const levels = storeyLevels(floorYs);
+    const areas = levels.map(() => 0);
+    for (const p of floors) areas[storeyOf(levels, p.y)]! += p.w * p.d;
+    out.push({ key: `${Math.round(cx)},${Math.round(cz)}`, box: [x0, z0, x1, z1], cx, cz, levels, main: mainStorey(areas), hasRoof, members });
   }
   return out;
 }

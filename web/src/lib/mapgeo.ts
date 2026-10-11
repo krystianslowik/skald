@@ -394,7 +394,10 @@ export interface View {
   h: number;
 }
 
-export const MAX_SCALE = 6;
+/** The closest zoom: close enough to read a floor plan wall by wall and follow a player through the rooms. */
+export const MAX_SCALE = 24;
+/** Jumps to a mark from elsewhere (a search, the village stores) zoom no closer than this. */
+export const FOCUS_MAX_SCALE = 8;
 
 /** The smallest scale: the whole world disc with a margin. */
 export function minScale(w: number, h: number): number {

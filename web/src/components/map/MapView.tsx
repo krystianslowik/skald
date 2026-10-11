@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../i18n";
-import { buildMarkers, decodeRLE, DEFAULT_LAYERS, layerCounts, LAYERS, mainBase, markerStores, type Insets, type LayerId, type Marker } from "../../lib/mapgeo";
+import { buildMarkers, decodeRLE, DEFAULT_LAYERS, FOCUS_MAX_SCALE, layerCounts, LAYERS, mainBase, markerStores, type Insets, type LayerId, type Marker } from "../../lib/mapgeo";
 import type { StoreyInfo, StoreyPick } from "../../lib/planrender";
 import { COARSE, PHONE, useMedia } from "../../lib/useMedia";
 import { useTerrain } from "../../lib/useTerrain";
@@ -16,6 +16,8 @@ import { MapLayers } from "./MapLayers";
 import { StoreySwitcher } from "./StoreySwitcher";
 
 const LAYERS_KEY = "skald.map.layers";
+/** Storeys picked in the floor switcher, by base, for as long as the page lives. */
+const chosenStoreys = new Map<string, number>();
 
 /**
  * Containers to pick out on the map (where an item is kept): every one gets a
@@ -241,6 +243,9 @@ function SaveMap({
   const onStoreys = useCallback(
     (info: StoreyInfo | null) => {
       setStoreys(info);
+      // A base whose storey was picked before opens on that storey again; any other on its main one.
+      const kept = info ? chosenStoreys.get(info.base) : undefined;
+      if (info && kept !== undefined) setStorey((s) => (s?.base === info.base ? s : { base: info.base, level: kept }));
       settleStorey();
     },
     [settleStorey],
@@ -311,7 +316,7 @@ function SaveMap({
     // Its storey: now if the floor plan is here, else when it arrives.
     wantStorey.current = chest ? { x: chest.x, z: chest.z, y: chest.y } : null;
     settleStorey();
-    canvas.current?.flyTo(target.x, target.z, 0.9);
+    canvas.current?.flyTo(target.x, target.z, 0.9, FOCUS_MAX_SCALE);
   }, [focus, focusMarks, choose, settleStorey]);
 
   const pickResult = useCallback(
@@ -323,7 +328,7 @@ function SaveMap({
         wantStorey.current = { x: chest.x, z: chest.z, y: chest.y };
         settleStorey();
       }
-      canvas.current?.flyTo(m.x, m.z, 0.35);
+      canvas.current?.flyTo(m.x, m.z, 0.35, FOCUS_MAX_SCALE);
     },
     [choose, settleStorey],
   );
@@ -498,7 +503,14 @@ function SaveMap({
         {/* The storeys of the base in the frame, above the zoom buttons like a lift's panel. */}
         {storeys && (
           <div className="mb-1.5">
-            <StoreySwitcher info={storeys} level={storey?.base === storeys.base ? storey.level : 0} onChange={(level) => setStorey({ base: storeys.base, level })} />
+            <StoreySwitcher
+              info={storeys}
+              level={storey?.base === storeys.base ? storey.level : storeys.main}
+              onChange={(level) => {
+                chosenStoreys.set(storeys.base, level);
+                setStorey({ base: storeys.base, level });
+              }}
+            />
           </div>
         )}
         {/* A finger pinches and double taps; +/- are for mice and trackpads. */}

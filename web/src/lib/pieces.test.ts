@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mockMap } from "@server/mapmock";
 import { mockPieces, piecesIn } from "@server/mockpieces";
 import type { PieceKind } from "../types";
-import { activeBase, baseAt, chunkBox, chunksFor, decodePieces, groupBases, inBox, pieceCorners, pieceLocal, pieceStorey, quarters, storeyLevels, storeyOf, uphill, type Piece } from "./pieces";
+import { activeBase, baseAt, chunkBox, chunksFor, decodePieces, groupBases, inBox, mainStorey, pieceCorners, pieceLocal, pieceStorey, quarters, storeyLevels, storeyOf, uphill, type Piece } from "./pieces";
 
 const close = (a: readonly number[], b: readonly number[]) => a.forEach((v, i) => expect(v).toBeCloseTo(b[i]!, 6));
 
@@ -142,5 +142,36 @@ describe("storeys", () => {
     const hall = baseAt(groupBases(all), 225, -350)!;
     expect(hall.levels).toHaveLength(2);
     expect(hall.hasRoof).toBe(true);
+    // The hall below is larger than the loft: the switcher opens on the ground.
+    expect(hall.main).toBe(0);
+  });
+});
+
+describe("main storey", () => {
+  it("opens a plain two-storey house on its ground floor", () => {
+    const ps = house(0, 0, 4, 3, 30);
+    house(0, 0, 4, 3, 33, ps);
+    expect(groupBases(ps)[0]!.main).toBe(0);
+    // An upper floor a little wider than the ground (an overhang) does not win either.
+    ps.push(piece("floor", 9, 1, 33), piece("floor", 9, 3, 33));
+    expect(groupBases(ps)[0]!.main).toBe(0);
+  });
+
+  it("skips a yard of floor pieces at the ground and opens on the house above", () => {
+    // A strip of yard (or a jetty) two metres under the house's floor.
+    const ps: Piece[] = [];
+    for (let i = 0; i < 4; i++) ps.push(piece("floor", 1 + 2 * i, -1, 30));
+    house(0, 0, 4, 3, 32, ps);
+    const [b] = groupBases(ps);
+    expect(b!.levels).toEqual([30, 32]);
+    expect(b!.main).toBe(1);
+  });
+
+  it("weighs footprints, prefers the lower of near equals, and copes with nothing", () => {
+    expect(mainStorey([4, 12])).toBe(1);
+    expect(mainStorey([10, 12, 2])).toBe(0);
+    expect(mainStorey([2, 3, 12])).toBe(2);
+    expect(mainStorey([])).toBe(0);
+    expect(mainStorey([0])).toBe(0);
   });
 });
