@@ -39,7 +39,7 @@ import {
   zoomAt,
   type Box,
 } from "./mapgeo";
-import { inertiaStep, releaseVelocity, springStep } from "./mapmotion";
+import { inertiaStep, releaseVelocity, RUBBER, rubberBand, springStep, ZOOM_DECELERATION } from "./mapmotion";
 import { mapUrlAt, terrainUrl } from "./world";
 
 const snap = mockMap({ now: Date.parse("2026-10-10T20:00:00Z") });
@@ -451,6 +451,32 @@ describe("motion", () => {
     expect(x).toBeCloseTo(100, 1);
     expect(max).toBeLessThanOrEqual(100.0001);
   });
+  it("stretches a zoom past its limits less and less, never further than the band", () => {
+    expect(rubberBand(1, 0, 2)).toBe(1);
+    const a = rubberBand(2.1, 0, 2) - 2;
+    const b = rubberBand(2.5, 0, 2) - 2;
+    const c = rubberBand(10, 0, 2) - 2;
+    expect(a).toBeGreaterThan(0);
+    expect(a).toBeLessThan(0.1);
+    expect(b).toBeGreaterThan(a);
+    expect(b - a).toBeLessThan(0.4);
+    expect(c).toBeLessThan(RUBBER);
+    expect(rubberBand(-0.5, 0, 2)).toBeCloseTo(-(rubberBand(2.5, 0, 2) - 2), 10);
+  });
+
+  it("lets a pinch's momentum run out sooner than a pan's", () => {
+    let v = 3;
+    let d = 0;
+    for (let i = 0; i < 200 && Math.abs(v) > 0.05; i++) {
+      const s = inertiaStep(v, 16, ZOOM_DECELERATION);
+      d += s.d;
+      v = s.v;
+    }
+    // A brisk pinch (x20 a second) carries on by well under 2x.
+    expect(d).toBeGreaterThan(0.2);
+    expect(Math.exp(d)).toBeLessThan(2);
+  });
+
   it("measures release velocity over the last 100 ms", () => {
     expect(releaseVelocity([])).toEqual([0, 0]);
     const [vx] = releaseVelocity([
@@ -460,6 +486,13 @@ describe("motion", () => {
       { x: 700, y: 0, t: 300 },
     ]);
     expect(vx).toBeCloseTo(2000);
+    // Lifted right after the last move it keeps its speed; after a pause it has none.
+    const run = [
+      { x: 600, y: 0, t: 250 },
+      { x: 700, y: 0, t: 300 },
+    ];
+    expect(releaseVelocity(run, 308)[0]).toBeCloseTo(2000);
+    expect(releaseVelocity(run, 420)).toEqual([0, 0]);
   });
 });
 

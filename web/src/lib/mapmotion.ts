@@ -8,6 +8,26 @@ export const DECELERATION = 0.998;
 /** Below this speed (px/s) a fling has come to rest. */
 export const REST_SPEED = 12;
 
+/** A pinch's momentum slows faster than a pan's: a zoom should not run on far past the fingers. */
+export const ZOOM_DECELERATION = 0.994;
+
+/** Below this zoom speed (log scale per second) a pinch's momentum has come to rest. */
+export const ZOOM_REST = 0.05;
+
+/** How far past a zoom limit a pinch can stretch at most, in log scale (about 40 %). */
+export const RUBBER = Math.log(1.4);
+
+/**
+ * A log scale `x` past [lo, hi] pulled back towards the limit, ever more
+ * stiffly the further it goes and never more than `d` past it: the rubber
+ * band of a scroll view, so a limit gives way a little instead of stopping
+ * the fingers dead.
+ */
+export function rubberBand(x: number, lo: number, hi: number, d = RUBBER): number {
+  const band = (o: number) => (1 - 1 / ((o * 0.55) / d + 1)) * d;
+  return x > hi ? hi + band(x - hi) : x < lo ? lo - band(lo - x) : x;
+}
+
 /** Advance a fling by `dtMs`: the distance travelled and the velocity left. */
 export function inertiaStep(v: number, dtMs: number, rate = DECELERATION): { d: number; v: number } {
   const k = Math.pow(rate, dtMs);
@@ -29,10 +49,14 @@ export function springStep(x: number, v: number, target: number, dtSec: number, 
   return { x: target + (d + c * dtSec) * e, v: (c - w * (d + c * dtSec)) * e };
 }
 
-/** Release velocity in px/s from recent pointer samples (newest last), over the last 100 ms. */
-export function releaseVelocity(samples: readonly { x: number; y: number; t: number }[]): [number, number] {
+/**
+ * Release velocity in px/s from recent pointer samples (newest last), over
+ * the last 100 ms. Lifted at `at` (the release's time stamp) more than
+ * 50 ms after the last move, the pointer had stopped: no velocity.
+ */
+export function releaseVelocity(samples: readonly { x: number; y: number; t: number }[], at?: number): [number, number] {
   const last = samples.at(-1);
-  if (!last) return [0, 0];
+  if (!last || (at !== undefined && at - last.t > 50)) return [0, 0];
   let first = last;
   for (let i = samples.length - 1; i >= 0; i--) {
     const s = samples[i]!;
