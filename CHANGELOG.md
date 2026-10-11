@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-10-11
+
+### Fixed
+
+- The admin world keys list showed the world's creation modifiers as one long unbroken key that ran off the screen; it now reads "World modifiers: resources much more, portals casual", and long keys wrap.
+
 ## [0.8.2] - 2026-10-11
 
 ### Changed

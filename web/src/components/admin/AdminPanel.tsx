@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AdminCatalog, BanEntry } from "../../types";
 import { BROADCAST_MAX, gameClock, getBans, getCatalog, lockAdmin, storeActorName, storedActorName, WORLD_KEYS } from "../../lib/admin";
 import { useLivePositions } from "../../lib/live";
-import { useI18n } from "../../i18n";
+import { useI18n, type TextKey } from "../../i18n";
 import { PlatformGlyph } from "../PlatformGlyph";
 import { Sheet } from "../Sheet";
 import { targetBody, useAdmin, type Target } from "./AdminContext";
@@ -355,6 +355,29 @@ function Raids({ catalog, picked, onChange }: { catalog: AdminCatalog | null; pi
   );
 }
 
+/**
+ * A key the switch list does not know, in words. The game stores a world's
+ * creation modifiers as one key, "preset combat_default:resources_muchmore:...",
+ * which would otherwise run off the screen as a single unbroken string.
+ */
+export function describeKey(key: string, t: (k: TextKey, v?: Record<string, string | number>) => string, lookup: (k: string) => string | undefined): { title: string; detail: string } {
+  const space = key.indexOf(" ");
+  const name = space < 0 ? key : key.slice(0, space);
+  const value = space < 0 ? "" : key.slice(space + 1);
+  if (name === "preset" && value) {
+    const parts = value.split(":").flatMap((pair) => {
+      const cut = pair.lastIndexOf("_");
+      if (cut < 0) return [];
+      const mod = pair.slice(0, cut);
+      const level = pair.slice(cut + 1);
+      if (level === "default") return [];
+      return [`${lookup(`mod.${mod}`) ?? mod}: ${lookup(`modv.${level}`) ?? level}`];
+    });
+    return { title: t("admin.keys.preset"), detail: parts.length ? parts.join(", ") : t("admin.keys.presetDefault") };
+  }
+  return { title: lookup(`gkey.${name}`) ?? name, detail: value };
+}
+
 /** Global keys as switches, explained; boss keys are held to remove, risky ones confirmed. */
 function WorldKeys({ catalog, onChange }: { catalog: AdminCatalog | null; onChange: () => void }) {
   const { t, lookup } = useI18n();
@@ -404,14 +427,20 @@ function WorldKeys({ catalog, onChange }: { catalog: AdminCatalog | null; onChan
             </li>
           );
         })}
-        {extra.map((key) => (
+        {extra.map((key) => {
+          const { title, detail } = describeKey(key, t, lookup);
+          return (
           <li key={key} className="flex items-center gap-3 py-2">
-            <span className="flex-1 font-mono text-sm text-bone">{key}</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-bone [overflow-wrap:anywhere]">{title}</p>
+              {detail && <p className="text-xs leading-snug text-ash [overflow-wrap:anywhere]">{detail}</p>}
+            </div>
             <HoldButton danger={false} disabled={off} onConfirm={() => set(key, false)}>
               {t("admin.keys.remove")}
             </HoldButton>
           </li>
-        ))}
+          );
+        })}
       </ul>
     </Section>
   );
