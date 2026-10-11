@@ -132,7 +132,7 @@ function home(out: Item[]) {
     const k = r();
     if (dense > 0 && k < 0.03) return firs ? "BlueberryBush" : "Pickable_Mushroom";
     if (dense > 0 && k < 0.06) return "Pickable_Branch";
-    if (dense > -0.4 && k < 0.075) return r() < 0.5 ? "Bush01" : "Bush02_en";
+    if (dense > -0.1 && k < 0.07) return r() < 0.5 ? "Bush01" : "Bush02_en";
     if (k < 0.085) return r() < 0.8 ? "Rock_4" : "Rock_3";
     if (k < 0.09 && open > 0.5) return "rock4_forest";
     if (firs && k < 0.095) return "Pickable_Thistle";
