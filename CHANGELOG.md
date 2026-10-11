@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-10-11
+
+### Changed
+
+- Village stores is a compact bag of item slots, biggest stacks first, with swipeable kind chips and counts. It shows a few rows until you ask for the rest, so a big village no longer turns the board into a page-long list.
+- More ready-made admin kits, with names in English and Polish, and a pass over the Polish copy.
+
 ## [0.8.4] - 2026-10-11
 
 ### Added
