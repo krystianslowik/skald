@@ -534,7 +534,9 @@ export class MapRenderer {
       const ch = c.h / 2 / c.scale;
       return Math.abs(v.cx - c.cx) + halfW <= cw + 0.5 / v.scale && Math.abs(v.cz - c.cz) + halfH <= ch + 0.5 / v.scale;
     };
-    if (!b || b.key !== key || !covers(b)) b = this.renderBase(f, key, quality === "fast");
+    // Only a base whose woods were drawn rough needs a redraw at rest.
+    const rough = quality === "fast" && f.layers.nature && natureAlpha(v.scale) > 0 && !this.nature.empty;
+    if (!b || b.key !== key || !covers(b)) b = this.renderBase(f, key, rough);
     this.screen(g);
     g.fillStyle = VOID;
     g.fillRect(0, 0, v.w, v.h);
