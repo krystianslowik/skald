@@ -143,17 +143,19 @@ type TerrainEdit struct {
 // with its inventory. ID is the prefab and the rounded position, stable for
 // as long as it stays put. Width x Height is the inventory grid: the game's
 // size where known, never smaller than the slots in use. Unreadable is set
-// when the inventory did not decode; Items is then empty.
+// when the inventory did not decode; Items is then empty. Y is the height in
+// metres (0.05 m steps), which tells apart chests stacked on one spot.
 type Container struct {
-	ID         string `json:"id"`
-	Kind       string `json:"kind"`
-	Prefab     string `json:"prefab"`
-	X          int    `json:"x"`
-	Z          int    `json:"z"`
-	Width      int    `json:"width"`
-	Height     int    `json:"height"`
-	Items      []Item `json:"items"`
-	Unreadable bool   `json:"unreadable,omitempty"`
+	ID         string  `json:"id"`
+	Kind       string  `json:"kind"`
+	Prefab     string  `json:"prefab"`
+	X          int     `json:"x"`
+	Y          float64 `json:"y"`
+	Z          int     `json:"z"`
+	Width      int     `json:"width"`
+	Height     int     `json:"height"`
+	Items      []Item  `json:"items"`
+	Unreadable bool    `json:"unreadable,omitempty"`
 }
 
 // Item is one stack in a container. Name is the item prefab ("#hash" when

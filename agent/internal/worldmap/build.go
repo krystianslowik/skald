@@ -454,8 +454,8 @@ func storeKind(prefab string) string {
 }
 
 // exportStorage turns the built containers into Snapshot.Storage, in a
-// stable order. Two containers on the same metre get "#n" suffixes, and the
-// vehicles' ids are renamed to match.
+// stable order. Two containers on the same metre get "#n" suffixes, lowest
+// first, and the vehicles' ids are renamed to match.
 func exportStorage(stores []rawStore, vehicles []Vehicle, showNames bool) []Container {
 	sort.Slice(stores, func(i, j int) bool {
 		a, b := stores[i], stores[j]
@@ -465,7 +465,11 @@ func exportStorage(stores []rawStore, vehicles []Vehicle, showNames bool) []Cont
 		if az, bz := iround(a.z), iround(b.z); az != bz {
 			return az < bz
 		}
-		return a.prefab < b.prefab
+		if a.prefab != b.prefab {
+			return a.prefab < b.prefab
+		}
+		// A stack on one spot: "#n" counts up from the bottom.
+		return a.y < b.y
 	})
 	out := make([]Container, 0, len(stores))
 	seen := map[string]int{}
@@ -481,7 +485,7 @@ func exportStorage(stores []rawStore, vehicles []Vehicle, showNames bool) []Cont
 		items := exportItems(s.items, showNames)
 		w, h := gridOf(s.prefab, s.items)
 		out = append(out, Container{
-			ID: id, Kind: storeKind(s.prefab), Prefab: s.prefab, X: iround(s.x), Z: iround(s.z),
+			ID: id, Kind: storeKind(s.prefab), Prefab: s.prefab, X: iround(s.x), Y: math.Round(float64(s.y)*20) / 20, Z: iround(s.z),
 			Width: w, Height: h, Items: items, Unreadable: s.unreadable,
 		})
 	}

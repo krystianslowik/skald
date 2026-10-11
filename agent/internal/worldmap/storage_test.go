@@ -170,6 +170,12 @@ func TestStorageFixture(t *testing.T) {
 	if c := byID["Raft@1800,1900"]; c.Width != 0 || len(c.Items) != 0 {
 		t.Errorf("raft = %+v", c)
 	}
+	if full.Y != 31 || byID["Karve@-150,250"].Y != 30 || byID["Cart@90,40"].Y != 34 {
+		t.Errorf("heights = %v %v %v", full.Y, byID["Karve@-150,250"].Y, byID["Cart@90,40"].Y)
+	}
+	if !bytes.Contains(must(json.Marshal(full)), []byte(`"y":31,`)) {
+		t.Error("container JSON has no y")
+	}
 	for _, v := range s.Vehicles {
 		if _, ok := byID[v.ID]; !ok {
 			t.Errorf("vehicle %+v has no storage entry", v)
@@ -207,6 +213,41 @@ func TestStorageFixture(t *testing.T) {
 	}
 	if len(hidden.Storage) != len(s.Storage) {
 		t.Error("ShowNames changed what is exported")
+	}
+}
+
+func must(b []byte, err error) []byte {
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+func TestStackedContainers(t *testing.T) {
+	// Three chests on one spot, handed over top first, and one beside them.
+	stores := []rawStore{
+		{prefab: "piece_chest_wood", x: 10.1, y: 33.734, z: 5, items: []rawItem{}},
+		{prefab: "piece_chest_wood", x: 9.9, y: 31.98, z: 5.2},
+		{prefab: "piece_chest_wood", x: 10, y: 32.86, z: 4.9},
+		{prefab: "piece_chest_wood", x: 12, y: 32, z: 5},
+	}
+	got := exportStorage(stores, nil, true)
+	want := []struct {
+		id string
+		y  float64
+	}{
+		{"piece_chest_wood@10,5", 32},
+		{"piece_chest_wood@10,5#1", 32.85},
+		{"piece_chest_wood@10,5#2", 33.75},
+		{"piece_chest_wood@12,5", 32},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("storage = %+v", got)
+	}
+	for i, w := range want {
+		if got[i].ID != w.id || got[i].Y != w.y {
+			t.Errorf("[%d] = %s y %v, want %s y %v", i, got[i].ID, got[i].Y, w.id, w.y)
+		}
 	}
 }
 

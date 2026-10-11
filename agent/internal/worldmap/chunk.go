@@ -85,7 +85,7 @@ type rawVehicle struct {
 // rawStore is a player-built container with its decoded inventory.
 type rawStore struct {
 	prefab     string
-	x, z       float32
+	x, y, z    float32
 	items      []rawItem
 	unreadable bool
 }
@@ -234,13 +234,13 @@ func parseChunk(b []byte) (cd *chunkData, err error) {
 		case roleVehicle:
 			cd.vehicles = append(cd.vehicles, rawVehicle{kind: info.name, x: x, z: z, built: f.creator})
 			if f.creator {
-				cd.addStore(info.name, x, z, f.items)
+				cd.addStore(info.name, x, y, z, f.items)
 			}
 		case roleContainer:
 			// Only what a player built: a listed prefab without a creator is
 			// not exported, contents or not.
 			if f.creator {
-				cd.addStore(info.name, x, z, f.items)
+				cd.addStore(info.name, x, y, z, f.items)
 			}
 		case roleTable:
 			cd.tables++
@@ -332,9 +332,9 @@ func inventoryOf(blob []byte) ([]rawItem, error) {
 	return parseInventory(blob)
 }
 
-func (cd *chunkData) addStore(prefab string, x, z float32, blob []byte) {
+func (cd *chunkData) addStore(prefab string, x, y, z float32, blob []byte) {
 	items, err := inventoryOf(blob)
-	cd.stores = append(cd.stores, rawStore{prefab: prefab, x: x, z: z, items: items, unreadable: err != nil})
+	cd.stores = append(cd.stores, rawStore{prefab: prefab, x: x, y: y, z: z, items: items, unreadable: err != nil})
 }
 
 // The cartography table's explored mask: 2048 x 2048 pixels of 12 m.

@@ -483,12 +483,15 @@ export type MapContainerKind = "chest" | "cart" | "ship";
  * A chest, cart or ship a player built, with its inventory. World chests are
  * never listed. `id` is the prefab and rounded position; `width` x `height`
  * the inventory grid (0 x 0 for a raft). `unreadable`: the inventory did not
- * decode and `items` is empty.
+ * decode and `items` is empty. `y` is the height in metres (0.05 m steps)
+ * that tells apart chests stacked on one spot; missing from agents older than
+ * 0.8.6.
  */
 export interface MapContainer extends MapPoint {
   id: string;
   kind: MapContainerKind;
   prefab: string;
+  y?: number;
   width: number;
   height: number;
   items: MapItem[];

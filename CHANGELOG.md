@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - The agent serves floor plans of what players built: `GET /pieces` returns the walls, floors, roofs, doors, stairs, stations and the rest inside a box, each with its position, height, heading and footprint, for drawing bases at close zoom.
+- Every chest, cart and ship on the map and in the village stores carries its height (`y`, in metres), so chests stacked on one spot can be told apart; stacked chests on the same metre are numbered from the bottom up.
 
 ## [0.8.6] - 2026-10-11
 
