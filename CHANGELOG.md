@@ -6,10 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-11
+
+Floor plans and chest stacks need the 0.9.0 agent; with an older agent the web keeps working without them.
+
 ### Added
 
 - The agent serves floor plans of what players built: `GET /pieces` returns the walls, floors, roofs, doors, stairs, stations and the rest inside a box, each with its position, height, heading and footprint, for drawing bases at close zoom.
-- Every chest, cart and ship on the map and in the village stores carries its height (`y`, in metres), so chests stacked on one spot can be told apart; stacked chests on the same metre are numbered from the bottom up.
+- Every chest, cart and ship on the map and in the village stores carries its height (`y`, in metres), so chests stacked on one spot can be told apart; container positions are now given to 5 cm instead of whole metres, and stacked chests on the same metre are numbered from the bottom up.
 - A Buildings layer on the map: zoomed in close, bases are drawn as an inked floor plan on the parchment, with walls, floors, doors, stairs, workbenches, chests and fences. Bases with more than one storey get a floor switcher (Ground, 1st floor, ... Roof); the storey below shows faintly, and "Show on map" from the village stores opens the chest's own storey.
 - Chests stacked on one spot are one mark on the map with a count, and open as a stack listing each chest bottom to top. The village stores, the map and its search say where a chest sits ("3rd from the bottom of 3").
 
