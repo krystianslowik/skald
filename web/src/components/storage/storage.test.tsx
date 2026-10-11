@@ -25,7 +25,7 @@ describe("storage helpers", () => {
   it("names items in both languages, else prettifies the prefab", () => {
     expect(itemLabel("Iron", en.lookup)).toBe("Iron");
     expect(itemLabel("Iron", makeI18n("pl").lookup)).toBe("Żelazo");
-    expect(itemLabel("ArmorBronzeChest", en.lookup)).toBe("Bronze chest");
+    expect(itemLabel("ArmorBronzeChest", en.lookup)).toBe("Bronze Plate Tunic");
     expect(prettify("SwordBronze")).toBe("Bronze sword");
     expect(prettify("ArmorTrollLeatherLegs")).toBe("Troll leather legs");
     expect(prettify("TrophyDeer")).toBe("Deer trophy");
@@ -62,7 +62,7 @@ describe("storage helpers", () => {
     expect(searchStore(entries, "miód").map((e) => e.name)).toContain("Honey");
     expect(fold("Złom ŻELAZA")).toBe("zlom zelaza");
     const cart = snap.storage.find((c) => c.kind === "cart")!;
-    expect(matchingItems(cart.items, "ore", en.lookup)[0]).toEqual({ name: "CopperOre", label: "Copper ore", count: 90 });
+    expect(matchingItems(cart.items, "ore", en.lookup)[0]).toEqual({ name: "CopperOre", label: "Copper Ore", count: 90 });
   });
 });
 
@@ -84,15 +84,15 @@ describe("map storage", () => {
     const grid = screen.getByRole("list", { name: "Contents" });
     // 6 x 3: every slot is drawn, the used ones as buttons.
     expect(grid.children).toHaveLength(18);
-    fireEvent.click(within(grid).getAllByRole("button", { name: "Copper ore, 30" })[0]!);
-    expect(screen.getByText("Copper ore × 30")).toBeInTheDocument();
+    fireEvent.click(within(grid).getAllByRole("button", { name: "Copper Ore, 30" })[0]!);
+    expect(screen.getByText("Copper Ore × 30")).toBeInTheDocument();
   });
 
   it("shows quality, durability and the crafter of gear", () => {
     const chest = find((m) => m.data.type === "storage" && m.data.store.prefab === "piece_chest_private");
     inLocale(<MapDetails marker={chest} seedName="s" onClose={() => {}} />);
     expect(screen.getByRole("heading", { name: "Personal chest" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Bronze sword, 1/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Bronze Sword, 1/ }));
     expect(screen.getByText(/Quality 3/)).toBeInTheDocument();
     expect(screen.getByText(/Durability 287\.5/)).toBeInTheDocument();
     expect(screen.getByText(/Made by Ragnar/)).toBeInTheDocument();

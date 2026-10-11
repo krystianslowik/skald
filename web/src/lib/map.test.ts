@@ -120,7 +120,7 @@ describe("markers and layers", () => {
     const eik = markers.find((m) => m.data.type === "location" && m.data.name === "Eikthyrnir");
     expect(eik?.label).toBe("Eikthyr's altar");
     const crypt = buildMarkers(gateMap(snap, true), lookup).find((m) => m.data.type === "location" && m.data.name === "Crypt3");
-    expect(crypt?.label).toBe("Burial chambers");
+    expect(crypt?.label).toBe("Burial Chambers");
     const home = markers.find((m) => m.data.type === "portal" && m.data.tag === "home" && m.x > 0);
     expect(home?.data.type === "portal" && home.data.partnerTag).toBe("home");
     expect(portalLinks(off)).toHaveLength(3);
