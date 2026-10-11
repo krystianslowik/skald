@@ -1,6 +1,7 @@
 // The admin bridge from the browser: status, the admin session, commands and
 // the per-device things (the name in the saga, saved kits).
 
+import type { TextKey } from "../i18n";
 import type { AdminCatalog, AdminCommand, AdminRead, AdminResult, AdminStatus, BanEntry, LivePlayer } from "../types";
 import { Unauthorized } from "./api";
 
@@ -115,10 +116,11 @@ export interface Kit {
   lines: KitLine[];
 }
 
-/** Suggestions for an empty device; saved kits replace them once there are any. */
-export const PRESET_KITS: Kit[] = [
+/** Ready-made loadouts; device-local custom kits remain separate. */
+export const PRESET_KITS: (Kit & { nameKey: TextKey })[] = [
   {
     name: "Starter",
+    nameKey: "admin.items.kit.starter",
     lines: [
       { item: "Wood", amount: 50, quality: 1 },
       { item: "Stone", amount: 30, quality: 1 },
@@ -131,6 +133,7 @@ export const PRESET_KITS: Kit[] = [
   },
   {
     name: "Bronze age",
+    nameKey: "admin.items.kit.bronze",
     lines: [
       { item: "Bronze", amount: 20, quality: 1 },
       { item: "BronzeNails", amount: 100, quality: 1 },
@@ -142,6 +145,7 @@ export const PRESET_KITS: Kit[] = [
   },
   {
     name: "Boss prep",
+    nameKey: "admin.items.kit.boss",
     lines: [
       { item: "MeadHealthMedium", amount: 10, quality: 1 },
       { item: "MeadStaminaMedium", amount: 10, quality: 1 },
@@ -150,6 +154,241 @@ export const PRESET_KITS: Kit[] = [
       { item: "BowFineWood", amount: 1, quality: 3 },
     ],
   },
+  {
+    name: "Iron age",
+    nameKey: "admin.items.kit.iron",
+    lines: [
+      { item: "Iron", amount: 20, quality: 1 },
+      { item: "IronNails", amount: 100, quality: 1 },
+      { item: "ElderBark", amount: 30, quality: 1 },
+      { item: "PickaxeIron", amount: 1, quality: 2 },
+      { item: "AxeIron", amount: 1, quality: 2 },
+      { item: "ShieldBanded", amount: 1, quality: 2 },
+      { item: "Sausages", amount: 5, quality: 1 },
+      { item: "TurnipStew", amount: 5, quality: 1 },
+      { item: "CarrotSoup", amount: 5, quality: 1 },
+    ],
+  },
+  {
+    name: "Mountains",
+    nameKey: "admin.items.kit.mountains",
+    lines: [
+      { item: "Silver", amount: 20, quality: 1 },
+      { item: "WolfPelt", amount: 10, quality: 1 },
+      { item: "Obsidian", amount: 30, quality: 1 },
+      { item: "PickaxeIron", amount: 1, quality: 2 },
+      { item: "CapeWolf", amount: 1, quality: 2 },
+      { item: "MeadFrostResist", amount: 5, quality: 1 },
+      { item: "WolfJerky", amount: 5, quality: 1 },
+      { item: "OnionSoup", amount: 5, quality: 1 },
+      { item: "CookedWolfMeat", amount: 5, quality: 1 },
+    ],
+  },
+  {
+    name: "Plains",
+    nameKey: "admin.items.kit.plains",
+    lines: [
+      { item: "BlackMetal", amount: 20, quality: 1 },
+      { item: "LinenThread", amount: 30, quality: 1 },
+      { item: "Barley", amount: 20, quality: 1 },
+      { item: "AxeBlackMetal", amount: 1, quality: 2 },
+      { item: "ShieldBlackmetal", amount: 1, quality: 2 },
+      { item: "LoxPie", amount: 5, quality: 1 },
+      { item: "FishWraps", amount: 5, quality: 1 },
+      { item: "Bread", amount: 5, quality: 1 },
+    ],
+  },
+  {
+    name: "Mistlands",
+    nameKey: "admin.items.kit.mistlands",
+    lines: [
+      { item: "BlackMarble", amount: 30, quality: 1 },
+      { item: "Copper", amount: 20, quality: 1 },
+      { item: "Iron", amount: 20, quality: 1 },
+      { item: "PickaxeBlackMetal", amount: 1, quality: 2 },
+      { item: "Demister", amount: 1, quality: 1 },
+      { item: "MeadHealthMajor", amount: 5, quality: 1 },
+      { item: "MisthareSupreme", amount: 5, quality: 1 },
+      { item: "MeatPlatter", amount: 5, quality: 1 },
+      { item: "Salad", amount: 5, quality: 1 },
+    ],
+  },
+  {
+    name: "Ashlands",
+    nameKey: "admin.items.kit.ashlands",
+    lines: [
+      { item: "FlametalNew", amount: 20, quality: 1 },
+      { item: "Grausten", amount: 50, quality: 1 },
+      { item: "Blackwood", amount: 30, quality: 1 },
+      { item: "PickaxeBlackMetal", amount: 1, quality: 2 },
+      { item: "ShieldFlametal", amount: 1, quality: 2 },
+      { item: "BarleyWine", amount: 5, quality: 1 },
+      { item: "MashedMeat", amount: 5, quality: 1 },
+      { item: "PiquantPie", amount: 5, quality: 1 },
+      { item: "ScorchingMedley", amount: 5, quality: 1 },
+    ],
+  },
+  {
+    name: "Deep North",
+    nameKey: "admin.items.kit.deepnorth",
+    lines: [
+      { item: "Gold", amount: 20, quality: 1 },
+      { item: "MooseHide", amount: 10, quality: 1 },
+      { item: "MooseSinew", amount: 10, quality: 1 },
+      { item: "PickaxeBlackMetal", amount: 1, quality: 2 },
+      { item: "CapeDeepNorth", amount: 1, quality: 2 },
+      { item: "MeadFrostResist", amount: 5, quality: 1 },
+      { item: "MooseKebab", amount: 5, quality: 1 },
+      { item: "SealSoup", amount: 5, quality: 1 },
+      { item: "Pancakes", amount: 5, quality: 1 },
+    ],
+  },
+  {
+    name: "Prep: Eikthyr",
+    nameKey: "admin.items.kit.eikthyr",
+    lines: [
+      { item: "SpearFlint", amount: 1, quality: 2 },
+      { item: "ShieldWood", amount: 1, quality: 2 },
+      { item: "ArmorLeatherChest", amount: 1, quality: 2 },
+      { item: "ArmorLeatherLegs", amount: 1, quality: 2 },
+      { item: "HelmetLeather", amount: 1, quality: 2 },
+      { item: "CookedMeat", amount: 5, quality: 1 },
+      { item: "CookedDeerMeat", amount: 5, quality: 1 },
+      { item: "Honey", amount: 5, quality: 1 },
+    ],
+  },
+  {
+    name: "Prep: The Elder",
+    nameKey: "admin.items.kit.elder",
+    lines: [
+      { item: "BowFineWood", amount: 1, quality: 2 },
+      { item: "AxeBronze", amount: 1, quality: 2 },
+      { item: "ShieldBronzeBuckler", amount: 1, quality: 2 },
+      { item: "ArmorBronzeChest", amount: 1, quality: 2 },
+      { item: "ArmorBronzeLegs", amount: 1, quality: 2 },
+      { item: "HelmetBronze", amount: 1, quality: 2 },
+      { item: "ArrowFire", amount: 100, quality: 1 },
+      { item: "MeadHealthMinor", amount: 5, quality: 1 },
+      { item: "MeadStaminaMinor", amount: 5, quality: 1 },
+      { item: "DeerStew", amount: 5, quality: 1 },
+      { item: "MinceMeatSauce", amount: 5, quality: 1 },
+      { item: "CarrotSoup", amount: 5, quality: 1 },
+    ],
+  },
+  {
+    name: "Prep: Bonemass",
+    nameKey: "admin.items.kit.bonemass",
+    lines: [
+      { item: "MaceIron", amount: 1, quality: 2 },
+      { item: "ShieldBanded", amount: 1, quality: 2 },
+      { item: "ArmorIronChest", amount: 1, quality: 2 },
+      { item: "ArmorIronLegs", amount: 1, quality: 2 },
+      { item: "HelmetIron", amount: 1, quality: 2 },
+      { item: "MeadPoisonResist", amount: 5, quality: 1 },
+      { item: "MeadHealthMedium", amount: 5, quality: 1 },
+      { item: "MeadStaminaMinor", amount: 5, quality: 1 },
+      { item: "Sausages", amount: 5, quality: 1 },
+      { item: "SerpentStew", amount: 5, quality: 1 },
+      { item: "TurnipStew", amount: 5, quality: 1 },
+    ],
+  },
+  {
+    name: "Prep: Moder",
+    nameKey: "admin.items.kit.moder",
+    lines: [
+      { item: "BowDraugrFang", amount: 1, quality: 2 },
+      { item: "SwordSilver", amount: 1, quality: 2 },
+      { item: "ShieldSilver", amount: 1, quality: 2 },
+      { item: "ArmorWolfChest", amount: 1, quality: 2 },
+      { item: "ArmorWolfLegs", amount: 1, quality: 2 },
+      { item: "HelmetDrake", amount: 1, quality: 2 },
+      { item: "CapeWolf", amount: 1, quality: 2 },
+      { item: "ArrowObsidian", amount: 100, quality: 1 },
+      { item: "ArrowPoison", amount: 100, quality: 1 },
+      { item: "MeadFrostResist", amount: 5, quality: 1 },
+      { item: "MeadHealthMedium", amount: 5, quality: 1 },
+      { item: "MeadStaminaMinor", amount: 5, quality: 1 },
+      { item: "WolfMeatSkewer", amount: 5, quality: 1 },
+      { item: "SerpentStew", amount: 5, quality: 1 },
+      { item: "OnionSoup", amount: 5, quality: 1 },
+    ],
+  },
+  {
+    name: "Prep: Yagluth",
+    nameKey: "admin.items.kit.yagluth",
+    lines: [
+      { item: "MaceSilver", amount: 1, quality: 2 },
+      { item: "ShieldBlackmetal", amount: 1, quality: 2 },
+      { item: "ArmorPaddedCuirass", amount: 1, quality: 2 },
+      { item: "ArmorPaddedGreaves", amount: 1, quality: 2 },
+      { item: "HelmetPadded", amount: 1, quality: 2 },
+      { item: "BarleyWine", amount: 5, quality: 1 },
+      { item: "MeadHealthMedium", amount: 5, quality: 1 },
+      { item: "MeadStaminaMedium", amount: 5, quality: 1 },
+      { item: "LoxPie", amount: 5, quality: 1 },
+      { item: "FishWraps", amount: 5, quality: 1 },
+      { item: "Bread", amount: 5, quality: 1 },
+    ],
+  },
+  {
+    name: "Prep: The Queen",
+    nameKey: "admin.items.kit.queen",
+    lines: [
+      { item: "SwordMistwalker", amount: 1, quality: 2 },
+      { item: "ShieldCarapace", amount: 1, quality: 2 },
+      { item: "ArmorCarapaceChest", amount: 1, quality: 2 },
+      { item: "ArmorCarapaceLegs", amount: 1, quality: 2 },
+      { item: "HelmetCarapace", amount: 1, quality: 2 },
+      { item: "CapeFeather", amount: 1, quality: 2 },
+      { item: "Demister", amount: 1, quality: 1 },
+      { item: "MeadPoisonResist", amount: 5, quality: 1 },
+      { item: "MeadHealthMajor", amount: 5, quality: 1 },
+      { item: "MeadStaminaLingering", amount: 5, quality: 1 },
+      { item: "MisthareSupreme", amount: 5, quality: 1 },
+      { item: "MeatPlatter", amount: 5, quality: 1 },
+      { item: "Salad", amount: 5, quality: 1 },
+    ],
+  },
+  {
+    name: "Prep: Fader",
+    nameKey: "admin.items.kit.fader",
+    lines: [
+      { item: "SwordNiedhogg", amount: 1, quality: 2 },
+      { item: "ShieldFlametal", amount: 1, quality: 2 },
+      { item: "ArmorFlametalChest", amount: 1, quality: 2 },
+      { item: "ArmorFlametalLegs", amount: 1, quality: 2 },
+      { item: "HelmetFlametal", amount: 1, quality: 2 },
+      { item: "CapeAsksvin", amount: 1, quality: 2 },
+      { item: "BarleyWine", amount: 5, quality: 1 },
+      { item: "MeadHealthMajor", amount: 5, quality: 1 },
+      { item: "MeadHealthLingering", amount: 5, quality: 1 },
+      { item: "MeadStaminaLingering", amount: 5, quality: 1 },
+      { item: "MashedMeat", amount: 5, quality: 1 },
+      { item: "PiquantPie", amount: 5, quality: 1 },
+      { item: "ScorchingMedley", amount: 5, quality: 1 },
+    ],
+  },
+  {
+    name: "Prep: Kall Fimbulbringer",
+    nameKey: "admin.items.kit.kall",
+    lines: [
+      { item: "MaceGold", amount: 1, quality: 2 },
+      { item: "ShieldGold", amount: 1, quality: 2 },
+      { item: "ArmorDeepNorthHeavyChest", amount: 1, quality: 2 },
+      { item: "ArmorDeepNorthHeavylegs", amount: 1, quality: 2 },
+      { item: "HelmetDNHeavy", amount: 1, quality: 2 },
+      { item: "CapeDeepNorth", amount: 1, quality: 2 },
+      { item: "BarleyWine", amount: 5, quality: 1 },
+      { item: "MeadFrostResist", amount: 5, quality: 1 },
+      { item: "MeadHealthMajor", amount: 5, quality: 1 },
+      { item: "MeadHealthLingering", amount: 5, quality: 1 },
+      { item: "MeadStaminaLingering", amount: 5, quality: 1 },
+      { item: "MooseKebab", amount: 5, quality: 1 },
+      { item: "SealSoup", amount: 5, quality: 1 },
+      { item: "Pancakes", amount: 5, quality: 1 },
+    ],
+  },
+
 ];
 
 function validKit(k: unknown): k is Kit {

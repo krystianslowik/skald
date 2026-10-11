@@ -91,7 +91,7 @@ describe("map storage", () => {
   it("shows quality, durability and the crafter of gear", () => {
     const chest = find((m) => m.data.type === "storage" && m.data.store.prefab === "piece_chest_private");
     inLocale(<MapDetails marker={chest} seedName="s" onClose={() => {}} />);
-    expect(screen.getByRole("heading", { name: "Personal chest" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Personal Chest" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Bronze Sword, 1/ }));
     expect(screen.getByText(/Quality 3/)).toBeInTheDocument();
     expect(screen.getByText(/Durability 287\.5/)).toBeInTheDocument();
@@ -146,7 +146,7 @@ describe("VillageStores", () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(storage)));
     const onShow = vi.fn();
     inLocale(<VillageStores saveKey="a" onShow={onShow} />, "pl");
-    expect(await screen.findByText(/Rodzajów rzeczy: \d+, schowków: \d+/)).toBeInTheDocument();
+    expect(await screen.findByText(/Rodzaje przedmiotów: \d+, schowki: \d+/)).toBeInTheDocument();
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "iron" } });
     await waitFor(() => expect(screen.getAllByRole("button", { name: /Żelazo/ })).toHaveLength(1));
     fireEvent.click(screen.getByRole("button", { name: /Żelazo/ }));

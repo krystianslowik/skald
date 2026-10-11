@@ -77,7 +77,7 @@ describe("Dashboard", () => {
       expect(screen.getByRole("heading", { name: t })).toBeInTheDocument();
     }
     expect(screen.getByText((_, el) => el?.tagName === "SPAN" && el.textContent === "Ragnar falls in battle")).toBeInTheDocument();
-    expect(screen.getByText("Raid: Eikthyr's herd")).toBeInTheDocument();
+    expect(screen.getByText("Raid: Eikthyr rallies the creatures of the forest")).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "World" })).getByText("Day 1")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Download backup worlds-20261009-180000.zip" })).toBeInTheDocument();
     expect(screen.getAllByText(/Prometheus is silent/).length).toBe(3);
@@ -107,7 +107,7 @@ describe("Dashboard", () => {
     const dl = screen.getByRole("link", { name: "Pobierz kopię worlds-20261009-180000.zip" });
     expect(dl).toHaveAttribute("href", "/api/backups/worlds-20261009-180000.zip");
     expect(dl).toHaveAttribute("download", "worlds-20261009-180000.zip");
-    expect(screen.getByText("Najazd: stado Eikthyra")).toBeInTheDocument();
+    expect(screen.getByText("Najazd: Eikthyr gromadzi leśne stworzenia")).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Świat" })).getByText("Dzień 1")).toBeInTheDocument();
     const map = screen.getByRole("link", { name: /Mapa świata/ });
     expect(map).toHaveAttribute("href", "https://valheim-map.world/?seed=ZbzIWkK5KK&offset=0,0&zoom=0.600&ver=1.0.7");
@@ -126,7 +126,7 @@ describe("Dashboard", () => {
     s.world.meta = null;
     s.server.netStats = null;
     inPolish(<Dashboard live={{ state: s, logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
-    expect(screen.getByText(/Zapis świata jeszcze nieczytelny/)).toBeInTheDocument();
+    expect(screen.getByText(/Zapis świata nie jest jeszcze czytelny/)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Mapa świata/ })).not.toBeInTheDocument();
     expect(screen.queryByText("Obiekty w świecie")).not.toBeInTheDocument();
     expect(screen.getAllByText("nieznane")).toHaveLength(7);
@@ -205,10 +205,10 @@ describe("Profile sheet", () => {
     await within(dialog).findByText("12 h");
     expect(within(dialog).getByText("najdłuższa 9 dni")).toBeInTheDocument();
     expect(within(dialog).getByText("0,25 na godzinę")).toBeInTheDocument();
-    expect(within(dialog).getByRole("img", { name: /Czas gry dziennie w ostatnich 30 dniach/ })).toBeInTheDocument();
+    expect(within(dialog).getByRole("img", { name: /Czas gry w ostatnich 30 dniach/ })).toBeInTheDocument();
     expect(within(dialog).getByText("Pierwsza krew").closest("li")).not.toHaveClass("opacity-45");
     expect(within(dialog).getByText("Nocny marek").closest("li")).toHaveClass("opacity-45");
-    expect(within(dialog).getByText("jeszcze zamknięta")).toBeInTheDocument();
+    expect(within(dialog).getByText("jeszcze niezdobyta")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/players/Ragnar", expect.anything());
     // Shift+Tab from the first focusable wraps inside the dialog.
     fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
@@ -308,7 +308,7 @@ describe("Server settings", () => {
     const presets = within(dialog).getByRole("radiogroup", { name: "Presets" });
     fireEvent.click(within(presets).getByRole("radio", { name: "Hard" }));
     expect(within(presets).getByRole("radio", { name: "Hard" })).toHaveAttribute("aria-checked", "true");
-    expect(await within(dialog).findByText("Tougher enemies and harsher deaths.")).toBeInTheDocument();
+    expect(await within(dialog).findByText("Harder combat and more frequent raids.")).toBeInTheDocument();
     const raids = within(dialog).getByRole("radiogroup", { name: "raids" });
     expect(within(raids).getByRole("radio", { name: "preset" })).toHaveAttribute("aria-checked", "true");
     fireEvent.click(within(raids).getByRole("radio", { name: "none" }));
@@ -474,8 +474,8 @@ describe("i18n", () => {
     expect(i.ago(new Date(Date.now() - 5 * 60_000).toISOString())).toBe("5 min temu");
     expect(i.ago(new Date(Date.now() - 3 * 86_400_000).toISOString())).toBe("3 dni temu");
     expect(i.modifiers("-crossplay -modifier raids less")).toEqual(["crossplay", "najazdy: rzadziej"]);
-    expect(i.raidLabel("foresttrolls")).toBe("leśne trolle");
-    expect(i.raidLabel("hildirboss2")).toBe("łowcy nagród Hildir");
+    expect(i.raidLabel("foresttrolls")).toBe("Ziemia drży");
+    expect(i.raidLabel("hildirboss2")).toBe("Przechodzą cię ciarki");
     expect(i.raidLabel("army_new_thing")).toBe("army_new_thing");
     expect(i.number(0.25, 2)).toBe("0,25");
   });
@@ -490,7 +490,7 @@ describe("i18n", () => {
     expect(i.ago(new Date(Date.now() - 2 * 3_600_000).toISOString())).toBe("2 h ago");
     expect(i.ago(null)).toBe("never");
     expect(i.modifiers("-modifier deathpenalty casual -preset hard")).toEqual(["death penalty: casual", "preset: hard"]);
-    expect(i.raidLabel("army_eikthyr")).toBe("Eikthyr's herd");
+    expect(i.raidLabel("army_eikthyr")).toBe("Eikthyr rallies the creatures of the forest");
     expect(i.lookup("badge.night_owl.label")).toBe("Night owl");
     expect(i.lookup("badge.nope.label")).toBeUndefined();
     expect(i.number(0.25, 2)).toBe("0.25");

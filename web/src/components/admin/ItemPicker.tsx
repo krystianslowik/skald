@@ -70,7 +70,10 @@ export function ItemPicker({ target: initial, lines: initialLines, onClose }: { 
   };
   const remove = (i: number) => setLines((ls) => ls.filter((_, j) => j !== i));
 
-  const shownKits = kits.length > 0 ? kits : PRESET_KITS;
+  const kitGroups = [
+    { title: t("admin.items.defaultKits"), kits: PRESET_KITS.map((k) => ({ ...k, name: t(k.nameKey) })), custom: false },
+    { title: t("admin.items.customKits"), kits, custom: true },
+  ];
   const storeKit = () => {
     const name = (kitName ?? "").trim();
     if (!name || lines.length === 0) return;
@@ -193,26 +196,28 @@ export function ItemPicker({ target: initial, lines: initialLines, onClose }: { 
           <p className="label-caps mb-2">{t("admin.items.where")}</p>
           <TargetChips value={target} onChange={setTarget} />
         </div>
-        <div>
-          <p className="label-caps mb-2">{t("admin.items.kits")}</p>
-          <div className="flex flex-wrap gap-2">
-            {shownKits.map((k) => (
-              <span key={k.name} className="inline-flex items-center">
-                <Chip on={false} onClick={() => setLines(k.lines.slice(0, MAX_LINES))} title={k.lines.map((l) => `${l.amount} ${itemLabel(l.item, lookup)}`).join(", ")}>
-                  {k.name}
-                  <span className="text-xs font-normal text-ash">{k.lines.length}</span>
-                </Chip>
-                {kits.length > 0 && (
-                  <button type="button" onClick={() => dropKit(k.name)} aria-label={t("admin.items.kitDelete", { name: k.name })} className="press -ml-1 grid h-9 w-7 place-items-center text-ash hover:text-blood">
-                    <svg width="9" height="9" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
-                      <path d="M3 3l10 10M13 3L3 13" />
-                    </svg>
-                  </button>
-                )}
-              </span>
-            ))}
+        {kitGroups.filter((group) => group.kits.length > 0).map((group) => (
+          <div key={group.title}>
+            <p className="label-caps mb-2">{group.title}</p>
+            <div className="flex flex-wrap gap-2">
+              {group.kits.map((k) => (
+                <span key={k.name} className="inline-flex items-center">
+                  <Chip on={false} onClick={() => setLines(k.lines.slice(0, MAX_LINES))} title={k.lines.map((l) => `${l.amount} ${itemLabel(l.item, lookup)}`).join(", ")}>
+                    {k.name}
+                    <span className="text-xs font-normal text-ash">{k.lines.length}</span>
+                  </Chip>
+                  {group.custom && (
+                    <button type="button" onClick={() => dropKit(k.name)} aria-label={t("admin.items.kitDelete", { name: k.name })} className="press -ml-1 grid h-9 w-7 place-items-center text-ash hover:text-blood">
+                      <svg width="9" height="9" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+                        <path d="M3 3l10 10M13 3L3 13" />
+                      </svg>
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
           </div>
-        </div>
+        ))}
         <div>
           <label htmlFor="item-q" className="label-caps mb-2 block">
             {t("admin.items.search")}

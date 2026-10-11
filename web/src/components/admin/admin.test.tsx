@@ -2,7 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "../Dashboard";
 import { describeAdmin } from "../Saga";
-import { I18nProvider, makeI18n } from "../../i18n";
+import { I18nProvider, LocaleToggle, makeI18n } from "../../i18n";
+import { ItemPicker } from "./ItemPicker";
 import { Glide } from "../../lib/live";
 import { createLogStore } from "../../lib/useValheim";
 import { emptyAgentState, type AdminStatus, type ApiState } from "../../types";
@@ -62,6 +63,57 @@ afterEach(() => {
 });
 
 describe("admin", () => {
+
+  it("updates default kit names when the language changes", () => {
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() });
+    api(status());
+    render(<I18nProvider locale="en"><LocaleToggle /><ItemPicker target={{ at: { x: 0, z: 0 } }} onClose={() => {}} /></I18nProvider>);
+    expect(screen.getByRole("button", { name: "Starter7" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Bronze age6" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Boss prep5" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Zmień język na Polski" }));
+    expect(screen.getByRole("button", { name: "Na początek7" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Epoka brązu6" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Przygotowanie do bossa5" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Starter7" })).not.toBeInTheDocument();
+  });
+
+  it("preserves user kit names when the language changes", () => {
+    const kits = [{ name: "Starter", lines: [{ item: "Wood", amount: 50, quality: 1 }] }];
+    vi.stubGlobal("localStorage", { getItem: (key: string) => key === "skald.admin.kits" ? JSON.stringify(kits) : null, setItem: vi.fn() });
+    api(status());
+    render(<I18nProvider locale="en"><LocaleToggle /><ItemPicker target={{ at: { x: 0, z: 0 } }} onClose={() => {}} /></I18nProvider>);
+    expect(screen.getByRole("button", { name: "Starter1" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Zmień język na Polski" }));
+    expect(screen.getByRole("button", { name: "Starter1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Usuń zestaw Starter" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Na początek7" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Usuń zestaw Na początek" })).not.toBeInTheDocument();
+  });
+
+  it("keeps default kits available after saving and deleting a custom kit", () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => void store.set(key, value) });
+    api(status());
+    render(<I18nProvider locale="en"><ItemPicker target={{ at: { x: 0, z: 0 } }} onClose={() => {}} /></I18nProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Starter7" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save as kit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Kit name" }), { target: { value: "My supplies" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByRole("button", { name: "My supplies7" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Starter7" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Prep: Moder15" })).toBeInTheDocument();
+    const saved = JSON.parse(store.get("skald.admin.kits")!);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].name).toBe("My supplies");
+    expect(saved[0]).not.toHaveProperty("nameKey");
+    expect(screen.queryByRole("button", { name: "Delete kit Starter" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete kit My supplies" }));
+    expect(screen.queryByRole("button", { name: "My supplies7" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Starter7" })).toBeInTheDocument();
+    expect(JSON.parse(store.get("skald.admin.kits")!)).toEqual([]);
+  });
+
   it("stays hidden when the agent has no bridge", async () => {
     const calls = api(status({}, { available: false, reason: "off" }));
     renderDashboard();
