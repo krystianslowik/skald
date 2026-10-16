@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"slices"
 	"testing"
 )
 
@@ -149,6 +150,49 @@ func TestParseChunkNature(t *testing.T) {
 	}
 	if len(cd.built) != 1 {
 		t.Errorf("built = %+v, want the planted beech only", cd.built)
+	}
+}
+
+// shortNatureZDO writes a ZDO in the short position form (no height).
+func shortNatureZDO(b *bytes.Buffer, prefab string, x, z int16) {
+	w := func(v any) { _ = binary.Write(b, binary.LittleEndian, v) }
+	w(uint16(flagShortPos))
+	w(x)
+	w(z)
+	w(stableHash(prefab))
+}
+
+// TestParseChunkUnderwater drops rocks, logs and pickables clearly under the
+// sea (water at 30 m, 4 m of tolerance) and keeps the shoreline, ore anywhere
+// and objects saved without a height.
+func TestParseChunkUnderwater(t *testing.T) {
+	var b bytes.Buffer
+	natureZDO(&b, "rock4_coast", 10, 12, 10, nil, nil, nil)      // seabed: dropped
+	natureZDO(&b, "beech_log", 12, 25.9, 10, nil, nil, nil)      // sunken log: dropped
+	natureZDO(&b, "Pickable_Stone", 14, 20, 10, nil, nil, nil)   // under water: dropped
+	natureZDO(&b, "Rock_4", 16, 26, 10, nil, nil, nil)           // shoreline: kept
+	natureZDO(&b, "Pickable_Flint", 18, 28.5, 10, nil, nil, nil) // beach: kept
+	natureZDO(&b, "Leviathan", 20, 5, 10, nil, nil, nil)         // ore in open sea: kept
+	natureZDO(&b, "SwampTree1", 22, 29, 10, nil, nil, nil)       // swamp at the water line: kept
+	shortNatureZDO(&b, "Rock_4", 24, 10)                         // no height: kept
+	var raw bytes.Buffer
+	_ = binary.Write(&raw, binary.LittleEndian, uint16(41))
+	_ = binary.Write(&raw, binary.LittleEndian, int32(8))
+	raw.Write(b.Bytes())
+	cd, err := parseChunk(raw.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, it := range cd.nature {
+		got = append(got, natureKinds[it.kind].name)
+	}
+	want := []string{"Rock_4", "Pickable_Flint", "Leviathan", "SwampTree1", "Rock_4"}
+	if !slices.Equal(got, want) {
+		t.Errorf("nature = %v, want %v", got, want)
+	}
+	if cd.nature[4].x != 24 || cd.nature[4].z != 10 {
+		t.Errorf("short position = %+v", cd.nature[4])
 	}
 }
 

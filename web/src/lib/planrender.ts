@@ -5,12 +5,21 @@
 
 import { activeBase, baseAt, groupBases, pieceCorners, pieceLocal, pieceStorey, storeyOf, type Base, type Piece } from "./pieces";
 import { closeRing, type View } from "./mapgeo";
+import { mix, pieceMaterial, rgba, type Material, type Rgb } from "./materials";
 
 /** Below this scale (px per metre) nothing is drawn or fetched; full strength from FULL on. */
 export const PLAN_MIN_SCALE = 1.2;
 export const PLAN_FULL_SCALE = 2;
 /** The floor switcher shows from this scale on. */
 export const STOREY_SCALE = 2;
+/**
+ * Roofs lie over every base that is not showing its roof level: full up to
+ * ROOF_FULL_SCALE, where a house is a few dozen pixels and its outline reads
+ * better than its rooms, gone from ROOF_GONE_SCALE on, so a base zoomed into
+ * (a tap flies to 8) is a clean floor plan.
+ */
+export const ROOF_FULL_SCALE = 2.5;
+export const ROOF_GONE_SCALE = 5.5;
 
 /** The storey picked for one base: an index into its levels, or levels.length for the roofs. */
 export interface StoreyPick {
@@ -41,13 +50,50 @@ const TINT: Partial<Record<Piece["kind"], [fill: string, line: string]>> = {
 const ROOF_FILL = "rgba(150, 74, 42, 0.14)";
 const ROOF_INK = "rgba(112, 52, 30, 0.42)";
 const ROOF_EDGE = "rgba(112, 52, 30, 0.22)";
+/** The roofs laid over a floor plan: a stronger wash and the tiles' edges, no hachures (they would shimmer when small). */
+const ROOF_COVER = "rgba(150, 74, 42, 0.42)";
+const ROOF_COVER_EDGE = "rgba(96, 44, 24, 0.5)";
 const ACTIVE = "rgba(33, 70, 95, 0.6)";
+
+/** How a material's floors, walls and roofs are drawn. */
+interface Palette {
+  floor: string;
+  wall: string;
+  roof: string;
+  roofEdge: string;
+  cover: string;
+  coverEdge: string;
+}
+
+/** The fixed colours, for pieces without a material tone. */
+const PLAIN: Palette = { floor: FLOOR, wall: INK, roof: ROOF_FILL, roofEdge: ROOF_EDGE, cover: ROOF_COVER, coverEdge: ROOF_COVER_EDGE };
+const PARCHMENT: Rgb = [232, 214, 172];
+const INK_RGB: Rgb = [58, 42, 26];
+const BLACK: Rgb = [0, 0, 0];
+
+/**
+ * A material's colours from its tone: floors are parchment leaning towards
+ * it, so boards still read as a plan; walls ink tinted by it; roofs washed in
+ * it.
+ */
+export function tonePalette(tone: Rgb): Palette {
+  const edge = mix(tone, BLACK, 0.45);
+  return {
+    floor: rgba(mix(PARCHMENT, tone, 0.45), 0.92),
+    wall: rgba(mix(INK_RGB, tone, 0.3), 1),
+    roof: rgba(tone, 0.2),
+    roofEdge: rgba(edge, 0.3),
+    cover: rgba(tone, 0.55),
+    coverEdge: rgba(edge, 0.6),
+  };
+}
 
 /** Everything one storey of one base draws, by how it is stroked. */
 interface Paths {
-  floors: Path2D;
-  /** Walls by thickness (metres), stroked along their length. */
-  walls: Map<number, Path2D>;
+  /** Floors by material ("" for none). */
+  floors: Map<string, Path2D>;
+  /** Walls by material and thickness in metres ("stone|1"), stroked along their length. */
+  walls: Map<string, Path2D>;
   doors: Path2D;
   fences: Path2D;
   beams: Path2D;
@@ -55,14 +101,15 @@ interface Paths {
   poles: Map<number, Path2D>;
   stairs: Path2D;
   marks: Map<Piece["kind"], Path2D>;
-  roofs: Path2D;
+  /** Roof tiles by material. */
+  roofs: Map<string, Path2D>;
   hatch: Path2D;
   dots: Path2D;
   empty: boolean;
 }
 
 function newPaths(): Paths {
-  return { floors: new Path2D(), walls: new Map(), doors: new Path2D(), fences: new Path2D(), beams: new Path2D(), poles: new Map(), stairs: new Path2D(), marks: new Map(), roofs: new Path2D(), hatch: new Path2D(), dots: new Path2D(), empty: true };
+  return { floors: new Map(), walls: new Map(), doors: new Path2D(), fences: new Path2D(), beams: new Path2D(), poles: new Map(), stairs: new Path2D(), marks: new Map(), roofs: new Map(), hatch: new Path2D(), dots: new Path2D(), empty: true };
 }
 
 function rect(path: Path2D, p: Piece) {
@@ -79,7 +126,7 @@ function line(path: Path2D, p: Piece, ax: number, az: number, bx: number, bz: nu
   path.lineTo(b[0], b[1]);
 }
 
-const bucket = (m: Map<number, Path2D>, k: number) => {
+const bucket = <K>(m: Map<K, Path2D>, k: K) => {
   let p = m.get(k);
   if (!p) m.set(k, (p = new Path2D()));
   return p;
@@ -130,12 +177,13 @@ function roofTile(outline: Path2D, hatch: Path2D, p: Piece) {
 
 function addPiece(out: Paths, p: Piece) {
   out.empty = false;
+  const mat = pieceMaterial(p.name) ?? "";
   switch (p.kind) {
     case "floor":
-      rect(out.floors, p);
+      rect(bucket(out.floors, mat), p);
       break;
     case "wall":
-      line(bucket(out.walls, Math.round(p.d * 20) / 20), p, -p.w / 2, 0, p.w / 2, 0);
+      line(bucket(out.walls, `${mat}|${Math.round(p.d * 20) / 20}`), p, -p.w / 2, 0, p.w / 2, 0);
       break;
     case "door":
       door(out.doors, p);
@@ -156,7 +204,7 @@ function addPiece(out: Paths, p: Piece) {
       stair(out.stairs, p);
       break;
     case "roof":
-      roofTile(out.roofs, out.hatch, p);
+      roofTile(bucket(out.roofs, mat), out.hatch, p);
       break;
     case "other":
       // An unknown piece: only a small mark where it stands.
@@ -187,10 +235,20 @@ export class FloorPlan {
   readonly bases: Base[];
   private storeyPaths = new Map<string, Paths[]>();
   private byKey: Map<string, Base>;
+  private palettes = new Map<string, Palette>();
 
   constructor(private readonly pieces: readonly Piece[]) {
     this.bases = typeof Path2D === "undefined" ? [] : groupBases(pieces);
     this.byKey = new Map(this.bases.map((b) => [b.key, b]));
+  }
+
+  /** Material tones from the item icons; an empty map draws the fixed colours. */
+  setTones(tones: ReadonlyMap<Material, Rgb>): void {
+    this.palettes = new Map([...tones].map(([m, t]) => [m, tonePalette(t)]));
+  }
+
+  private palette(mat: string): Palette {
+    return this.palettes.get(mat) ?? PLAIN;
   }
 
   /** The storey a base shows: the one picked for it, else its main one. */
@@ -243,6 +301,19 @@ export class FloorPlan {
       }
       g.globalAlpha = alpha;
       this.drawStorey(g, list[level]!, px, scale, false);
+      const roofs = list[list.length - 1]!;
+      const cover = roofAlpha(scale);
+      if (level < list.length - 1 && cover > 0 && !roofs.empty) {
+        g.globalAlpha = alpha * cover;
+        g.lineWidth = 0.7 * px;
+        for (const [mat, path] of roofs.roofs) {
+          const pal = this.palette(mat);
+          g.fillStyle = pal.cover;
+          g.fill(path);
+          g.strokeStyle = pal.coverEdge;
+          g.stroke(path);
+        }
+      }
       if (b.key === active && b.levels.length > 1) {
         // The base the floor switcher is for: corner marks, as on a drawing sheet.
         g.globalAlpha = alpha;
@@ -274,11 +345,13 @@ export class FloorPlan {
     g.lineJoin = "miter";
     g.lineCap = "butt";
     // Floors: light plates with a hairline, so the grid of boards reads.
-    g.fillStyle = FLOOR;
-    g.fill(s.floors);
     g.strokeStyle = FLOOR_LINE;
     g.lineWidth = 0.7 * px;
-    g.stroke(s.floors);
+    for (const [mat, path] of s.floors) {
+      g.fillStyle = this.palette(mat).floor;
+      g.fill(path);
+      g.stroke(path);
+    }
     if (!ghost) {
       for (const [kind, path] of s.marks) {
         const [fill, ink] = TINT[kind] ?? ["rgba(80, 60, 40, 0.2)", INK];
@@ -293,23 +366,29 @@ export class FloorPlan {
       g.stroke(s.stairs);
     }
     // Roofs: a thin wash, hachures down the slope, the tiles' edges.
-    g.fillStyle = ROOF_FILL;
-    g.fill(s.roofs);
+    for (const [mat, path] of s.roofs) {
+      g.fillStyle = this.palette(mat).roof;
+      g.fill(path);
+    }
     g.strokeStyle = ROOF_INK;
     g.lineWidth = 0.6 * px;
     g.stroke(s.hatch);
-    g.strokeStyle = ROOF_EDGE;
     g.lineWidth = 0.7 * px;
-    g.stroke(s.roofs);
-    // Walls: thick ink along their length, never thinner than a couple of
-    // pixels; close in, their own thickness takes over.
-    g.strokeStyle = INK;
-    g.lineCap = "square";
-    const min = (1.3 + 0.3 * Math.min(scale, 8)) * px;
-    for (const [d, path] of s.walls) {
-      g.lineWidth = Math.max(min, d);
+    for (const [mat, path] of s.roofs) {
+      g.strokeStyle = this.palette(mat).roofEdge;
       g.stroke(path);
     }
+    // Walls: thick ink along their length, never thinner than a couple of
+    // pixels; close in, their own thickness takes over.
+    g.lineCap = "square";
+    const min = (1.3 + 0.3 * Math.min(scale, 8)) * px;
+    for (const [key, path] of s.walls) {
+      const bar = key.indexOf("|");
+      g.strokeStyle = this.palette(key.slice(0, bar)).wall;
+      g.lineWidth = Math.max(min, Number(key.slice(bar + 1)));
+      g.stroke(path);
+    }
+    g.strokeStyle = INK;
     g.lineCap = "butt";
     g.lineWidth = 1 * px;
     g.stroke(s.doors);
@@ -338,6 +417,12 @@ export class FloorPlan {
 /** How strongly floor plans show at this scale. */
 export function planAlpha(scale: number): number {
   const t = Math.min(1, Math.max(0, (scale - PLAN_MIN_SCALE) / (PLAN_FULL_SCALE - PLAN_MIN_SCALE)));
+  return t * t * (3 - 2 * t);
+}
+
+/** How strongly roofs lie over the floor plans at this scale (see ROOF_FULL_SCALE). */
+export function roofAlpha(scale: number): number {
+  const t = Math.min(1, Math.max(0, (ROOF_GONE_SCALE - scale) / (ROOF_GONE_SCALE - ROOF_FULL_SCALE)));
   return t * t * (3 - 2 * t);
 }
 

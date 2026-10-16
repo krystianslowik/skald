@@ -24,7 +24,7 @@
 | `TERRAIN_DIR` | (empty) | Where terrain runs leave the world generator's grids (`/terrain`); empty turns the terrain image off. See [Terrain](#terrain) |
 | `BRIDGE_URL` | `http://127.0.0.1:9010` | The Skald bridge plugin inside the game process; the agent shares the pod's (or container's) network namespace, so loopback reaches it. See [Admin bridge](#admin-bridge) |
 | `BRIDGE_TOKEN` | (empty) | Same value as the game container's `SKALD_BRIDGE_TOKEN` (16+ characters). Empty leaves the `/bridge` routes unregistered and the admin UI hidden |
-| `BRIDGE_TESTED_BUILDS` | `l-1.0.17` | Game builds admin commands may run on without a confirmation from the panel, comma-separated; `*` allows any |
+| `BRIDGE_TESTED_BUILDS` | `l-1.0.17,l-1.0.20` | Game builds admin commands may run on without a confirmation from the panel, comma-separated; `*` allows any |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 
 ## skald-web
@@ -218,7 +218,10 @@ placed (a creator), creatures, spawners, dropped items, location and
 dungeon pieces never show; a cut tree or a mined rock is gone from the save
 and so from the answer. Dungeon interiors are left out whole, so the muddy
 scrap piles inside sunken crypts do not show either; iron on the map is the
-buried piles a wishbone finds and any lying in the open.
+buried piles a wishbone finds and any lying in the open. Rocks, logs and
+pickables more than 4 m under the sea (world y below 26 m; the water is at
+30 m) are left out too, so seabed rocks and sunken logs no longer draw inside
+lakes; ore deposits are kept wherever they lie.
 
 ```json
 {"generation":12,"bbox":[100,-220,140,-180],"spoilers":false,
@@ -282,6 +285,11 @@ How it works:
   the build as ETag (the sheet is immutable), and `/state` carries
   `icons: {available, build, count}`. The web tier proxies them as
   `/api/icons/*`. The browser loads the sheet once per game build.
+- Floor plans take their material tones from the same sheet: the browser
+  averages the icons of Wood, RoundLog (core wood), Stone, Iron, BlackMarble,
+  Grausten and Blackwood (ashwood) and tints floors, walls and roofs built of
+  each. Darkwood, stave and turf pieces, and every plan without a sheet, keep
+  the plain parchment colours. Nothing new is extracted or stored.
 - Exit codes of a single run (`--every 0`): 0 done or already current, 2 no
   game install found, 3 the game files could not be read (mid-update or an
   unknown format; the previous sheet stays), 4 the output is not writable,

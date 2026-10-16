@@ -111,6 +111,10 @@ func TestStatus(t *testing.T) {
 	if !st.Available || !st.Tested || st.GameBuild != "l-1.0.17" || st.Plugin != "0.1.1" || len(st.Commands) != len(Commands) {
 		t.Fatalf("got %+v", st)
 	}
+	f.build = "l-1.0.20"
+	if st = c.Status(context.Background()); !st.Available || !st.Tested {
+		t.Fatalf("l-1.0.20 is a tested build: %+v", st)
+	}
 	f.build = "l-1.0.18"
 	if st = c.Status(context.Background()); !st.Available || st.Tested {
 		t.Fatalf("untested build: %+v", st)

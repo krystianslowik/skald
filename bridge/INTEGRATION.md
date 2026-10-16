@@ -197,7 +197,7 @@ the game pod restarts the game and rotates the join code.
    - The other fallback is `BEPINEX=false`, which removes modding entirely
      and returns to vanilla.
 6. **Version gate**: the agent reads `gameBuild` from `/v1/health`. Keep an
-   allow-list of tested builds (`l-1.0.17`). On an unknown build, show "untested
+   allow-list of tested builds (`l-1.0.17`, `l-1.0.20`). On an unknown build, show "untested
    game build" in the panel and keep only the read-only commands until someone
    ticks it off.
 

@@ -546,8 +546,9 @@ func TestRealWorld(t *testing.T) {
 	if took > 2*time.Second {
 		t.Errorf("build took %v", took)
 	}
-	// About 316k trees, rocks, bushes, ore and pickables outside dungeons.
-	if n := b.Current().Nature.Len(); n < 300000 || n > 330000 {
+	// About 293k trees, rocks, bushes, ore and pickables outside dungeons and
+	// above the seabed (about 23k seabed rocks and sunken logs are left out).
+	if n := b.Current().Nature.Len(); n < 280000 || n > 310000 {
 		t.Errorf("nature = %d objects", n)
 	}
 	t.Logf("build %v (%.3f s inside), JSON %d B, gzip %d B, bases %d, listed locations %d, nature %d",

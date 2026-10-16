@@ -13,9 +13,9 @@ spec:
               valueFrom:
                 secretKeyRef: {name: skald-agent, key: BRIDGE_TOKEN}
             # Game builds commands may run on without a confirmation from the
-            # panel (comma-separated, "*" for any). Default: l-1.0.17.
+            # panel (comma-separated, "*" for any). Default: l-1.0.17,l-1.0.20.
             # - name: BRIDGE_TESTED_BUILDS
-            #   value: "l-1.0.17"
+            #   value: "l-1.0.17,l-1.0.20"
         # Copies SkaldBridge.dll into /config/bepinex/plugins (and the
         # BepInEx install, if it exists yet) after deleting older copies:
         # the image syncs that directory on start but never prunes it.
