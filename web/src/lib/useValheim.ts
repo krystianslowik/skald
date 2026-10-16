@@ -6,6 +6,10 @@ import { applyEvent } from "./apply";
 import { getLivePositions, setLivePositions } from "./live";
 
 const MAX_LOGS = 1500;
+/** Hidden at least this long, the page reads state and the log tail again on return. */
+const LONG_AWAY_MS = 30_000;
+const WS_CONNECTING = 0;
+const WS_OPEN = 1;
 
 /**
  * The live log tail, kept outside React state: log lines are the most frequent
@@ -98,32 +102,62 @@ export function useValheim(onUnauthorized: () => void): Valheim {
     refreshTimer.current = setTimeout(refreshIfShown, 1500);
   }, [refreshIfShown]);
 
+  /** Log lines appended from the socket so far, and the latest tail request. */
+  const liveLines = useRef(0);
+  const logRequest = useRef(0);
+
+  /**
+   * Replaces the log tail with the server's last lines (appending would keep a
+   * gap). Lines the socket delivered while the request was out stay on top
+   * unless the server's tail already has them; an older response is dropped.
+   */
+  const reloadLogs = useCallback(() => {
+    const req = ++logRequest.current;
+    const seen = liveLines.current;
+    getLogs(500)
+      .then((l) => {
+        if (req !== logRequest.current) return;
+        const since = liveLines.current - seen;
+        logs.set((cur) => {
+          if (since === 0) return l;
+          const have = new Set(l.map((x) => `${x.ts}\n${x.line}`));
+          const merged = l.concat(cur.slice(-since).filter((x) => !have.has(`${x.ts}\n${x.line}`)));
+          return merged.length > MAX_LOGS ? merged.slice(merged.length - MAX_LOGS) : merged;
+        });
+      })
+      .catch(() => undefined);
+  }, [logs]);
+
   useEffect(() => {
     void refresh();
-    getLogs(500).then((l) => logs.set(() => l)).catch(() => undefined);
+    reloadLogs();
     const poll = setInterval(refreshIfShown, 60_000);
-    const onVisible = () => {
-      if (document.hidden || !missed.current) return;
-      missed.current = false;
-      void refresh();
-    };
-    document.addEventListener("visibilitychange", onVisible);
     return () => {
       clearInterval(poll);
-      document.removeEventListener("visibilitychange", onVisible);
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
     };
-  }, [refresh, refreshIfShown, logs]);
+  }, [refresh, refreshIfShown, reloadLogs]);
 
   useEffect(() => {
     let cancelled = false;
     let attempt = 0;
     let sock: WebSocket | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    // Set once a socket closes: what happened until the next one opens never reached us.
+    let dropped = false;
+    let hiddenAt: number | null = document.hidden ? Date.now() : null;
+
+    /** /live does not replay what was missed: read state and the log tail again. */
+    const resync = () => {
+      missed.current = false;
+      void refresh();
+      reloadLogs();
+    };
 
     const onEvent = (ev: AgentEvent) => {
       if (ev.type === "log") {
         const line = String(ev.data.line ?? "");
+        liveLines.current += 1;
         logs.set((l) => {
           const next = l.length >= MAX_LOGS ? l.slice(l.length - MAX_LOGS + 1) : l.slice();
           next.push({ ts: ev.ts, line });
@@ -150,13 +184,20 @@ export function useValheim(onUnauthorized: () => void): Valheim {
     const connect = () => {
       if (typeof WebSocket === "undefined") return;
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      sock = new WebSocket(`${proto}//${location.host}/live`);
-      sock.onopen = () => {
+      const s = new WebSocket(`${proto}//${location.host}/live`);
+      sock = s;
+      // A socket replaced by wake() may still report late; only the current one counts.
+      const stale = () => cancelled || s !== sock;
+      s.onopen = () => {
+        if (stale()) return;
         attempt = 0;
-        if (!cancelled) setWs("up");
+        setWs("up");
+        if (!dropped) return;
+        dropped = false;
+        resync();
       };
-      sock.onmessage = (m) => {
-        if (cancelled) return;
+      s.onmessage = (m) => {
+        if (stale()) return;
         let msg: LiveMessage;
         try {
           msg = JSON.parse(String(m.data)) as LiveMessage;
@@ -170,8 +211,9 @@ export function useValheim(onUnauthorized: () => void): Valheim {
           setState((s) => (s ? share(s, { ...s, ...msg.state, online: msg.online }) : s));
         }
       };
-      sock.onclose = () => {
-        if (cancelled) return;
+      s.onclose = () => {
+        if (stale()) return;
+        dropped = true;
         setWs("down");
         // A closed socket may mean an expired session; /api/state tells us.
         void refresh();
@@ -181,13 +223,56 @@ export function useValheim(onUnauthorized: () => void): Valheim {
       };
     };
 
+    /**
+     * Back in front (a phone unlocked, a tab shown, a page restored from the
+     * back-forward cache) or back online. The backoff grown while asleep no
+     * longer applies: a dead or doubtful socket is replaced at once, and the
+     * new one resyncs when it opens. A short look away keeps a healthy socket
+     * and only catches up on state a hidden poll skipped.
+     */
+    const wake = (e: Event) => {
+      if (cancelled) return;
+      if (document.hidden) {
+        hiddenAt ??= Date.now();
+        return;
+      }
+      const away = hiddenAt === null ? 0 : Date.now() - hiddenAt;
+      hiddenAt = null;
+      attempt = 0;
+      // Back online, out of the back-forward cache or after a long sleep, a
+      // socket that looks open may be one the phone lost without a close.
+      const suspect = e.type === "online" || (e as PageTransitionEvent).persisted === true || away >= LONG_AWAY_MS;
+      const st = sock?.readyState;
+      // A retry stuck connecting since before the sleep is not trusted either.
+      const healthy = st === WS_OPEN || (st === WS_CONNECTING && !dropped);
+      if (healthy && !suspect) {
+        if (missed.current) {
+          missed.current = false;
+          void refresh();
+        }
+        return;
+      }
+      if (timer) clearTimeout(timer);
+      timer = null;
+      dropped = true;
+      const old = sock;
+      connect();
+      old?.close();
+    };
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("pageshow", wake);
+    window.addEventListener("online", wake);
+
     connect();
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", wake);
+      window.removeEventListener("pageshow", wake);
+      window.removeEventListener("online", wake);
       if (timer) clearTimeout(timer);
       sock?.close();
     };
-  }, [refresh, refreshSoon, logs]);
+  }, [refresh, refreshSoon, reloadLogs, logs]);
 
   return { state, logs, online: ws !== "down" && agentUp, lastAction };
 }

@@ -24,6 +24,8 @@ if (!("ResizeObserver" in window)) {
   };
 }
 class FakeWebSocket {
+  // Never connects: CONNECTING for good.
+  readyState = 0;
   onopen: (() => void) | null = null;
   onmessage: ((m: { data: string }) => void) | null = null;
   onclose: (() => void) | null = null;

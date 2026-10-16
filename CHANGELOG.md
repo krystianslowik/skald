@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- Unlocking a phone, switching back to the tab or coming back online now reconnects the live link at once instead of waiting up to 30 seconds, and reloads the server state and the Chronicle's log lines, so nothing that happened while the screen was off is missing.
+- A signed-in viewer is no longer sent to the login screen when the server is briefly unreachable (no network, or a restart that answers with an error). The panel opens and keeps retrying; only an expired session shows the login.
+
 ## [2026.10.4] - 2026-10-16
 
 ### Changed
