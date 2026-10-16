@@ -5,9 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func ptr(s string) *string { return &s }
@@ -33,13 +35,13 @@ type rules struct {
 	NameLength     struct{ Min, Max int } `json:"nameLength"`
 	PasswordLength struct{ Min, Max int } `json:"passwordLength"`
 	Names          []struct {
-		Name string `json:"name"`
-		Want string `json:"want"` // null = valid
+		Name string  `json:"name"`
+		Want *string `json:"want"` // null = valid
 	} `json:"names"`
 	Passwords []struct {
-		Password string `json:"password"`
-		Name     string `json:"name"`
-		Want     string `json:"want"`
+		Password string  `json:"password"`
+		Name     string  `json:"name"`
+		Want     *string `json:"want"`
 	} `json:"passwords"`
 	Inputs struct {
 		Prev struct {
@@ -89,20 +91,50 @@ func TestRulesMatchFixture(t *testing.T) {
 	if r.PasswordLength.Min != PasswordMin || r.PasswordLength.Max != PasswordMax {
 		t.Errorf("password length %d..%d, fixture %+v", PasswordMin, PasswordMax, r.PasswordLength)
 	}
+
+	// The long literals in the fixture must stay at the limit and one past it.
+	at := map[string]bool{}
+	for _, c := range r.Names {
+		at["name "+strconv.Itoa(utf8.RuneCountInString(c.Name))+" "+want(t, c.Want)] = true
+	}
+	for _, c := range r.Passwords {
+		at["password "+strconv.Itoa(len(c.Password))+" "+want(t, c.Want)] = true
+	}
+	for _, k := range []string{
+		"name " + strconv.Itoa(NameMax) + " ", "name " + strconv.Itoa(NameMax+1) + " length",
+		"password " + strconv.Itoa(PasswordMax) + " ", "password " + strconv.Itoa(PasswordMax+1) + " length",
+	} {
+		if !at[k] {
+			t.Errorf("fixture has no case %q", k)
+		}
+	}
+}
+
+// want reads a fixture verdict: null is valid, "" is a mistake (the dashboard
+// test would read it differently).
+func want(t *testing.T, w *string) string {
+	t.Helper()
+	if w == nil {
+		return ""
+	}
+	if *w == "" {
+		t.Fatal(`fixture verdict "" is ambiguous; write null for valid`)
+	}
+	return *w
 }
 
 func TestValidateName(t *testing.T) {
 	for _, tc := range loadRules(t).Names {
-		if got := ValidateName(tc.Name); got != tc.Want {
-			t.Errorf("ValidateName(%q) = %q, want %q", tc.Name, got, tc.Want)
+		if got := ValidateName(tc.Name); got != want(t, tc.Want) {
+			t.Errorf("ValidateName(%q) = %q, want %q", tc.Name, got, want(t, tc.Want))
 		}
 	}
 }
 
 func TestValidatePassword(t *testing.T) {
 	for _, tc := range loadRules(t).Passwords {
-		if got := ValidatePassword(tc.Password, tc.Name); got != tc.Want {
-			t.Errorf("ValidatePassword(%q, %q) = %q, want %q", tc.Password, tc.Name, got, tc.Want)
+		if got := ValidatePassword(tc.Password, tc.Name); got != want(t, tc.Want) {
+			t.Errorf("ValidatePassword(%q, %q) = %q, want %q", tc.Password, tc.Name, got, want(t, tc.Want))
 		}
 	}
 }

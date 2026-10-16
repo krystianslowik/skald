@@ -359,7 +359,14 @@
         }
       },
       {
-        "desc": "save interval at the bounds",
+        "desc": "save interval at the low bound",
+        "edit": {
+          "saveInterval": 60
+        },
+        "errors": {}
+      },
+      {
+        "desc": "save interval at the high bound",
         "edit": {
           "saveInterval": 7200
         },
