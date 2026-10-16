@@ -1,7 +1,7 @@
 import { HttpAgent, type AgentSource } from "./agent";
 import { createApp } from "./app";
 import { readCookie, SESSION_COOKIE, verifySession } from "./auth";
-import { loadConfig } from "./config";
+import { checkPasswordHash, loadConfig, type Config } from "./config";
 import { HistoryStore } from "./db";
 import { hashPassword } from "./hash";
 import { Hub } from "./hub";
@@ -27,7 +27,16 @@ if (process.argv[2] === "hash-password") {
   }
 }
 
-const cfg = loadConfig();
+// A bad setting stops the server here with one line naming the variable.
+let cfg: Config;
+try {
+  cfg = loadConfig();
+  await checkPasswordHash("PANEL_PASSWORD_HASH", cfg.passwordHash);
+  await checkPasswordHash("ADMIN_PASSWORD_HASH", cfg.adminPasswordHash);
+} catch (e) {
+  console.error(`skald-web: ${e instanceof Error ? e.message : String(e)}`);
+  process.exit(1);
+}
 
 let agent: AgentSource;
 let passwordHash = cfg.passwordHash;

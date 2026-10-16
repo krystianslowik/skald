@@ -2,6 +2,7 @@ import type { AgentSource } from "./agent";
 import { applyEvent } from "./apply";
 import type { HistoryStore } from "./db";
 import { deriveHistory } from "./history";
+import { cause, log as defaultLog, type Logger } from "./log";
 import { deriveProfiles } from "./profiles";
 import { emptyAgentState, isBridgeRead, UNSTORED_EVENTS, type AgentEvent, type AgentEventType, type AgentState, type History, type LiveMessage, type LivePlayer, type PlayerProfile } from "./types";
 
@@ -26,6 +27,8 @@ export interface HubOptions {
   /** IANA zone for profile calendar days. */
   timeZone?: string;
   clock?: () => number;
+  /** Where lost agent connections are reported; the process-wide logger by default. */
+  log?: Logger;
 }
 
 /**
@@ -49,6 +52,8 @@ export class Hub {
   private positionsSentAt = 0;
   private positionsTimer: ReturnType<typeof setTimeout> | null = null;
   private profilesCache: { at: number; value: PlayerProfile[] } | null = null;
+  /** The agent connection failed and has not come back yet: the next success is logged. */
+  private down = false;
   private readonly opts: Required<HubOptions>;
 
   constructor(
@@ -62,6 +67,7 @@ export class Hub {
       historyCacheMs: opts.historyCacheMs ?? 5_000,
       timeZone: opts.timeZone ?? "UTC",
       clock: opts.clock ?? Date.now,
+      log: opts.log ?? defaultLog,
     };
     for (const type of Object.keys(ON_CHANGE) as AgentEventType[]) {
       const ev = store.last(type);
@@ -169,8 +175,9 @@ export class Hub {
     for (const fn of this.listeners) {
       try {
         fn(m);
-      } catch {
+      } catch (e) {
         // a broken listener must not stop the others
+        this.opts.log.error("live listener failed", { cause: cause(e) });
       }
     }
   }
@@ -184,8 +191,10 @@ export class Hub {
   private async pollState(): Promise<void> {
     try {
       this.setState(await this.agent.getState());
-    } catch {
+    } catch (e) {
       this.stateOk = false;
+      // While the stream is down, the loop already reports the outage.
+      if (this.streaming && !this.stopped) this.opts.log.warn("agent state poll failed", { cause: cause(e) });
     }
     this.emit({ type: "state", state: this.state, online: this.online });
   }
@@ -193,6 +202,7 @@ export class Hub {
   private async loop(): Promise<void> {
     let attempt = 0;
     while (!this.stopped) {
+      let failure: unknown = "stream ended";
       try {
         const st = await this.agent.getState();
         this.setState(st);
@@ -211,14 +221,22 @@ export class Hub {
         this.emit({ type: "state", state: this.state, online: this.online });
         await this.agent.stream(since, (ev) => {
           attempt = 0;
+          // The first event proves the stream works, not just /state.
+          if (this.down) {
+            this.down = false;
+            this.opts.log.info("agent reachable again");
+          }
           this.ingest(epoch, ev);
         }, this.abort.signal);
-      } catch {
-        // fall through to backoff
+      } catch (e) {
+        failure = e;
       }
       const wasOnline = this.online;
       this.streaming = false;
       if (this.stopped) return;
+      // Rate-limited by the logger: a dead agent prints about once a minute.
+      this.down = true;
+      this.opts.log.warn("agent stream lost", { cause: cause(failure), retryMs: Math.min(this.opts.maxBackoffMs, 1000 * 2 ** attempt) });
       if (wasOnline || this.hasState) this.emit({ type: "state", state: this.state, online: false });
       const delay = Math.min(this.opts.maxBackoffMs, 1000 * 2 ** attempt);
       attempt += 1;

@@ -9,6 +9,14 @@ above them.
 
 ## [Unreleased]
 
+### Added
+
+- **Operators:** the web server now logs its failures, one JSON line each (like the agent's log), with the route, the status and the cause: an unreachable or failing agent, a lost agent connection and its recovery, an unreachable Prometheus, a failed Discord test, wrong passwords and lockouts with the client address, and a password check that errors. A repeated failure is printed at most once a minute with a count of the ones skipped, so a dead agent does not flood the log. Passwords, cookies, tokens, the webhook URL, request bodies and player ids never go in.
+
+### Fixed
+
+- A malformed `PANEL_PASSWORD_HASH` or `ADMIN_PASSWORD_HASH` (for example one whose `$` signs were expanded by the shell or Compose) used to start fine and then turn every login into "wrong password". The web server now refuses to start and says which variable is wrong, without printing its value.
+
 ## [2026.10.4] - 2026-10-16
 
 ### Changed

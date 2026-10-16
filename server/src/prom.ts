@@ -1,3 +1,4 @@
+import { cause, log as defaultLog, type Logger } from "./log";
 import type { Metrics, SeriesPoint } from "./types";
 
 const RANGE_S = 6 * 60 * 60;
@@ -57,6 +58,7 @@ export async function fetchMetrics(
   target: PromTarget = DEFAULT_TARGET,
   now = Date.now(),
   fetchImpl: typeof fetch = fetch,
+  log: Logger = defaultLog,
 ): Promise<Metrics | null> {
   const q = metricQueries(target);
   try {
@@ -67,7 +69,8 @@ export async function fetchMetrics(
       queryRange(promUrl, q.tx, now, fetchImpl),
     ]);
     return { cpu, memory, rx, tx };
-  } catch {
+  } catch (e) {
+    log.warn("prometheus unreachable", { cause: cause(e) });
     return null;
   }
 }

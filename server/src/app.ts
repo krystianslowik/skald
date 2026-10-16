@@ -2,9 +2,11 @@ import { Hono, type Context } from "hono";
 import { getConnInfo } from "hono/bun";
 import { compress, COMPRESSIBLE_CONTENT_TYPE_REGEX } from "hono/compress";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
+import { routePath } from "hono/route";
 import type { AgentAsset, AgentSource, PiecesBox, ToolsRequest } from "./agent";
 import { ADMIN_COOKIE, ADMIN_IDLE_MS, createAdminSession, createSession, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS, sessionHash, verifyAdminSession, verifySession } from "./auth";
 import type { Hub } from "./hub";
+import { cause, log as defaultLog, type Logger } from "./log";
 import type { MapCache, MapView } from "./map";
 import type { SendResult } from "./notify";
 import {
@@ -59,6 +61,8 @@ export interface AppDeps {
   version?: string;
   /** A newer Skald release, from the update check; unset when it is off. */
   update?: () => { version: string; url: string } | null;
+  /** Failure lines; the process-wide JSON logger by default. */
+  log?: Logger;
 }
 
 /**
@@ -107,6 +111,32 @@ export function createApp(deps: AppDeps): Hono {
   const verify = deps.verifyPassword ?? ((p: string, h: string) => Bun.password.verify(p, h));
   const authed = (c: Context) => verifySession(deps.sessionSecret, getCookie(c, SESSION_COOKIE), clock());
 
+  // ---- failure log ------------------------------------------------------------
+  // One line per failure, rate-limited per route by the logger. The route is
+  // the registered pattern (`/api/backups/:name`), never the URL, so names and
+  // ids in a path stay out of the log; bodies, cookies and tokens never go in.
+  const logger = deps.log ?? defaultLog;
+  const where = (c: Context) => ({ method: c.req.method, route: routePath(c) });
+  /**
+   * An agent call threw; `status` is what the client gets. A request the
+   * browser cancelled (a map pan drops tiles) aborts the agent call too: that
+   * is not a failure.
+   */
+  const unreachable = (c: Context, e: unknown, status = 502) => {
+    if (!c.req.raw.signal.aborted) logger.warn("agent unreachable", { ...where(c), status, cause: cause(e) });
+  };
+  /**
+   * The agent answered with an error; `status` is what the client gets. Logged
+   * when either side is a 5xx, so a 401 from a wrong AGENT_TOKEN that turns
+   * into a 502 shows up too.
+   */
+  const agentFailed = (c: Context, upstream: number, status = upstream) => {
+    if (upstream >= 500 || status >= 500) logger.warn("agent error", { ...where(c), status, upstream });
+  };
+  /** A wrong password or a lockout, with the client address the limiter keys on. */
+  const loginFailed = (c: Context, ip: string, status: number, retryAfter?: number) =>
+    logger.warn(status === 429 ? "login locked" : "login failed", { ...where(c), status, ip, retryAfter });
+
   // Gzip JSON and the built app (scripts, styles, HTML) for clients that take it.
   // Answers with an ETag are left as they are: compress() would weaken the tag,
   // and the map routes already send their own gzip.
@@ -128,6 +158,7 @@ export function createApp(deps: AppDeps): Hono {
     const ip = clientIp(c, deps.trustedIpHeader ?? "");
     const wait = limiter.hit(ip);
     if (wait > 0) {
+      loginFailed(c, ip, 429, wait);
       c.header("Retry-After", String(wait));
       return c.json({ ok: false, error: "locked", retryAfter: wait }, 429);
     }
@@ -142,11 +173,16 @@ export function createApp(deps: AppDeps): Hono {
     if (password && deps.passwordHash) {
       try {
         ok = await verify(password, deps.passwordHash);
-      } catch {
+      } catch (e) {
+        // A broken PANEL_PASSWORD_HASH, not a wrong password; startup checks it too.
+        logger.error("password check failed", { ...where(c), cause: cause(e) });
         ok = false;
       }
     }
-    if (!ok) return c.json({ ok: false, error: "invalid" }, 401);
+    if (!ok) {
+      loginFailed(c, ip, 401);
+      return c.json({ ok: false, error: "invalid" }, 401);
+    }
     limiter.reset(ip);
     setCookie(c, SESSION_COOKIE, createSession(deps.sessionSecret, clock()), {
       httpOnly: true,
@@ -216,7 +252,8 @@ export function createApp(deps: AppDeps): Hono {
     const limit = Math.min(2000, Math.max(1, Number.parseInt(c.req.query("limit") ?? "500", 10) || 500));
     try {
       return c.json({ lines: await deps.agent.getLogs(limit) });
-    } catch {
+    } catch (e) {
+      unreachable(c, e);
       return c.json({ lines: [], error: "agent unreachable" }, 502);
     }
   });
@@ -253,7 +290,8 @@ export function createApp(deps: AppDeps): Hono {
     let up: Response;
     try {
       up = await ask(box, c.req.header("If-None-Match") ?? null, c.req.raw.signal);
-    } catch {
+    } catch (e) {
+      unreachable(c, e);
       return c.json({ error: "agent unreachable" }, 502);
     }
     const headers: Record<string, string> = { "Cache-Control": "private, no-cache", Vary: "Accept-Encoding" };
@@ -267,13 +305,15 @@ export function createApp(deps: AppDeps): Hono {
       await up.body?.cancel();
       if (up.status === 503) return c.json({ error: "world map not ready" }, 503, { "Retry-After": up.headers.get("Retry-After") ?? "30" });
       if (up.status === 404) return c.json({ error: "not available" }, 404);
+      agentFailed(c, up.status, 502);
       return c.json({ error: "agent error" }, 502);
     }
     let json: string;
     try {
       // Read whole: fetch has already undone the agent's gzip.
       json = await up.text();
-    } catch {
+    } catch (e) {
+      unreachable(c, e);
       return c.json({ error: "agent unreachable" }, 502);
     }
     headers["Content-Type"] = "application/json";
@@ -294,7 +334,8 @@ export function createApp(deps: AppDeps): Hono {
     let up: Response;
     try {
       up = await deps.agent.asset(path, c.req.header("If-None-Match") ?? null, c.req.raw.signal);
-    } catch {
+    } catch (e) {
+      unreachable(c, e);
       return c.json({ error: "agent unreachable" }, 502);
     }
     const headers = new Headers({ "Cache-Control": cache });
@@ -307,6 +348,7 @@ export function createApp(deps: AppDeps): Hono {
     if (up.status !== 200 || !up.body) {
       await up.body?.cancel();
       const status = up.status === 404 ? 404 : up.status === 503 ? 503 : 502;
+      if (status === 502) agentFailed(c, up.status, status);
       return c.json({ error: status === 404 ? "not available" : "agent error" }, status);
     }
     headers.set("Content-Type", up.headers.get("Content-Type") ?? "application/octet-stream");
@@ -338,7 +380,8 @@ export function createApp(deps: AppDeps): Hono {
     try {
       if (!deps.agent.terrainTile) return c.json({ error: "not available" }, 404);
       up = await deps.agent.terrainTile({ z, x, y, v }, c.req.header("If-None-Match") ?? null, c.req.raw.signal);
-    } catch {
+    } catch (e) {
+      unreachable(c, e);
       return c.json({ error: "agent unreachable" }, 502);
     }
     const headers = new Headers({ "Cache-Control": "private, max-age=31536000, immutable" });
@@ -351,6 +394,7 @@ export function createApp(deps: AppDeps): Hono {
     if (up.status !== 200 || !up.body) {
       await up.body?.cancel();
       const status = up.status === 404 ? 404 : up.status === 429 || up.status === 503 ? 503 : 502;
+      if (status === 502) agentFailed(c, up.status, status);
       // A missing or busy tile may be there later: never cache the refusal.
       return c.json({ error: status === 404 ? "not available" : "terrain busy" }, status, { "Cache-Control": "no-store" });
     }
@@ -380,11 +424,13 @@ export function createApp(deps: AppDeps): Hono {
     let upstream: Response;
     try {
       upstream = await deps.agent.backup(name, c.req.raw.signal);
-    } catch {
+    } catch (e) {
+      unreachable(c, e);
       return c.json({ error: "agent unreachable" }, 502);
     }
     if (!upstream.ok || !upstream.body) {
       await upstream.body?.cancel();
+      if (upstream.status !== 404) agentFailed(c, upstream.status, 502);
       return c.json({ error: upstream.status === 404 ? "not found" : "agent error" }, upstream.status === 404 ? 404 : 502);
     }
     const headers = new Headers({
@@ -405,8 +451,10 @@ export function createApp(deps: AppDeps): Hono {
     if (!deps.hub.online) return c.json({ ok: false, message: "agent unreachable" }, 503);
     try {
       const res = await deps.agent.action(name);
+      agentFailed(c, res.status);
       return c.json(res.body, res.status as 200);
-    } catch {
+    } catch (e) {
+      unreachable(c, e);
       return c.json({ ok: false, message: "agent unreachable" }, 502);
     }
   });
@@ -418,6 +466,8 @@ export function createApp(deps: AppDeps): Hono {
     if (denied) return denied;
     if (!deps.notifyTest) return c.json({ ok: false, error: "not_configured" }, 404);
     const res = await deps.notifyTest();
+    // The notifier already strips the webhook URL out of its errors.
+    if (!res.ok) logger.warn("discord test failed", { ...where(c), status: 502, cause: res.error });
     return res.ok ? c.json({ ok: true }) : c.json({ ok: false, error: res.error }, 502);
   });
 
@@ -428,8 +478,10 @@ export function createApp(deps: AppDeps): Hono {
     c.header("Cache-Control", "no-store");
     try {
       const res = await deps.agent.settings(req);
+      agentFailed(c, res.status);
       return c.json(res.body as object, res.status as 200);
-    } catch {
+    } catch (e) {
+      unreachable(c, e);
       return c.json({ ok: false, message: "agent unreachable" }, 502);
     }
   };
@@ -472,16 +524,20 @@ export function createApp(deps: AppDeps): Hono {
   // ---- admin: the bridge plugin, through the agent ---------------------------
 
   let statusCache: { at: number; value: BridgeStatus } | null = null;
-  const bridgeStatus = async (): Promise<BridgeStatus> => {
+  const bridgeStatus = async (c: Context): Promise<BridgeStatus> => {
     const now = clock();
     if (statusCache && now - statusCache.at < 3_000) return statusCache.value;
     let value: BridgeStatus;
     try {
       const res = await deps.agent.bridge({ op: "status" });
       if (res.status === 404) value = offStatus("off");
-      else if (res.status !== 200) value = offStatus("agent");
-      else value = res.body as BridgeStatus;
-    } catch {
+      else if (res.status !== 200) {
+        // Answered 200 with the bridge shown as off; logged like a 502.
+        agentFailed(c, res.status, 502);
+        value = offStatus("agent");
+      } else value = res.body as BridgeStatus;
+    } catch (e) {
+      unreachable(c, e, 200);
       value = offStatus("agent");
     }
     statusCache = { at: now, value };
@@ -507,24 +563,28 @@ export function createApp(deps: AppDeps): Hono {
     try {
       const res = await deps.agent.bridge(req);
       if (req.op === "run") statusCache = null;
+      agentFailed(c, res.status);
       return c.json(res.body as object, res.status as 200);
-    } catch {
+    } catch (e) {
+      unreachable(c, e);
       return c.json({ ok: false, error: "agent unreachable" }, 502);
     }
   };
 
   app.get("/api/admin/status", async (c) => {
     c.header("Cache-Control", "no-store");
-    const body: AdminStatus = { bridge: await bridgeStatus(), required: adminRequired, unlocked: isAdmin(c), idleMs: ADMIN_IDLE_MS, notifyConfigured: Boolean(deps.notifyTest) };
+    const body: AdminStatus = { bridge: await bridgeStatus(c), required: adminRequired, unlocked: isAdmin(c), idleMs: ADMIN_IDLE_MS, notifyConfigured: Boolean(deps.notifyTest) };
     body.update = deps.update?.() ?? null;
     return c.json(body);
   });
 
   app.post("/api/admin/unlock", async (c) => {
     if (!adminRequired) return c.json({ ok: true });
-    const key = `${clientIp(c, deps.trustedIpHeader ?? "")}:admin`;
+    const ip = clientIp(c, deps.trustedIpHeader ?? "");
+    const key = `${ip}:admin`;
     const wait = adminLimiter.hit(key);
     if (wait > 0) {
+      loginFailed(c, ip, 429, wait);
       c.header("Retry-After", String(wait));
       return c.json({ ok: false, error: "locked", retryAfter: wait }, 429);
     }
@@ -539,11 +599,16 @@ export function createApp(deps: AppDeps): Hono {
     if (password) {
       try {
         ok = await verify(password, deps.adminPasswordHash!);
-      } catch {
+      } catch (e) {
+        // A broken ADMIN_PASSWORD_HASH, not a wrong password; startup checks it too.
+        logger.error("password check failed", { ...where(c), cause: cause(e) });
         ok = false;
       }
     }
-    if (!ok) return c.json({ ok: false, error: "invalid" }, 401);
+    if (!ok) {
+      loginFailed(c, ip, 401);
+      return c.json({ ok: false, error: "invalid" }, 401);
+    }
     adminLimiter.reset(key);
     touchAdmin(c);
     return c.json({ ok: true });
@@ -581,7 +646,10 @@ export function createApp(deps: AppDeps): Hono {
         deps.agent.bridge({ op: "read", name: "globalkeys" }),
         deps.agent.bridge({ op: "read", name: "locations" }),
       ]);
-      if (ev.status !== 200) return c.json(ev.body as object, ev.status as 200);
+      if (ev.status !== 200) {
+        agentFailed(c, ev.status);
+        return c.json(ev.body as object, ev.status as 200);
+      }
       const evd = (ev.body as { data?: { current?: { name: string; elapsed: number; duration: number } | null; available?: string[] } }).data;
       const keyd = (keys.body as { data?: string[] }).data;
       const locd = (locs.body as { data?: { aliases?: string[] } }).data;
@@ -593,7 +661,8 @@ export function createApp(deps: AppDeps): Hono {
       };
       catalogCache = { at: now, value };
       return c.json(value);
-    } catch {
+    } catch (e) {
+      unreachable(c, e);
       return c.json({ ok: false, error: "agent unreachable" }, 502);
     }
   });
@@ -608,8 +677,10 @@ export function createApp(deps: AppDeps): Hono {
     if (!deps.hub.online) return c.json({ ok: false, error: "agent unreachable" }, 503);
     try {
       const res = await deps.agent.tools(req);
+      agentFailed(c, res.status);
       return c.json(res.body as object, res.status as 200);
-    } catch {
+    } catch (e) {
+      unreachable(c, e);
       return c.json({ ok: false, error: "agent unreachable" }, 502);
     }
   };
