@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AdminCatalog, BanEntry } from "../../types";
-import { BROADCAST_MAX, gameClock, getBans, getCatalog, lockAdmin, storeActorName, storedActorName, WORLD_KEYS } from "../../lib/admin";
+import { BROADCAST_MAX, gameClock, getBans, getCatalog, lockAdmin, storeActorName, storedActorName, testNotify, WORLD_KEYS } from "../../lib/admin";
 import { useLivePositions } from "../../lib/live";
 import { useI18n, type TextKey } from "../../i18n";
 import { PlatformGlyph } from "../PlatformGlyph";
@@ -113,6 +113,8 @@ export function AdminPanel({ picked, onClose }: { picked?: { x: number; z: numbe
             </ul>
           )}
         </Section>
+        <Notify />
+
         <Section title={t("admin.you")}>
           <label htmlFor="admin-name" className="text-xs text-ash">
             {t("admin.you.name")}
@@ -148,6 +150,42 @@ export function AdminPanel({ picked, onClose }: { picked?: { x: number; z: numbe
 
       </div>
     </Sheet>
+  );
+}
+
+/**
+ * Discord notifications: on or off, and a test message. Works without the
+ * bridge, so its blocker does not disable the button. The webhook URL never
+ * reaches the browser.
+ */
+function Notify() {
+  const { t } = useI18n();
+  const admin = useAdmin()!;
+  const [busy, setBusy] = useState(false);
+  const on = admin.status?.notifyConfigured ?? false;
+  const send = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      let r = await testNotify();
+      if (r.needsAdmin && (await admin.unlock())) r = await testNotify();
+      if (r.ok) admin.toast(true, t("admin.notify.sent"));
+      else if (!r.needsAdmin) admin.toast(false, r.status === 0 ? t("admin.notify.offline") : t("admin.notify.failed", { error: r.error ?? `HTTP ${r.status}` }));
+    } catch {
+      // signed out; the next poll takes the panel back to the login screen
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Section title={t("admin.notify.title")} aside={on ? t("admin.notify.aside.on") : t("admin.notify.aside.off")}>
+      <p className="mb-2 text-sm text-ash">{on ? t("admin.notify.on") : t("admin.notify.off")}</p>
+      {on && (
+        <Btn className="w-full" disabled={busy} onClick={() => void send()}>
+          {t("admin.notify.test")}
+        </Btn>
+      )}
+    </Section>
   );
 }
 

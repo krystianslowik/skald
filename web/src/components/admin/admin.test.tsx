@@ -23,6 +23,7 @@ function status(over: Partial<AdminStatus> = {}, bridge: Partial<AdminStatus["br
     required: false,
     unlocked: true,
     idleMs: 1_800_000,
+    notifyConfigured: false,
     ...over,
     bridge: { available: true, plugin: "0.1.1", gameBuild: "l-1.0.17", worldLoaded: true, timeFrozen: false, tested: true, acknowledged: false, testedBuilds: ["l-1.0.17"], commands: [], ...bridge },
   };
@@ -43,6 +44,7 @@ function api(st: AdminStatus, commands: (url: string, n: number) => Response = (
     if (u === "/api/admin/read/bans") return Response.json({ ok: true, data: [] });
     if (u === "/api/admin/unlock") return Response.json({ ok: true });
     if (u.startsWith("/api/admin/") && method === "POST") return commands(u, n++);
+    if (u === "/api/notify/test" && method === "POST") return commands(u, n++);
     return new Response("{}", { status: 404 });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -112,6 +114,26 @@ describe("admin", () => {
     expect(screen.queryByRole("button", { name: "My supplies7" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Starter7" })).toBeInTheDocument();
     expect(JSON.parse(store.get("skald.admin.kits")!)).toEqual([]);
+  });
+
+  it("sends a Discord test notification and never shows the webhook", async () => {
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
+    const calls = api(status({ notifyConfigured: true }));
+    renderDashboard();
+    const dialog = await openAdmin();
+    expect(within(dialog).getByText(/go to a Discord channel/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send a test notification" }));
+    expect(await screen.findByText("Test notification sent.")).toBeInTheDocument();
+    expect(calls.filter((c) => c.url === "/api/notify/test" && c.method === "POST")).toHaveLength(1);
+  });
+
+  it("says how to turn Discord notifications on when they are off", async () => {
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
+    api(status());
+    renderDashboard();
+    const dialog = await openAdmin();
+    expect(within(dialog).getByText(/Set DISCORD_WEBHOOK_URL/)).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Send a test notification" })).not.toBeInTheDocument();
   });
 
   it("stays hidden when the agent has no bridge", async () => {

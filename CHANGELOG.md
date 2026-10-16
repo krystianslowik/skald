@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Discord notifications. Set `DISCORD_WEBHOOK_URL` and skald-web posts joins and leaves (with the visit length), deaths, raids, server stops and starts, new join codes, game updates and failed admin commands or settings to a Discord channel, in the `SKALD_LOCALE` language. `DISCORD_NOTIFY` picks which ones. Players arriving together share one message, a quick restart does not flap, world saves are never sent, and nothing from before skald-web started is repeated. The admin sheet says whether notifications are on and sends a test message.
+
 ## [0.10.2] - 2026-10-16
 
 ### Changed

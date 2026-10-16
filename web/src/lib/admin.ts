@@ -90,6 +90,18 @@ export async function runAdmin(command: AdminCommand, body: Record<string, unkno
   return outcome(res.status, await json<AdminResult>(res), `HTTP ${res.status}`);
 }
 
+/** POST /api/notify/test: one test message to the Discord webhook. */
+export async function testNotify(): Promise<AdminOutcome> {
+  let res: Response;
+  try {
+    res = await fetch("/api/notify/test", { method: "POST", credentials: "same-origin" });
+  } catch {
+    return { ok: false, status: 0, error: "offline" };
+  }
+  if (res.status === 401) throw new Unauthorized();
+  return outcome(res.status, await json<AdminResult>(res), `HTTP ${res.status}`);
+}
+
 async function getAdmin<T>(path: string): Promise<{ status: number; data: T | null; error?: string; needsAdmin?: boolean }> {
   const res = await fetch(path, { credentials: "same-origin" });
   if (res.status === 401) throw new Unauthorized();
