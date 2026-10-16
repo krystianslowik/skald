@@ -1,19 +1,24 @@
-// Package events is the agent's event log: a sequence-numbered ring buffer
-// that /events replays from, plus live fan-out to SSE subscribers, plus a
-// separate ring of log lines for /logs.
+// Package events is the agent's event log: sequence-numbered ring buffers
+// that /events replays from, plus live fan-out to SSE subscribers. Log lines
+// and notable events (joins, deaths, saves, ...) share one seq but live in
+// separate rings, so a burst of log lines cannot push notable events out of
+// the replay. The log ring also serves /logs.
 package events
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
 
 const (
+	// DefaultRingSize is how many notable (non-log) events are kept for replay.
 	DefaultRingSize = 5000
-	DefaultLogSize  = 2000
+	// DefaultLogSize is how many log lines are kept for replay and /logs.
+	DefaultLogSize = 2000
 	// subscriberBuffer is how far a subscriber may fall behind before it is
 	// dropped. The client reconnects with ?since= and loses nothing that is
-	// still in the ring.
+	// still in the rings.
 	subscriberBuffer = 512
 )
 
@@ -31,32 +36,58 @@ type LogLine struct {
 	Line string    `json:"line"`
 }
 
-type Hub struct {
-	mu      sync.Mutex
-	seq     uint64
-	ring    []Event // circular, len == cap once full
+// ring is a fixed-capacity circular buffer of events, oldest overwritten first.
+type ring struct {
+	buf     []Event // len == max once full
 	next    int
-	logs    []LogLine
-	logNext int
-	subs    map[chan Event]struct{}
-	counts  map[string]uint64 // events published per type since start
-	now     func() time.Time
-	ringCap int
-	logCap  int
+	max     int
+	evicted uint64 // seq of the newest event overwritten so far, 0 if none
+}
+
+func (r *ring) add(ev Event) {
+	if r.max <= 0 {
+		r.evicted = ev.Seq
+		return
+	}
+	if len(r.buf) < r.max {
+		r.buf = append(r.buf, ev)
+		return
+	}
+	r.evicted = r.buf[r.next].Seq
+	r.buf[r.next] = ev
+	r.next = (r.next + 1) % r.max
+}
+
+// ordered returns the ring oldest first.
+func (r *ring) ordered() []Event {
+	out := make([]Event, 0, len(r.buf))
+	out = append(out, r.buf[r.next:]...)
+	return append(out, r.buf[:r.next]...)
+}
+
+type Hub struct {
+	mu     sync.Mutex
+	seq    uint64
+	ring   ring // notable events
+	logs   ring // `log` events
+	subs   map[chan Event]struct{}
+	counts map[string]uint64 // events published per type since start
+	now    func() time.Time
 }
 
 func New(ringSize, logSize int) *Hub {
 	return &Hub{
-		subs:    map[chan Event]struct{}{},
-		counts:  map[string]uint64{},
-		now:     time.Now,
-		ringCap: ringSize,
-		logCap:  logSize,
+		ring:   ring{max: ringSize},
+		logs:   ring{max: logSize},
+		subs:   map[chan Event]struct{}{},
+		counts: map[string]uint64{},
+		now:    time.Now,
 	}
 }
 
 // Publish assigns the next seq and timestamp, stores the event, and fans it
-// out. A `log` event with a "line" string is also stored in the log ring.
+// out. A `log` event goes to the log ring, everything else to the ring of
+// notable events.
 func (h *Hub) Publish(typ string, data map[string]any) Event {
 	if data == nil {
 		data = map[string]any{}
@@ -66,33 +97,12 @@ func (h *Hub) Publish(typ string, data map[string]any) Event {
 	h.seq++
 	h.counts[typ]++
 	ev := Event{Seq: h.seq, TS: h.now().UTC(), Type: typ, Data: data}
-
-	if len(h.ring) < h.ringCap {
-		h.ring = append(h.ring, ev)
-	} else {
-		h.ring[h.next] = ev
-		h.next = (h.next + 1) % h.ringCap
-	}
 	if typ == "log" {
-		line, _ := data["line"].(string)
-		ll := LogLine{TS: ev.TS, Line: line}
-		if len(h.logs) < h.logCap {
-			h.logs = append(h.logs, ll)
-		} else {
-			h.logs[h.logNext] = ll
-			h.logNext = (h.logNext + 1) % h.logCap
-		}
+		h.logs.add(ev)
+	} else {
+		h.ring.add(ev)
 	}
-
-	for ch := range h.subs {
-		select {
-		case ch <- ev:
-		default:
-			// Too slow: drop it so it reconnects and resumes via ?since=.
-			delete(h.subs, ch)
-			close(ch)
-		}
-	}
+	h.fanOut(ev)
 	return ev
 }
 
@@ -107,11 +117,16 @@ func (h *Hub) PublishVolatile(typ string, data map[string]any) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.counts[typ]++
-	ev := Event{TS: h.now().UTC(), Type: typ, Data: data}
+	h.fanOut(Event{TS: h.now().UTC(), Type: typ, Data: data})
+}
+
+// fanOut sends ev to every subscriber. Caller holds mu.
+func (h *Hub) fanOut(ev Event) {
 	for ch := range h.subs {
 		select {
 		case ch <- ev:
 		default:
+			// Too slow: drop it so it reconnects and resumes via ?since=.
 			delete(h.subs, ch)
 			close(ch)
 		}
@@ -125,21 +140,54 @@ func (h *Hub) Subscribers() int {
 	return len(h.subs)
 }
 
-// Subscribe atomically returns the buffered events with seq > since and a
-// channel for everything after them. The channel is closed when the
-// subscriber is dropped for lagging or after Unsubscribe.
-func (h *Hub) Subscribe(since uint64) ([]Event, chan Event) {
+// Subscription is what SubscribeFrom returns.
+type Subscription struct {
+	// Replay holds the stored events with seq > since, in seq order.
+	Replay []Event
+	// Ch carries everything published after Replay. It is closed when the
+	// subscriber is dropped for lagging or after Unsubscribe.
+	Ch chan Event
+	// Gap is true when a resuming subscriber (since > 0) asks for notable
+	// events that were already overwritten, so Replay misses some of them.
+	// Lost log lines do not count; a fresh subscriber (since 0) never has one.
+	Gap bool
+}
+
+// SubscribeFrom atomically returns the stored events with seq > since, a
+// channel for everything after them, and whether notable events after since
+// have already been lost.
+func (h *Hub) SubscribeFrom(since uint64) Subscription {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	var replay []Event
-	for _, ev := range h.ordered() {
-		if ev.Seq > since {
-			replay = append(replay, ev)
-		}
-	}
+	replay := mergeAfter(since, h.ring.ordered(), h.logs.ordered())
 	ch := make(chan Event, subscriberBuffer)
 	h.subs[ch] = struct{}{}
-	return replay, ch
+	return Subscription{Replay: replay, Ch: ch, Gap: since > 0 && h.ring.evicted > since}
+}
+
+// mergeAfter merges two seq-ordered slices into one, keeping seq > since.
+func mergeAfter(since uint64, a, b []Event) []Event {
+	a = a[sort.Search(len(a), func(i int) bool { return a[i].Seq > since }):]
+	b = b[sort.Search(len(b), func(i int) bool { return b[i].Seq > since }):]
+	if len(a)+len(b) == 0 {
+		return nil
+	}
+	out := make([]Event, 0, len(a)+len(b))
+	for len(a) > 0 && len(b) > 0 {
+		if a[0].Seq < b[0].Seq {
+			out, a = append(out, a[0]), a[1:]
+		} else {
+			out, b = append(out, b[0]), b[1:]
+		}
+	}
+	out = append(out, a...)
+	return append(out, b...)
+}
+
+// Subscribe is SubscribeFrom without the gap report.
+func (h *Hub) Subscribe(since uint64) ([]Event, chan Event) {
+	s := h.SubscribeFrom(since)
+	return s.Replay, s.Ch
 }
 
 func (h *Hub) Unsubscribe(ch chan Event) {
@@ -162,18 +210,14 @@ func (h *Hub) Count(typ string) uint64 {
 func (h *Hub) Logs(n int) []LogLine {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	all := make([]LogLine, 0, len(h.logs))
-	all = append(all, h.logs[h.logNext:]...)
-	all = append(all, h.logs[:h.logNext]...)
-	if n >= 0 && n < len(all) {
-		all = all[len(all)-n:]
+	evs := h.logs.ordered()
+	if n >= 0 && n < len(evs) {
+		evs = evs[len(evs)-n:]
 	}
-	return all
-}
-
-// ordered returns the ring oldest first. Caller holds mu.
-func (h *Hub) ordered() []Event {
-	out := make([]Event, 0, len(h.ring))
-	out = append(out, h.ring[h.next:]...)
-	return append(out, h.ring[:h.next]...)
+	out := make([]LogLine, 0, len(evs))
+	for _, ev := range evs {
+		line, _ := ev.Data["line"].(string)
+		out = append(out, LogLine{TS: ev.TS, Line: line})
+	}
+	return out
 }

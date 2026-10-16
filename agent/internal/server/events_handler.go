@@ -38,10 +38,20 @@ func (s *Server) eventsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	replay, ch := s.opt.Hub.Subscribe(since)
+	sub := s.opt.Hub.SubscribeFrom(since)
+	ch := sub.Ch
 	defer s.opt.Hub.Unsubscribe(ch)
 
-	for _, ev := range replay {
+	if sub.Gap {
+		// Notable events after since were already overwritten: the client
+		// fell behind further than the ring reaches. Say so rather than
+		// replay silently with a hole in it.
+		s.opt.Logger.Warn("events: since is older than the replay ring, some events were lost", "since", since)
+		if _, err := fmt.Fprintf(w, ": gap since=%d\n\n", since); err != nil {
+			return
+		}
+	}
+	for _, ev := range sub.Replay {
 		if writeEvent(w, ev) != nil {
 			return
 		}

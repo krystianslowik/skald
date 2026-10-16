@@ -258,6 +258,30 @@ func TestEventsReplayLiveAndPing(t *testing.T) {
 	}
 }
 
+// A since older than the replay ring is reported with a `: gap` comment before
+// the replay; a since inside the ring is not.
+func TestEventsReportsGap(t *testing.T) {
+	h := newHarness(t)
+	for i := 0; i < events.DefaultRingSize+2; i++ { // seq 1 and 2 overwritten
+		h.hub.Publish("death", map[string]any{"name": "Bjorn"})
+	}
+	gapLine := func(since string) string {
+		r := h.do(t, "GET", "/events?since="+since, token)
+		defer r.Body.Close()
+		line, err := bufio.NewReader(r.Body).ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(line)
+	}
+	if got := gapLine("1"); got != ": gap since=1" {
+		t.Errorf("since=1 first line = %q, want the gap comment", got)
+	}
+	if got := gapLine("2"); !strings.HasPrefix(got, "id: ") {
+		t.Errorf("since=2 first line = %q, want an event", got)
+	}
+}
+
 func TestActionBackupAndUpdate(t *testing.T) {
 	h := newHarness(t)
 	for name, program := range map[string]string{"backup": "valheim-backup", "update": "valheim-updater"} {
