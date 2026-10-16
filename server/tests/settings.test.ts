@@ -1,69 +1,66 @@
 import { describe, expect, it } from "bun:test";
-import { buildArgs, changedKeys, normalize, parseArgs, validateName, validatePassword, validateSettings } from "../src/settings";
+import {
+  buildArgs,
+  changedKeys,
+  KEYS,
+  MODIFIERS,
+  NAME_LEN,
+  normalize,
+  parseArgs,
+  PASSWORD_LEN,
+  PRESETS,
+  SAVE_INTERVAL,
+  validateName,
+  validatePassword,
+  validateSettings,
+} from "../src/settings";
 import type { SettingsInput } from "../src/types";
 
-// The same table as agent/internal/settings: both validators must agree.
+/**
+ * The agent's rules file (agent/internal/settings/testdata/rules.json). The
+ * agent's tests load the same file, so a rule changed on one side only fails
+ * a test on that side.
+ */
+interface Rules {
+  presets: string[];
+  modifiers: { name: string; values: string[] }[];
+  keys: string[];
+  saveInterval: { min: number; max: number; default: number };
+  nameLength: { min: number; max: number };
+  passwordLength: { min: number; max: number };
+  names: { name: string; want: string | null }[];
+  passwords: { password: string; name: string; want: string | null }[];
+  inputs: {
+    prev: { name: string; password: string };
+    base: SettingsInput;
+    cases: { desc: string; edit: Partial<SettingsInput>; errors: Record<string, string> }[];
+  };
+}
+const rules: Rules = await Bun.file(new URL("../../agent/internal/settings/testdata/rules.json", import.meta.url)).json();
+
 describe("validation mirrors the agent", () => {
+  it("allow-lists and limits", () => {
+    expect<unknown>([...PRESETS]).toEqual(rules.presets);
+    expect<unknown>(Object.entries(MODIFIERS).map(([name, values]) => ({ name, values: [...values] }))).toEqual(rules.modifiers);
+    expect<unknown>([...KEYS]).toEqual(rules.keys);
+    expect<unknown>({ ...SAVE_INTERVAL }).toEqual(rules.saveInterval);
+    expect<unknown>({ ...NAME_LEN }).toEqual(rules.nameLength);
+    expect<unknown>({ ...PASSWORD_LEN }).toEqual(rules.passwordLength);
+  });
+
   it("names", () => {
-    const cases: [string, string | null][] = [
-      ["Midgard", null],
-      ["Łódź Długa Noc", null],
-      ["Ragnar's Hall!", null],
-      ["a-b_c.d", null],
-      ["abc", null],
-      ["x".repeat(40), null],
-      ["ab", "length"],
-      ["x".repeat(41), "length"],
-      ["ż".repeat(40), null],
-      ["Hall $(id)", "chars"],
-      ["Hall `id`", "chars"],
-      ["Hall; rm", "chars"],
-      ["tab\there", "chars"],
-      ["new\nline", "chars"],
-      ["a=b c", "chars"],
-    ];
-    for (const [name, want] of cases) expect([name, validateName(name)]).toEqual([name, want]);
+    for (const { name, want } of rules.names) expect([name, validateName(name)]).toEqual([name, want]);
   });
 
   it("passwords", () => {
-    const cases: [string, string, string | null][] = [
-      ["ognisko", "Midgard", null],
-      ["a$b`c;d=e'f\"", "Midgard", null],
-      ["abcd", "Midgard", "length"],
-      ["x".repeat(32), "Midgard", null],
-      ["x".repeat(33), "Midgard", "length"],
-      ["has space", "Midgard", "chars"],
-      ["zażółć", "Midgard", "chars"],
-      ["tab\tx1", "Midgard", "chars"],
-      ["midga", "Midgard", "inName"],
-      ["HALL1", "The hall1 of fire", "inName"],
-    ];
-    for (const [pw, name, want] of cases) expect([pw, validatePassword(pw, name)]).toEqual([pw, want]);
+    for (const { password, name, want } of rules.passwords) expect([password, validatePassword(password, name)]).toEqual([password, want]);
   });
 
-  const prev = { name: "Midgard Hall" };
-  const base: SettingsInput = { name: "Midgard Hall", public: true, preset: "normal", modifiers: {}, keys: [], saveInterval: 1800 };
+  const prev = { name: rules.inputs.prev.name };
+  const base = rules.inputs.base;
   it("whole input", () => {
-    const cases: [Partial<SettingsInput>, Record<string, string>][] = [
-      [{}, {}],
-      [{ name: "  Midgard Hall  " }, {}],
-      [{ name: "x" }, { name: "length" }],
-      [{ password: "abc" }, { password: "length" }],
-      [{ name: "Ognisko Hall" }, { password: "inName" }],
-      [{ preset: "Hardcore" }, {}],
-      [{ preset: "nightmare" }, { preset: "value" }],
-      [{ modifiers: { raids: "none", Combat: "VeryHard" } }, {}],
-      [{ modifiers: { raids: "normal" } }, {}],
-      [{ modifiers: { raids: "most" } }, { "modifier.raids": "value" }],
-      [{ modifiers: { weather: "none" } }, { "modifier.weather": "unknown" }],
-      [{ modifiers: { raids: "none;id" } }, { "modifier.raids": "value" }],
-      [{ keys: ["nomap", "nobuildcost"] }, {}],
-      [{ keys: ["godmode"] }, { keys: "value" }],
-      [{ saveInterval: 600 }, {}],
-      [{ saveInterval: 59 }, { saveInterval: "range" }],
-      [{ saveInterval: 7201 }, { saveInterval: "range" }],
-    ];
-    for (const [edit, want] of cases) expect([edit, validateSettings(prev, "ognisko", { ...base, ...edit })]).toEqual([edit, want]);
+    for (const { desc, edit, errors } of rules.inputs.cases)
+      expect<unknown>([desc, validateSettings(prev, rules.inputs.prev.password, { ...base, ...edit })]).toEqual([desc, errors]);
   });
 
   it("grandfathers unchanged legacy values and requires a password when none is known", () => {

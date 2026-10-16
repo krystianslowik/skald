@@ -7,6 +7,9 @@
 // https://valheimgame.com/support/a-guide-to-dedicated-servers/ (section
 // "List of console commands": -preset, -modifier, -setkey, -saveinterval).
 // Nothing outside it ever reaches SERVER_ARGS from a client.
+//
+// The dashboard mirrors these rules in server/src/settings.ts. Both test
+// suites load testdata/rules.json, so change a rule in all three places.
 package settings
 
 import (
