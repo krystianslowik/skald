@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-10-16
+
 ### Changed
 
 - The Saga keeps the last 200 real events (joins, deaths, raids, admin commands) however often the world saves. Routine saves and backups are kept only for the span those events cover, and at most a week, so they can no longer push everything else out after a few days.
