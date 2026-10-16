@@ -132,6 +132,16 @@ describe("MapView", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
+  it("names the layers sheet's close button after the sheet, not the map", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(snap)));
+    inLocale(<MapView seedName="ZbzIWkK5KK" saveKey="a" now={Date.now()} onClose={vi.fn()} />, "pl");
+    await screen.findAllByRole("button", { name: /Portale/ });
+    fireEvent.click(screen.getByRole("button", { name: "Warstwy" }));
+    const sheet = await screen.findByRole("dialog", { name: "Warstwy" });
+    expect(within(sheet).getByRole("button", { name: "Zamknij warstwy" })).toBeInTheDocument();
+    expect(within(sheet).queryByRole("button", { name: "Zamknij mapę" })).not.toBeInTheDocument();
+  });
+
   it("explains a missing map", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })));
     inLocale(<MapView seedName="" saveKey="b" now={Date.now()} onClose={() => {}} />);

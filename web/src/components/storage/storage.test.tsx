@@ -154,6 +154,7 @@ describe("VillageStores", () => {
     await waitFor(() => expect(screen.getAllByRole("button", { name: /Żelazo/ })).toHaveLength(1));
     fireEvent.click(screen.getByRole("button", { name: /Żelazo/ }));
     const sheet = await screen.findByRole("dialog", { name: /Żelazo/ });
+    expect(within(sheet).getByRole("button", { name: "Zamknij miejsca przedmiotu" })).toBeInTheDocument();
     const rows = within(sheet).getAllByRole("button", { name: /Pokaż na mapie/ });
     expect(rows.length).toBeGreaterThan(1);
     fireEvent.click(rows[0]!);
