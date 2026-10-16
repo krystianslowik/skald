@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -36,6 +38,11 @@ type Config struct {
 	// TerrainDir is where the skald-terrain Job writes the world generator's
 	// grids; empty turns the terrain image off (its request is still in /state).
 	TerrainDir string
+	// TerrainCacheDir keeps terrain tiles across restarts; empty keeps them
+	// in memory (default: terrain-tiles under SettingsDir).
+	TerrainCacheDir string
+	// TerrainCacheMB bounds the terrain tile cache; 0 is the default (256).
+	TerrainCacheMB int
 	// BridgeURL is the Skald bridge plugin inside the game process; the
 	// agent shares the pod's network namespace, so loopback reaches it.
 	BridgeURL string
@@ -71,6 +78,13 @@ func Load() (Config, error) {
 		BridgeURL:          getenv("BRIDGE_URL", "http://127.0.0.1:9010"),
 		BridgeToken:        os.Getenv("BRIDGE_TOKEN"),
 		BridgeTestedBuilds: splitList(os.Getenv("BRIDGE_TESTED_BUILDS")),
+	}
+	c.TerrainCacheDir = os.Getenv("TERRAIN_CACHE_DIR")
+	if c.TerrainCacheDir == "" && c.SettingsDir != "" {
+		c.TerrainCacheDir = filepath.Join(c.SettingsDir, "terrain-tiles")
+	}
+	if v, err := strconv.Atoi(os.Getenv("TERRAIN_CACHE_MB")); err == nil && v > 0 {
+		c.TerrainCacheMB = v
 	}
 	if c.AgentToken == "" {
 		return c, errors.New("AGENT_TOKEN is required")

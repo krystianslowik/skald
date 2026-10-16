@@ -136,6 +136,8 @@ func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
 		p.sample("valheim_map_generation", float64(enc.Generation))
 	}
 
+	s.terrainTileMetrics(&p)
+
 	if snap.LastLogAt != nil {
 		p.family("valheim_agent_last_log_timestamp_seconds", "gauge", "Unix time the agent last received a log line.")
 		p.sample("valheim_agent_last_log_timestamp_seconds", unix(*snap.LastLogAt))
