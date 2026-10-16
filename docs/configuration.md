@@ -576,11 +576,22 @@ start. The NetworkPolicy needs no change: the plugin is loopback only.
   the events in the history, so the Saga reads "Sigrun spawned 20 Wood for
   Ragnar". The plugin still writes an audit line before and after every
   command for the game log (with ids redacted in the Chronicle).
-- **Live positions.** While at least one SSE client is subscribed (skald-web
-  always is) and somebody is playing, the agent polls the plugin every 2 s and
-  publishes a `positions` event (name, platform, x, z, health) when something
-  moved. It is volatile: no sequence number, not replayed, not stored, and not
-  on the metrics port. skald-web passes it to browsers at most every 2 s.
+- **Live positions.** While a browser has the map or a player list open and
+  somebody is playing, the agent polls the plugin every 2 s and publishes a
+  `positions` event (name, platform, x, z, health) when something moved. It is
+  volatile: no sequence number, not replayed, not stored, and not on the
+  metrics port. skald-web passes it at most every 2 s, and only to the browsers
+  that asked for it.
+
+  How the agent knows: skald-web opens `/events?positions=lease` and holds a
+  lease with `POST /positions/watch?holder=<id>` (renewed every 10 s, kept
+  30 s; one lease per web tier) while any browser watches, and drops it with
+  `DELETE /positions/watch?holder=<id>` when the last one stops. An `/events` stream without `positions=lease` (an older skald-web)
+  keeps the old behaviour: positions whenever somebody plays. In the browser,
+  `/live?topics=` gets no positions until it sends
+  `{"type":"subscribe","topic":"positions"}` (and stops after
+  `{"type":"unsubscribe","topic":"positions"}`); a plain `/live` from an older
+  page gets them all along.
 
 **Who is named.** The actor in the saga is the name a device set in the admin
 sheet ("Your name in the saga", kept in that browser) folded to ASCII, or

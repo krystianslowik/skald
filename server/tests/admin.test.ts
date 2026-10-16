@@ -250,12 +250,13 @@ describe("live positions in the hub", () => {
   let hub: Hub | null = null;
   afterEach(() => hub?.stop());
 
-  it("passes positions on at most every 2 s, never stores them, and hands the latest to new sockets", async () => {
+  it("passes positions on at most every 2 s, never stores them, and hands the latest to new watchers", async () => {
     let now = 1_000_000;
     const store = new HistoryStore(":memory:");
     hub = new Hub(fakeAgent([]), store, { clock: () => now });
     const got: LiveMessage[] = [];
     hub.subscribe((m) => got.push(m));
+    hub.watchPositions((m) => got.push(m));
     hub.ingest("e", { seq: 5, ts: new Date(now).toISOString(), type: "player_join", data: { name: "Ragnar" } });
     hub.ingest("e", pos(1));
     hub.ingest("e", pos(2));
@@ -270,8 +271,9 @@ describe("live positions in the hub", () => {
     hub.ingest("e", { seq: 6, ts: new Date(now).toISOString(), type: "death", data: { name: "Ragnar" } });
     expect(store.all().map((e) => e.type)).toEqual(["player_join", "death"]);
     expect(hub.latestPositions()).toMatchObject({ type: "positions", t: 3 });
-    now += 20_000;
-    expect(hub.latestPositions()).toBeNull();
+    // The agent sends only changes: a sample from long ago is still the current one.
+    now += 60_000;
+    expect(hub.latestPositions()).toMatchObject({ type: "positions", t: 3 });
   });
 });
 

@@ -29,6 +29,10 @@ if (!("ResizeObserver" in window)) {
   };
 }
 class FakeWebSocket {
+  // Never opens: nothing is sent over it.
+  static OPEN = 1;
+  readyState = 0;
+  send() {}
   onopen: (() => void) | null = null;
   onmessage: ((m: { data: string }) => void) | null = null;
   onclose: (() => void) | null = null;

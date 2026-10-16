@@ -8,8 +8,8 @@ import { emptyAgentState, isBridgeRead, UNSTORED_EVENTS, type AgentEvent, type A
 
 /** Live positions go out at most this often, whatever the agent sends. */
 const POSITIONS_EVERY_MS = 2_000;
-/** A positions sample older than this is not handed to a new socket. */
-const POSITIONS_FRESH_MS = 10_000;
+/** How often the agent's positions lease is renewed while someone watches; the agent holds it 30 s. */
+const POSITIONS_RENEW_MS = 10_000;
 
 /** A boot prune that frees at least this many rows also shrinks the file. */
 const VACUUM_AFTER_ROWS = 1_000;
@@ -34,6 +34,8 @@ export interface HubOptions {
   clock?: () => number;
   /** Where lost agent connections are reported; the process-wide logger by default. */
   log?: Logger;
+  /** Renewal of the agent's positions lease; tests shorten it. */
+  positionsRenewMs?: number;
 }
 
 /**
@@ -54,9 +56,13 @@ export class Hub {
   private timers: ReturnType<typeof setInterval>[] = [];
   private eventsCache: { at: number; value: AgentEvent[] } | null = null;
   private historyCache: { at: number; value: History } | null = null;
-  private positions: { at: number; msg: Extract<LiveMessage, { type: "positions" }> } | null = null;
+  private positions: Extract<LiveMessage, { type: "positions" }> | null = null;
   private positionsSentAt = 0;
   private positionsTimer: ReturnType<typeof setTimeout> | null = null;
+  private positionsWatchers = new Set<(m: LiveMessage) => void>();
+  private watchTimer: ReturnType<typeof setInterval> | null = null;
+  /** Lease calls go out one after another, so an end never overtakes a later start. */
+  private watchChain: Promise<void> = Promise.resolve();
   private profilesCache: { at: number; value: PlayerProfile[] } | null = null;
   /** The agent connection failed and has not come back yet: the next success is logged. */
   private down = false;
@@ -75,6 +81,7 @@ export class Hub {
       timeZone: opts.timeZone ?? "UTC",
       clock: opts.clock ?? Date.now,
       log: opts.log ?? defaultLog,
+      positionsRenewMs: opts.positionsRenewMs ?? POSITIONS_RENEW_MS,
     };
     this.bootPrune();
     for (const type of Object.keys(ON_CHANGE) as AgentEventType[]) {
@@ -91,9 +98,43 @@ export class Hub {
     return this.state;
   }
 
+  /** Everything but live positions: state, events. */
   subscribe(fn: (m: LiveMessage) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
+  }
+
+  /**
+   * Live positions for one watcher (a socket with the map or a player list
+   * open): the latest sample at once, then every new one. The agent polls
+   * the game only while there is at least one watcher.
+   */
+  watchPositions(fn: (m: LiveMessage) => void): () => void {
+    if (!this.positionsWatchers.has(fn)) {
+      this.positionsWatchers.add(fn);
+      const latest = this.latestPositions();
+      if (latest) fn(latest);
+      if (this.positionsWatchers.size === 1) this.setWatching(true);
+    }
+    return () => {
+      if (this.positionsWatchers.delete(fn) && this.positionsWatchers.size === 0) this.setWatching(false);
+    };
+  }
+
+  /** Starts or ends the agent's positions lease; renewed while anyone watches. */
+  private setWatching(on: boolean): void {
+    if (this.watchTimer) clearInterval(this.watchTimer);
+    this.watchTimer = null;
+    if (this.stopped) return;
+    if (on) this.watchTimer = setInterval(() => this.tellAgent(true), this.opts.positionsRenewMs);
+    this.tellAgent(on);
+  }
+
+  private tellAgent(on: boolean): void {
+    const watch = this.agent.watchPositions?.bind(this.agent);
+    if (!watch) return;
+    // An agent older than the lease answers 404 and polls whenever someone plays.
+    this.watchChain = this.watchChain.then(() => watch(on)).catch(() => {});
   }
 
   history(): History {
@@ -153,12 +194,16 @@ export class Hub {
     this.abort?.abort();
     for (const t of this.timers) clearInterval(t);
     if (this.positionsTimer) clearTimeout(this.positionsTimer);
+    if (this.watchTimer) clearInterval(this.watchTimer);
   }
 
-  /** The latest live positions, for a socket that just opened; null when stale or none. */
+  /**
+   * The latest live positions, for a new watcher; null when none. Never too
+   * old to hand out: the agent sends only changes while it polls and an empty
+   * list when it stops, and a lost stream drops the sample.
+   */
   latestPositions(): LiveMessage | null {
-    if (!this.positions || this.opts.clock() - this.positions.at > POSITIONS_FRESH_MS) return null;
-    return this.positions.msg;
+    return this.positions;
   }
 
   /**
@@ -169,13 +214,13 @@ export class Hub {
     const players = Array.isArray(ev.data.players) ? (ev.data.players as LivePlayer[]) : [];
     const t = Number(ev.data.t) || Date.parse(ev.ts) || this.opts.clock();
     const now = this.opts.clock();
-    this.positions = { at: now, msg: { type: "positions", t, players } };
+    this.positions = { type: "positions", t, players };
     if (this.positionsTimer) return;
     const wait = this.positionsSentAt + POSITIONS_EVERY_MS - now;
     const send = () => {
       this.positionsTimer = null;
       this.positionsSentAt = this.opts.clock();
-      if (this.positions) this.emit(this.positions.msg);
+      if (this.positions) this.emitPositions(this.positions);
     };
     if (wait <= 0) send();
     else this.positionsTimer = setTimeout(send, wait);
@@ -212,7 +257,15 @@ export class Hub {
   }
 
   private emit(m: LiveMessage): void {
-    for (const fn of this.listeners) {
+    this.fanOut(this.listeners, m);
+  }
+
+  private emitPositions(m: LiveMessage): void {
+    this.fanOut(this.positionsWatchers, m);
+  }
+
+  private fanOut(to: Set<(m: LiveMessage) => void>, m: LiveMessage): void {
+    for (const fn of to) {
       try {
         fn(m);
       } catch (e) {
@@ -256,6 +309,8 @@ export class Hub {
           this.store.setMeta("epoch", epoch);
           this.store.setMeta("lastSeq", String(since));
         }
+        // A restarted agent forgot the lease; do not wait for the renewal.
+        if (this.positionsWatchers.size > 0) this.tellAgent(true);
         this.abort = new AbortController();
         this.streaming = true;
         this.emit({ type: "state", state: this.state, online: this.online });
@@ -273,6 +328,7 @@ export class Hub {
       }
       const wasOnline = this.online;
       this.streaming = false;
+      this.positions = null;
       if (this.stopped) return;
       // Rate-limited by the logger: a dead agent prints about once a minute.
       this.down = true;

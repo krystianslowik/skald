@@ -10,7 +10,8 @@ import { DiscordNotifier } from "./notify";
 import { metricsFetch, VERSION } from "./buildinfo";
 import { cachedMetrics, fetchMetrics } from "./prom";
 import { mountStatic } from "./static";
-import type { LiveMessage, Metrics } from "./types";
+import type { Metrics } from "./types";
+import { liveSocket, liveSocketData, type LiveSocketData } from "./live";
 import { UpdateChecker } from "./update";
 import { isRelease } from "./version";
 
@@ -106,30 +107,23 @@ const app = createApp({
 // Static SPA, resolved relative to the process CWD (image: /app/bin -> /app/web/dist).
 mountStatic(app, cfg.webRoot);
 
-type WsData = { unsubscribe?: () => void };
+const live = liveSocket(hub);
 
 const [host, portStr] = cfg.bind.split(":");
-const server = Bun.serve<WsData>({
+const server = Bun.serve<LiveSocketData>({
   hostname: host || "0.0.0.0",
   port: Number.parseInt(portStr ?? "8080", 10),
   fetch(req, srv) {
-    if (new URL(req.url).pathname === "/live") return upgradeLive(req, cfg.sessionSecret, () => srv.upgrade(req, { data: {} }));
+    const url = new URL(req.url);
+    if (url.pathname === "/live") return upgradeLive(req, cfg.sessionSecret, () => srv.upgrade(req, { data: liveSocketData(url) }));
     return app.fetch(req, { server: srv });
   },
   websocket: {
-    open(ws) {
-      const send = (m: LiveMessage) => ws.send(JSON.stringify(m));
-      send({ type: "state", state: hub.getState(), online: hub.online });
-      const positions = hub.latestPositions();
-      if (positions) send(positions);
-      ws.data.unsubscribe = hub.subscribe(send);
-    },
-    close(ws) {
-      ws.data.unsubscribe?.();
-    },
-    message() {
-      // clients never send anything
-    },
+    // Clients only ever send a short subscribe or unsubscribe.
+    maxPayloadLength: 4096,
+    open: (ws) => live.open(ws),
+    message: (ws, raw) => live.message(ws, raw),
+    close: (ws) => live.close(ws),
   },
 });
 

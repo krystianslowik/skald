@@ -220,6 +220,8 @@ export class MockAgent implements AgentSource {
   private frozen = false;
   private acked = false;
   private lastPositions = "";
+  /** The positions lease, as on the agent (no expiry: the hub renews and ends it). */
+  private watched = false;
   // The fake agent file tools.
   private access = { admins: ["V_76561190000000002", "X_1234500000000003"], bans: ["Steam_76561190000000005", "Xbox_2533274900000009"] };
   private skaldBackups: { name: string; sizeBytes: number; modifiedAt: string }[] = [];
@@ -703,9 +705,10 @@ export class MockAgent implements AgentSource {
 
   private samplePositions(): void {
     if (this.bridgeMode === "off" || this.bridgeMode === "disabled" || this.state.server.status !== "running") return;
-    const players = this.livePlayers();
+    // Like the agent: nothing while nobody watches, and one empty list to clear the markers.
+    const players = this.watched ? this.livePlayers() : [];
     const key = JSON.stringify(players);
-    if (key === this.lastPositions) return;
+    if (key === this.lastPositions || (this.lastPositions === "" && players.length === 0)) return;
     this.lastPositions = key;
     // Volatile, like the agent's: seq 0, not kept for replay.
     const ev: AgentEvent = { seq: 0, ts: new Date(this.clock()).toISOString(), type: "positions", data: { t: this.clock(), players } };
@@ -1026,6 +1029,10 @@ export class MockAgent implements AgentSource {
         "Content-Disposition": `attachment; filename="${name}"`,
       },
     });
+  }
+
+  async watchPositions(on: boolean): Promise<void> {
+    this.watched = on;
   }
 
   async stream(since: number, onEvent: (e: AgentEvent) => void, signal: AbortSignal): Promise<void> {

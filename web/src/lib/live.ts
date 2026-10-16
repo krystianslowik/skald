@@ -1,9 +1,10 @@
 // Live player positions (the agent's `positions` samples, every 2 s while
-// someone plays). Kept outside React state like the log tail: only the map's
-// marker layer and the player lists subscribe, so the dashboard does not
-// re-render with every sample.
+// someone plays and someone looks). Kept outside React state like the log
+// tail: only the map's marker layer and the player lists subscribe, so the
+// dashboard does not re-render with every sample. Mounting one of them is
+// also what asks the server for positions at all (see watchPositions).
 
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import type { LivePlayer } from "../types";
 import { springStep } from "./mapmotion";
 
@@ -26,7 +27,42 @@ const subscribe = (f: () => void) => {
   return () => subs.delete(f);
 };
 
+let watchers = 0;
+let sink: ((on: boolean) => void) | null = null;
+
+/** Whether anything on the page shows positions right now. */
+export const watchingPositions = (): boolean => watchers > 0;
+
+/**
+ * Where the first watcher and the last one going are reported: the /live
+ * socket, which subscribes and unsubscribes. One sink at a time.
+ */
+export function setPositionsSink(fn: ((on: boolean) => void) | null): void {
+  sink = fn;
+}
+
+/**
+ * Asks for live positions until the returned function is called. Counted, so
+ * the map and a player list open together subscribe once; after the last one
+ * goes the markers are cleared, not left for the next time the map opens.
+ */
+export function watchPositions(): () => void {
+  watchers += 1;
+  if (watchers === 1) sink?.(true);
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    watchers -= 1;
+    if (watchers > 0) return;
+    sink?.(false);
+    setLivePositions({ t: 0, players: [] });
+  };
+}
+
+/** The latest positions; a component using this asks for them while mounted. */
 export function useLivePositions(): LiveSample {
+  useEffect(() => watchPositions(), []);
   return useSyncExternalStore(subscribe, () => current, () => current);
 }
 
