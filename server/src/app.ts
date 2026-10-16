@@ -23,6 +23,7 @@ import {
   type AdminRead,
   type AdminStatus,
   type BridgeStatus,
+  type FillStations,
   type ApiState,
   type ApplyMode,
   type Locale,
@@ -576,10 +577,12 @@ export function createApp(deps: AppDeps): Hono {
     const now = clock();
     if (catalogCache && now - catalogCache.at < 60_000 && c.req.query("fresh") === undefined) return c.json(catalogCache.value);
     try {
-      const [ev, keys, locs] = await Promise.all([
+      const [ev, keys, locs, st] = await Promise.all([
         deps.agent.bridge({ op: "read", name: "events" }),
         deps.agent.bridge({ op: "read", name: "globalkeys" }),
         deps.agent.bridge({ op: "read", name: "locations" }),
+        // Bridge 0.3.0+; an older one answers 404 and the pickers go on without it.
+        deps.agent.bridge({ op: "read", name: "stations" }),
       ]);
       if (ev.status !== 200) return c.json(ev.body as object, ev.status as 200);
       const evd = (ev.body as { data?: { current?: { name: string; elapsed: number; duration: number } | null; available?: string[] } }).data;
@@ -590,6 +593,7 @@ export function createApp(deps: AppDeps): Hono {
         currentEvent: evd?.current ? { name: evd.current.name, elapsed: evd.current.elapsed, duration: evd.current.duration } : null,
         globalKeys: keys.status === 200 && Array.isArray(keyd) ? keyd : [],
         spots: locs.status === 200 && Array.isArray(locd?.aliases) ? locd.aliases : [],
+        stations: st.status === 200 ? fillStations((st.body as { data?: unknown }).data) : { kilns: [], smelters: [] },
       };
       catalogCache = { at: now, value };
       return c.json(value);
@@ -688,6 +692,18 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   return app;
+}
+
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+
+/** The bridge's station list, keeping only well-formed entries. */
+export function fillStations(data: unknown): FillStations {
+  const d = (data ?? {}) as { kilns?: unknown; smelters?: unknown };
+  const list = (v: unknown) => (Array.isArray(v) ? v.filter((s): s is Record<string, unknown> => !!s && typeof s === "object" && typeof (s as { prefab?: unknown }).prefab === "string") : []);
+  return {
+    kilns: list(d.kilns).map((s) => ({ prefab: s.prefab as string, inputs: strings(s.inputs) })),
+    smelters: list(d.smelters).map((s) => ({ prefab: s.prefab as string, fuel: typeof s.fuel === "string" ? s.fuel : null, inputs: strings(s.inputs) })),
+  };
 }
 
 function offStatus(reason: BridgeStatus["reason"]): BridgeStatus {

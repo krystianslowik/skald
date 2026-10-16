@@ -671,6 +671,8 @@ export const ADMIN_COMMANDS = [
   "status",
   "repair",
   "fill",
+  "fill-kilns",
+  "fill-smelters",
   "grow",
   "map-reveal",
   "map-pins",
@@ -679,7 +681,7 @@ export const ADMIN_COMMANDS = [
 export type AdminCommand = (typeof ADMIN_COMMANDS)[number];
 
 /** Read-only bridge calls (agent GET /bridge/{name}). */
-export const ADMIN_READS = ["time", "events", "globalkeys", "locations", "bans"] as const;
+export const ADMIN_READS = ["time", "events", "globalkeys", "locations", "bans", "stations"] as const;
 export type AdminRead = (typeof ADMIN_READS)[number];
 
 /** Why the bridge cannot take commands right now. */
@@ -743,6 +745,14 @@ export interface AdminCatalog {
   globalKeys: string[];
   /** Teleport spot aliases (spawn, eikthyr, haldor, ...). */
   spots: string[];
+  /** What the fill commands can put where, read from the game (bridge 0.3.0+; empty before). */
+  stations: FillStations;
+}
+
+/** Agent GET /bridge/stations: kilns and smelters with the items each one takes, in the game's order. */
+export interface FillStations {
+  kilns: { prefab: string; inputs: string[] }[];
+  smelters: { prefab: string; fuel: string | null; inputs: string[] }[];
 }
 
 /** One admin command's outcome as the panel gets it. */

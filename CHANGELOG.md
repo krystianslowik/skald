@@ -9,6 +9,12 @@ above them.
 
 ## [Unreleased]
 
+### Changed
+
+- "Fill kilns and smelters" is split in two. **Fill kilns with wood** puts wood into charcoal kilns and nothing else. **Fill smelters** lets the admin choose what goes in (ore only, ore and coal, or coal only) and which ore, from the ores each station really takes, read from the game, so a smelter and a blast furnace each offer only their own ores. "Keep the current ore" tops each station up with the ore it already holds and leaves empty ones alone. A station that does not take the chosen ore is left untouched instead of being filled with copper. Both still work near a player or around a base, and the Saga says what went in ("filled 3 smelters with scrap iron and coal near Ragnar").
+- The panel no longer tops up fermenters with mead base; the old combined command did that silently. The old `fill` command stays in the agent and the bridge for older panels.
+- **Operators:** the new fill commands need the bridge 0.3.0 image (`skald-bridge`). With an older bridge the ore list stays empty and the buttons answer with an error.
+
 ## [2026.10.4] - 2026-10-16
 
 ### Changed
