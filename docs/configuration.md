@@ -47,6 +47,8 @@
 | `DB_PATH` | `/data/skald.db` | SQLite file for the event history |
 | `BIND` | `0.0.0.0:8080` | Listen address |
 | `WEB_ROOT` | `../web/dist` | Built SPA, relative to the working directory |
+| `DISCORD_WEBHOOK_URL` | (empty) | A Discord channel webhook for notifications. Empty turns them off at no cost. A secret: it is never logged or sent to the browser. See [Discord notifications](#discord-notifications) |
+| `DISCORD_NOTIFY` | all | Which notifications to send, comma-separated: `join`, `leave`, `death`, `raid`, `server`, `join_code`, `version`, `failure`. An unknown name stops skald-web at startup |
 | `MAP_SPOILERS` | `false` | `true` shows every boss altar, trader and dungeon of the seed on the world map. Off, only places someone has been to are sent to the browser |
 | `MOCK_AGENT` | (unset) | `1` runs against a built-in fake server (development). It also turns `COOKIE_SECURE` off and keeps the history in memory unless `DB_PATH` is set |
 | `MOCK_BRIDGE` | `on` | With `MOCK_AGENT=1`: the fake bridge's state, `on`, `off`, `untested` or `disabled` |
@@ -55,6 +57,37 @@ The resource charts query cAdvisor series as kube-prometheus-stack scrapes
 them (`container_cpu_usage_seconds_total`, `container_memory_working_set_bytes`,
 `container_network_*_bytes_total`). Outside Kubernetes, point `PROM_*` at
 whatever labels your cAdvisor uses, or leave `PROM_URL` empty.
+
+## Discord notifications
+
+With `DISCORD_WEBHOOK_URL` set (Discord: channel settings, Integrations,
+Webhooks, New Webhook, Copy Webhook URL), skald-web posts short messages to
+that channel, in the `SKALD_LOCALE` language:
+
+| Kind | When |
+|---|---|
+| `join`, `leave` | A player joins or leaves; a leave carries the visit length |
+| `death` | A player dies |
+| `raid` | A raid starts |
+| `server` | The server stopped, is starting, or runs again. A state has to hold for 30 seconds, so a quick stop and start says nothing |
+| `join_code` | A new join code. A restart or a game update rotates it, so this is the one to keep |
+| `version` | The game was updated, "Game updated to 1.0.20" |
+| `failure` | An admin command, a backup, restart or update, or applying new settings failed |
+
+Routine world saves and backups are never sent. Joins, leaves and deaths wait
+10 seconds for company, so five players arriving together are one message.
+Only what happens after skald-web starts is sent: a restart of skald-web or a
+reconnect to the agent never repeats older events. Messages go out one at a
+time with a 10 second timeout; when Discord rate-limits (HTTP 429) skald-web
+waits as long as Discord asks and tries again, up to three times. A message
+that still fails is dropped and logged, without the webhook URL. Player names
+never ping anyone (`@everyone` in a name stays plain text).
+
+The admin sheet (there when the bridge is on) shows whether notifications are on and has a button that
+sends a test message (an admin session when `ADMIN_PASSWORD_HASH` is set).
+
+On Kubernetes, the example `skald-web` NetworkPolicy allows no internet
+egress; uncomment its Discord rule.
 
 ## Server settings
 

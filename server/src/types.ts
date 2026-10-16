@@ -699,6 +699,8 @@ export interface AdminStatus {
   unlocked: boolean;
   /** Idle timeout of an admin session, in ms. */
   idleMs: number;
+  /** DISCORD_WEBHOOK_URL is set; the URL itself never leaves the server. */
+  notifyConfigured: boolean;
 }
 
 /** A connected player as the agent serves it: never a platform or peer id. */

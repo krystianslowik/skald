@@ -206,6 +206,9 @@ services:
       ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
       SKALD_LOCALE: ${SKALD_LOCALE:-en}
+      # Optional Discord notifications; an empty webhook keeps them off.
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      DISCORD_NOTIFY: ${DISCORD_NOTIFY:-}
       SKALD_TZ: ${TZ:-UTC}
       # Plain http on localhost/LAN needs this off, or the browser never sends
       # the session cookie back. Set it to "true" as soon as HTTPS fronts Skald.

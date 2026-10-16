@@ -32,4 +32,21 @@ describe("config", () => {
     expect(loadConfig({ ...base, COOKIE_SECURE: "false" }).cookieSecure).toBe(false);
     expect(loadConfig({ ...base, COOKIE_SECURE: "0" }).cookieSecure).toBe(true);
   });
+
+  it("keeps Discord off unless a webhook is set, and checks the kinds", () => {
+    const c = loadConfig(base);
+    expect(c.discordWebhookUrl).toBe("");
+    expect(c.discordNotify).toContain("join_code");
+    expect(loadConfig({ ...base, DISCORD_NOTIFY: "join, Join_Code" }).discordNotify).toEqual(["join", "join_code"]);
+    expect(() => loadConfig({ ...base, DISCORD_NOTIFY: "join,saves" })).toThrow("DISCORD_NOTIFY");
+    const secret = "discord.example/api/webhooks/1/abc";
+    let message = "";
+    try {
+      loadConfig({ ...base, DISCORD_WEBHOOK_URL: secret });
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toContain("DISCORD_WEBHOOK_URL");
+    expect(message).not.toContain("abc");
+  });
 });

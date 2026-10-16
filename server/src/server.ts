@@ -7,6 +7,7 @@ import { hashPassword } from "./hash";
 import { Hub } from "./hub";
 import { MapCache } from "./map";
 import { MockAgent, mockMetrics } from "./mock";
+import { DiscordNotifier } from "./notify";
 import { cachedMetrics, fetchMetrics } from "./prom";
 import { mountStatic } from "./static";
 import type { LiveMessage } from "./types";
@@ -46,6 +47,10 @@ if (cfg.mock) {
 
 const store = new HistoryStore(cfg.dbPath);
 const hub = new Hub(agent, store, { timeZone: cfg.timeZone });
+// Subscribed before start: the first state it sees is its baseline, and
+// nothing that happened before boot is sent.
+const notifier = cfg.discordWebhookUrl ? new DiscordNotifier({ url: cfg.discordWebhookUrl, kinds: cfg.discordNotify, locale: cfg.locale }) : null;
+if (notifier) hub.subscribe((m) => notifier.handle(m));
 hub.start();
 
 const target = { namespace: cfg.promNamespace, container: cfg.promContainer, podRegex: cfg.promPodRegex };
@@ -67,6 +72,7 @@ const app = createApp({
   locale: cfg.locale,
   trustedIpHeader: cfg.trustedIpHeader,
   map: new MapCache((etag) => agent.map(etag), cfg.mapSpoilers),
+  notifyTest: notifier ? () => notifier.test() : undefined,
 });
 
 // Static SPA, resolved relative to the process CWD (image: /app/bin -> /app/web/dist).
@@ -107,5 +113,5 @@ const server = Bun.serve<WsData>({
 });
 
 console.log(
-  `skald-web listening on ${server.hostname}:${server.port} (locale ${cfg.locale}, tz ${cfg.timeZone}, metrics ${metricsConfigured ? "on" : "off"}, map spoilers ${cfg.mapSpoilers ? "on" : "off"}, admin password ${adminPasswordHash ? "on" : "off"})${cfg.mock ? " (mock agent)" : ""}`,
+  `skald-web listening on ${server.hostname}:${server.port} (locale ${cfg.locale}, tz ${cfg.timeZone}, metrics ${metricsConfigured ? "on" : "off"}, map spoilers ${cfg.mapSpoilers ? "on" : "off"}, admin password ${adminPasswordHash ? "on" : "off"}, discord ${notifier ? "on" : "off"})${cfg.mock ? " (mock agent)" : ""}`,
 );

@@ -50,6 +50,15 @@ spec:
             - name: SESSION_SECRET
               valueFrom:
                 secretKeyRef: {name: skald-web, key: SESSION_SECRET}
+            # Optional Discord notifications: without the key they are off.
+            # Uncomment the Discord egress rule in networkpolicy.yaml too.
+            - name: DISCORD_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef: {name: skald-web, key: DISCORD_WEBHOOK_URL, optional: true}
+            # Which ones, comma-separated; empty sends all of them:
+            # join, leave, death, raid, server, join_code, version, failure
+            - name: DISCORD_NOTIFY
+              value: ""
             - name: SKALD_LOCALE
               value: en
             # Calendar days for streaks and badges.

@@ -5,6 +5,7 @@ import type { AgentAsset, AgentSource, PiecesBox } from "./agent";
 import { ADMIN_COOKIE, ADMIN_IDLE_MS, createAdminSession, createSession, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS, sessionHash, verifyAdminSession, verifySession } from "./auth";
 import type { Hub } from "./hub";
 import type { MapCache, MapView } from "./map";
+import type { SendResult } from "./notify";
 import {
   ACTION_NAMES,
   ADMIN_COMMANDS,
@@ -44,6 +45,8 @@ export interface AppDeps {
   adminLimiter?: RateLimiter;
   /** The world map; without it /api/map answers 404. */
   map?: MapCache;
+  /** Sends a Discord test message; unset when DISCORD_WEBHOOK_URL is empty. */
+  notifyTest?: () => Promise<SendResult>;
   verifyPassword?: (password: string, hash: string) => Promise<boolean>;
   clock?: () => number;
 }
@@ -351,6 +354,16 @@ export function createApp(deps: AppDeps): Hono {
     }
   });
 
+  // A test message to the Discord webhook. Changes nothing, but it posts to a
+  // channel in the server's name, so it is an admin action like the others.
+  app.post("/api/notify/test", async (c) => {
+    const denied = needAdmin(c);
+    if (denied) return denied;
+    if (!deps.notifyTest) return c.json({ ok: false, error: "not_configured" }, 404);
+    const res = await deps.notifyTest();
+    return res.ok ? c.json({ ok: true }) : c.json({ ok: false, error: res.error }, 502);
+  });
+
   // Server settings, passed through to the agent with its status codes (400
   // with per-field `errors`, 404 when the feature is off, 409 when busy).
   const settings = async (c: Context, req: SettingsRequest) => {
@@ -440,7 +453,7 @@ export function createApp(deps: AppDeps): Hono {
 
   app.get("/api/admin/status", async (c) => {
     c.header("Cache-Control", "no-store");
-    const body: AdminStatus = { bridge: await bridgeStatus(), required: adminRequired, unlocked: isAdmin(c), idleMs: ADMIN_IDLE_MS };
+    const body: AdminStatus = { bridge: await bridgeStatus(), required: adminRequired, unlocked: isAdmin(c), idleMs: ADMIN_IDLE_MS, notifyConfigured: Boolean(deps.notifyTest) };
     return c.json(body);
   });
 

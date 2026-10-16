@@ -5,6 +5,7 @@ import { ADMIN_IDLE_MS, RateLimiter } from "../src/auth";
 import { HistoryStore } from "../src/db";
 import { Hub } from "../src/hub";
 import { MockAgent } from "../src/mock";
+import type { SendResult } from "../src/notify";
 import { emptyAgentState, type AdminStatus, type AgentEvent, type LiveMessage } from "../src/types";
 
 const PANEL = await Bun.password.hash("ognisko");
@@ -52,7 +53,7 @@ function fakeAgent(calls: BridgeRequest[], status = 200): AgentSource {
   };
 }
 
-function setup(opts: { admin?: boolean; bridgeStatus?: number } = {}) {
+function setup(opts: { admin?: boolean; bridgeStatus?: number; notifyTest?: () => Promise<SendResult> } = {}) {
   const calls: BridgeRequest[] = [];
   const agent = fakeAgent(calls, opts.bridgeStatus);
   const hub = new Hub(agent, new HistoryStore(":memory:"));
@@ -70,6 +71,7 @@ function setup(opts: { admin?: boolean; bridgeStatus?: number } = {}) {
     limiter: new RateLimiter(5, 60_000, 900_000, () => t),
     adminLimiter: new RateLimiter(5, 60_000, 900_000, () => t),
     clock: () => t,
+    notifyTest: opts.notifyTest,
   });
   return { app, calls, advance: (ms: number) => (t += ms) };
 }
@@ -302,5 +304,34 @@ describe("HttpAgent.bridge", () => {
     ]);
     expect(seen[3]!.headers).toMatchObject({ "X-Agent-Token": "tok", "X-Skald-Actor": "dashboard-abc123", "Content-Type": "application/json" });
     expect(seen[3]!.body).toBe('{"player":"Ragnar"}');
+  });
+});
+
+describe("discord test notification", () => {
+  it("says whether it is configured and needs an admin session to send", async () => {
+    let sent = 0;
+    const { app } = setup({ admin: true, notifyTest: async () => (sent++, { ok: true }) });
+    const cookie = await signIn(app);
+    const st = (await (await app.request("/api/admin/status", { headers: { Cookie: cookie } })).json()) as AdminStatus;
+    expect(st.notifyConfigured).toBe(true);
+    expect(JSON.stringify(st)).not.toContain("webhook");
+    expect((await post(app, "/api/notify/test", cookie)).status).toBe(403);
+    expect(sent).toBe(0);
+    const admin = adminCookie(await post(app, "/api/admin/unlock", cookie, { password: "jarl" }));
+    const res = await post(app, "/api/notify/test", `${cookie}; ${admin}`);
+    expect(res.status).toBe(200);
+    expect(sent).toBe(1);
+  });
+
+  it("answers 404 when off and 502 with the redacted error when Discord fails", async () => {
+    const off = setup();
+    const c1 = await signIn(off.app);
+    expect(((await (await off.app.request("/api/admin/status", { headers: { Cookie: c1 } })).json()) as AdminStatus).notifyConfigured).toBe(false);
+    expect((await post(off.app, "/api/notify/test", c1)).status).toBe(404);
+    const failing = setup({ notifyTest: async () => ({ ok: false, error: "HTTP 401" }) });
+    const c2 = await signIn(failing.app);
+    const res = await post(failing.app, "/api/notify/test", c2);
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ ok: false, error: "HTTP 401" });
   });
 });

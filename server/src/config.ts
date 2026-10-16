@@ -1,3 +1,4 @@
+import { parseNotifyKinds, type NotifyKind } from "./notify";
 import type { Locale } from "./types";
 
 export const LOCALES: readonly Locale[] = ["en", "pl"];
@@ -35,6 +36,10 @@ export interface Config {
   mapSpoilers: boolean;
   /** Mock mode only: how the fake bridge behaves (on, off, disabled, untested). */
   mockBridge: string;
+  /** Discord webhook for notifications; empty means off. A secret: never logged. */
+  discordWebhookUrl: string;
+  /** Which notifications go to Discord (DISCORD_NOTIFY); all when unset. */
+  discordNotify: NotifyKind[];
 }
 
 type Env = Record<string, string | undefined>;
@@ -66,6 +71,11 @@ export function loadConfig(env: Env = process.env): Config {
     throw new Error(`SKALD_TZ is not a valid IANA time zone: ${env.SKALD_TZ || env.TZ}`);
   }
 
+  const discordWebhookUrl = opt("DISCORD_WEBHOOK_URL", "").trim();
+  // The URL is a secret: the error names the variable, never the value.
+  if (discordWebhookUrl && !/^https?:\/\//.test(discordWebhookUrl)) throw new Error("DISCORD_WEBHOOK_URL must be an http(s) URL");
+  const discordNotify = parseNotifyKinds(opt("DISCORD_NOTIFY", ""));
+
   return {
     bind: opt("BIND", "0.0.0.0:8080"),
     mock,
@@ -88,5 +98,7 @@ export function loadConfig(env: Env = process.env): Config {
     trustedIpHeader: opt("TRUSTED_IP_HEADER", ""),
     mapSpoilers: ["1", "true", "yes", "on"].includes(opt("MAP_SPOILERS", "false").toLowerCase()),
     mockBridge: opt("MOCK_BRIDGE", "on").toLowerCase(),
+    discordWebhookUrl,
+    discordNotify,
   };
 }
