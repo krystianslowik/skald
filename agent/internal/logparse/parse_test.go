@@ -82,7 +82,7 @@ func TestMatchMsg(t *testing.T) {
 		{"player joined", `Player joined server "My Valheim" that has join code 482915, now 2 player(s)`,
 			[]Match{{Kind: KindPlayerCount, Count: 2}}},
 		{"connection lost", `Player connection lost server "My Valheim" that has join code 482915, now 1 player(s)`,
-			[]Match{{Kind: KindPlayerCount, Count: 1}}},
+			[]Match{{Kind: KindPlayerCount, Count: 1, Lost: true}}},
 		{"platform xbox", `PlayFab socket with remote ID playfab/0A1B2C3D4E5F6071 received local Platform ID Xbox_2533274900000001`,
 			[]Match{{Kind: KindPlatform, Platform: PlatformXbox}}},
 		{"platform steam", `PlayFab socket with remote ID playfab/1B2C3D4E5F607182 received local Platform ID Steam_76561190000000003`,

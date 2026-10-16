@@ -158,6 +158,17 @@ func TestMetrics(t *testing.T) {
 	}
 }
 
+func TestMetricsPlayersOnlineAfterLaggingLeave(t *testing.T) {
+	h := newHarness(t)
+	h.tr.SetStatus("running")
+	for _, l := range lastLeaveLines {
+		h.tr.HandleLine(l)
+	}
+	if body, _ := scrape(t, h.s); !strings.Contains(body, "\nvalheim_players_online 0\n") {
+		t.Errorf("players_online not 0:\n%s", body)
+	}
+}
+
 func TestMetricsColdAndSupervisorDown(t *testing.T) {
 	h := newHarness(t)
 	h.fake.Close()

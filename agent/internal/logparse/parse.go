@@ -69,9 +69,11 @@ type Match struct {
 	NetworkVersion int
 	Code           string
 	Count          int
-	State          string
-	Name           string
-	Death          bool
+	// Lost is set on a player_count from a "Player connection lost" line.
+	Lost  bool
+	State string
+	Name  string
+	Death bool
 	// UID is the peer id part of a character ZDOID (character) or the owner
 	// of an abandoned object (abandoned).
 	UID      string
@@ -145,10 +147,11 @@ var table = []rule{
 	// "New session", "Player joined" and "Player connection lost" lines all
 	// end in the server's count. The first one has an empty join code. The
 	// "connection lost" count can lag by one while the socket is kept for a
-	// reconnect, so names come from ZDOIDs, not from this number.
-	{regexp.MustCompile(`server ".*" that has join code \d*, now (\d+) player`), func(s []string) []Match {
-		n, _ := strconv.Atoi(s[1])
-		return []Match{{Kind: KindPlayerCount, Count: n}}
+	// reconnect, so names come from ZDOIDs, not from this number, and Lost
+	// marks it so the tracker never lets it raise the count.
+	{regexp.MustCompile(`(connection lost )?server ".*" that has join code \d*, now (\d+) player`), func(s []string) []Match {
+		n, _ := strconv.Atoi(s[2])
+		return []Match{{Kind: KindPlayerCount, Count: n, Lost: s[1] != ""}}
 	}},
 	{regexp.MustCompile(`received local Platform ID ([A-Za-z]+)_`), func(s []string) []Match {
 		return []Match{{Kind: KindPlatform, Platform: PlatformOf(s[1])}}

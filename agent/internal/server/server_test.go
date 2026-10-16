@@ -344,3 +344,12 @@ func TestActionRestartBusyThenComplete(t *testing.T) {
 		t.Errorf("after restart = %d", r.StatusCode)
 	}
 }
+
+// lastLeaveLines is the B-001 sequence: the only player leaves while the
+// connection-lost line still says "now 1".
+var lastLeaveLines = []string{
+	`supervisord: valheim-server 10/16/2026 11:20:00: Player joined server "W" that has join code 123456, now 1 player(s)`,
+	`supervisord: valheim-server 10/16/2026 11:20:30: Got character ZDOID from PlayerA : 123:5`,
+	`supervisord: valheim-server 10/16/2026 11:39:00: Player connection lost server "W" that has join code 123456, now 1 player(s)`,
+	`supervisord: valheim-server 10/16/2026 11:39:00: Destroying abandoned non persistent zdo 123:9 owner 123`,
+}
