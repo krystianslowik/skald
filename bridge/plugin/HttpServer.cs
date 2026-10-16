@@ -77,8 +77,9 @@ namespace Skald.Bridge
                 }
                 else
                 {
-                    JObject args = ReadBody(req);
+                    // Found before the body is read, so a bad body on a command is audited too.
                     route = Router.Find(req.HttpMethod, path);
+                    JObject args = ReadBody(req);
                     if (route == null)
                     {
                         status = 404; body = Error("unknown command " + cmd);
@@ -89,10 +90,10 @@ namespace Skald.Bridge
                     }
                     else
                     {
-                        if (route.Mutating)
+                        if (Audited(route))
                             SkaldBridgePlugin.Info("audit actor=" + actor + " cmd=" + cmd + " args=" + Compact(args));
                         body = route.OffThread ? route.Handler(args) : SkaldBridgePlugin.RunOnMainThread(() => route.Handler(args), CommandTimeoutMs);
-                        if (route.Mutating)
+                        if (Audited(route))
                             SkaldBridgePlugin.Info("audit actor=" + actor + " cmd=" + cmd + " result=ok " + Compact(body));
                     }
                 }
@@ -100,12 +101,14 @@ namespace Skald.Bridge
             catch (CommandError e)
             {
                 status = e.Status; body = Error(e.Message);
-                SkaldBridgePlugin.Info("audit actor=" + actor + " cmd=" + cmd + " result=error " + e.Message);
+                // Reads are not audited: a refused terrain tile (429) is not an admin action.
+                if (Audited(route))
+                    SkaldBridgePlugin.Info("audit actor=" + actor + " cmd=" + cmd + " result=error " + e.Message);
             }
             catch (TimeoutException e)
             {
                 status = 504; body = Error(e.Message);
-                SkaldBridgePlugin.Warn("audit actor=" + actor + " cmd=" + cmd + " result=timeout");
+                SkaldBridgePlugin.Warn(Unaudited(route, actor) + cmd + " result=timeout");
             }
             catch (Exception e) when (e is MissingMemberException || e is TypeLoadException || e is TypeInitializationException)
             {
@@ -122,10 +125,18 @@ namespace Skald.Bridge
             catch (Exception e)
             {
                 status = 500; body = Error(e.GetType().Name + ": " + e.Message);
-                SkaldBridgePlugin.Warn("audit actor=" + actor + " cmd=" + cmd + " result=exception " + e);
+                SkaldBridgePlugin.Warn(Unaudited(route, actor) + cmd + " result=exception " + e);
             }
             Write(ctx, status, body);
         }
+
+        // Only commands that change the world get audit lines; reads never do.
+        static bool Audited(Route route) => route != null && route.Mutating;
+
+        // The head of a warning line: an audit line for a command, else a plain
+        // one that says whether a read or an unrouted request failed.
+        static string Unaudited(Route route, string actor) =>
+            Audited(route) ? "audit actor=" + actor + " cmd=" : route == null ? "request " : "read ";
 
         bool Authorised(string presented)
         {

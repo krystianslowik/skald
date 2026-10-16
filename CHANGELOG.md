@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- Admin commands in the Saga are now recorded exactly once each, with the right details. The agent writes the entry itself from the command it sent and the bridge's answer, instead of reading the bridge's log lines back, which could lose an entry when the log feed dropped a line or mix up the details when the same admin ran the same command twice at once (#31).
+- Looking at the map no longer fills the bridge's log with "too many terrain requests" audit lines. The bridge plugin (now **v0.2.1**) writes audit lines only for commands that change the world, never for reads, also when a read fails (#63).
+
 ## [2026.10.4] - 2026-10-16
 
 ### Changed
