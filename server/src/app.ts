@@ -5,7 +5,6 @@ import type { AgentAsset, AgentSource, PiecesBox, ToolsRequest } from "./agent";
 import { ADMIN_COOKIE, ADMIN_IDLE_MS, createAdminSession, createSession, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS, sessionHash, verifyAdminSession, verifySession } from "./auth";
 import type { Hub } from "./hub";
 import type { MapCache, MapView } from "./map";
-import { buildInfoMetric } from "./buildinfo";
 import type { SendResult } from "./notify";
 import {
   ACCESS_LISTS,
@@ -108,7 +107,6 @@ export function createApp(deps: AppDeps): Hono {
   const authed = (c: Context) => verifySession(deps.sessionSecret, getCookie(c, SESSION_COOKIE), clock());
 
   app.get("/healthz", (c) => c.text("ok"));
-  app.get("/metrics", (c) => c.text(buildInfoMetric("web", deps.version ?? "dev"), 200, { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" }));
 
   // Public on purpose: the login screen is translated before anyone signs in.
   // Never put anything here that should stay behind the password.

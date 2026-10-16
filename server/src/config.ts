@@ -40,6 +40,8 @@ export interface Config {
   discordWebhookUrl: string;
   /** Which notifications go to Discord (DISCORD_NOTIFY); all when unset. */
   discordNotify: NotifyKind[];
+  /** Prometheus listener (METRICS_BIND, e.g. 0.0.0.0:9465); empty means off. */
+  metricsBind: string;
   /** Ask GitHub for a newer Skald release (SKALD_UPDATE_CHECK, off with `off`). */
   updateCheck: boolean;
 }
@@ -102,6 +104,7 @@ export function loadConfig(env: Env = process.env): Config {
     mockBridge: opt("MOCK_BRIDGE", "on").toLowerCase(),
     discordWebhookUrl,
     discordNotify,
+    metricsBind: opt("METRICS_BIND", "").trim(),
     updateCheck: !["off", "false", "0", "no"].includes(opt("SKALD_UPDATE_CHECK", "on").trim().toLowerCase()),
   };
 }

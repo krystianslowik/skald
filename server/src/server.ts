@@ -8,7 +8,7 @@ import { Hub } from "./hub";
 import { MapCache } from "./map";
 import { MockAgent, mockMetrics } from "./mock";
 import { DiscordNotifier } from "./notify";
-import { VERSION } from "./buildinfo";
+import { metricsFetch, VERSION } from "./buildinfo";
 import { cachedMetrics, fetchMetrics } from "./prom";
 import { mountStatic } from "./static";
 import type { LiveMessage } from "./types";
@@ -120,6 +120,13 @@ const server = Bun.serve<WsData>({
     },
   },
 });
+
+// skald_build_info on its own port, so the panel port carries no unauthenticated route.
+if (cfg.metricsBind) {
+  const [mHost, mPort] = cfg.metricsBind.split(":");
+  const m = Bun.serve({ hostname: mHost || "0.0.0.0", port: Number.parseInt(mPort ?? "9465", 10), fetch: metricsFetch(VERSION) });
+  console.log(`skald-web metrics on ${m.hostname}:${m.port}`);
+}
 
 console.log(
   `skald-web ${VERSION} listening on ${server.hostname}:${server.port} (locale ${cfg.locale}, tz ${cfg.timeZone}, metrics ${metricsConfigured ? "on" : "off"}, map spoilers ${cfg.mapSpoilers ? "on" : "off"}, admin password ${adminPasswordHash ? "on" : "off"}, discord ${notifier ? "on" : "off"}, update check ${updates ? "on" : "off"})${cfg.mock ? " (mock agent)" : ""}`,

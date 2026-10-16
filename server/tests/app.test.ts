@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import type { AgentSource } from "../src/agent";
 import { createApp } from "../src/app";
+import { metricsFetch } from "../src/buildinfo";
 import { RateLimiter } from "../src/auth";
 import { HistoryStore } from "../src/db";
 import { Hub } from "../src/hub";
@@ -404,13 +405,19 @@ describe("terrain", () => {
 });
 
 describe("version", () => {
-  it("serves skald_build_info on /metrics without a session", async () => {
+  it("has no /metrics on the panel port", async () => {
     const { app } = setup({ version: "2026.10.0" });
-    const res = await app.request("/metrics");
+    expect((await app.request("/metrics")).status).toBe(404);
+  });
+
+  it("serves skald_build_info on the METRICS_BIND listener only at GET /metrics", async () => {
+    const fetchMetrics = metricsFetch("2026.10.0");
+    const res = fetchMetrics(new Request("http://127.0.0.1:9465/metrics"));
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/plain; version=0.0.4");
     expect(await res.text()).toContain('\nskald_build_info{component="web",version="2026.10.0"} 1\n');
-    expect(await (await setup().app.request("/metrics")).text()).toContain('skald_build_info{component="web",version="dev"} 1');
+    expect(fetchMetrics(new Request("http://127.0.0.1:9465/api/state")).status).toBe(404);
+    expect(fetchMetrics(new Request("http://127.0.0.1:9465/metrics", { method: "POST" })).status).toBe(404);
   });
 
   it("reports its own version in /api/state and a newer release in /api/admin/status", async () => {

@@ -5,6 +5,14 @@
  */
 export const VERSION: string = process.env.SKALD_VERSION || "dev";
 
+/** The METRICS_BIND listener: GET /metrics, everything else 404. No session, so keep the port private. */
+export function metricsFetch(version: string): (req: Request) => Response {
+  return (req) =>
+    req.method === "GET" && new URL(req.url).pathname === "/metrics"
+      ? new Response(buildInfoMetric("web", version), { headers: { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" } })
+      : new Response("not found", { status: 404 });
+}
+
 /** `skald_build_info` in the Prometheus text format. */
 export function buildInfoMetric(component: string, version: string): string {
   const v = version.replace(/[\\"\n]/g, (c) => (c === "\n" ? "\\n" : `\\${c}`));
