@@ -1,4 +1,7 @@
-import { plural, type Dict } from "./en";
+import type { Dict, Plural } from "./en";
+
+// Local, not imported from `en`: a value import would pull the English chunk in with this one.
+const plural = (p: Plural): Plural => p;
 
 /** Polish dictionary. Must match the English shape key for key (enforced by `Dict`). */
 export const pl: Dict = {
@@ -10,7 +13,6 @@ export const pl: Dict = {
   "key.hold": "Przytrzymaj",
   "key.esc": "Esc",
   "lang.label": "Język",
-  "lang.switchTo": "Zmień język na {lang}",
 
   "login.title": "Ognisko przygasa",
   "login.subtitle": "Wypowiedz słowo, a płomień wróci.",

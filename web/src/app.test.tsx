@@ -436,6 +436,20 @@ describe("App", () => {
   const api = (locale: string) =>
     vi.fn(async (url: string) => (String(url) === "/api/config" ? Response.json({ locale }) : new Response("{}", { status: 401 })));
 
+  it("takes the default language from the served page, without asking the API", async () => {
+    memoryStorage();
+    const fetch = api("en");
+    vi.stubGlobal("fetch", fetch);
+    document.documentElement.dataset.locale = "pl";
+    try {
+      render(<App />);
+      await waitFor(() => expect(screen.getByPlaceholderText("Wypowiedz słowo")).toBeInTheDocument());
+      expect(fetch.mock.calls.map(([url]) => String(url))).not.toContain("/api/config");
+    } finally {
+      delete document.documentElement.dataset.locale;
+    }
+  });
+
   it("shows the login campfire in the server's default language", async () => {
     memoryStorage();
     vi.stubGlobal("fetch", api("en"));

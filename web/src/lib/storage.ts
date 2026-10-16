@@ -1,10 +1,10 @@
 // Player storage: item names and categories, the village's totals and item
 // search. Item names come from the dictionaries (`item.<Prefab>`) for the
-// common things and a prettified prefab name for the rest; both languages are
-// searched whatever the UI language, so "iron" and "żelazo" find the same.
+// common things and a prettified prefab name for the rest. Search matches every
+// loaded language whatever the UI language, so "iron" and "żelazo" find the
+// same; a search box loads the other dictionaries once used (`useEveryLocale`).
 
-import { en } from "../i18n/en";
-import { pl } from "../i18n/pl";
+import { loadedDicts, localesVersion } from "../i18n/load";
 import type { MapContainer, MapItem } from "../types";
 
 export type Category = "wood" | "ore" | "metal" | "food" | "seed" | "material" | "weapon" | "armor" | "tool" | "trophy" | "misc";
@@ -89,16 +89,20 @@ export function fold(s: string): string {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/ł/g, "l").replace(/Ł/g, "l").toLowerCase();
 }
 
-const dictEn = en as Record<string, unknown>;
-const dictPl = pl as Record<string, unknown>;
 const searchCache = new Map<string, string>();
+let cacheVersion = -1;
 
-/** Everything an item can be found by: its names in both languages and its prefab. */
+/** Everything an item can be found by: its names in the loaded languages and its prefab. */
 export function itemSearchText(name: string): string {
+  if (cacheVersion !== localesVersion()) {
+    searchCache.clear();
+    cacheVersion = localesVersion();
+  }
   let s = searchCache.get(name);
   if (s === undefined) {
     const key = `item.${name}`;
-    s = fold([dictEn[key], dictPl[key], prettify(name), name].filter((x) => typeof x === "string").join(" | "));
+    const names = loadedDicts().map((d) => (d as Record<string, unknown>)[key]);
+    s = fold([...names, prettify(name), name].filter((x) => typeof x === "string").join(" | "));
     searchCache.set(name, s);
   }
   return s;

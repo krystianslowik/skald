@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Changed
+
+- The dashboard loads only the language you read it in, about 25-30 KB less to download before the first screen on a phone. The page already names the server's default language (`SKALD_LOCALE`) or your own choice, so that language arrives together with the app and the first screen does not wait for it. Switching language in the header fetches the other one then; the old language stays on screen until it is in. Item search still finds names in both languages: the other language is fetched the first time you search.
+
 ## [2026.10.4] - 2026-10-16
 
 ### Changed

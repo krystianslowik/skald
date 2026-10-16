@@ -1,14 +1,16 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { en, type Dict, type Plural } from "./en";
-import { pl } from "./pl";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import type { Dict, Plural } from "./en";
+import { dictFor, isLocale, loadLocale, LOCALES, localesVersion, subscribeLocales, type Locale } from "./load";
+import { LOCALE_STORAGE_KEY } from "./locales";
 
-export type Locale = "en" | "pl";
-export const LOCALES: readonly Locale[] = ["en", "pl"];
-const DICTS: Record<Locale, Dict> = { en, pl };
+export { isLocale, loadLocale, LOCALES, type Locale } from "./load";
+
 /** Intl tag per UI language; en-GB for 24-hour clocks, like the game's own log. */
 const INTL: Record<Locale, string> = { en: "en-GB", pl: "pl-PL" };
 /** Each language names itself in the toggle. */
 export const LOCALE_NAMES: Record<Locale, string> = { en: "English", pl: "Polski" };
+/** The toggle's labels, each in its own language: the other dictionary is usually not loaded. */
+const SWITCH_TO: Record<Locale, string> = { en: "Switch language to English", pl: "Zmień język na Polski" };
 
 type KeysOf<V> = { [K in keyof Dict]: Dict[K] extends V ? K : never }[keyof Dict];
 export type TextKey = KeysOf<string>;
@@ -17,8 +19,6 @@ type Vars = Record<string, string | number>;
 
 const PLACEHOLDER = /\{(\w+)\}/g;
 const fill = (s: string, vars?: Vars) => (vars ? s.replace(PLACEHOLDER, (m, k: string) => (k in vars ? String(vars[k]) : m)) : s);
-
-export const isLocale = (v: unknown): v is Locale => typeof v === "string" && (LOCALES as readonly string[]).includes(v);
 
 export interface I18n {
   locale: Locale;
@@ -46,8 +46,10 @@ export interface I18n {
   raidLabel(id: string): string;
 }
 
+/** Needs the language's dictionary loaded (`loadLocale`, or `I18nProvider` does it). */
 export function makeI18n(locale: Locale): I18n {
-  const dict = DICTS[locale];
+  const dict = dictFor(locale);
+  if (!dict) throw new Error(`skald: the ${locale} dictionary is not loaded`);
   const intl = INTL[locale];
   const rules = new Intl.PluralRules(intl);
   const nf = new Map<number, Intl.NumberFormat>();
@@ -153,12 +155,10 @@ export function makeI18n(locale: Locale): I18n {
   };
 }
 
-const STORAGE_KEY = "skald_locale";
-
 /** The viewer's own choice, if they made one; storage can be blocked. */
 export function storedLocale(): Locale | null {
   try {
-    const v = localStorage.getItem(STORAGE_KEY);
+    const v = localStorage.getItem(LOCALE_STORAGE_KEY);
     return isLocale(v) ? v : null;
   } catch {
     return null;
@@ -167,35 +167,85 @@ export function storedLocale(): Locale | null {
 
 function storeLocale(l: Locale): void {
   try {
-    localStorage.setItem(STORAGE_KEY, l);
+    localStorage.setItem(LOCALE_STORAGE_KEY, l);
   } catch {
     // private mode or blocked storage: the toggle still works for this visit
   }
 }
 
+/** The server's SKALD_LOCALE, written into the served page as `<html data-locale>`. */
+export function serverLocale(): Locale | null {
+  const v = typeof document === "undefined" ? null : document.documentElement.dataset.locale;
+  return isLocale(v) ? v : null;
+}
+
 type Ctx = I18n & { setLocale(l: Locale): void };
 
-const I18nContext = createContext<Ctx>({ ...makeI18n("en"), setLocale: () => undefined });
+const I18nContext = createContext<Ctx | null>(null);
 
-export const useI18n = (): Ctx => useContext(I18nContext);
+let fallbackCtx: Ctx | undefined;
+/** Outside a provider (tests): English, which then has to be loaded already. */
+export const useI18n = (): Ctx => useContext(I18nContext) ?? (fallbackCtx ??= { ...makeI18n("en"), setLocale: () => undefined });
+
+/** Waits before trying a failed first dictionary again: 1 s, 2 s, 4 s ... up to 30 s. */
+const retryDelay = (attempt: number) => Math.min(30_000, 1000 * 2 ** attempt);
 
 /**
  * Holds the active language. `locale` is the starting point (the viewer's
  * stored choice, else the server default); `setLocale` from the header toggle
- * wins from then on and is remembered per browser.
+ * wins from then on and is remembered per browser. Renders `fallback` until
+ * the first dictionary is in; on a switch the old language stays up until
+ * the new one has loaded, so nothing flashes.
  */
-export function I18nProvider({ locale: initial, children }: { locale: Locale; children: ReactNode }) {
-  const [locale, setState] = useState<Locale>(initial);
-  useEffect(() => setState(initial), [initial]);
-  useEffect(() => {
-    document.documentElement.lang = locale;
-  }, [locale]);
-  const setLocale = useCallback((l: Locale) => {
-    storeLocale(l);
-    setState(l);
+export function I18nProvider({ locale: initial, fallback = null, children }: { locale: Locale; fallback?: ReactNode; children: ReactNode }) {
+  const [shown, setShown] = useState<Locale | null>(() => (dictFor(initial) ? initial : null));
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
+  // The language asked for last; a slower load for an earlier pick is dropped.
+  const wanted = useRef(initial);
+  const retry = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const show = useCallback((l: Locale, remember: boolean, attempt = 0) => {
+    wanted.current = l;
+    clearTimeout(retry.current);
+    const done = () => {
+      if (wanted.current !== l) return;
+      // Remembered only once it is on screen, so a failed switch does not stick for the next visit.
+      if (remember) storeLocale(l);
+      setShown(l);
+    };
+    if (dictFor(l)) return done();
+    loadLocale(l).then(done, () => {
+      // Offline or a dropped request. With a language on screen it stays and the toggle tries
+      // again; with none yet (first load) keep trying rather than leave the page blank.
+      if (wanted.current === l && !shownRef.current) retry.current = setTimeout(() => show(l, remember, attempt + 1), retryDelay(attempt));
+    });
   }, []);
-  const value = useMemo(() => ({ ...makeI18n(locale), setLocale }), [locale, setLocale]);
+
+  useEffect(() => {
+    show(initial, false);
+    return () => clearTimeout(retry.current);
+  }, [initial, show]);
+  useEffect(() => {
+    if (shown) document.documentElement.lang = shown;
+  }, [shown]);
+  const setLocale = useCallback((l: Locale) => show(l, true), [show]);
+  const value = useMemo(() => (shown ? { ...makeI18n(shown), setLocale } : null), [shown, setLocale]);
+  if (!value) return <>{fallback}</>;
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
+
+/**
+ * For searches that match item names in every language: loads the other
+ * dictionaries once `active` (the box has a query) and re-renders when they
+ * arrive. The returned number changes with each arrival; memos depend on it.
+ */
+export function useEveryLocale(active: boolean): number {
+  const v = useSyncExternalStore(subscribeLocales, localesVersion, localesVersion);
+  useEffect(() => {
+    if (active) for (const l of LOCALES) loadLocale(l).catch(() => undefined);
+  }, [active]);
+  return v;
 }
 
 /** Two-letter EN / PL switch. */
@@ -209,7 +259,7 @@ export function LocaleToggle({ className = "" }: { className?: string }) {
           type="button"
           lang={l}
           aria-pressed={locale === l}
-          aria-label={fill(DICTS[l]["lang.switchTo"], { lang: LOCALE_NAMES[l] })}
+          aria-label={SWITCH_TO[l]}
           onClick={() => setLocale(l)}
           className="plaque press px-2 py-1 uppercase tracking-wider coarse:min-h-11 coarse:min-w-11 coarse:text-sm"
         >
