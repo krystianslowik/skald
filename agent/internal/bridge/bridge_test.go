@@ -55,7 +55,15 @@ func (f *fakePlugin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(411, map[string]any{"ok": false, "error": "length required"})
 		return
 	}
-	if forced != 0 {
+	switch forced {
+	case 0:
+	case http.StatusTooManyRequests:
+		reply(forced, map[string]any{"ok": false, "error": "too many terrain requests"})
+		return
+	case http.StatusGatewayTimeout:
+		reply(forced, map[string]any{"ok": false, "error": "the game did not answer within 5000 ms"})
+		return
+	default:
 		reply(forced, map[string]any{"ok": false, "error": "no connected player '1234567890123456789'"})
 		return
 	}
@@ -80,6 +88,10 @@ func (f *fakePlugin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ok(map[string]any{"banned": "Xbox_2533274800000001", "name": "Ragnar", "banList": []string{"Xbox_2533274800000001"}})
 	case "/v1/broadcast":
 		reply(501, map[string]any{"ok": false, "error": "not possible server-side"})
+	case "/v1/spawn":
+		ok(map[string]any{"items": []any{}, "stacks": 3, "near": "Ragnar", "position": map[string]any{"x": 1, "y": 2, "z": 3}})
+	case "/v1/time":
+		ok(map[string]any{"day": 12, "dayFraction": 0.5})
 	default:
 		ok(map[string]any{"near": "Ragnar"})
 	}
@@ -264,51 +276,175 @@ func TestUntestedBuildGate(t *testing.T) {
 	mustRun(t, c2, "save", nil)
 	replay, ch := hub.Subscribe(0)
 	hub.Unsubscribe(ch)
-	if len(replay) != 1 || replay[0].Type != "admin" || replay[0].Data["command"] != "ack-build" || replay[0].Data["actor"] != "me" {
+	// The refused save never reached the plugin, so it is not in the trail.
+	if len(replay) != 2 || replay[0].Type != "admin" || replay[0].Data["command"] != "ack-build" || replay[0].Data["actor"] != "me" || replay[1].Data["command"] != "save" {
 		t.Fatalf("events %+v", replay)
 	}
 }
 
-func TestAuditToAdminEvents(t *testing.T) {
-	hub := events.New(100, 10)
-	c := newClient(t, &fakePlugin{build: "l-1.0.17"}, hub, "")
-	_, _ = c.Players(context.Background())
-	line := func(s string) string {
-		return "Oct 10 18:01:02 supervisord: valheim-server [Info   :Skald Bridge] [SkaldBridge] audit " + s
-	}
-	c.NoteLine(line(`actor=admin-1 cmd=POST /v1/spawn args={"items":[{"item":"Wood","amount":20},{"item":"SwordIron","amount":1,"quality":3}],"player":"1234567890123456789"}`))
-	c.NoteLine(line(`actor=admin-1 cmd=POST /v1/spawn result=ok {"ok":true,"data":{"items":[],"stacks":3,"near":"Ragnar","position":{"x":1,"y":2,"z":3}}}`))
-	c.NoteLine(line(`actor=admin-1 cmd=POST /v1/ban args={"player":"Xbox_2533274800000001"}`))
-	c.NoteLine(line(`actor=admin-1 cmd=POST /v1/ban result=error no connected player 'Xbox_2533274800000001'`))
-	c.NoteLine(line(`actor=k cmd=POST /v1/broadcast args={"text":"Restart in 5 min","type":"narrator"}`))
-	c.NoteLine(line(`actor=k cmd=POST /v1/broadcast result=ok {"ok":true,"data":{"sentTo":2,"type":"narrator"}}`))
-	c.NoteLine(line(`actor=k cmd=POST /v1/creatures/kill result=timeout`))
+// adminEvents drains the hub's history.
+func adminEvents(t *testing.T, hub *events.Hub) []map[string]any {
+	t.Helper()
 	replay, ch := hub.Subscribe(0)
 	hub.Unsubscribe(ch)
-	if len(replay) != 4 {
-		t.Fatalf("want 4 admin events, got %+v", replay)
+	var out []map[string]any
+	for _, ev := range replay {
+		if ev.Type != "admin" {
+			t.Fatalf("unexpected %s event %+v", ev.Type, ev.Data)
+		}
+		out = append(out, ev.Data)
 	}
-	b, _ := json.Marshal(replay)
-	for _, leak := range []string{"2533274800000001", "1234567890123456789"} {
+	return out
+}
+
+// Every command the agent sends becomes exactly one `admin` event, built from
+// the body it sent and the plugin's reply. Nothing comes from the game log.
+func TestCommandsPublishAdminEvents(t *testing.T) {
+	hub := events.New(100, 10)
+	f := &fakePlugin{build: "l-1.0.17", status: map[string]int{"/v1/player/heal": 404, "/v1/creatures/kill": 504}}
+	c := newClient(t, f, hub, "")
+	ctx := context.Background()
+	spawn := map[string]any{"player": "Ragnar", "items": []any{
+		map[string]any{"item": "Wood", "amount": 20},
+		map[string]any{"item": "SwordIron", "amount": 1, "quality": 3},
+	}}
+	if _, err := c.Run(ctx, "spawn", spawn, "admin-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Run(ctx, "broadcast", map[string]any{"text": "Restart in 5 min", "type": "narrator"}, "k"); StatusOf(err) != 501 {
+		t.Fatalf("broadcast: %v", err)
+	}
+	if _, err := c.Run(ctx, "heal", map[string]any{"player": "Ragnar"}, "k"); StatusOf(err) != 404 {
+		t.Fatalf("heal: %v", err)
+	}
+	if _, err := c.Run(ctx, "creature-kill", map[string]any{"radius": 30}, ""); StatusOf(err) != 504 {
+		t.Fatalf("creature-kill: %v", err)
+	}
+	if err := c.BanEntry(ctx, "Xbox_2533274800000001", "k"); err != nil {
+		t.Fatal(err)
+	}
+	// Refused before the plugin is asked: nothing ran, nothing to audit.
+	if _, err := c.Run(ctx, "kick", map[string]any{"player": "Nobody"}, "k"); StatusOf(err) != 404 {
+		t.Fatalf("kick: %v", err)
+	}
+	if _, err := c.Run(ctx, "unban", map[string]any{"id": "nope"}, "k"); StatusOf(err) != 404 {
+		t.Fatalf("unban: %v", err)
+	}
+
+	evs := adminEvents(t, hub)
+	if len(evs) != 5 {
+		t.Fatalf("want 5 admin events, got %+v", evs)
+	}
+	b, _ := json.Marshal(evs)
+	for _, leak := range []string{"2533274800000001", "1234567890123456789", "uid", "banList"} {
 		if strings.Contains(string(b), leak) {
 			t.Fatalf("leaked %s: %s", leak, b)
 		}
 	}
-	spawn := replay[0].Data
-	if spawn["command"] != "spawn" || spawn["actor"] != "admin-1" || spawn["result"] != "ok" || spawn["player"] != "Ragnar" || spawn["stacks"] != float64(3) {
-		t.Fatalf("spawn %+v", spawn)
+	sp := evs[0]
+	if sp["command"] != "spawn" || sp["actor"] != "admin-1" || sp["result"] != "ok" || sp["player"] != "Ragnar" || sp["stacks"] != float64(3) || sp["error"] != nil {
+		t.Fatalf("spawn %+v", sp)
 	}
-	if items, _ := spawn["items"].([]map[string]any); len(items) != 2 || items[1]["item"] != "SwordIron" || items[1]["quality"] != float64(3) {
-		t.Fatalf("spawn items %+v", spawn["items"])
+	if items, _ := sp["items"].([]map[string]any); len(items) != 2 || items[1]["item"] != "SwordIron" || items[1]["quality"] != float64(3) {
+		t.Fatalf("spawn items %+v", sp["items"])
 	}
-	if ban := replay[1].Data; ban["command"] != "ban" || ban["result"] != "error" || ban["player"] != nil {
-		t.Fatalf("ban %+v", ban)
-	}
-	if bc := replay[2].Data; bc["text"] != "Restart in 5 min" || bc["type"] != "narrator" || bc["sentTo"] != float64(2) {
+	if bc := evs[1]; bc["command"] != "broadcast" || bc["result"] != "error" || bc["text"] != "Restart in 5 min" || bc["type"] != "narrator" || bc["error"] != "not possible server-side" {
 		t.Fatalf("broadcast %+v", bc)
 	}
-	if k := replay[3].Data; k["command"] != "creature-kill" || k["result"] != "timeout" {
-		t.Fatalf("kill %+v", k)
+	// The plugin's error names the uid; the event names the player.
+	if h := evs[2]; h["command"] != "heal" || h["result"] != "error" || h["player"] != "Ragnar" || h["error"] != "no connected player 'Ragnar'" {
+		t.Fatalf("heal %+v", h)
+	}
+	if k := evs[3]; k["command"] != "creature-kill" || k["result"] != "timeout" || k["actor"] != "unknown" || k["radius"] != float64(30) || k["error"] != nil {
+		t.Fatalf("creature-kill %+v", k)
+	}
+	if ban := evs[4]; ban["command"] != "ban" || ban["result"] != "ok" || ban["player"] != "Ragnar" || ban["actor"] != "k" {
+		t.Fatalf("ban %+v", ban)
+	}
+}
+
+// A plugin that does not answer in the agent's own time: the command may
+// still run, so it is a timeout, not a failure.
+func TestCommandAgentTimeout(t *testing.T) {
+	hub := events.New(100, 10)
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/health" {
+			_, _ = io.WriteString(w, `{"ok":true,"data":{"gameBuild":"l-1.0.17","worldLoaded":true}}`)
+			return
+		}
+		<-release
+	}))
+	defer srv.Close()
+	defer close(release)
+	c := New(Options{URL: srv.URL, Token: testToken, Hub: hub, Timeout: 200 * time.Millisecond})
+	if _, err := c.Run(context.Background(), "save", nil, ""); StatusOf(err) != http.StatusGatewayTimeout {
+		t.Fatalf("got %v", err)
+	}
+	evs := adminEvents(t, hub)
+	if len(evs) != 1 || evs[0]["command"] != "save" || evs[0]["result"] != "timeout" || evs[0]["actor"] != "unknown" {
+		t.Fatalf("events %+v", evs)
+	}
+}
+
+// Reads change nothing and are never audited, also when the plugin turns
+// one away (#63: a busy map produced dozens of "failed admin command" events).
+func TestReadsPublishNothing(t *testing.T) {
+	hub := events.New(100, 10)
+	f := &fakePlugin{build: "l-1.0.17", status: map[string]int{"/v1/terrain/tile": 429, "/v1/locations": 404}}
+	c := newClient(t, f, hub, "")
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		if _, _, err := c.TerrainTile(ctx, 64, 0, 0, 8); StatusOf(err) != 429 {
+			t.Fatalf("tile: %v", err)
+		}
+	}
+	if _, err := c.Read(ctx, "time"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Read(ctx, "locations"); StatusOf(err) != 404 {
+		t.Fatalf("locations: %v", err)
+	}
+	if _, err := c.Players(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Bans(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_ = c.Status(ctx)
+	if evs := adminEvents(t, hub); len(evs) != 0 {
+		t.Fatalf("reads published %+v", evs)
+	}
+}
+
+// The same admin running the same command at once gets one event per call,
+// each with its own arguments (#31: log lines were paired by actor+command).
+func TestConcurrentCommandsKeepTheirArguments(t *testing.T) {
+	hub := events.New(100, 10)
+	c := newClient(t, &fakePlugin{build: "l-1.0.17"}, hub, "")
+	const n = 12
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if _, err := c.Run(context.Background(), "time", map[string]any{"dayFraction": float64(i) / n}, "admin-1"); err != nil {
+				t.Error(err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	evs := adminEvents(t, hub)
+	seen := map[float64]int{}
+	for _, ev := range evs {
+		if ev["command"] != "time" || ev["result"] != "ok" || ev["actor"] != "admin-1" {
+			t.Fatalf("event %+v", ev)
+		}
+		f, _ := ev["dayFraction"].(float64)
+		seen[f]++
+	}
+	if len(evs) != n || len(seen) != n {
+		t.Fatalf("want %d distinct events, got %d events, %d distinct: %+v", n, len(evs), len(seen), evs)
 	}
 }
 

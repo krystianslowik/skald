@@ -39,10 +39,6 @@ const (
 	// KindSocketLost is "Keep socket for playfab/X, try to reconnect": the
 	// connection with that remote id dropped.
 	KindSocketLost = "socket_lost"
-	// KindAdmin is the Skald bridge plugin's audit line: one with the
-	// arguments before a command runs (Args set) and one with its outcome
-	// after (Result set).
-	KindAdmin = "admin"
 	// KindAbandoned is "Destroying abandoned non persistent zdo U:N owner U":
 	// the owner's peer is gone. Logged once per object, in bursts.
 	KindAbandoned = "abandoned"
@@ -86,14 +82,6 @@ type Match struct {
 	// published.
 	Remote string
 	Ms     float64 // world_saved; 0 when the line had no duration
-	// admin: Actor and Cmd ("POST /v1/spawn") on both lines; Args is the raw
-	// JSON on the first, Result (ok, error, timeout, exception) and Detail
-	// (the response or the error) on the second.
-	Actor  string
-	Cmd    string
-	Args   string
-	Result string
-	Detail string
 	// net_stats
 	Connections int
 	ZDOs        int
@@ -201,11 +189,6 @@ var table = []rule{
 		se, _ := strconv.Atoi(s[3])
 		r, _ := strconv.Atoi(s[4])
 		return []Match{{Kind: KindNetStats, Connections: c, ZDOs: z, Sent: se, Recv: r}}
-	}},
-	// The Skald bridge plugin (bridge/plugin/HttpServer.cs) writes these for
-	// every mutating command; the token is never in them.
-	{regexp.MustCompile(`\[SkaldBridge\] audit actor=(\S*) cmd=([A-Z]+ \S+) (?:args=(.*)|result=(\w+)(?: (.*))?)$`), func(s []string) []Match {
-		return []Match{{Kind: KindAdmin, Actor: s[1], Cmd: s[2], Args: s[3], Result: s[4], Detail: s[5]}}
 	}},
 	{regexp.MustCompile(`Joined PlayFab Party network`), func([]string) []Match {
 		return []Match{{Kind: KindPlayfab, State: PlayfabOK}}

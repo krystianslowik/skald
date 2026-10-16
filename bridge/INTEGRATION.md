@@ -349,6 +349,8 @@ the game pod restarts the game and rotates the join code.
   radius 100 m. The UI should also rate-limit, for example one spawn per second.
 - **Audit completeness.** The audit trail lives in the game log. If the agent's
   syslog feed drops lines, the Chronicle misses entries, but Loki still has them.
+  (Since resolved: the agent now builds `admin` events from the commands it
+  sends and the plugin's replies, not from the log lines.)
 
 ## 6. What still needs a human with an Xbox
 

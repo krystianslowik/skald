@@ -78,9 +78,6 @@ func main() {
 		if store != nil {
 			store.NoteLine(line)
 		}
-		if br != nil {
-			br.NoteLine(line)
-		}
 	}
 
 	go tracker.WatchStatusFile(ctx, cfg.StatusFile, 2*time.Second)

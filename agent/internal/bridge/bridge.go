@@ -3,8 +3,9 @@
 //
 // It is the only place that sees player platform ids and peer uids. The web
 // tier names players; this package swaps a name for its uid before a command
-// goes to the plugin, and strips every id from what comes back. It also turns
-// the plugin's audit lines into `admin` events and polls live positions.
+// goes to the plugin, and strips every id from what comes back. It also
+// publishes an `admin` event for every command it sends, built from the
+// request and the plugin's reply, and polls live positions.
 package bridge
 
 import (
@@ -82,15 +83,6 @@ var Reads = map[string]string{
 	"locations":  "/v1/locations",
 }
 
-// commandByPath is the reverse of Commands, for audit lines.
-var commandByPath = func() map[string]string {
-	m := map[string]string{}
-	for name, c := range Commands {
-		m["POST "+c.Path] = name
-	}
-	return m
-}()
-
 // CommandNames lists the allow-list, sorted.
 func CommandNames() []string {
 	out := make([]string, 0, len(Commands))
@@ -141,8 +133,6 @@ type Client struct {
 	health   *Health
 	healthAt time.Time
 	acked    string
-	// pending audit argument summaries by "actor cmd", waiting for the result line.
-	pending map[string]map[string]any
 	// last positions published, to skip unchanged samples.
 	lastPositions string
 }
@@ -177,7 +167,6 @@ func New(opt Options) *Client {
 		nameByUserID: map[string]string{},
 		userIDByName: map[string]string{},
 		banIDs:       map[string]string{},
-		pending:      map[string]map[string]any{},
 	}
 	c.acked = c.loadAck()
 	return c
@@ -236,12 +225,12 @@ func (c *Client) call(ctx context.Context, method, path, actor string, body any)
 	}
 	res, err := c.http.Do(req)
 	if err != nil {
-		return nil, &Error{http.StatusBadGateway, "bridge unavailable"}
+		return nil, unavailable(ctx)
 	}
 	defer res.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if err != nil {
-		return nil, &Error{http.StatusBadGateway, "bridge unavailable"}
+		return nil, unavailable(ctx)
 	}
 	var env envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
@@ -260,6 +249,16 @@ func (c *Client) call(ctx context.Context, method, path, actor string, body any)
 		return nil, &Error{status, c.redact(msg)}
 	}
 	return env.Data, nil
+}
+
+// unavailable is a failed exchange with the plugin: 504 when it ran out of
+// time (the request may have been sent and the command may still run, so the
+// outcome is unknown), 502 when the plugin could not be reached.
+func unavailable(ctx context.Context) *Error {
+	if ctx.Err() != nil {
+		return &Error{http.StatusGatewayTimeout, "the bridge did not answer in time"}
+	}
+	return &Error{http.StatusBadGateway, "bridge unavailable"}
 }
 
 var actorChars = regexp.MustCompile(`[^A-Za-z0-9_.@-]`)
@@ -394,7 +393,7 @@ func (c *Client) Acknowledge(ctx context.Context, build, actor string) error {
 	c.acked = build
 	c.mu.Unlock()
 	c.saveAck(build)
-	c.publishAdmin(map[string]any{"actor": CleanActor(actor), "command": "ack-build", "result": "ok", "build": build})
+	c.publishAdmin(map[string]any{"actor": auditActor(actor), "command": "ack-build", "result": "ok", "build": build})
 	return nil
 }
 
@@ -561,21 +560,21 @@ func (c *Client) BanEntries(ctx context.Context) ([]string, error) {
 }
 
 // BanEntry bans a platform id (or a connected player by name) live, and
-// UnbanEntry lifts one ban list entry. The plugin writes bannedlist.txt and
-// its audit line becomes the `admin` event.
+// UnbanEntry lifts one ban list entry. The plugin writes bannedlist.txt; the
+// `admin` event is published here, like for every command.
 func (c *Client) BanEntry(ctx context.Context, who, actor string) error {
-	return c.post(ctx, "/v1/ban", who, actor)
+	return c.post(ctx, "ban", who, actor)
 }
 
 func (c *Client) UnbanEntry(ctx context.Context, entry, actor string) error {
-	return c.post(ctx, "/v1/unban", entry, actor)
+	return c.post(ctx, "unban", entry, actor)
 }
 
-func (c *Client) post(ctx context.Context, path, player, actor string) error {
+func (c *Client) post(ctx context.Context, name, player, actor string) error {
 	if err := c.gate(ctx); err != nil {
 		return err
 	}
-	_, err := c.call(ctx, http.MethodPost, path, actor, map[string]any{"player": player})
+	_, err := c.command(ctx, name, actor, map[string]any{"player": player})
 	return err
 }
 
@@ -625,8 +624,7 @@ func (c *Client) Read(ctx context.Context, name string) (any, error) {
 // Run sends one allow-listed command. Player names in `player` and
 // `toPlayer` become uids here, and `unban` takes an opaque id from Bans.
 func (c *Client) Run(ctx context.Context, name string, body map[string]any, actor string) (any, error) {
-	cmd, ok := Commands[name]
-	if !ok {
+	if _, ok := Commands[name]; !ok {
 		return nil, &Error{http.StatusNotFound, "unknown command " + name}
 	}
 	if body == nil {
@@ -663,7 +661,7 @@ func (c *Client) Run(ctx context.Context, name string, body map[string]any, acto
 			out[k] = uid
 		}
 	}
-	data, err := c.call(ctx, http.MethodPost, cmd.Path, actor, out)
+	data, err := c.command(ctx, name, actor, out)
 	if err != nil {
 		return nil, err
 	}
@@ -787,51 +785,44 @@ func (c *Client) publishPositions(list []Position) {
 
 func round1(v float64) float64 { return math.Round(v*10) / 10 }
 
-// ---- audit -> admin events ------------------------------------------------
+// ---- admin events -----------------------------------------------------------
 
-// NoteLine turns the plugin's audit lines into `admin` events. The args line
-// is remembered; the result line publishes, with a summary of both that
-// holds no ids: players by name, nothing else from the arguments unless it
-// is on the list below.
-func (c *Client) NoteLine(raw string) {
-	_, matches := logparse.Parse(raw)
-	for _, m := range matches {
-		if m.Kind != logparse.KindAdmin {
-			continue
+// command sends one allow-listed command to the plugin and publishes its
+// `admin` event from what the agent holds: the body it sent and the reply it
+// got. Reads never come through here, so they are never audited. The event
+// holds no ids: players by name, nothing else from the arguments unless it is
+// on the list below.
+func (c *Client) command(ctx context.Context, name, actor string, body map[string]any) (json.RawMessage, error) {
+	data, err := c.call(ctx, http.MethodPost, Commands[name].Path, actor, body)
+	ev := c.summarizeArgs(body)
+	ev["actor"] = auditActor(actor)
+	ev["command"] = name
+	var e *Error
+	switch {
+	case err == nil:
+		ev["result"] = "ok"
+		c.summarizeResult(name, data, ev)
+	case errors.As(err, &e) && e.Status == http.StatusGatewayTimeout:
+		ev["result"] = "timeout"
+	default:
+		ev["result"] = "error"
+		msg := "bridge unavailable"
+		if e != nil {
+			msg = e.Message
 		}
-		key := m.Actor + " " + m.Cmd
-		if m.Result == "" {
-			sum := c.summarizeArgs(m.Args)
-			c.mu.Lock()
-			if len(c.pending) > 64 {
-				c.pending = map[string]map[string]any{}
-			}
-			c.pending[key] = sum
-			c.mu.Unlock()
-			continue
-		}
-		c.mu.Lock()
-		ev := c.pending[key]
-		delete(c.pending, key)
-		c.mu.Unlock()
-		if ev == nil {
-			ev = map[string]any{}
-		}
-		name, ok := commandByPath[m.Cmd]
-		if !ok {
-			name = strings.TrimPrefix(strings.TrimPrefix(m.Cmd, "POST "), "/v1/")
-		}
-		ev["actor"] = m.Actor
-		ev["command"] = name
-		ev["result"] = m.Result
-		switch m.Result {
-		case "ok":
-			c.summarizeResult(name, m.Detail, ev)
-		case "error":
-			ev["error"] = truncate(c.redact(m.Detail), 200)
-		}
-		c.publishAdmin(ev)
+		ev["error"] = truncate(msg, 200)
 	}
+	c.publishAdmin(ev)
+	return data, err
+}
+
+// auditActor is who an `admin` event names: the cleaned X-Skald-Actor, or
+// "unknown" like the plugin's own audit line.
+func auditActor(actor string) string {
+	if actor = CleanActor(actor); actor != "" {
+		return actor
+	}
+	return "unknown"
 }
 
 func (c *Client) publishAdmin(ev map[string]any) {
@@ -847,10 +838,13 @@ var argKeys = map[string]bool{
 	"toSpot": true, "radius": true,
 }
 
-func (c *Client) summarizeArgs(raw string) map[string]any {
+// summarizeArgs reads the body as the plugin got it (a JSON round trip, so
+// numbers are float64 whatever the caller put in).
+func (c *Client) summarizeArgs(body map[string]any) map[string]any {
 	out := map[string]any{}
 	var args map[string]any
-	if json.Unmarshal([]byte(raw), &args) != nil {
+	raw, err := json.Marshal(body)
+	if err != nil || json.Unmarshal(raw, &args) != nil {
 		return out
 	}
 	for k, v := range args {
@@ -896,15 +890,9 @@ func (c *Client) summarizeArgs(raw string) map[string]any {
 }
 
 // summarizeResult adds the counts and the target's name from the answer.
-func (c *Client) summarizeResult(cmd, raw string, ev map[string]any) {
-	var body struct {
-		Data any `json:"data"`
-	}
-	if json.Unmarshal([]byte(raw), &body) != nil {
-		return
-	}
-	d, ok := body.Data.(map[string]any)
-	if !ok {
+func (c *Client) summarizeResult(cmd string, data json.RawMessage, ev map[string]any) {
+	var d map[string]any
+	if json.Unmarshal(data, &d) != nil {
 		return
 	}
 	for _, k := range []string{"killed", "tamed", "alreadyTamed", "repaired", "smelters", "fermenters", "plants", "sentTo", "stopped", "started", "label", "stacks", "unloaded", "day"} {

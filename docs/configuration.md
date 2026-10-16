@@ -557,21 +557,25 @@ start. The NetworkPolicy needs no change: the plugin is loopback only.
   event-stop, spawn, teleport, globalkey-set, globalkey-remove,
   creature-spawn, creature-kill, creature-tame, heal, status, repair, fill,
   grow, map-reveal, map-pins`, plus `ack-build`. Bodies are JSON objects
-  (`{}` at least, 16 KB max), `X-Skald-Actor` is passed through to the
-  plugin's audit line, 8 s timeout. The plugin's 400/404/409/501/503/504
-  pass through; an unreachable plugin is 502. Commands are refused while a
+  (`{}` at least, 16 KB max), `X-Skald-Actor` names who ran it in the
+  `admin` event and the plugin's audit line, 8 s timeout. The plugin's 400/404/409/501/503/504
+  pass through; an unreachable plugin is 502, one that does not answer
+  within the 8 s is 504. Commands are refused while a
   restart runs, but do not wait for backups or updates.
 - **Game build gate.** On a build not in `BRIDGE_TESTED_BUILDS`, commands
   answer 409 until an admin confirms the build in the panel (held button, kept
   in `SETTINGS_DIR/bridge.json`). Reads keep working.
-- **Saga.** The plugin writes an audit line before and after every command.
-  The agent turns each pair into an `admin` event: who, which command, the
-  result, the player **by name**, and an allow-listed summary of the
-  arguments (item, amount, quality, creature, key, time, the broadcast text,
-  ...). Platform ids and uids are dropped, error messages redacted. The web
-  tier keeps them in the history, so the Saga reads "Sigrun spawned 20 Wood
-  for Ragnar". The full lines stay in the game log (with ids redacted in the
-  Chronicle).
+- **Saga.** Every command the agent sends to the plugin becomes one `admin`
+  event, built from the request and the plugin's reply: who, which command,
+  the result (`ok`, `error` or `timeout`), the player **by name**, and an
+  allow-listed summary of the arguments (item, amount, quality, creature,
+  key, time, the broadcast text, ...). Platform ids and uids are dropped,
+  error messages redacted. Reads (the map's terrain tiles, players, bans,
+  time) are never audited, and a command refused before it reaches the
+  plugin (untested build, unknown player) is not either. The web tier keeps
+  the events in the history, so the Saga reads "Sigrun spawned 20 Wood for
+  Ragnar". The plugin still writes an audit line before and after every
+  command for the game log (with ids redacted in the Chronicle).
 - **Live positions.** While at least one SSE client is subscribed (skald-web
   always is) and somebody is playing, the agent polls the plugin every 2 s and
   publishes a `positions` event (name, platform, x, z, health) when something

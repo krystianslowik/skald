@@ -211,15 +211,18 @@ update broke the binding (one log line, the route stays off).
 Each mutating command writes two lines to the server log: the arguments before
 it runs, and the outcome after (`result=ok <response>`, `result=error <message>`,
 `result=timeout` or `result=exception`). Both are written by BepInEx to stdout,
-so `kubectl logs` and the agent's syslog feed see them:
+so `kubectl logs` and Loki see them. They are for people reading the log: the
+agent builds the Saga's `admin` events from the commands it sends and the
+replies it gets, not from these lines.
 
 ```
 [Info   :Skald Bridge] [SkaldBridge] audit actor=test cmd=POST /v1/globalkeys/set args={"key":"nobuildcost"}
 [Info   :Skald Bridge] [SkaldBridge] audit actor=test cmd=POST /v1/globalkeys/set result=ok {"ok":true,"data":["defeated_eikthyr","nobuildcost"]}
 ```
 
-Read-only commands (`GET`, `/v1/nearby`) are not logged. The token is never
-logged.
+Read-only commands (`GET`, `/v1/nearby`) are not logged, also when they fail
+(a busy terrain tile's 429, for example); a read that times out or throws gets
+one `read <cmd> result=...` warning instead. The token is never logged.
 
 ## Safety
 

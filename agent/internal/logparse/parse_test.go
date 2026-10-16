@@ -256,21 +256,18 @@ func TestSessionLog(t *testing.T) {
 	}
 }
 
-func TestAdminAudit(t *testing.T) {
-	args := `Oct 10 18:01:02 supervisord: valheim-server [Info   :Skald Bridge] [SkaldBridge] audit actor=admin-1a2b cmd=POST /v1/spawn args={"item":"Wood","amount":20,"player":"123456789"}`
-	_, m := Parse(args)
-	want := []Match{{Kind: KindAdmin, Actor: "admin-1a2b", Cmd: "POST /v1/spawn", Args: `{"item":"Wood","amount":20,"player":"123456789"}`}}
-	if !reflect.DeepEqual(m, want) {
-		t.Fatalf("args line: got %+v", m)
-	}
-	res := `Oct 10 18:01:02 supervisord: valheim-server [Info   :Skald Bridge] [SkaldBridge] audit actor=admin-1a2b cmd=POST /v1/spawn result=ok {"ok":true,"data":{"near":"Ragnar"}}`
-	_, m = Parse(res)
-	if len(m) != 1 || m[0].Result != "ok" || m[0].Detail != `{"ok":true,"data":{"near":"Ragnar"}}` || m[0].Args != "" {
-		t.Fatalf("result line: got %+v", m)
-	}
-	_, m = Parse(`[Warning:Skald Bridge] [SkaldBridge] audit actor=x cmd=POST /v1/save result=timeout`)
-	if len(m) != 1 || m[0].Result != "timeout" || m[0].Detail != "" {
-		t.Fatalf("timeout line: got %+v", m)
+// The bridge plugin's audit lines are for people reading the log: the agent
+// builds `admin` events from the commands it sends (internal/bridge), so they
+// match nothing here.
+func TestAuditLinesAreOnlyLogs(t *testing.T) {
+	for _, line := range []string{
+		`Oct 10 18:01:02 supervisord: valheim-server [Info   :Skald Bridge] [SkaldBridge] audit actor=admin-1a2b cmd=POST /v1/spawn args={"item":"Wood","amount":20,"player":"123456789"}`,
+		`Oct 10 18:01:02 supervisord: valheim-server [Info   :Skald Bridge] [SkaldBridge] audit actor=admin-1a2b cmd=POST /v1/spawn result=ok {"ok":true,"data":{"near":"Ragnar"}}`,
+		`[Info   :Skald Bridge] [SkaldBridge] audit actor=unknown cmd=GET /v1/terrain/tile result=error too many terrain requests`,
+	} {
+		if _, m := Parse(line); len(m) != 0 {
+			t.Errorf("%s: got %+v", line, m)
+		}
 	}
 }
 

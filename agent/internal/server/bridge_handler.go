@@ -53,8 +53,8 @@ func (s *Server) bridgeRead(w http.ResponseWriter, r *http.Request) {
 }
 
 // bridgeCommand serves POST /bridge/{command} for the allow-list in
-// internal/bridge. X-Skald-Actor is passed through for the plugin's audit
-// line. Not serialised with restart/backup/update (the plugin queues its
+// internal/bridge. X-Skald-Actor names who ran it in the `admin` event and
+// the plugin's audit line. Not serialised with restart/backup/update (the plugin queues its
 // own work on the game's main thread), but refused while a restart runs.
 func (s *Server) bridgeCommand(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("command")
