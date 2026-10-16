@@ -248,6 +248,25 @@ describe("live positions per socket", () => {
   });
 });
 
+describe("live history deltas per socket", () => {
+  it("sends rankings deltas only to sockets opened with history=1, whatever their topics", async () => {
+    const hub = new Hub(watchAgent([]), new HistoryStore(":memory:"), { historyDeltaMs: 10 });
+    (hub as unknown as { state: ReturnType<typeof emptyAgentState> }).state = emptyAgentState(new Date("2026-10-09T17:00:00Z"));
+    const ws = liveSocket(hub);
+    const current = socket("/live?topics=&history=1");
+    const old = socket("/live");
+    ws.open(current);
+    ws.open(old);
+    expect(current.data).toMatchObject({ positions: false, history: true });
+    expect(old.data).toMatchObject({ positions: true, history: false });
+    hub.ingest("A", { seq: 1, ts: "2026-10-09T17:30:00Z", type: "player_join", data: { name: "Ragnar" } });
+    await Bun.sleep(30);
+    expect(current.sent.filter((m) => m.type === "history")).toHaveLength(1);
+    expect(old.sent.filter((m) => m.type === "history")).toHaveLength(0);
+    hub.stop();
+  });
+});
+
 describe("HttpAgent positions lease", () => {
   it("streams with the lease and maps watch calls to /positions/watch", async () => {
     const { HttpAgent } = await import("../src/agent");
