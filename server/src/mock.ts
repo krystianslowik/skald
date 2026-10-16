@@ -1,9 +1,9 @@
-import type { ActionResponse, AgentAsset, AgentSource, BridgeRequest, MapSourceResult, PiecesBox, Proxied } from "./agent";
+import type { ActionResponse, AgentAsset, AgentSource, BridgeRequest, MapSourceResult, PiecesBox, Proxied, TerrainTileRef } from "./agent";
 import { mockMap } from "./mapmock";
 import { mockNature, natureIn } from "./mocknature";
 import { mockPieces, piecesIn } from "./mockpieces";
 import { mockIcons, type MockIcons } from "./mockicons";
-import { MOCK_TERRAIN_RADIUS, mockTerrain } from "./mockterrain";
+import { MOCK_TERRAIN_RADIUS, MOCK_TILE_BUILD, mockTerrain, mockTerrainTile, mockTilesDoc } from "./mockterrain";
 import { addDays, calendar } from "./profiles";
 import { buildArgs, changedKeys, normalize, parseArgs, validateSettings } from "./settings";
 import type {
@@ -176,6 +176,7 @@ export class MockAgent implements AgentSource {
   private mapGeneration = 1;
   private piecesAll: ReturnType<typeof mockPieces> | null = null;
   private natureAll: ReturnType<typeof mockNature> | null = null;
+  private tiles = new Map<string, Uint8Array>();
   // The fake bridge plugin.
   private pos = new Map<string, MockPos>();
   private bans: { id: string; platform: Platform; name?: string }[] = [{ id: "5e1d0c3b2a190807", platform: "steam", name: "Hrafn" }, { id: "0f9e8d7c6b5a4f3e", platform: "xbox" }];
@@ -349,7 +350,31 @@ export class MockAgent implements AgentSource {
     return this.iconSet;
   }
 
+  /** Tiles from the mock's noise, gzipped like the agent's, a few kept. */
+  async terrainTile(t: TerrainTileRef, etag: string | null): Promise<Response> {
+    if (t.v !== MOCK_TILE_BUILD) return new Response('{"ok":false}', { status: 404 });
+    const tag = `"tt-${t.v}-${t.z}-${t.x}-${t.y}"`;
+    if (etag === tag) return new Response(null, { status: 304, headers: { ETag: tag } });
+    const key = `${t.z}/${t.x}/${t.y}`;
+    let body = this.tiles.get(key);
+    if (!body) {
+      const raw = mockTerrainTile(t.z, t.x, t.y);
+      if (!raw) return new Response('{"ok":false}', { status: 404 });
+      body = Bun.gzipSync(raw as Uint8Array<ArrayBuffer>);
+      if (this.tiles.size > 256) this.tiles.delete(this.tiles.keys().next().value!);
+      this.tiles.set(key, body);
+    }
+    // MOCK_TILE_DELAY_MS imitates the bridge sampling a tile, for the perf harness.
+    const delay = Number(process.env.MOCK_TILE_DELAY_MS ?? 0);
+    if (delay > 0) await Bun.sleep(delay);
+    return new Response(body, { headers: { ETag: tag, "Content-Type": "application/octet-stream" } });
+  }
+
   async asset(path: AgentAsset, etag: string | null): Promise<Response> {
+    if (path === "terrain/tiles.json") {
+      if (process.env.MOCK_TILES === "off") return new Response('{"ok":false}', { status: 404 });
+      return new Response(mockTilesDoc(), { headers: { "Content-Type": "application/json" } });
+    }
     if (path === "terrain.png" || path === "terrain.json") {
       const t = mockTerrain();
       const tag = `"t-${t.build}"`;

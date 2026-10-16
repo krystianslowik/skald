@@ -89,3 +89,83 @@ export function mockTerrain(): MockTerrain {
   cached = { build, png: encodePng(SIZE, SIZE, px), json };
   return cached;
 }
+
+// ---- tiles ------------------------------------------------------------------
+// The mock's terrain as the agent's tile pyramid (GET /terrain/tile), in the
+// bridge's binary format (bridge/plugin/TerrainTile.cs): biome indices,
+// heights and a forest channel, from the same noise, with two finer octaves
+// so close zoom has relief to shade.
+
+export const MOCK_TILE_BUILD = "mock-tiles-1";
+const TILE = 256;
+const EDGE = TILE + 2;
+const MAX_LEVEL = 7;
+const BIOME_INDEX = new Map<RGB, number>([
+  [MEADOWS, 1],
+  [SWAMP, 2],
+  [MOUNTAIN, 3],
+  [FOREST, 4],
+  [PLAINS, 5],
+  [ASH, 6],
+  [NORTH, 7],
+  [MIST, 9],
+]);
+
+function fine(x: number, z: number): number {
+  return (mockElevation(x * 9 + 31_000, z * 9 - 17_000) - 0.45) * 14 + (mockElevation(x * 41 - 9_000, z * 41 + 5_000) - 0.45) * 3;
+}
+
+/** The tiles document, as the agent's GET /terrain/tiles.json. */
+export function mockTilesDoc(): string {
+  return JSON.stringify({
+    build: MOCK_TILE_BUILD,
+    tileSize: TILE,
+    apron: 1,
+    maxLevel: MAX_LEVEL,
+    gridLevel: -1,
+    radius: MOCK_TERRAIN_RADIUS,
+    source: "bridge",
+    stale: false,
+    waterLevel: 30,
+    biomes: ["None", "Meadows", "Swamp", "Mountain", "BlackForest", "Plains", "AshLands", "DeepNorth", "Ocean", "Mistlands"],
+    forest: "mask",
+    palette: { source: "none" },
+  });
+}
+
+/** Tile z/x/y, ungzipped, or null when there is no such tile. */
+export function mockTerrainTile(z: number, x: number, y: number): Uint8Array | null {
+  if (!Number.isInteger(z) || z < 0 || z > MAX_LEVEL || x < 0 || y < 0 || x >= 1 << z || y >= 1 << z) return null;
+  const R = MOCK_TERRAIN_RADIUS;
+  const step = (2 * R) / (TILE << z);
+  const x0 = -R + (x * TILE - 0.5) * step;
+  const z0 = R - (y * TILE - 0.5) * step;
+  const n = EDGE;
+  const out = new Uint8Array(24 + n * n * 4);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(0, 0x31544b53, true);
+  dv.setUint16(4, 1, true);
+  dv.setUint16(6, 3, true);
+  dv.setInt32(8, n, true);
+  dv.setFloat32(12, x0, true);
+  dv.setFloat32(16, z0, true);
+  dv.setFloat32(20, step, true);
+  const hOff = 24 + n * n;
+  const fOff = hOff + 2 * n * n;
+  for (let r = 0; r < n; r++) {
+    const wz = z0 - r * step;
+    for (let c = 0; c < n; c++) {
+      const wx = x0 + c * step;
+      const base = height(wx, wz);
+      const h = base + (base > 26 ? fine(wx, wz) : 0);
+      const i = r * n + c;
+      const b = h < 30 && base < 22 ? 8 : (BIOME_INDEX.get(biome(wx, wz, base)) ?? 1);
+      out[24 + i] = b;
+      dv.setUint16(hOff + 2 * i, Math.max(0, Math.min(65535, Math.round((h + 500) * 50))), true);
+      const woods = mockElevation(wx * 3 + 7_000, wz * 3 + 3_000);
+      const f = b === 4 ? 1 : b === 1 || b === 5 || b === 2 || b === 9 ? (woods > 0.5 ? 1 : 0) : 0;
+      out[fOff + i] = f * 255;
+    }
+  }
+  return out;
+}
