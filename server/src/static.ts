@@ -20,5 +20,8 @@ export function mountStatic(app: Hono, webRoot: string): void {
     }
   });
   app.use("/*", serveStatic({ root: webRoot }));
+  // A missing hashed asset is a 404, never the HTML shell: a tab still on the old
+  // build must see its import fail (and reload) rather than run HTML as JavaScript.
+  app.all("/assets/*", (c, next) => (c.req.path.startsWith("/assets/") ? c.text("Not found", 404, { "Cache-Control": "no-store" }) : next()));
   app.get("*", serveStatic({ path: `${webRoot}/index.html` }));
 }
