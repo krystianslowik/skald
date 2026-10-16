@@ -7,11 +7,40 @@ import { crackle } from "../lib/campfire";
 import { diff, draftErrors, draftReducer, generatePassword, isCustom, strength, toInput, worldOnly, type Draft } from "../lib/settingsForm";
 import { useI18n, type TextKey } from "../i18n";
 import { SETTINGS_PATH, SettingsGlyph } from "./SettingsGlyph";
+import { useAdmin } from "./admin/AdminContext";
 import { Sheet, SheetClose, SETTLE } from "./Sheet";
 
 const HOLD_MS = 1500;
 const SPRING_BACK = { bounce: 0, visualDuration: 0.35 };
 const SWAP = { type: "spring" as const, bounce: 0, visualDuration: 0.3 };
+
+type SheetProps = Parameters<typeof SettingsForm>[0];
+
+/**
+ * The settings sheet, behind the admin unlock when there is an admin
+ * password: a viewer is asked for it first and the sheet stays shut if they
+ * cancel (the server refuses the password and every change anyway).
+ */
+export default function SettingsSheet(props: SheetProps) {
+  const admin = useAdmin();
+  const locked = !!admin && !admin.unlocked;
+  const { onClose } = props;
+  const asked = useRef(false);
+  const shown = useRef(false);
+  useEffect(() => {
+    if (!locked || !admin) return;
+    // Locked again (the idle timeout) while open: close rather than ask twice.
+    if (asked.current) {
+      if (shown.current) onClose();
+      return;
+    }
+    asked.current = true;
+    void admin.unlock().then((ok) => !ok && onClose());
+  }, [locked, admin, onClose]);
+  if (locked) return null;
+  shown.current = true;
+  return <SettingsForm {...props} />;
+}
 
 /**
  * Server settings: name, password, public listing, world modifiers and keys,
@@ -20,7 +49,7 @@ const SWAP = { type: "spring" as const, bounce: 0, visualDuration: 0.3 };
  * the footer counts them, saves (optimistically, rolled back on error) and
  * then offers to apply: now (press and hold) or once the server is empty.
  */
-export default function SettingsSheet({
+function SettingsForm({
   summary,
   effectiveName,
   worldModifiers,

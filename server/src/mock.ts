@@ -237,7 +237,9 @@ export class MockAgent implements AgentSource {
         world: "Midgard",
         args: "-crossplay -modifier raids less -modifier deathpenalty casual",
         status: "running",
-        processes: { "valheim-server": "RUNNING", "valheim-updater": "RUNNING", "valheim-backup": "RUNNING" },
+        // As the community image runs them: the game, its helpers, a one-shot
+        // bootstrap that has already finished, and the container's plumbing.
+        processes: { crond: "RUNNING", syslogd: "RUNNING", "valheim-bootstrap": "EXITED", "valheim-server": "RUNNING", "valheim-updater": "RUNNING", "valheim-backup": "RUNNING" },
         serverStartedAt: new Date(now - 3 * HOUR - 17 * MIN).toISOString(),
         version: "l-1.0.17",
         networkVersion: 40,

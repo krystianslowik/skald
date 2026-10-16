@@ -334,8 +334,9 @@ export function mockMap(opts: { generation?: number; netTime?: number; savedAt?:
       { type: 3, kind: "point", name: name("Silver?"), x: 1640, z: 1810 },
       { type: 2, kind: "hammer", name: name("Bridge"), x: -760, z: 360 },
       { type: 4, kind: "cave", name: name("Troll cave"), x: 520, z: 780 },
-      { type: 9, kind: "boss", name: name("Eikthyr"), x: 330, z: 140 },
-      { type: 9, kind: "boss", name: name("The Elder"), x: -1180, z: 760 },
+      // Vegvisir marks carry the game's own token for the boss, not a name.
+      { type: 9, kind: "boss", name: name("$enemy_eikthyr"), x: 330, z: 140 },
+      { type: 9, kind: "boss", name: name("$enemy_gdking"), x: -1180, z: 760 },
       { type: 0, kind: "fire", name: name("Raspberries"), x: 140, z: 260 },
     ],
     portals,

@@ -3,6 +3,7 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { JoinCode } from "./JoinCode";
 import { ServerPassword, useServerPassword } from "./ServerPassword";
+import { useAdmin } from "./admin/AdminContext";
 
 const INCLUDE_KEY = "skald.share.password";
 const SHARE_PATH = "M12 3.5v11M8 7.5l4-4 4 4M5.5 11.5v7a1.5 1.5 0 0 0 1.5 1.5h10a1.5 1.5 0 0 0 1.5-1.5v-7";
@@ -55,7 +56,10 @@ export const JoinPanel = memo(function JoinPanel({
   const [note, setNote] = useState<Note>(null);
   const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ready = /^\d{6}$/.test(code);
-  const withPassword = hasPassword && include;
+  // Behind an admin password, a viewer shares the code alone; the password needs an unlock.
+  const admin = useAdmin();
+  const mayRead = !admin || admin.unlocked;
+  const withPassword = hasPassword && include && mayRead;
   const { load } = pw;
 
   useEffect(() => () => void (noteTimer.current && clearTimeout(noteTimer.current)), []);
@@ -147,7 +151,7 @@ export const JoinPanel = memo(function JoinPanel({
             <Glyph d={SHARE_PATH} size={20} />
             {t("share.button")}
           </button>
-          {hasPassword && (
+          {hasPassword && mayRead && (
             <label className="on-world inline-flex min-h-11 cursor-pointer select-none items-center gap-2.5 text-sm text-label">
               <input type="checkbox" checked={include} onChange={toggleInclude} className="peer sr-only" />
               <span

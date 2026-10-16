@@ -4,8 +4,33 @@
 
 import type { MapContainer } from "../types";
 
-/** Chests whose centres are at most this far apart, seen from above, are one stack. */
-export const STACK_REACH = 0.5;
+/**
+ * How far apart two stacked chests' centres may be along x and along z.
+ * People set each chest a little off the one below (0.4 to 0.6 m is common)
+ * and a wood chest is about 1.0 x 0.6 m; the save has no turn for it, so
+ * a footprint overlap on both axes is taken as under 0.8 m. Two columns of
+ * chests side by side stand 0.85 m and more apart and stay two stacks.
+ */
+export const STACK_REACH = 0.8;
+/** One chest on another: its pivot 0.8 to 1.0 m higher. */
+const LEVEL_MIN = 0.5;
+/** Up to a level and a bit more: a chest on a shelf over another still belongs to it, a loft floor (3 m) does not. */
+const LEVEL_MAX = 2.2;
+/** Without heights (an older agent), only chests on one spot can be told to be a stack. */
+const FLAT_REACH = 0.5;
+
+/**
+ * Whether two chests are neighbours in a stack: their footprints overlap
+ * seen from above and one stands a level (or a shelf) over the other.
+ * Chests side by side at one height never are, however close.
+ */
+function stacked(a: MapContainer, b: MapContainer): boolean {
+  const dx = Math.abs(a.x - b.x);
+  const dz = Math.abs(a.z - b.z);
+  if (typeof a.y !== "number" || typeof b.y !== "number") return Math.hypot(dx, dz) <= FLAT_REACH;
+  const dy = Math.abs(a.y - b.y);
+  return dx < STACK_REACH && dz < STACK_REACH && dy >= LEVEL_MIN && dy <= LEVEL_MAX;
+}
 
 export interface ChestStack {
   /** Bottom to top. */
@@ -21,8 +46,10 @@ export interface StackPlace {
 }
 
 /**
- * Chests grouped into stacks: union-find over chests within STACK_REACH of
- * each other, on a grid of that size so only neighbours are compared. Carts
+ * Chests grouped into stacks: union-find over chests that stand on one
+ * another (see stacked), so a pile chains level by level even when each
+ * chest drifts a little further sideways; on a grid of STACK_REACH so only
+ * neighbours are compared. Carts
  * and ships are never stacked. Every chest is in exactly one stack.
  */
 export function groupStacks(containers: readonly MapContainer[]): ChestStack[] {
@@ -44,7 +71,7 @@ export function groupStacks(containers: readonly MapContainer[]): ChestStack[] {
       for (let b = cz - 1; b <= cz + 1; b++) {
         for (const j of grid.get(`${a},${b}`) ?? []) {
           const o = chests[j]!;
-          if (Math.hypot(o.x - c.x, o.z - c.z) <= STACK_REACH) parent[find(i)] = find(j);
+          if (stacked(o, c)) parent[find(i)] = find(j);
         }
       }
     }
@@ -66,6 +93,15 @@ export function groupStacks(containers: readonly MapContainer[]): ChestStack[] {
     list.sort((a, b) => (ordered ? a.y! - b.y! : 0) || a.id.localeCompare(b.id, "en", { numeric: true }));
     return { chests: list, ordered };
   });
+}
+
+/**
+ * A stack's chests in the order they are seen standing in front of it: the
+ * top one first. `index` stays the level from the bottom (0 for the lowest),
+ * so "1st from the bottom" is always the last row.
+ */
+export function topDown<T>(chests: readonly T[]): { chest: T; index: number }[] {
+  return chests.map((chest, index) => ({ chest, index })).reverse();
 }
 
 /** Where each chest sits in its stack, by container id. */

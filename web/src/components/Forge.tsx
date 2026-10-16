@@ -1,6 +1,7 @@
 import { memo, useMemo } from "react";
 import type { ApiState, SeriesPoint } from "../types";
 import { useI18n } from "../i18n";
+import { processRows, type ProcessTone } from "../lib/processes";
 import { Chart } from "./Chart";
 
 const DOCS_METRICS = "https://github.com/krystianslowik/skald#metrics-and-alerts";
@@ -29,7 +30,7 @@ function Gauge({ title, value, children }: { title: string; value: string | null
 }
 
 /**
- * A HUD resource bar in the game's style (health column, stamina and eitr bars).
+ * A HUD resource bar in the game's style (health, stamina and eitr bars).
  * There is no CPU or memory limit to measure against, so the fill is the current
  * value as a share of the 6-hour peak; the label says so.
  */
@@ -39,27 +40,52 @@ function Meter({ kind, points, value, label }: { kind: "hp" | "stamina" | "eitr"
   const now = last(points) ?? 0;
   const frac = top > 0 ? Math.min(1, now / top) : 0;
   const pct = Math.round(frac * 100);
-  const vertical = kind === "hp";
   const text = t("forge.meter", { value, pct });
   return (
-    <div
-      role="meter"
-      aria-label={label}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={pct}
-      aria-valuetext={text}
-      title={text}
-      className={`meter meter-${kind} ${vertical ? "meter-v w-4 shrink-0" : "mb-2 h-3.5"}`}
-      style={vertical ? { height: 120 } : undefined}
-    >
-      <span className="meter-fill" style={{ transform: vertical ? `scaleY(${frac})` : `scaleX(${frac})` }} />
-      {!vertical && (
-        <span aria-hidden className="meter-value">
-          {value}
-        </span>
-      )}
+    <div role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-valuetext={text} title={text} className={`meter meter-${kind} mb-2 h-3.5`}>
+      <span className="meter-fill" style={{ transform: `scaleX(${frac})` }} />
+      <span aria-hidden className="meter-value">
+        {value}
+      </span>
     </div>
+  );
+}
+
+/** What each line of a chart is, under it: every chart has one, so the three stand even. */
+function Legend({ items }: { items: { color: string; label: string; value?: string }[] }) {
+  return (
+    <p className="mt-1.5 flex min-h-4 flex-wrap gap-x-4 gap-y-0.5 text-[0.6875rem] leading-4 text-ash">
+      {items.map((it) => (
+        <span key={it.label} className="inline-flex items-center gap-1.5">
+          <span aria-hidden className="inline-block h-0.5 w-3" style={{ background: it.color }} />
+          {it.label}
+          {it.value && <span className="tabular-nums text-label">{it.value}</span>}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+const TONE_TEXT: Record<ProcessTone, string> = { ok: "text-flame", busy: "text-gold", idle: "text-ash", bad: "text-blood" };
+const TONE_DOT: Record<ProcessTone, string> = { ok: "bg-flame", busy: "bg-gold", idle: "bg-iron", bad: "bg-blood" };
+
+/** The container's processes by what they do; the plumbing as one "system" line. */
+function Processes({ processes }: { processes: Record<string, string> }) {
+  const { t, lookup } = useI18n();
+  const rows = processRows(processes);
+  if (rows.length === 0) return <p className="text-xs text-ash">{t("forge.noData")}</p>;
+  return (
+    <ul className="space-y-1.5">
+      {rows.map((r) => (
+        <li key={r.key} className="flex items-center justify-between gap-3 text-sm" title={r.key === "process.system" ? t("process.systemHint", { names: r.names.join(", ") }) : r.names[0]}>
+          <span className="flex min-w-0 items-center gap-2">
+            <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${TONE_DOT[r.tone]}`} />
+            <span className="truncate text-bone">{lookup(r.key) ?? r.names[0]!.replace(/^valheim-/, "")}</span>
+          </span>
+          <span className={`shrink-0 text-xs font-bold ${TONE_TEXT[r.tone]}`}>{lookup(r.state) ?? r.state}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -109,8 +135,8 @@ export const Forge = memo(function Forge({
     () => ({
       hours: { every: 2 * 3_600_000, format: clock },
       cores: (v: number) => t("forge.cores", { n: number(v, 2) }),
-      cpu: [{ name: "CPU", points: m?.cpu ?? [], color: "#e0484b" }],
-      memory: [{ name: "RAM", points: m?.memory ?? [], color: "#d9b44a" }],
+      cpu: [{ name: t("forge.legendCpu"), points: m?.cpu ?? [], color: "#e0484b" }],
+      memory: [{ name: t("forge.legendMemory"), points: m?.memory ?? [], color: "#d9b44a" }],
       network: [
         { name: t("forge.rx"), points: m?.rx ?? [], color: "#d655bf" },
         { name: t("forge.tx"), points: m?.tx ?? [], color: "#e0c7c2", fill: false },
@@ -134,88 +160,78 @@ export const Forge = memo(function Forge({
     for (const key of keys) out.push(lookup(`worldkey.${key}`) ?? lookup(`setkey.${key}`)?.toLowerCase() ?? key);
     return out;
   }, [modifiers, lookup, server.args, worldMods, worldKeys]);
+  const cpuNow = m ? cores(last(m.cpu) ?? 0) : null;
+  const memNow = m ? bytes(last(m.memory) ?? 0) : null;
+  const rxNow = m ? rate(last(m.rx) ?? 0) : null;
   return (
-    <div className="grid gap-x-8 gap-y-7 lg:grid-cols-[1fr_1fr_1fr_17rem]">
+    <div className="space-y-6">
       {metricsConfigured === false ? (
         <MetricsOff />
       ) : (
-        <>
-          <Gauge title={t("forge.cpu")} value={m ? cores(last(m.cpu) ?? 0) : null}>
-            <div className="flex items-start gap-2.5">
-              {m && m.cpu.length > 0 && <Meter kind="hp" points={m.cpu} value={cores(last(m.cpu) ?? 0)} label={t("forge.cpu")} />}
-              <div className="min-w-0 flex-1">
-                <Chart label={t("forge.cpuLabel")} series={charts.cpu} format={cores} timeFormat={clock} empty={empty} ticks={hours} />
-              </div>
-            </div>
+        // Three gauges built the same way: title and value, a bar, the chart, its legend.
+        <div className="grid gap-x-8 gap-y-7 md:grid-cols-3">
+          <Gauge title={t("forge.cpu")} value={cpuNow}>
+            <Meter kind="hp" points={m?.cpu ?? []} value={cpuNow ?? "?"} label={t("forge.cpu")} />
+            <Chart label={t("forge.cpuLabel")} series={charts.cpu} format={cores} timeFormat={clock} empty={empty} ticks={hours} />
+            <Legend items={[{ color: "#e0484b", label: t("forge.legendCpu") }]} />
           </Gauge>
-          <Gauge title={t("forge.memory")} value={m ? bytes(last(m.memory) ?? 0) : null}>
-            {m && m.memory.length > 0 && <Meter kind="stamina" points={m.memory} value={bytes(last(m.memory) ?? 0)} label={t("forge.memory")} />}
+          <Gauge title={t("forge.memory")} value={memNow}>
+            <Meter kind="stamina" points={m?.memory ?? []} value={memNow ?? "?"} label={t("forge.memory")} />
             <Chart label={t("forge.memoryLabel")} series={charts.memory} format={bytes} timeFormat={clock} empty={empty} ticks={hours} />
+            <Legend items={[{ color: "#d9b44a", label: t("forge.legendMemory") }]} />
           </Gauge>
-          <Gauge title={t("forge.network")} value={m ? rate(last(m.rx) ?? 0) : null}>
-            {m && m.rx.length > 0 && <Meter kind="eitr" points={m.rx} value={rate(last(m.rx) ?? 0)} label={t("forge.network")} />}
-            <Chart
-              label={t("forge.networkLabel")}
-              series={charts.network}
-              format={rate}
-              timeFormat={clock}
-              empty={empty}
-              ticks={hours}
+          <Gauge title={t("forge.network")} value={rxNow}>
+            <Meter kind="eitr" points={m?.rx ?? []} value={rxNow ?? "?"} label={t("forge.network")} />
+            <Chart label={t("forge.networkLabel")} series={charts.network} format={rate} timeFormat={clock} empty={empty} ticks={hours} />
+            <Legend
+              items={[
+                { color: "#d655bf", label: t("forge.rx"), value: rxNow ?? undefined },
+                { color: "#e0c7c2", label: t("forge.tx"), value: m ? rate(last(m.tx) ?? 0) : undefined },
+              ]}
             />
-            {m && (
-              <div className="mt-1 flex gap-4 text-[0.6875rem] text-ash">
-                <span><span className="mr-1.5 inline-block h-0.5 w-3 align-middle bg-eitr" />{t("forge.rx")}</span>
-                <span><span className="mr-1.5 inline-block h-0.5 w-3 align-middle bg-label" />{t("forge.tx")} {rate(last(m.tx) ?? 0)}</span>
-              </div>
-            )}
           </Gauge>
-        </>
+        </div>
       )}
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-4 border-t border-iron/40 pt-5 text-sm lg:grid-cols-1 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
-        <div>
-          <dt className="text-xs text-ash">{t("forge.worldSize")}</dt>
-          <dd className="font-bold text-bone">{bytes(world.sizeBytes)}</dd>
-        </div>
-        <div>
-          <dt className="text-xs text-ash">{t("forge.lastSave")}</dt>
-          <dd className="font-bold text-bone">
-            {ago(world.lastSaveAt ?? world.meta?.savedAt, now)}
-            {world.lastSaveMs > 0 && <span className="text-ash">, {world.lastSaveMs} ms</span>}
-          </dd>
-        </div>
-        {server.netStats && (
+      {/* The world and the container under the charts: facts, modifiers and processes side by side. */}
+      <div className="grid gap-x-8 gap-y-5 border-t border-iron/40 pt-5 text-sm sm:grid-cols-2 lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)_minmax(0,16rem)]">
+        <dl className="grid grid-cols-2 content-start gap-x-4 gap-y-3 sm:grid-cols-1 lg:order-1">
           <div>
-            <dt className="text-xs text-ash">{t("forge.objects")}</dt>
+            <dt className="text-xs text-ash">{t("forge.worldSize")}</dt>
+            <dd className="font-bold text-bone">{bytes(world.sizeBytes)}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-ash">{t("forge.lastSave")}</dt>
             <dd className="font-bold text-bone">
-              {number(server.netStats.zdos)}
-              <span className="text-ash">, {tn("forge.connections", server.netStats.connections)}</span>
+              {ago(world.lastSaveAt ?? world.meta?.savedAt, now)}
+              {world.lastSaveMs > 0 && <span className="text-ash">, {world.lastSaveMs} ms</span>}
             </dd>
           </div>
-        )}
-        <div className="col-span-2 lg:col-span-1">
-          <dt className="text-xs text-ash">{t("forge.modifiers")}</dt>
-          <dd className="mt-1 flex flex-wrap gap-1.5">
+          {server.netStats && (
+            <div className="col-span-2 sm:col-span-1">
+              <dt className="text-xs text-ash">{t("forge.objects")}</dt>
+              <dd className="font-bold text-bone">
+                {number(server.netStats.zdos)}
+                <span className="text-ash">, {tn("forge.connections", server.netStats.connections)}</span>
+              </dd>
+            </div>
+          )}
+        </dl>
+        <section aria-label={t("forge.processes")} className="lg:order-3">
+          <h3 className="mb-2 text-xs text-ash">{t("forge.processes")}</h3>
+          <Processes processes={server.processes} />
+        </section>
+        <section aria-label={t("forge.modifiers")} className="sm:col-span-2 lg:order-2 lg:col-span-1">
+          <h3 className="mb-2 text-xs text-ash">{t("forge.modifiers")}</h3>
+          <div className="flex flex-wrap gap-1.5">
             {mods.length === 0 && <span className="text-bone">{t("forge.defaultModifiers")}</span>}
             {mods.map((x) => (
               <span key={x} className="plaque px-1.5 py-0.5 text-xs font-bold text-flame">
                 {x}
               </span>
             ))}
-          </dd>
-        </div>
-        <div className="col-span-2 lg:col-span-1">
-          <dt className="text-xs text-ash">{t("forge.processes")}</dt>
-          <dd className="mt-1 space-y-0.5">
-            {Object.entries(server.processes).map(([k, v]) => (
-              <div key={k} className="flex justify-between gap-2 text-xs">
-                <span className="text-bone/80">{lookup(`process.${k}`) ?? k}</span>
-                <span className={v === "RUNNING" ? "text-flame" : "text-blood"}>{v === "RUNNING" ? t("forge.running") : v.toLowerCase()}</span>
-              </div>
-            ))}
-            {Object.keys(server.processes).length === 0 && <span className="text-xs text-ash">{t("forge.noData")}</span>}
-          </dd>
-        </div>
-      </dl>
+          </div>
+        </section>
+      </div>
     </div>
   );
 });

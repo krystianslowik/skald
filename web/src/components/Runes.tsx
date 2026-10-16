@@ -96,89 +96,91 @@ const Rune = memo(function Rune({ def, disabled, onFire }: { def: RuneDef; disab
   );
 
   const status =
-    phase.kind === "holding" ? (
-      t("rune.holding")
-    ) : phase.kind === "sent" ? (
-      t("rune.sent")
-    ) : phase.kind === "done" ? (
-      phase.message
-    ) : disabled ? (
-      t("rune.sleeping")
-    ) : (
-      <>
-        <span className="key-chip mr-1.5">{t("key.hold")}</span>
-        {t("rune.hold")}
-      </>
-    );
+    phase.kind === "holding"
+      ? t("rune.holding")
+      : phase.kind === "sent"
+        ? t("rune.sent")
+        : phase.kind === "done"
+          ? phase.message
+          : disabled
+            ? t("rune.sleeping")
+            : `${t("key.hold")} ${t("rune.hold")}`;
   // Holding or burning: the slot is the selected one, in the game's blue.
   const active = phase.kind === "holding" || phase.kind === "sent";
+  const statusTone = phase.kind === "done" ? (phase.ok ? "text-flame" : "text-blood") : active ? "text-bone" : "text-label/80";
 
+  // One row per rune, the whole row the thing to hold: the carved rune on the
+  // left lights stroke by stroke and a line of fire runs along the bottom.
   return (
-    <div className="flex flex-col items-center text-center">
-      <button
-        type="button"
-        disabled={disabled}
-        aria-label={t("rune.aria", { title: t(def.title) })}
-        onPointerDown={(e) => {
-          e.currentTarget.setPointerCapture?.(e.pointerId);
+    <button
+      type="button"
+      disabled={disabled}
+      aria-label={t("rune.aria", { title: t(def.title) })}
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        begin();
+      }}
+      onPointerUp={stop}
+      onPointerLeave={stop}
+      onPointerCancel={stop}
+      onKeyDown={(e) => {
+        if ((e.key === " " || e.key === "Enter") && !e.repeat) {
+          e.preventDefault();
           begin();
-        }}
-        onPointerUp={stop}
-        onPointerLeave={stop}
-        onPointerCancel={stop}
-        onKeyDown={(e) => {
-          if ((e.key === " " || e.key === "Enter") && !e.repeat) {
-            e.preventDefault();
-            begin();
-          }
-        }}
-        onKeyUp={(e) => {
-          if (e.key === " " || e.key === "Enter") stop();
-        }}
-        onContextMenu={(e) => e.preventDefault()}
-        className={`press group relative grid h-24 w-24 touch-none select-none place-items-center transition-[background,box-shadow,opacity] enabled:hover:shadow-[inset_0_2px_7px_rgba(0,0,0,0.65),inset_0_0_0_1px_rgba(243,184,103,0.55)] disabled:cursor-not-allowed disabled:opacity-40 ${active ? "slot-selected" : "slot"}`}
-      >
-        <svg viewBox="0 0 40 62" width="40" height="62" aria-hidden className="overflow-visible">
-          <path d={def.path} fill="none" stroke="#120c08" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
-          <path d={def.path} fill="none" stroke="#5a4330" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-          <motion.path
-            d={def.path}
-            fill="none"
-            stroke="url(#rune-fire)"
-            strokeWidth="4"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{ pathLength: progress, opacity: glow, filter: "drop-shadow(0 0 3px #d68a1a) drop-shadow(0 0 8px rgba(236,194,18,0.5))" }}
-          />
-        </svg>
-        <AnimatePresence>
-          {phase.kind === "sent" && !reduced && (
-            <motion.span
-              className="pointer-events-none absolute inset-0 rounded-[inherit]"
-              style={{ boxShadow: "0 0 26px 4px rgba(94,151,204,0.5), inset 0 0 18px rgba(255,255,255,0.35)" }}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: [0.4, 1, 0.6] }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 1.2, repeat: Infinity, repeatType: "mirror" }}
-            />
-          )}
-        </AnimatePresence>
-      </button>
-      <h3 className="mt-2.5 text-[0.9375rem] font-bold leading-tight text-bone">{t(def.title)}</h3>
-      <p className="text-[0.6875rem] text-flame/90">
-        <span aria-hidden className="mr-1 font-rune">
-          {def.glyph}
+        }
+      }}
+      onKeyUp={(e) => {
+        if (e.key === " " || e.key === "Enter") stop();
+      }}
+      onContextMenu={(e) => e.preventDefault()}
+      className={`press group relative flex min-h-16 w-full touch-none select-none items-center gap-3.5 overflow-hidden px-3 py-2.5 text-left transition-[background,box-shadow,opacity] enabled:hover:shadow-[inset_0_2px_7px_rgba(0,0,0,0.65),inset_0_0_0_1px_rgba(243,184,103,0.55)] disabled:cursor-not-allowed disabled:opacity-40 ${active ? "slot-selected" : "slot"}`}
+    >
+      <svg viewBox="0 0 40 62" width="26" height="40" aria-hidden className="shrink-0 overflow-visible">
+        <path d={def.path} fill="none" stroke="#120c08" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d={def.path} fill="none" stroke="#6a4f38" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
+        <motion.path
+          d={def.path}
+          fill="none"
+          stroke="url(#rune-fire)"
+          strokeWidth="4.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ pathLength: progress, opacity: glow, filter: "drop-shadow(0 0 3px #d68a1a) drop-shadow(0 0 8px rgba(236,194,18,0.5))" }}
+        />
+      </svg>
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-baseline gap-x-2">
+          <span className="text-[0.9375rem] font-bold leading-tight text-bone">{t(def.title)}</span>
+          <span className="text-[0.6875rem] text-flame/80" title={t("rune.name", { rune: def.rune })}>
+            <span aria-hidden className="mr-0.5 font-rune">
+              {def.glyph}
+            </span>
+            {def.rune}
+          </span>
         </span>
-        {t("rune.name", { rune: def.rune })}
-      </p>
-      <p className="mt-1 max-w-[18ch] text-xs leading-snug text-ash">{t(def.hint)}</p>
-      <p
-        aria-live="polite"
-        className={`mt-2 min-h-5 text-xs ${phase.kind === "done" ? (phase.ok ? "text-flame" : "text-blood") : "text-ash"}`}
-      >
+        <span className="mt-0.5 block text-xs leading-snug text-ash">{t(def.hint)}</span>
+        {/* Phones: the status under the hint, where it has the width. */}
+        <span aria-live="polite" className={`mt-1 block text-xs font-bold sm:hidden ${statusTone}`}>
+          {status}
+        </span>
+      </span>
+      <span aria-live="polite" className={`hidden max-w-[9rem] shrink-0 text-right text-xs font-bold leading-tight sm:block ${statusTone}`}>
         {status}
-      </p>
-    </div>
+      </span>
+      <motion.span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 origin-left bg-[linear-gradient(90deg,#e08a1c,#ffe58a)]" style={{ scaleX: progress, opacity: glow }} />
+      <AnimatePresence>
+        {phase.kind === "sent" && !reduced && (
+          <motion.span
+            className="pointer-events-none absolute inset-0 rounded-[inherit]"
+            style={{ boxShadow: "inset 0 0 18px rgba(140,188,230,0.35)" }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: [0.4, 1, 0.6] }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 1.2, repeat: Infinity, repeatType: "mirror" }}
+          />
+        )}
+      </AnimatePresence>
+    </button>
   );
 });
 
@@ -200,7 +202,7 @@ export const Runes = memo(function Runes({ online, lastAction }: { online: boole
     [t],
   );
   return (
-    <div>
+    <div className="flex flex-1 flex-col">
       <svg width="0" height="0" className="absolute">
         <defs>
           <linearGradient id="rune-fire" x1="0" y1="1" x2="0" y2="0">
@@ -209,13 +211,14 @@ export const Runes = memo(function Runes({ online, lastAction }: { online: boole
           </linearGradient>
         </defs>
       </svg>
-      <div className="grid grid-cols-3 gap-3">
+      {/* Beside the treasury on wide screens the rows share its height evenly. */}
+      <div className="grid flex-1 auto-rows-fr gap-2.5">
         {RUNES.map((r) => (
           <Rune key={r.name} def={r} disabled={!online} onFire={fire} />
         ))}
       </div>
       {lastAction && (
-        <p className="mt-4 border-t border-iron/40 pt-3 text-center text-xs text-ash">
+        <p className="mt-4 border-t border-iron/40 pt-3 text-xs text-ash">
           {t("rune.last")}: {actionTitle(i18n, String(lastAction.data.name))},{" "}
           <span className={lastAction.data.ok ? "text-flame" : "text-blood"}>
             {actionStatus(i18n, Boolean(lastAction.data.ok), String(lastAction.data.message ?? ""))}

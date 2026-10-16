@@ -27,6 +27,12 @@ above them.
 - Admins, bans and world restore need the agent to write the config volume, which the example deployments do not allow; the sheet shows the lists and backups read-only until it can.
 - The terrain looks like the game's map: biome colours, darker forest, relief and water by depth, painted the same way at every zoom, so a place keeps its colour as you zoom in. Swamps are dark mud with water pools instead of beige patches with outlines, and biome borders are smooth curves instead of blocks. Tiles are painted in a background worker, at most four load at once, nearest the view first, and tiles that leave the view are cancelled.
 - The terrain Job stays as a fallback: when the bridge is not reachable, its grid serves the low zoom levels and the terrain image as before.
+- With `ADMIN_PASSWORD_HASH` set, the server settings sheet and the server password are the admin's: a viewer is asked to unlock first, and `GET /api/settings/password` answers 403 without an admin session. On the join panel a viewer shares the join code alone.
+- The Forge card is even: the processor, memory and network gauges are built the same way, each with its bar, chart and legend. The world facts, modifiers and processes sit in one band under them.
+- Processes read by what they do ("game server", "backups", "updates"), a finished first-start bootstrap shows as done instead of a red "exited", and the container's cron and syslog fold into one "system" line. Every state is translated.
+- The Runes of power are three compact rows, each the thing to press and hold, with the status in words and a line of fire along the bottom while held. Beside the Treasury they share its height.
+- On wide screens the join code and the players at the fire sit side by side, centred on each other, and an empty fire is one quiet line instead of a tall empty board.
+- Close in on the map, a wood has one outline round its edge instead of one round every tree, and trees are drawn by species: swamp trees dark, small and gnarled, conifers as low stars, birches small and light, oaks broad.
 
 ### Fixed
 
@@ -34,6 +40,9 @@ above them.
 - The development mock's terrain now has swamps, forests and mist lands; its noise was faded out far from the centre, so they never appeared.
 - The player count drops back to 0 when the last player leaves. The game's "connection lost" line still counts the player who just left, so the count used to stay at 1 until the next join or restart: "apply settings when the server is empty" never fired, the agent kept asking the bridge for positions with nobody on, and `valheim_players_online` stayed at 1. The game's 10-minute network summary showing 0 connections now also resets it.
 - The day labels on the 7-day online chart stay on local midnight across a daylight saving change. After the autumn change they used to sit an hour early, under the previous day's name, with Sunday shown twice.
+- A pile of chests each pushed a little sideways (0.4 to 0.6 m is common) lost its bottom chest, which the map then counted as a stack of its own: the stack label was off by one. Chests now stack when their footprints overlap and one stands a level (or a shelf) over the other, so a pile stays whole and two columns side by side stay apart.
+- A stack of chests is listed as it stands, the top chest first, so "1st from the bottom" is the lowest row of the list.
+- Boss altars marked by a Vegvisir showed the game's raw token ("$enemy_gdking"); they now carry the boss's name, and any other token is put into words.
 
 ## [0.10.2] - 2026-10-16
 

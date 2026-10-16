@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useI18n } from "../../i18n";
 import { markerItems, markerStore, type Marker } from "../../lib/mapgeo";
+import { topDown } from "../../lib/stacks";
 import { countItems } from "../../lib/storage";
 import { mapUrlAt } from "../../lib/world";
 import type { MapContainer } from "../../types";
@@ -170,9 +171,10 @@ function ClusterList({ group, onPick }: { group: readonly Marker[]; onPick?: (m:
 }
 
 /**
- * A stack of chests, bottom to top: where each one sits, what it holds and
- * its slots. `level` (from the stores or a search) is picked out and
- * scrolled to.
+ * A stack of chests as it stands, the top one first and the bottom one last
+ * (like the storey switcher): where each one sits, what it holds and its
+ * slots. `level` (from the stores or a search, 0 for the bottom) is picked
+ * out and scrolled to.
  */
 function StackList({ chests, level, names }: { chests: readonly MapContainer[]; level?: number; names: boolean }) {
   const { t, tn, lookup } = useI18n();
@@ -182,8 +184,8 @@ function StackList({ chests, level, names }: { chests: readonly MapContainer[]; 
   }, [level]);
   const ordered = chests.every((c) => typeof c.y === "number");
   return (
-    <ol className="mt-2 space-y-2">
-      {chests.map((c, i) => {
+    <ol reversed className="mt-2 space-y-2">
+      {topDown(chests).map(({ chest: c, index: i }) => {
         const n = countItems(c.items);
         const on = i === level;
         return (

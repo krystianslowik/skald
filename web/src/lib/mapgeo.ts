@@ -8,6 +8,7 @@
 // explored mask are both row-major from the south-west corner.
 
 import type { ApiMap, MapContainer, MapExplored, MapItem, MapLand, MapLocation } from "../types";
+import { gameName } from "./gametext";
 import { groupStacks } from "./stacks";
 
 /** Radius of the playable world in metres. */
@@ -876,6 +877,8 @@ export function buildMarkers(map: ApiMap, lookup: (key: string) => string | unde
     out.push({ id: `store:${c.id}`, layer: "storage", icon: "chest", x: c.x, z: c.z, priority: 35, tier: 1, rank: 60, label: "", labelScale: Infinity, data });
   }
   for (const [i, p] of map.pins.entries()) {
+    // A Vegvisir names its pin with the game's token ("$enemy_gdking"): the boss's name instead.
+    const name = gameName(p.name, lookup);
     out.push({
       id: `pin:${i}`,
       layer: "pins",
@@ -886,9 +889,9 @@ export function buildMarkers(map: ApiMap, lookup: (key: string) => string | unde
       tier: 0,
       rank: 150,
       // A home pin that names a base lends it the label; the pin keeps its name in the details.
-      label: used.has(i) ? "" : p.name,
+      label: used.has(i) ? "" : name,
       labelScale: 0.1,
-      data: { type: "pin", kind: p.kind, name: p.name },
+      data: { type: "pin", kind: p.kind, name },
     });
   }
   for (const [i, l] of map.locations.entries()) {
