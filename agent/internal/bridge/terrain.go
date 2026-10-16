@@ -14,8 +14,8 @@ import (
 // TerrainTimeout covers the plugin's queue wait and one duty-cycled tile.
 const TerrainTimeout = 30 * time.Second
 
-// maxTerrainTile is the largest tile the plugin can answer: 258^2 * 4 bytes plus the header.
-const maxTerrainTile = 24 + 258*258*4
+// maxTerrainTile is the largest tile the plugin can answer: 260^2 * 4 bytes plus the header.
+const maxTerrainTile = 24 + 260*260*4
 
 // TerrainPalette is the game's own minimap colours, when the plugin could
 // read them; Source "none" otherwise.

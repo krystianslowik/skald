@@ -107,8 +107,19 @@ func decode(t *testing.T, raw []byte) decoded {
 		step:   float64(math.Float32frombits(binary.LittleEndian.Uint32(raw[20:]))),
 		biomes: raw[tileHeader : tileHeader+n*n],
 	}
-	for i := 0; i < n*n; i++ {
-		d.heights = append(d.heights, binary.LittleEndian.Uint16(raw[tileHeader+n*n+2*i:]))
+	if d.flags&flagPacked == 0 {
+		t.Fatal("served tile not packed")
+	}
+	d.flags &^= flagPacked
+	// Undo packHeights: byte planes of west-to-east deltas.
+	lo, hi := raw[tileHeader+n*n:], raw[tileHeader+2*n*n:]
+	for r := 0; r < n; r++ {
+		var v uint16
+		for c := 0; c < n; c++ {
+			i := r*n + c
+			v += uint16(lo[i]) | uint16(hi[i])<<8
+			d.heights = append(d.heights, v)
+		}
 	}
 	return d
 }
@@ -124,7 +135,7 @@ func TestPyramidGeometry(t *testing.T) {
 	}
 	// Pixel (0, 0) of tile 0/0/0 is centred half a pixel in from the north-west corner.
 	x0, z0, step := TileOrigin(0, 0, 0)
-	if !near(x0+step, -WorldRadius+step/2, 1e-9) || !near(z0-step, WorldRadius-step/2, 1e-9) {
+	if !near(x0+Apron*step, -WorldRadius+step/2, 1e-9) || !near(z0-Apron*step, WorldRadius-step/2, 1e-9) {
 		t.Fatalf("origin %v %v step %v", x0, z0, step)
 	}
 	// Neighbouring tiles share their apron: tile x+1's first pixel is tile x's apron.
@@ -183,7 +194,7 @@ func TestGridFillsItsLevelsWithoutTheBridge(t *testing.T) {
 	}
 	d := decode(t, gunzip(t, body))
 	at := func(i, j int) (byte, float64) {
-		k := (j+1)*d.n + i + 1
+		k := (j+Apron)*d.n + i + Apron
 		return d.biomes[k], float64(d.heights[k])/50 - 500
 	}
 	if b, h := at(0, 0); b != 1 || !near(h, 60, 0.02) {
@@ -193,7 +204,7 @@ func TestGridFillsItsLevelsWithoutTheBridge(t *testing.T) {
 		t.Fatalf("pixel 10,0: biome %d height %v", b, h)
 	}
 	// The apron past the world's edge repeats the edge.
-	if d.biomes[0] != d.biomes[d.n+1] || d.heights[0] != d.heights[d.n+1] {
+	if k := Apron*d.n + Apron; d.biomes[0] != d.biomes[k] || d.heights[0] != d.heights[k] {
 		t.Fatal("apron does not repeat the edge")
 	}
 	// Level 0 averages 2 x 2 grid pixels: (60 + 60.5) / 2, and the south half is sea.

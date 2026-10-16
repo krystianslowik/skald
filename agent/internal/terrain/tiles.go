@@ -5,7 +5,7 @@ package terrain
 // [-WorldRadius, WorldRadius]^2 into 2^z x 2^z tiles of TileSize pixels, so
 // level 3 is 2048 px across: exactly the terrain Job's default grid, which
 // fills levels 0..3 without the bridge when it is there and current. Every
-// tile carries a one-sample apron on each side (TileEdge samples a row), so
+// tile carries a two-sample apron on each side (TileEdge samples a row), so
 // the web can shade and smooth its edges without the neighbours.
 //
 // A tile is the bridge's binary format (bridge/plugin/TerrainTile.cs),
@@ -35,7 +35,10 @@ import (
 
 const (
 	TileSize = 256
-	TileEdge = TileSize + 2
+	TileEdge = TileSize + 2*Apron
+	// Apron is the samples around a tile on every side: two, so a slope at
+	// the tile's edge is a centred difference in both neighbours.
+	Apron = 2
 	// MaxLevel is 0.64 m per pixel; deeper adds little but bridge time.
 	MaxLevel = 7
 	// WorldRadius is half the pyramid's span: the game world's edge.
@@ -56,11 +59,11 @@ func MetresPerPixel(z int) float64 { return 2 * WorldRadius / float64(int(TileSi
 
 // TileOrigin is the world position of a tile's north-west apron sample:
 // pixel (i, j) of the tile (apron excluded) is centred at
-// x0 + (i+1)*step, z0 - (j+1)*step.
+// x0 + (i+Apron)*step, z0 - (j+Apron)*step.
 func TileOrigin(z, x, y int) (x0, z0, step float64) {
 	step = MetresPerPixel(z)
-	x0 = -WorldRadius + (float64(x*TileSize)-0.5)*step
-	z0 = WorldRadius - (float64(y*TileSize)-0.5)*step
+	x0 = -WorldRadius + (float64(x*TileSize-Apron)+0.5)*step
+	z0 = WorldRadius - (float64(y*TileSize-Apron)+0.5)*step
 	return
 }
 
@@ -223,7 +226,7 @@ func (ts *Tiles) plan(ctx context.Context) (*plan, error) {
 	if info, err := ts.bridgeInfo(ctx); err == nil {
 		k := tileKey{info.SeedHash, info.WorldGenVersion, info.GameBuild}
 		p := &plan{key: k, doc: TilesDoc{
-			Build: k.build(), TileSize: TileSize, Apron: 1, MaxLevel: MaxLevel, GridLevel: -1, Radius: WorldRadius,
+			Build: k.build(), TileSize: TileSize, Apron: Apron, MaxLevel: MaxLevel, GridLevel: -1, Radius: WorldRadius,
 			Source: "bridge", WaterLevel: WaterLevel, Biomes: BiomeNames, Forest: info.Forest, Palette: &info.Palette,
 		}}
 		// The grid serves its levels only when it is from exactly this world and build.
@@ -237,7 +240,7 @@ func (ts *Tiles) plan(ctx context.Context) (*plan, error) {
 	}
 	k := tileKey{gm.SeedHash, gm.WorldGenVersion, gm.GameBuild}
 	return &plan{key: k, grid: gm, doc: TilesDoc{
-		Build: k.build(), TileSize: TileSize, Apron: 1, MaxLevel: gl, GridLevel: gl, Radius: WorldRadius,
+		Build: k.build(), TileSize: TileSize, Apron: Apron, MaxLevel: gl, GridLevel: gl, Radius: WorldRadius,
 		Source: "grid", Stale: ginfo.Stale, WaterLevel: WaterLevel, Biomes: BiomeNames, Forest: "none",
 	}}, nil
 }
@@ -338,7 +341,7 @@ func (ts *Tiles) produce(c *tileCall, key string, p *plan, z, x, y int) {
 	}
 	var buf bytes.Buffer
 	zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
-	_, _ = zw.Write(raw)
+	_, _ = zw.Write(packHeights(raw))
 	_ = zw.Close()
 	c.body = buf.Bytes()
 	if err := ts.cache.put(key, c.body); err != nil {
@@ -405,6 +408,34 @@ func checkTile(b []byte, n int) error {
 	return nil
 }
 
+// flagPacked marks heights stored as row deltas in two byte planes.
+const flagPacked = 4
+
+// packHeights rewrites a tile's heights for gzip: each row as differences
+// from the sample to its west (mod 2^16), low bytes of the whole grid first,
+// then the high bytes. Smooth terrain then compresses to about half. The web
+// undoes it (terrainpaint.ts decodeTile); flagPacked says it was done.
+func packHeights(raw []byte) []byte {
+	n := int(binary.LittleEndian.Uint32(raw[8:]))
+	nn := n * n
+	out := append([]byte(nil), raw...)
+	binary.LittleEndian.PutUint16(out[6:], binary.LittleEndian.Uint16(raw[6:])|flagPacked)
+	src := raw[tileHeader+nn:]
+	lo := out[tileHeader+nn : tileHeader+2*nn]
+	hi := out[tileHeader+2*nn : tileHeader+3*nn]
+	for r := 0; r < n; r++ {
+		var prev uint16
+		for c := 0; c < n; c++ {
+			i := r*n + c
+			v := binary.LittleEndian.Uint16(src[2*i:])
+			d := v - prev
+			prev = v
+			lo[i], hi[i] = byte(d), byte(d>>8)
+		}
+	}
+	return out
+}
+
 // encodeTile writes the bridge's format: header, biomes, heights[, forest].
 func encodeTile(n int, x0, z0, step float64, biomes []byte, heights []uint16) []byte {
 	out := make([]byte, tileHeader+n*n*3)
@@ -432,8 +463,8 @@ func gridTile(dir string, m *Manifest, gl, z, x, y int) ([]byte, error) {
 	k := 1 << (gl - z)
 	px := TileSize << z // pixels across at level z
 	// Grid rows this tile needs, apron included.
-	r0 := max(0, (y*TileSize-1)*k)
-	r1 := min(res, (y*TileSize+TileSize+1)*k)
+	r0 := max(0, (y*TileSize-Apron)*k)
+	r1 := min(res, (y*TileSize+TileSize+Apron)*k)
 	rows := r1 - r0
 	bf, err := os.Open(filepath.Join(dir, "biomes.u8"))
 	if err != nil {
@@ -458,9 +489,9 @@ func gridTile(dir string, m *Manifest, gl, z, x, y int) ([]byte, error) {
 	heights := make([]uint16, n*n)
 	var votes [256]int
 	for j := 0; j < n; j++ {
-		pr := min(px-1, max(0, y*TileSize+j-1))
+		pr := min(px-1, max(0, y*TileSize+j-Apron))
 		for i := 0; i < n; i++ {
-			pc := min(px-1, max(0, x*TileSize+i-1))
+			pc := min(px-1, max(0, x*TileSize+i-Apron))
 			sum := 0
 			best, bestN := byte(0), 0
 			for dr := 0; dr < k; dr++ {
