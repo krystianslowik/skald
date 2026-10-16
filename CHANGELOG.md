@@ -9,6 +9,15 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.0] - 2026-10-16
+
+The first calendar-versioned release (it follows 0.10.2). When upgrading:
+
+- **Terrain tiles** need the bridge 0.2.0 image (`skald-bridge`) next to the 2026.10.0 agent.
+- **Admins, bans and world restore** only work if the agent can write the config volume. See "Admins, bans and world restore" in docs/configuration.md; otherwise they stay read-only.
+- **Discord and the update check** need skald-web to reach the internet on port 443.
+- **Viewers and the server password:** with `ADMIN_PASSWORD_HASH` set, viewers no longer see the server password.
+
 ### Added
 
 - Discord notifications. Set `DISCORD_WEBHOOK_URL` and skald-web posts joins and leaves (with the visit length), deaths, raids, server stops and starts, new join codes, game updates and failed admin commands or settings to a Discord channel, in the `SKALD_LOCALE` language. `DISCORD_NOTIFY` picks which ones. Players arriving together share one message, a quick restart does not flap, world saves are never sent, and nothing from before skald-web started is repeated. The admin sheet says whether notifications are on and sends a test message.
