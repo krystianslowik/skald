@@ -735,3 +735,78 @@ export interface AdminResult {
   data?: unknown;
   error?: string;
 }
+
+// ---- admin: access lists and world restore (agent files, no bridge needed) ---
+
+/** The game's two list files. */
+export const ACCESS_LISTS = ["admins", "bans"] as const;
+export type AccessListName = (typeof ACCESS_LISTS)[number];
+export const ACCESS_OPS = ["add", "remove"] as const;
+export type AccessOp = (typeof ACCESS_OPS)[number];
+
+/**
+ * One list entry. `id` is the raw platform id: only ever served to an admin
+ * session (GET /api/admin/access), never in events or /api/state.
+ */
+export interface AccessEntry {
+  id: string;
+  platform: Platform;
+  name?: string;
+  /** False for a line in a format the agent does not recognise. */
+  known: boolean;
+}
+
+export interface AccessList {
+  entries: AccessEntry[];
+  /** A change applies to the running game at once (bans through the bridge). */
+  live: boolean;
+}
+
+/** A player at the fire, as the lists see them: never an id. */
+export interface AccessOnline {
+  name: string;
+  platform: Platform;
+  admin: boolean;
+  banned: boolean;
+  /** The agent knows this player's platform id: one tap adds them. */
+  canAdd: boolean;
+}
+
+/** GET /api/admin/access. */
+export interface AccessState {
+  /** The agent may write the config volume. */
+  writable: boolean;
+  running: boolean;
+  admins: AccessList;
+  bans: AccessList;
+  online: AccessOnline[];
+}
+
+/** When a list change takes effect: now (bridge), at the next restart, or at the next start. */
+export type AccessApplies = "now" | "restart" | "start";
+
+export type RestoreSource = "image" | "skald";
+
+/** Pre-restore copies Skald writes before replacing the world. */
+export const SKALD_BACKUP_NAME = /^pre-restore-\d{8}-\d{6}\.zip$/;
+
+export interface RestoreBackup {
+  name: string;
+  source: RestoreSource;
+  sizeBytes: number;
+  modifiedAt: string;
+}
+
+/** GET /api/admin/restore. */
+export interface RestoreInfo {
+  world: string;
+  /** Why a restore cannot run at all; absent when it can. */
+  reason?: "noworld" | "readonly";
+  /** A restore is running now. */
+  running: boolean;
+  playersOnline: boolean;
+  backups: RestoreBackup[];
+}
+
+/** Steps of a restore, as `admin` events with command "restore". */
+export type RestoreStep = "begin" | "safety" | "stop" | "extract" | "start" | "done" | "rollback";

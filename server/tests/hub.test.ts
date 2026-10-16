@@ -40,6 +40,9 @@ function fakeAgent(startedAt: string, sinces: number[]): AgentSource {
     async bridge() {
       return { status: 404, body: { ok: false, message: "not found" } };
     },
+    async tools() {
+      return { status: 404, body: { ok: false, message: "not found" } };
+    },
     async settings() {
       return { status: 404, body: {} };
     },

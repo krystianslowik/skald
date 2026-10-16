@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import type { AgentSource, BridgeRequest } from "../src/agent";
+import type { AgentSource, BridgeRequest, ToolsRequest } from "../src/agent";
 import { createApp, foldActor } from "../src/app";
 import { ADMIN_IDLE_MS, RateLimiter } from "../src/auth";
 import { HistoryStore } from "../src/db";
@@ -10,10 +10,19 @@ import { emptyAgentState, type AdminStatus, type AgentEvent, type LiveMessage } 
 const PANEL = await Bun.password.hash("ognisko");
 const ADMIN = await Bun.password.hash("jarl");
 
-function fakeAgent(calls: BridgeRequest[], status = 200): AgentSource {
+function fakeAgent(calls: BridgeRequest[], status = 200, toolCalls: ToolsRequest[] = []): AgentSource {
   return {
     async getState() {
-      return emptyAgentState();
+      const st = emptyAgentState();
+      st.server.world = "Testheim";
+      return st;
+    },
+    async tools(req) {
+      toolCalls.push(req);
+      if (req.op === "access") return { status: 200, body: { ok: true, data: { writable: true, running: true, admins: { entries: [{ id: "X_1234500000000001", platform: "xbox", known: true }], live: false }, bans: { entries: [], live: true }, online: [] } } };
+      if (req.op === "restore-info") return { status: 200, body: { ok: true, data: { world: "Testheim", running: false, playersOnline: false, backups: [] } } };
+      if (req.op === "restore") return { status: 202, body: { ok: true, data: { backup: req.body.backup } } };
+      return { status: 200, body: { ok: true, data: { applies: "restart" } } };
     },
     async getLogs() {
       return [];
@@ -52,11 +61,14 @@ function fakeAgent(calls: BridgeRequest[], status = 200): AgentSource {
   };
 }
 
-function setup(opts: { admin?: boolean; bridgeStatus?: number } = {}) {
+async function setup(opts: { admin?: boolean; bridgeStatus?: number } = {}) {
   const calls: BridgeRequest[] = [];
-  const agent = fakeAgent(calls, opts.bridgeStatus);
+  const toolCalls: ToolsRequest[] = [];
+  const agent = fakeAgent(calls, opts.bridgeStatus, toolCalls);
   const hub = new Hub(agent, new HistoryStore(":memory:"));
   Object.defineProperty(hub, "online", { get: () => true });
+  // The world name the restore confirmation is checked against.
+  await (hub as unknown as { pollState(): Promise<void> }).pollState();
   let t = 1_000_000;
   const app = createApp({
     sessionSecret: "secret",
@@ -71,10 +83,10 @@ function setup(opts: { admin?: boolean; bridgeStatus?: number } = {}) {
     adminLimiter: new RateLimiter(5, 60_000, 900_000, () => t),
     clock: () => t,
   });
-  return { app, calls, advance: (ms: number) => (t += ms) };
+  return { app, calls, toolCalls, advance: (ms: number) => (t += ms) };
 }
 
-type App = ReturnType<typeof setup>["app"];
+type App = Awaited<ReturnType<typeof setup>>["app"];
 
 async function signIn(app: App): Promise<string> {
   const res = await app.request("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: "ognisko" }) });
@@ -89,7 +101,7 @@ const adminCookie = (res: Response) => res.headers.get("set-cookie")?.split(";")
 
 describe("admin without an admin password", () => {
   it("lets everyone signed in command the bridge, with a session-hash actor", async () => {
-    const { app, calls } = setup();
+    const { app, calls } = await setup();
     expect((await post(app, "/api/admin/spawn", "", { item: "Wood" })).status).toBe(401);
     const cookie = await signIn(app);
     const st = (await (await app.request("/api/admin/status", { headers: { Cookie: cookie } })).json()) as AdminStatus;
@@ -104,7 +116,7 @@ describe("admin without an admin password", () => {
   });
 
   it("keeps the allow-list and body limits", async () => {
-    const { app } = setup();
+    const { app } = await setup();
     const cookie = await signIn(app);
     expect((await post(app, "/api/admin/godmode", cookie, {})).status).toBe(404);
     expect((await post(app, "/api/admin/save", cookie, "[1,2]")).status).toBe(400);
@@ -115,14 +127,14 @@ describe("admin without an admin password", () => {
   });
 
   it("reports the bridge off when the agent has no bridge", async () => {
-    const { app } = setup({ bridgeStatus: 404 });
+    const { app } = await setup({ bridgeStatus: 404 });
     const cookie = await signIn(app);
     const st = (await (await app.request("/api/admin/status", { headers: { Cookie: cookie } })).json()) as AdminStatus;
     expect(st.bridge).toMatchObject({ available: false, reason: "off" });
   });
 
   it("builds the catalog from events, keys and spots", async () => {
-    const { app } = setup();
+    const { app } = await setup();
     const cookie = await signIn(app);
     const cat = await (await app.request("/api/admin/catalog", { headers: { Cookie: cookie } })).json();
     expect(cat).toEqual({ events: ["wolves"], currentEvent: null, globalKeys: ["defeated_eikthyr"], spots: ["spawn"] });
@@ -131,7 +143,7 @@ describe("admin without an admin password", () => {
 
 describe("admin with an admin password", () => {
   it("keeps the panel password view-only until unlocked", async () => {
-    const { app, calls } = setup({ admin: true });
+    const { app, calls } = await setup({ admin: true });
     const cookie = await signIn(app);
     const st = (await (await app.request("/api/admin/status", { headers: { Cookie: cookie } })).json()) as AdminStatus;
     expect(st).toMatchObject({ required: true, unlocked: false });
@@ -154,7 +166,7 @@ describe("admin with an admin password", () => {
   });
 
   it("unlocks with the admin password, slides the idle timeout and locks again", async () => {
-    const { app, advance } = setup({ admin: true });
+    const { app, advance } = await setup({ admin: true });
     const cookie = await signIn(app);
     expect((await post(app, "/api/admin/unlock", cookie, { password: "ognisko" })).status).toBe(401);
     const res = await post(app, "/api/admin/unlock", cookie, { password: "jarl" });
@@ -180,7 +192,7 @@ describe("admin with an admin password", () => {
   });
 
   it("does not accept an admin cookie next to another session", async () => {
-    const { app } = setup({ admin: true });
+    const { app } = await setup({ admin: true });
     const a = await signIn(app);
     const b = await signIn(app);
     const admin = adminCookie(await post(app, "/api/admin/unlock", a, { password: "jarl" }));
@@ -191,7 +203,7 @@ describe("admin with an admin password", () => {
   });
 
   it("rate-limits unlock attempts like logins", async () => {
-    const { app } = setup({ admin: true });
+    const { app } = await setup({ admin: true });
     const cookie = await signIn(app);
     for (let i = 0; i < 5; i++) expect((await post(app, "/api/admin/unlock", cookie, { password: "nope" })).status).toBe(401);
     const res = await post(app, "/api/admin/unlock", cookie, { password: "jarl" });
@@ -280,6 +292,83 @@ describe("mock bridge", () => {
   });
 });
 
+describe("admin and ban lists, world restore", () => {
+  const get = (app: App, path: string, cookie: string) => app.request(path, { headers: { Cookie: cookie } });
+
+  it("needs an admin session for every list and restore route, reads included", async () => {
+    const { app, toolCalls } = await setup({ admin: true });
+    const cookie = await signIn(app);
+    for (const [method, path] of [
+      ["GET", "/api/admin/access"],
+      ["POST", "/api/admin/access/admins/add"],
+      ["POST", "/api/admin/access/bans/remove"],
+      ["GET", "/api/admin/restore"],
+      ["POST", "/api/admin/restore"],
+    ] as const) {
+      const res = await app.request(path, { method, headers: { Cookie: cookie, "Content-Type": "application/json" }, body: method === "GET" ? undefined : '{"id":"X_1"}' });
+      expect(res.status, `${method} ${path}`).toBe(403);
+    }
+    expect(toolCalls).toHaveLength(0);
+    // Without a panel session at all, not even a 403.
+    expect((await app.request("/api/admin/access")).status).toBe(401);
+    // Platform ids never reach the public state.
+    const state = await (await get(app, "/api/state", cookie)).text();
+    expect(state).not.toContain("X_1234500000000001");
+  });
+
+  it("passes list changes through with the actor and checks the body", async () => {
+    const { app, toolCalls } = await setup();
+    const cookie = await signIn(app);
+    const res = await get(app, "/api/admin/access", cookie);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { data: { admins: { entries: { id: string }[] } } }).data.admins.entries[0]!.id).toBe("X_1234500000000001");
+    expect((await post(app, "/api/admin/access/admins/add", cookie, { id: "X_1234500000000002" }, { "X-Skald-Name": "Jarl" })).status).toBe(200);
+    expect(toolCalls.at(-1)).toEqual({ op: "access-change", list: "admins", change: "add", body: { id: "X_1234500000000002" }, actor: "Jarl" });
+    expect((await post(app, "/api/admin/access/bans/add", cookie, { player: "Ragnar" })).status).toBe(200);
+    expect(toolCalls.at(-1)).toMatchObject({ list: "bans", body: { player: "Ragnar" } });
+    expect((await post(app, "/api/admin/access/owners/add", cookie, { id: "X_1" })).status).toBe(404);
+    expect((await post(app, "/api/admin/access/admins/wipe", cookie, { id: "X_1" })).status).toBe(404);
+    expect((await post(app, "/api/admin/access/admins/add", cookie, {})).status).toBe(400);
+    expect((await post(app, "/api/admin/access/admins/add", cookie, { id: "X_1", player: "Ragnar" })).status).toBe(400);
+    expect((await post(app, "/api/admin/access/admins/add", cookie, "[1]")).status).toBe(400);
+    expect((await post(app, "/api/admin/access/admins/add", cookie, { id: "x".repeat(5000) })).status).toBe(413);
+    expect(toolCalls.filter((c) => c.op === "access-change")).toHaveLength(2);
+  });
+
+  it("starts a restore only with the world name typed and a known backup name", async () => {
+    const { app, toolCalls } = await setup();
+    const cookie = await signIn(app);
+    expect((await get(app, "/api/admin/restore", cookie)).status).toBe(200);
+    const body = { source: "image", backup: "worlds-20261010-100000.zip", confirm: "Testheim" };
+    expect((await post(app, "/api/admin/restore", cookie, { ...body, confirm: "testheim" })).status).toBe(400);
+    expect((await post(app, "/api/admin/restore", cookie, { ...body, confirm: undefined })).status).toBe(400);
+    expect((await post(app, "/api/admin/restore", cookie, { ...body, backup: "../worlds-20261010-100000.zip" })).status).toBe(400);
+    expect((await post(app, "/api/admin/restore", cookie, { ...body, source: "skald" })).status).toBe(400);
+    expect((await post(app, "/api/admin/restore", cookie, { ...body, source: "nfs" })).status).toBe(400);
+    expect(toolCalls.filter((c) => c.op === "restore")).toHaveLength(0);
+    expect((await post(app, "/api/admin/restore", cookie, body)).status).toBe(202);
+    expect((await post(app, "/api/admin/restore", cookie, { ...body, source: "skald", backup: "pre-restore-20261010-100000.zip" })).status).toBe(202);
+    expect(toolCalls.filter((c) => c.op === "restore")).toHaveLength(2);
+  });
+});
+
+describe("MockAgent tools", () => {
+  it("lists, changes and restores like the agent, without ids in events", async () => {
+    const m = new MockAgent();
+    const seen: AgentEvent[] = [];
+    const ctl = new AbortController();
+    void m.stream(Number.MAX_SAFE_INTEGER, (e) => seen.push(e), ctl.signal);
+    const access = (await m.tools({ op: "access" })).body as { data: { admins: { entries: { name?: string }[] } } };
+    expect(access.data.admins.entries[0]!.name).toBe("Freya");
+    expect((await m.tools({ op: "access-change", list: "admins", change: "add", body: { id: "nope" }, actor: "t" })).status).toBe(400);
+    expect((await m.tools({ op: "access-change", list: "admins", change: "add", body: { id: "X_1234500000000077" }, actor: "t" })).status).toBe(200);
+    expect(JSON.stringify(seen)).not.toContain("1234500000000077");
+    expect((await m.tools({ op: "restore", body: { source: "image", backup: "x", confirm: "Midgard" }, actor: "t" })).status).toBe(400);
+    ctl.abort();
+    m.stop();
+  });
+});
+
 describe("HttpAgent.bridge", () => {
   it("maps calls to the agent's /bridge routes", async () => {
     const { HttpAgent } = await import("../src/agent");
@@ -302,5 +391,25 @@ describe("HttpAgent.bridge", () => {
     ]);
     expect(seen[3]!.headers).toMatchObject({ "X-Agent-Token": "tok", "X-Skald-Actor": "dashboard-abc123", "Content-Type": "application/json" });
     expect(seen[3]!.body).toBe('{"player":"Ragnar"}');
+  });
+
+  it("maps the file tools to /access and /restore", async () => {
+    const { HttpAgent } = await import("../src/agent");
+    const seen: string[] = [];
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      seen.push(`${init.method ?? "GET"} ${url} ${(init.headers as Record<string, string>)["X-Skald-Actor"] ?? ""} ${init.body ?? ""}`.trim());
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const a = new HttpAgent("http://agent:8080", "tok", fetchImpl);
+    await a.tools({ op: "access" });
+    await a.tools({ op: "access-change", list: "bans", change: "remove", body: { id: "V_1" }, actor: "jarl" });
+    await a.tools({ op: "restore-info" });
+    await a.tools({ op: "restore", body: { source: "image" }, actor: "jarl" });
+    expect(seen).toEqual([
+      "GET http://agent:8080/access",
+      'POST http://agent:8080/access/bans/remove jarl {"id":"V_1"}',
+      "GET http://agent:8080/restore",
+      'POST http://agent:8080/restore jarl {"source":"image"}',
+    ]);
   });
 });

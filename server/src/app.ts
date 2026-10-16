@@ -1,15 +1,20 @@
 import { Hono, type Context } from "hono";
 import { getConnInfo } from "hono/bun";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import type { AgentAsset, AgentSource, PiecesBox } from "./agent";
+import type { AgentAsset, AgentSource, PiecesBox, ToolsRequest } from "./agent";
 import { ADMIN_COOKIE, ADMIN_IDLE_MS, createAdminSession, createSession, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS, sessionHash, verifyAdminSession, verifySession } from "./auth";
 import type { Hub } from "./hub";
 import type { MapCache, MapView } from "./map";
 import {
+  ACCESS_LISTS,
+  ACCESS_OPS,
   ACTION_NAMES,
   ADMIN_COMMANDS,
   ADMIN_READS,
   BACKUP_NAME,
+  SKALD_BACKUP_NAME,
+  type AccessListName,
+  type AccessOp,
   type ActionName,
   type AdminCatalog,
   type AdminCommand,
@@ -520,6 +525,69 @@ export function createApp(deps: AppDeps): Hono {
     } catch {
       return c.json({ ok: false, error: "agent unreachable" }, 502);
     }
+  });
+
+  // ---- admin: the game's admin and ban lists, and world restore --------------
+  // Agent file tools that work with or without the bridge. Behind the admin
+  // middleware above, reads included: the lists carry raw platform ids.
+  // Registered before /api/admin/:command, which would swallow them.
+
+  const passTools = async (c: Context, req: ToolsRequest) => {
+    c.header("Cache-Control", "no-store");
+    if (!deps.hub.online) return c.json({ ok: false, error: "agent unreachable" }, 503);
+    try {
+      const res = await deps.agent.tools(req);
+      return c.json(res.body as object, res.status as 200);
+    } catch {
+      return c.json({ ok: false, error: "agent unreachable" }, 502);
+    }
+  };
+
+  /** A small JSON object body, or the 4xx to answer. */
+  const objectBody = async (c: Context): Promise<Record<string, unknown> | Response> => {
+    if (Number(c.req.header("Content-Length") ?? 0) > 4096) return c.json({ ok: false, error: "body too large" }, 413);
+    let raw = "";
+    try {
+      raw = await c.req.text();
+    } catch {
+      raw = "";
+    }
+    if (raw.length > 4096) return c.json({ ok: false, error: "body too large" }, 413);
+    try {
+      const body: unknown = JSON.parse(raw || "{}");
+      if (typeof body === "object" && body !== null && !Array.isArray(body)) return body as Record<string, unknown>;
+    } catch {
+      // fall through
+    }
+    return c.json({ ok: false, error: "bad request body" }, 400);
+  };
+
+  app.get("/api/admin/access", (c) => passTools(c, { op: "access" }));
+
+  app.post("/api/admin/access/:list/:op", async (c) => {
+    const list = c.req.param("list") as AccessListName;
+    const change = c.req.param("op") as AccessOp;
+    if (!ACCESS_LISTS.includes(list) || !ACCESS_OPS.includes(change)) return c.json({ ok: false, error: "unknown list or operation" }, 404);
+    const body = await objectBody(c);
+    if (body instanceof Response) return body;
+    const id = typeof body.id === "string" ? body.id.trim() : "";
+    const player = typeof body.player === "string" ? body.player.trim() : "";
+    if (!id === !player || id.length > 64 || player.length > 64) return c.json({ ok: false, error: "send an id or a player" }, 400);
+    return passTools(c, { op: "access-change", list, change, body: id ? { id } : { player }, actor: actorFor(c) });
+  });
+
+  app.get("/api/admin/restore", (c) => passTools(c, { op: "restore-info" }));
+
+  app.post("/api/admin/restore", async (c) => {
+    const body = await objectBody(c);
+    if (body instanceof Response) return body;
+    const { source, backup, confirm } = body;
+    if (source !== "image" && source !== "skald") return c.json({ ok: false, error: "unknown backup source" }, 400);
+    if (typeof backup !== "string" || !(source === "image" ? BACKUP_NAME : SKALD_BACKUP_NAME).test(backup)) return c.json({ ok: false, error: "bad backup name" }, 400);
+    // Typed by hand: the world name, exactly. The agent checks it again.
+    const world = deps.hub.getState().server.world;
+    if (typeof confirm !== "string" || !world || confirm !== world) return c.json({ ok: false, error: "type the world name to confirm" }, 400);
+    return passTools(c, { op: "restore", body: { source, backup, confirm }, actor: actorFor(c) });
   });
 
   app.post("/api/admin/:command", async (c) => {

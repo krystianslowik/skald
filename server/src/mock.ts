@@ -1,4 +1,4 @@
-import type { ActionResponse, AgentAsset, AgentSource, BridgeRequest, MapSourceResult, PiecesBox, Proxied } from "./agent";
+import type { ActionResponse, AgentAsset, AgentSource, BridgeRequest, MapSourceResult, PiecesBox, Proxied, ToolsRequest } from "./agent";
 import { mockMap } from "./mapmock";
 import { mockNature, natureIn } from "./mocknature";
 import { mockPieces, piecesIn } from "./mockpieces";
@@ -17,6 +17,8 @@ import type {
   MapSnapshot,
   Metrics,
   Platform,
+  RestoreInfo,
+  RestoreStep,
   SeriesPoint,
   SettingsCurrent,
   SettingsInput,
@@ -70,6 +72,38 @@ const SPOTS: Record<string, [number, number]> = {
 const MOCK_EVENTS = ["army_bonemass", "army_eikthyr", "army_goblin", "army_moder", "army_theelder", "blobs", "bats", "foresttrolls", "skeletons", "surtlings", "wolves"];
 /** What the mock's "plugin" says it was tested on. */
 const MOCK_BUILD = "l-1.0.17";
+
+// Fictional platform ids for the fake admin and ban lists.
+const MOCK_ID = /^([XVSNA]_[0-9]{1,24}|(Xbox|Steam|PlayStation|Nintendo)_[0-9]{1,24}|7656119[0-9]{10})$/;
+const MOCK_IDS_BY_NAME: Record<string, string> = {
+  Ragnar: "Xbox_2533274900000001",
+  Freya: "Steam_76561190000000002",
+  Hrafn: "Steam_76561190000000005",
+  Sigrun: "Xbox_2533274900000004",
+};
+
+/** One account's forms fold together, as in the agent: V_n = Steam_n, X_n = Xbox_n. */
+function accessKey(id: string): string {
+  const i = id.indexOf("_");
+  if (i < 0) return /^7656119\d{10}$/.test(id) ? `steam:${id}` : id.toLowerCase();
+  const pre = id.slice(0, i).toLowerCase();
+  const num = id.slice(i + 1);
+  if (pre === "v" || pre === "steam") return `steam:${num}`;
+  if (pre === "x" || pre === "xbox") return `xbox:${num}`;
+  return id.toLowerCase();
+}
+
+const MOCK_KNOWN_IDS: Record<string, string> = Object.fromEntries(Object.entries(MOCK_IDS_BY_NAME).map(([name, id]) => [accessKey(id), name]));
+
+function idPlatform(id: string): Platform {
+  const k = accessKey(id);
+  return k.startsWith("steam:") ? "steam" : k.startsWith("xbox:") ? "xbox" : id.startsWith("S_") ? "playstation" : id.startsWith("N_") ? "nintendo" : "unknown";
+}
+
+function maskId(id: string): string {
+  const i = id.indexOf("_");
+  return `${i > 0 ? id.slice(0, i + 1) : ""}***${id.slice(i + 1).slice(-4)}`;
+}
 
 interface MockPos {
   x: number;
@@ -183,6 +217,10 @@ export class MockAgent implements AgentSource {
   private frozen = false;
   private acked = false;
   private lastPositions = "";
+  // The fake agent file tools.
+  private access = { admins: ["V_76561190000000002", "X_1234500000000003"], bans: ["Steam_76561190000000005", "Xbox_2533274900000009"] };
+  private skaldBackups: { name: string; sizeBytes: number; modifiedAt: string }[] = [];
+  private restoring = false;
 
   constructor(
     private readonly clock: () => number = Date.now,
@@ -837,6 +875,106 @@ export class MockAgent implements AgentSource {
     }
     this.emit("admin", { ...summary, ...counts, actor, command, result: "ok" });
     return { status: 200, body: { ok: true, data } };
+  }
+
+  // ---- the fake agent file tools: admin and ban lists, world restore ---------
+
+  async tools(req: ToolsRequest): Promise<Proxied> {
+    const ok = (data: unknown): Proxied => ({ status: 200, body: { ok: true, data } });
+    const fail = (status: number, error: string): Proxied => ({ status, body: { ok: false, error } });
+    const running = this.state.server.status === "running";
+    const live = running && this.bridgeMode === "on";
+    const nameOf = (id: string) => MOCK_KNOWN_IDS[accessKey(id)];
+    const entries = (ids: string[]) => ids.map((id) => ({ id, platform: idPlatform(id), name: nameOf(id), known: MOCK_ID.test(id) }));
+    switch (req.op) {
+      case "access": {
+        const on = (ids: string[], name: string) => ids.some((id) => nameOf(id) === name);
+        return ok({
+          writable: true,
+          running,
+          admins: { entries: entries(this.access.admins), live: false },
+          bans: { entries: entries(this.access.bans), live },
+          online: this.state.players.map((p) => ({ name: p.name, platform: p.platform ?? "unknown", admin: on(this.access.admins, p.name), banned: on(this.access.bans, p.name), canAdd: p.name in MOCK_IDS_BY_NAME })),
+        });
+      }
+      case "access-change": {
+        if (this.busy && !running) return fail(409, "the server is restarting");
+        const list = this.access[req.list];
+        const player = typeof req.body.player === "string" ? req.body.player : "";
+        const id = player ? MOCK_IDS_BY_NAME[player] : String(req.body.id ?? "");
+        if (!id) return fail(404, `no platform id known for ${player}`);
+        if (req.change === "add") {
+          if (!MOCK_ID.test(id)) return fail(400, "not a platform id: use the F2 form like X_1234 or V_7656..., or Xbox_/Steam_ followed by digits");
+          if (list.some((x) => accessKey(x) === accessKey(id))) return fail(409, "already on the list");
+          list.push(id);
+        } else {
+          const i = list.indexOf(id);
+          if (i < 0) return fail(404, "not on the list");
+          list.splice(i, 1);
+        }
+        const command = req.list === "admins" ? (req.change === "add" ? "admin-add" : "admin-remove") : req.change === "add" ? "ban" : "unban";
+        const who = nameOf(id) ? { player: nameOf(id) } : { masked: maskId(id) };
+        if (req.list === "bans" && live) {
+          this.log(`[Info   :Skald Bridge] [SkaldBridge] audit actor=${req.actor} cmd=POST /v1/${command} result=ok`);
+          this.emit("admin", { actor: req.actor, command, result: "ok", ...(nameOf(id) ? { player: nameOf(id) } : {}) });
+          if (req.change === "add" && player) this.timers.push(setTimeout(() => this.leave(player), 600));
+          return ok({ applies: "now" });
+        }
+        this.emit("admin", { actor: req.actor, command, result: "ok", via: "file", platform: idPlatform(id), ...who });
+        return ok({ applies: running ? "restart" : "start" });
+      }
+      case "restore-info":
+        return ok({
+          world: this.state.server.world,
+          running: this.restoring,
+          playersOnline: this.state.players.length > 0,
+          backups: [
+            ...this.state.backups.map((b) => ({ ...b, source: "image" as const })),
+            ...this.skaldBackups.map((b) => ({ ...b, source: "skald" as const })),
+          ].sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt)),
+        } satisfies RestoreInfo);
+      case "restore":
+        return this.restore(req.body, req.actor);
+    }
+  }
+
+  /** A restore as the agent runs it: one `admin` event per step, the server down in the middle. */
+  private restore(body: Record<string, unknown>, actor: string): Proxied {
+    const fail = (status: number, error: string): Proxied => ({ status, body: { ok: false, error } });
+    if (body.confirm !== this.state.server.world) return fail(400, "type the world name to confirm");
+    const from = body.source === "skald" ? this.skaldBackups : this.state.backups;
+    if (!from.some((b) => b.name === body.backup)) return fail(400, "no such backup");
+    if (this.state.players.length > 0) return fail(409, "players are online");
+    if (this.busy) return fail(409, "another action is in progress");
+    this.busy = true;
+    this.restoring = true;
+    const step = (s: RestoreStep, extra: Record<string, unknown> = {}) => this.emit("admin", { actor, command: "restore", step: s, result: "ok", ...extra });
+    const at = (ms: number, fn: () => void) => this.timers.push(setTimeout(fn, ms));
+    const d = new Date(this.clock());
+    const archive = `pre-restore-${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}-${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}.zip`;
+    step("begin", { backup: body.backup });
+    at(1200, () => {
+      this.skaldBackups.unshift({ name: archive, sizeBytes: this.state.world.sizeBytes, modifiedAt: new Date(this.clock()).toISOString() });
+      step("safety", { archive });
+      this.setStatus("stopping");
+    });
+    at(2600, () => {
+      this.setStatus("stopped");
+      step("stop");
+    });
+    at(4200, () => {
+      step("extract", { files: 1873 });
+      this.setStatus("starting");
+    });
+    at(6500, () => {
+      this.state.server.serverStartedAt = new Date(this.clock()).toISOString();
+      this.bootComplete(newJoinCode());
+      step("start");
+      this.busy = false;
+      this.restoring = false;
+      step("done", { backup: body.backup, archive });
+    });
+    return { status: 202, body: { ok: true, data: { backup: body.backup } } };
   }
 
   async backup(name: string): Promise<Response> {
