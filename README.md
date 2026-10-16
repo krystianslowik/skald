@@ -163,7 +163,8 @@ in [docs/configuration.md](docs/configuration.md), metrics and alerts in
 The panel password is stored only as an argon2id hash, and login locks for 15
 minutes after 5 bad tries. With crossplay the server only dials out, so there are
 no game ports to forward or scan. The containers run as non-root on read-only
-filesystems, and player platform IDs never leave the agent. Two things to keep
+filesystems, and player platform IDs leave the agent only for admins, in the
+admin and ban lists. Two things to keep
 private: the metrics port has no token, and the settings volume holds the server
 password in plain text. More in [SECURITY.md](SECURITY.md).
 
