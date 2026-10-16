@@ -3,7 +3,7 @@ import { capRecent } from "@server/history";
 import { UNSTORED_EVENTS, type AgentEvent, type ApiState, type LiveMessage, type LogLine } from "../types";
 import { getLogs, getState, Unauthorized } from "./api";
 import { applyEvent } from "./apply";
-import { getLivePositions, setLivePositions } from "./live";
+import { getLivePositions, setLivePositions, setPositionsSink, watchingPositions } from "./live";
 
 const MAX_LOGS = 1500;
 
@@ -150,12 +150,16 @@ export function useValheim(onUnauthorized: () => void): Valheim {
     const connect = () => {
       if (typeof WebSocket === "undefined") return;
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      sock = new WebSocket(`${proto}//${location.host}/live`);
-      sock.onopen = () => {
+      // topics=: positions only after a subscribe; a server older than that sends them anyway.
+      const s = new WebSocket(`${proto}//${location.host}/live?topics=`);
+      sock = s;
+      s.onopen = () => {
         attempt = 0;
-        if (!cancelled) setWs("up");
+        if (cancelled) return;
+        setWs("up");
+        if (watchingPositions()) tell(s, true);
       };
-      sock.onmessage = (m) => {
+      s.onmessage = (m) => {
         if (cancelled) return;
         let msg: LiveMessage;
         try {
@@ -164,13 +168,16 @@ export function useValheim(onUnauthorized: () => void): Valheim {
           return;
         }
         if (msg.type === "event") onEvent(msg.event);
-        else if (msg.type === "positions") setLivePositions({ t: msg.t, players: msg.players });
+        else if (msg.type === "positions") {
+          // One still on its way after the last watcher left must not bring the markers back.
+          if (watchingPositions()) setLivePositions({ t: msg.t, players: msg.players });
+        }
         else {
           setAgentUp(msg.online);
           setState((s) => (s ? share(s, { ...s, ...msg.state, online: msg.online }) : s));
         }
       };
-      sock.onclose = () => {
+      s.onclose = () => {
         if (cancelled) return;
         setWs("down");
         // A closed socket may mean an expired session; /api/state tells us.
@@ -181,9 +188,16 @@ export function useValheim(onUnauthorized: () => void): Valheim {
       };
     };
 
+    const tell = (s: WebSocket, on: boolean) => s.send(JSON.stringify({ type: on ? "subscribe" : "unsubscribe", topic: "positions" }));
+    // A socket still connecting subscribes in onopen; a closed one on the next.
+    setPositionsSink((on) => {
+      if (sock && sock.readyState === WebSocket.OPEN) tell(sock, on);
+    });
+
     connect();
     return () => {
       cancelled = true;
+      setPositionsSink(null);
       if (timer) clearTimeout(timer);
       sock?.close();
     };

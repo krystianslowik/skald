@@ -14,7 +14,6 @@ import { BridgeBanner, HealthBar } from "./parts";
 export const AdminBoard = memo(function AdminBoard() {
   const { t } = useI18n();
   const admin = useAdmin();
-  const live = useLivePositions();
   if (!admin?.present) return null;
   return (
     <Plank title={t("admin.title")} id="admin-board" aside={admin.status?.required && !admin.unlocked ? t("admin.you.locked") : undefined}>
@@ -32,22 +31,29 @@ export const AdminBoard = memo(function AdminBoard() {
           <path d="M6 3l5 5-5 5" />
         </svg>
       </button>
-      {admin.players.length > 0 && (
-        <ul className="mt-2 divide-y divide-iron/25">
-          {admin.players.map((p) => {
-            const lp = live.players.find((x) => x.name === p.name);
-            return (
-              <li key={p.name}>
-                <button type="button" onClick={() => admin.open({ kind: "player", name: p.name })} onPointerDown={preloadAdmin} className="press flex min-h-12 w-full items-center gap-3 text-left">
-                  <PlatformGlyph platform={p.platform} size={16} className="text-label" />
-                  <span className="w-24 shrink-0 truncate font-bold text-bone">{p.name}</span>
-                  {lp && <HealthBar health={lp.health} max={lp.maxHealth} className="flex-1" />}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      {admin.players.length > 0 && <BoardPlayers />}
     </Plank>
   );
 });
+
+/** The players with their health; asks for live positions only while shown. */
+function BoardPlayers() {
+  const admin = useAdmin()!;
+  const live = useLivePositions();
+  return (
+    <ul className="mt-2 divide-y divide-iron/25">
+      {admin.players.map((p) => {
+        const lp = live.players.find((x) => x.name === p.name);
+        return (
+          <li key={p.name}>
+            <button type="button" onClick={() => admin.open({ kind: "player", name: p.name })} onPointerDown={preloadAdmin} className="press flex min-h-12 w-full items-center gap-3 text-left">
+              <PlatformGlyph platform={p.platform} size={16} className="text-label" />
+              <span className="w-24 shrink-0 truncate font-bold text-bone">{p.name}</span>
+              {lp && <HealthBar health={lp.health} max={lp.maxHealth} className="flex-1" />}
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}

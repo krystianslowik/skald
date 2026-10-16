@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Changed
+
+- Live player positions are only fetched from the game while someone has the map or a player list open, and only sent to the browsers showing them. Phones on the other tabs no longer receive a position update every 2 seconds, and the game is not asked for positions when nobody looks. Older agents and older open dashboards keep working as before until they are updated.
+
 ## [2026.10.4] - 2026-10-16
 
 ### Changed
