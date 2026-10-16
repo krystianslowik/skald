@@ -19,6 +19,18 @@ const COLOURS: [number, number, number][] = [
   [80, 150, 140],
 ];
 
+/**
+ * Building materials get a plain colour of their own, so the floor plans'
+ * material tones (sampled from these icons) look like wood and stone in the
+ * mock too. Only flat colours, chosen by hand.
+ */
+const MATERIAL_COLOURS: Record<string, [number, number, number]> = {
+  Wood: [156, 112, 68],
+  RoundLog: [128, 84, 50],
+  Stone: [132, 130, 124],
+  Iron: [104, 110, 120],
+};
+
 function hash(s: string): number {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
@@ -51,7 +63,7 @@ export function mockIcons(names: readonly string[]): MockIcons {
   list.forEach((name, k) => {
     const h = hash(name);
     const inside = SHAPES[h % SHAPES.length]!;
-    const [r, g, b] = COLOURS[(h >>> 8) % COLOURS.length]!;
+    const [r, g, b] = MATERIAL_COLOURS[name] ?? COLOURS[(h >>> 8) % COLOURS.length]!;
     const ox = (k % COLUMNS) * SIZE;
     const oy = Math.floor(k / COLUMNS) * SIZE;
     items[name] = [ox, oy];

@@ -252,6 +252,11 @@ How it works:
   the build as ETag (the sheet is immutable), and `/state` carries
   `icons: {available, build, count}`. The web tier proxies them as
   `/api/icons/*`. The browser loads the sheet once per game build.
+- Floor plans take their material tones from the same sheet: the browser
+  averages the icons of Wood, RoundLog (core wood), Stone, Iron, BlackMarble,
+  Grausten and Blackwood (ashwood) and tints floors, walls and roofs built of
+  each. Darkwood, stave and turf pieces, and every plan without a sheet, keep
+  the plain parchment colours. Nothing new is extracted or stored.
 - Exit codes of a single run (`--every 0`): 0 done or already current, 2 no
   game install found, 3 the game files could not be read (mid-update or an
   unknown format; the previous sheet stays), 4 the output is not writable,

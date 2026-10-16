@@ -7,6 +7,7 @@
 
 import type { ApiMap, MapItem } from "../types";
 import type { IconSheet } from "./itemicons";
+import { materialTones, type Material, type Rgb } from "./materials";
 import {
   clusterMarkers,
   LAYERS,
@@ -238,6 +239,8 @@ export class MapRenderer {
   private splits = new Map<string, { x: number; z: number; t0: number }>();
   /** The item icon sheet, decoded, for the contents strips under containers. */
   private icons: { img: CanvasImageSource; sheet: IconSheet } | null = null;
+  /** Building material tones from the icon sheet; empty without one. */
+  private tones: ReadonlyMap<Material, Rgb> = new Map();
   private relief: Relief | null = null;
   /** The relief's traced coast: land loops and the sea around them, `mpp` metres per image pixel. */
   private coast: { of: Relief; path: Path2D; sea: Path2D; mpp: number } | null = null;
@@ -356,6 +359,7 @@ export class MapRenderer {
     if (!this.ctx || pieces === this.planOf) return;
     this.planOf = pieces;
     this.plan = pieces.length ? new FloorPlan(pieces) : null;
+    this.plan?.setTones(this.tones);
     this.planVersion++;
     this.markStorey.clear();
   }
@@ -394,7 +398,11 @@ export class MapRenderer {
 
   /** The decoded item icon sheet, or null to draw no contents strips. */
   setIcons(icons: { img: CanvasImageSource; sheet: IconSheet } | null): void {
+    if (icons?.sheet === this.icons?.sheet && icons?.img === this.icons?.img) return;
     this.icons = icons;
+    this.tones = icons ? materialTones(icons.img, icons.sheet) : new Map();
+    this.plan?.setTones(this.tones);
+    this.planVersion++;
   }
 
   resize(w: number, h: number, dpr: number): void {
