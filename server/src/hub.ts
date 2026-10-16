@@ -1,7 +1,7 @@
 import type { AgentSource } from "./agent";
 import { applyEvent } from "./apply";
 import type { HistoryStore } from "./db";
-import { deriveHistory } from "./history";
+import { deriveHistory, WEEK_MS } from "./history";
 import { deriveProfiles } from "./profiles";
 import { emptyAgentState, isBridgeRead, UNSTORED_EVENTS, type AgentEvent, type AgentEventType, type AgentState, type History, type LiveMessage, type LivePlayer, type PlayerProfile } from "./types";
 
@@ -9,6 +9,9 @@ import { emptyAgentState, isBridgeRead, UNSTORED_EVENTS, type AgentEvent, type A
 const POSITIONS_EVERY_MS = 2_000;
 /** A positions sample older than this is not handed to a new socket. */
 const POSITIONS_FRESH_MS = 10_000;
+
+/** A boot prune that frees at least this many rows also shrinks the file. */
+const VACUUM_AFTER_ROWS = 1_000;
 
 /** Types the agent re-emits without a change; stored only when the value moves. */
 const ON_CHANGE: Partial<Record<AgentEventType, (d: Record<string, unknown>) => string>> = {
@@ -23,6 +26,8 @@ export interface HubOptions {
   statePollMs?: number;
   maxBackoffMs?: number;
   historyCacheMs?: number;
+  /** How often the history is pruned while running (see `HistoryStore.prune`). */
+  pruneEveryMs?: number;
   /** IANA zone for profile calendar days. */
   timeZone?: string;
   clock?: () => number;
@@ -44,6 +49,7 @@ export class Hub {
   private abort: AbortController | null = null;
   private stopped = false;
   private timers: ReturnType<typeof setInterval>[] = [];
+  private eventsCache: { at: number; value: AgentEvent[] } | null = null;
   private historyCache: { at: number; value: History } | null = null;
   private positions: { at: number; msg: Extract<LiveMessage, { type: "positions" }> } | null = null;
   private positionsSentAt = 0;
@@ -60,9 +66,11 @@ export class Hub {
       statePollMs: opts.statePollMs ?? 15_000,
       maxBackoffMs: opts.maxBackoffMs ?? 30_000,
       historyCacheMs: opts.historyCacheMs ?? 5_000,
+      pruneEveryMs: opts.pruneEveryMs ?? 3_600_000,
       timeZone: opts.timeZone ?? "UTC",
       clock: opts.clock ?? Date.now,
     };
+    this.bootPrune();
     for (const type of Object.keys(ON_CHANGE) as AgentEventType[]) {
       const ev = store.last(type);
       if (ev) this.lastValue.set(type, ON_CHANGE[type]!(ev.data));
@@ -85,7 +93,7 @@ export class Hub {
   history(): History {
     const now = this.opts.clock();
     if (this.historyCache && now - this.historyCache.at < this.opts.historyCacheMs) return this.historyCache.value;
-    const value = deriveHistory(this.store.all(), now);
+    const value = deriveHistory(this.events(now), now);
     this.historyCache = { at: now, value };
     return value;
   }
@@ -93,14 +101,45 @@ export class Hub {
   profiles(): PlayerProfile[] {
     const now = this.opts.clock();
     if (this.profilesCache && now - this.profilesCache.at < this.opts.historyCacheMs) return this.profilesCache.value;
-    const value = deriveProfiles(this.store.all(), now, this.opts.timeZone);
+    const value = deriveProfiles(this.events(now), now, this.opts.timeZone);
     this.profilesCache = { at: now, value };
     return value;
+  }
+
+  /** The stored events, loaded and parsed once per cache window for both folds. */
+  private events(now: number): AgentEvent[] {
+    if (this.eventsCache && now - this.eventsCache.at < this.opts.historyCacheMs) return this.eventsCache.value;
+    const value = this.store.all();
+    this.eventsCache = { at: now, value };
+    return value;
+  }
+
+  /** Cleanup is optional: a full disk or a locked file must not stop the panel. */
+  private bootPrune(): void {
+    try {
+      const n = this.store.pruneBridgeReads() + this.prune();
+      if (n >= VACUUM_AFTER_ROWS) this.store.vacuum();
+    } catch (err) {
+      console.warn(`history prune at startup failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  private prune(): number {
+    return this.store.prune(this.opts.clock() - WEEK_MS);
   }
 
   start(): void {
     void this.loop();
     this.timers.push(setInterval(() => void this.pollState(), this.opts.statePollMs));
+    this.timers.push(
+      setInterval(() => {
+        try {
+          this.prune();
+        } catch (err) {
+          console.warn(`history prune failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }, this.opts.pruneEveryMs),
+    );
   }
 
   stop(): void {
@@ -156,6 +195,7 @@ export class Hub {
       if (key !== undefined) this.lastValue.set(ev.type, key);
       if (changed && this.store.insert(epoch, ev)) {
         this.store.setMeta("lastSeq", String(ev.seq));
+        this.eventsCache = null;
         this.historyCache = null;
         this.profilesCache = null;
       }

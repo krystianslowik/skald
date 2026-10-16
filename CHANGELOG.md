@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Changed
+
+- The event history no longer grows forever. At startup and then once an hour, skald-web deletes stored entries that nothing on the panel can show again: world saves and backups older than 7 days (the events list only ever showed the last 7 days of them), player counts other than 0 older than 7 days (they only draw the 7-day players-online chart; the last one before the week is kept so the chart starts at the right value), and terrain reads that panels before 2026.10.1 stored by mistake. Everything else is kept for good: joins, leaves, deaths, raids, server starts and stops, player counts of 0, join codes, version and PlayFab changes, settings and admin actions. Playtime, sessions, deaths, streaks, badges, the ranking and the events list look exactly as before.
+- **Operators:** the first start after the update removes these old rows from `skald.db` for good and compacts the file (well under a second for a few years of history). Back up the database first if you want to keep the old save, backup and player-count lines. A server with about four years of history keeps roughly an eighth of its rows, and the dashboard and player profiles are built in less than half the time, also because the history is now read once for both instead of twice. If the cleanup fails at startup, for example on a full disk, the panel logs a warning and starts anyway.
+
 ## [2026.10.4] - 2026-10-16
 
 ### Changed
