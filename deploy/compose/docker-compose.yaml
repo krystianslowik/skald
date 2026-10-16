@@ -49,6 +49,10 @@ services:
       # A scheduled restart would rotate the join code; restart deliberately
       # from the dashboard instead.
       RESTART_CRON: ""
+      # Hourly zips, capped so they cannot fill the config volume. Each zip
+      # holds every world in worlds_local (not the game's auto-backups); keep
+      # BACKUPS_ZIP and BACKUPS_DIRECTORY at their defaults, Skald reads those
+      # zips. See docs/configuration.md, "What the image's backups hold".
       BACKUPS_MAX_COUNT: "48"
       # Feed the agent: busybox syslogd forwards every line to the sidecar and
       # still writes stdout, so `docker compose logs valheim` keeps working.
@@ -58,13 +62,14 @@ services:
       # supervisord XML-RPC for the agent's backup / update / restart actions.
       SUPERVISOR_HTTP: "true"
       SUPERVISOR_HTTP_PASS: ${SUPERVISOR_HTTP_PASS:?set SUPERVISOR_HTTP_PASS in .env}
-      # Reads the settings the dashboard saved (deploy/settings/pre-server-run-hook.sh;
-      # every $ is doubled for Compose). Parsed with an allow-list, never sourced.
       # Admin bridge (opt-in): BepInEx and the Skald plugin. SKALD_BRIDGE=off
       # is the kill switch; BEPINEX=false turns modding off entirely.
       BEPINEX: ${BEPINEX:-false}
       SKALD_BRIDGE: ${SKALD_BRIDGE:-on}
       SKALD_BRIDGE_TOKEN: ${BRIDGE_TOKEN:-}
+      # Reads the settings the dashboard saved. Parsed with an allow-list, never
+      # sourced. A copy of deploy/settings/pre-server-run-hook.sh with every $
+      # doubled for Compose (edit that file; the agent's tests fail if this drifts).
       PRE_SERVER_RUN_HOOK: >-
         skald_f=/settings/server.env; if [ -r "$$skald_f" ]; then while IFS='=' read -r skald_k skald_v || [ -n "$$skald_k" ]; do case "$$skald_k" in SERVER_NAME) SERVER_NAME=$$skald_v;; SERVER_PASS) SERVER_PASS=$$skald_v;; SERVER_PUBLIC) SERVER_PUBLIC=$$skald_v;; SERVER_ARGS) SERVER_ARGS=$$skald_v;; esac; done < "$$skald_f"; valheim_server_args=(-password "$$SERVER_PASS"); if [ "$$CROSSPLAY" = true ]; then valheim_server_args+=(-crossplay); fi; info "Skald settings applied"; fi
     secrets: [server_pass]

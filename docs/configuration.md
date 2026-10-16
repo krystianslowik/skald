@@ -154,6 +154,14 @@ the server password in plain text, readable by the agent and the game.
 If the dashboard says the game did not confirm reading the settings, the hook
 is missing or changed on the game container.
 
+The hook relies on two internals of the community image: its `info` log
+function and the `valheim_server_args` array that holds `-password` and
+`-crossplay`. The examples pin the image tag for that reason; before moving to
+a newer image, check that its `valheim-server` script still uses both. The
+hook file is the one to edit: the agent's tests (`cd agent && go test
+./internal/settings`, also in CI) run `deploy/settings/pre-server-run-hook.test.sh`
+and fail if the Compose or Kubernetes copy differs from it.
+
 **Compose** ([`docker-compose.yaml`](../deploy/compose/docker-compose.yaml)): a
 `skald-settings` volume, read-write in the agent and read-only in the game; a
 one-shot `settings-init` (busybox) hands it to the agent's user (65532); the
@@ -633,6 +641,37 @@ is to run the game as the agent's user, so both own everything they write:
   `BANNEDLIST_IDS`, it overwrites the files at every start.
 - Every change is an `admin` event in the Saga ("Sigrun made Ragnar an
   admin").
+
+### What the image's backups hold
+
+The backups come from the community image's `valheim-backup` job (checked
+against image 1.4.0, the version the examples pin). With `BACKUPS_ZIP=true`
+it zips the whole `/config/worlds_local` directory into
+`/config/backups/worlds-<date>-<time>.zip`:
+
+- **The game's own auto-backups are left out.** Files and directories named
+  `*_backup_auto-*` are excluded (an image change from March 2025), so they
+  do not inflate the zips.
+- **Every other world in `worlds_local` is included**, not only `WORLD_NAME`.
+  The image has no include or exclude setting for this. A second world you no
+  longer play makes every zip bigger; move it out of `worlds_local` (for
+  example to `/config/worlds_archive`) if you do not need it in the backups.
+  A restore from Skald extracts only the configured world's files, so extra
+  worlds in a zip do no harm beyond the size.
+- `.old` files the game keeps next to a pre-1.0 world (`<world>.db.old`) are
+  included.
+
+Settings that work with Skald:
+
+| Setting | Value | Why |
+|---|---|---|
+| `BACKUPS` | `true` (default) | |
+| `BACKUPS_ZIP` | `true` (default) | Skald lists and restores only `worlds-*.zip`. With `false` the image copies just `WORLD_NAME` uncompressed, and Skald sees no backups. |
+| `BACKUPS_DIRECTORY` | `/config/backups` (default) | The agent reads `CONFIG_DIR/backups`. |
+| `BACKUPS_CRON` | `5 * * * *` (default, hourly) | |
+| `BACKUPS_MAX_AGE` | `3` (default, days) | |
+| `BACKUPS_MAX_COUNT` | `48` (the examples) | Caps hourly zips so they cannot fill the config volume. |
+| `BACKUPS_IF_IDLE` | `true` (default) | `false` skips backups once nobody has played for an hour, which also makes the `ValheimBackupStale` alert fire on a quiet server. |
 
 ### Restoring a backup
 

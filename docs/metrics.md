@@ -54,5 +54,7 @@ scrapes both.
   `release:` label must match your kube-prometheus-stack `ruleSelector`.
 - **`grafana-dashboard.json`**: import it in Grafana; it asks for your Prometheus
   and (optionally) Loki data sources and lets you change the agent job and
-  namespace. **`grafana-dashboard-configmap.yaml`** is the same dashboard for the
-  Grafana sidecar.
+  namespace. For the Grafana sidecar, `kubectl apply -k deploy/monitoring`
+  turns the same file into the `skald-dashboard` ConfigMap (labelled
+  `grafana_dashboard: "1"`, namespace `monitoring`; change it in
+  `kustomization.yaml` if your sidecar watches another one).
