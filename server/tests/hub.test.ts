@@ -175,3 +175,73 @@ describe("Hub bridge reads", () => {
     expect(hub.history().events.map((e) => e.data.command)).toEqual(["broadcast"]);
   });
 });
+
+describe("Hub history storage", () => {
+  const DAY = 24 * 3_600_000;
+  const at = (t: number, type: AgentEvent["type"], data: Record<string, unknown> = {}, seq = t): AgentEvent => ({
+    seq,
+    ts: new Date(t).toISOString(),
+    type,
+    data,
+  });
+
+  it("loads and parses the stored events once per window for the ranking and the profiles", () => {
+    const store = new HistoryStore(":memory:");
+    const now = Date.parse("2026-10-09T18:00:00Z");
+    store.insert("A", at(now - 3_600_000, "player_join", { name: "Ragnar" }));
+    let loads = 0;
+    const all = store.all.bind(store);
+    store.all = () => {
+      loads += 1;
+      return all();
+    };
+    let clock = now;
+    const hub = new Hub(fakeAgent("A", []), store, { clock: () => clock });
+    hub.history();
+    hub.profiles();
+    hub.history();
+    hub.profiles();
+    expect(loads).toBe(1);
+    // A new stored event invalidates the shared load once, for both.
+    (hub as unknown as { state: ReturnType<typeof emptyAgentState> }).state = emptyAgentState(new Date(now - DAY));
+    hub.ingest("A", at(now, "death", { name: "Ragnar" }, 99));
+    expect(hub.profiles()[0]!.deaths).toBe(1);
+    expect(hub.history().players[0]!.deaths).toBe(1);
+    expect(loads).toBe(2);
+    clock += 5_000;
+    hub.history();
+    hub.profiles();
+    expect(loads).toBe(3);
+  });
+
+  it("prunes week-old saves at startup and on a timer, never the play history", async () => {
+    const store = new HistoryStore(":memory:");
+    const now = Date.parse("2026-10-09T18:00:00Z");
+    store.insert("A", at(now - 8 * DAY, "player_join", { name: "Freya" }));
+    store.insert("A", at(now - 8 * DAY + 1, "world_saved", { ms: 1 }));
+    store.insert("A", at(now - 7 * DAY + 30 * 60_000, "world_saved", { ms: 2 }));
+    store.insert("A", at(now - DAY, "admin", { actor: "dashboard-abc", command: "GET /v1/terrain/info", result: "error" }));
+    let clock = now;
+    const hub = new Hub(fakeAgent("A", []), store, { clock: () => clock, pruneEveryMs: 10, statePollMs: 60_000 });
+    expect(store.all().map((e) => e.type)).toEqual(["player_join", "world_saved"]);
+    clock = now + 3_600_000;
+    hub.start();
+    await settle();
+    hub.stop();
+    // The fake agent's buffer was stored meanwhile; the second save is gone.
+    expect(store.all().filter((e) => e.type === "world_saved")).toEqual([]);
+    expect(store.all()[0]!.data).toEqual({ name: "Freya" });
+    expect(hub.profiles().map((p) => p.name)).toContain("Freya");
+  });
+
+  it("starts even when the startup prune fails", () => {
+    const store = new HistoryStore(":memory:");
+    store.prune = () => {
+      throw new Error("database or disk is full");
+    };
+    const warned: string[] = [];
+    const log = { info: () => {}, warn: (msg: string) => void warned.push(msg), error: () => {} };
+    expect(() => new Hub(fakeAgent("A", []), store, { log })).not.toThrow();
+    expect(warned).toEqual(["history prune at startup failed"]);
+  });
+});

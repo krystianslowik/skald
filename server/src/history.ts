@@ -1,6 +1,7 @@
 import { isBridgeRead, UNSTORED_EVENTS, type AgentEvent, type AgentEventType, type History, type PlayerStats, type SeriesPoint } from "./types";
 
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+/** The window of the players-online series and of routine events in the list; also how long rows only it uses are kept. */
+export const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const RECENT_LIMIT = 200;
 /** Routine bookkeeping: a save every 30 min and a backup every 2 h, ~60 lines a day. */
 export const ROUTINE_EVENTS: readonly AgentEventType[] = ["world_saved", "world_backup"];
