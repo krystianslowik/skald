@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - Game build `l-1.0.20` is a tested build for the admin bridge, so admin commands run on it without a confirmation from the panel.
+- Floor plans show their roofs when zoomed out: a translucent roof lies over each house, so a base reads as buildings from afar, and fades away as you zoom in until the rooms are clear. This includes one-storey houses, whose roofs were never drawn before. A storey picked in the floor switcher shows without it.
 
 ### Fixed
 

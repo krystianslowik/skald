@@ -11,6 +11,14 @@ export const PLAN_MIN_SCALE = 1.2;
 export const PLAN_FULL_SCALE = 2;
 /** The floor switcher shows from this scale on. */
 export const STOREY_SCALE = 2;
+/**
+ * Roofs lie over every base that is not showing its roof level: full up to
+ * ROOF_FULL_SCALE, where a house is a few dozen pixels and its outline reads
+ * better than its rooms, gone from ROOF_GONE_SCALE on, so a base zoomed into
+ * (a tap flies to 8) is a clean floor plan.
+ */
+export const ROOF_FULL_SCALE = 2.5;
+export const ROOF_GONE_SCALE = 5.5;
 
 /** The storey picked for one base: an index into its levels, or levels.length for the roofs. */
 export interface StoreyPick {
@@ -41,6 +49,9 @@ const TINT: Partial<Record<Piece["kind"], [fill: string, line: string]>> = {
 const ROOF_FILL = "rgba(150, 74, 42, 0.14)";
 const ROOF_INK = "rgba(112, 52, 30, 0.42)";
 const ROOF_EDGE = "rgba(112, 52, 30, 0.22)";
+/** The roofs laid over a floor plan: a stronger wash and the tiles' edges, no hachures (they would shimmer when small). */
+const ROOF_COVER = "rgba(150, 74, 42, 0.42)";
+const ROOF_COVER_EDGE = "rgba(96, 44, 24, 0.5)";
 const ACTIVE = "rgba(33, 70, 95, 0.6)";
 
 /** Everything one storey of one base draws, by how it is stroked. */
@@ -243,6 +254,16 @@ export class FloorPlan {
       }
       g.globalAlpha = alpha;
       this.drawStorey(g, list[level]!, px, scale, false);
+      const roofs = list[list.length - 1]!;
+      const cover = roofAlpha(scale);
+      if (level < list.length - 1 && cover > 0 && !roofs.empty) {
+        g.globalAlpha = alpha * cover;
+        g.fillStyle = ROOF_COVER;
+        g.fill(roofs.roofs);
+        g.strokeStyle = ROOF_COVER_EDGE;
+        g.lineWidth = 0.7 * px;
+        g.stroke(roofs.roofs);
+      }
       if (b.key === active && b.levels.length > 1) {
         // The base the floor switcher is for: corner marks, as on a drawing sheet.
         g.globalAlpha = alpha;
@@ -338,6 +359,12 @@ export class FloorPlan {
 /** How strongly floor plans show at this scale. */
 export function planAlpha(scale: number): number {
   const t = Math.min(1, Math.max(0, (scale - PLAN_MIN_SCALE) / (PLAN_FULL_SCALE - PLAN_MIN_SCALE)));
+  return t * t * (3 - 2 * t);
+}
+
+/** How strongly roofs lie over the floor plans at this scale (see ROOF_FULL_SCALE). */
+export function roofAlpha(scale: number): number {
+  const t = Math.min(1, Math.max(0, (ROOF_GONE_SCALE - scale) / (ROOF_GONE_SCALE - ROOF_FULL_SCALE)));
   return t * t * (3 - 2 * t);
 }
 
