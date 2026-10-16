@@ -395,12 +395,15 @@ export class NatureLayer {
       }
       groups.push({ tint, paths });
     }
-    // Close in, the outline of each wood: about a pixel, darker as the trees come closer.
+    // Close in, the outline of each wood, darker as the trees come closer. Its
+    // stroke is one pixel wide (half of it shows): wider strokes round
+    // thousands of crowns cost a dense wood tens of milliseconds more a draw.
     const near = Math.min(1, Math.max(0, (scale - TREE_DETAIL_SCALE) / 4));
-    const rim = detail ? { width: 0.9 / scale, alpha: 0.45 + 0.35 * near } : null;
-    // Lobed rings are left open at a lobe's middle: round caps close them.
-    s.lineJoin = "round";
-    s.lineCap = "round";
+    const rim = detail ? { width: 0.5 / scale, alpha: 0.6 + 0.4 * near } : null;
+    // Lobed rings end where they began, on a smooth lobe, and stars go over
+    // their first edge again: plain caps and joins close both (and cost less).
+    s.lineJoin = "miter";
+    s.lineCap = "butt";
     paintWoods(s, groups, rim, (shadow) => (shadow ? s.setTransform(m.a, m.b, m.c, m.d, m.e + off, m.f + off) : s.setTransform(m)));
     g.save();
     g.setTransform(1, 0, 0, 1, 0, 0);
