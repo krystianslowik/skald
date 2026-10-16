@@ -144,8 +144,17 @@ func (t *Tracker) HandleLine(raw string) {
 				t.hub.Publish("death", map[string]any{"name": m.Name})
 				continue
 			}
-			if old, ok := t.uids[m.UID]; ok && old != m.Name {
-				t.dropPeer(m.UID) // a peer id is one connection; never seen renamed
+			old, known := t.uids[m.UID]
+			if known && old == m.Name {
+				// A respawn: same connection, whose platform was claimed at
+				// its first spawn. Claiming again would take another client's.
+				t.join(m.Name, "", now)
+				continue
+			}
+			if known {
+				// A peer id is one connection; never seen renamed. Move it
+				// without counting a leave.
+				t.dropPeer(m.UID, false)
 			}
 			if t.current[m.Name] == nil {
 				t.current[m.Name] = map[string]struct{}{}
@@ -157,7 +166,7 @@ func (t *Tracker) HandleLine(raw string) {
 			// One line per object the peer owned; the first one is the
 			// peer's leave. Its character is one of them, so every peer that
 			// spawned gets one.
-			t.dropPeer(m.UID)
+			t.dropPeer(m.UID, true)
 		case logparse.KindWorldBackup:
 			t.hub.Publish("world_backup", map[string]any{"ms": m.Ms})
 		case logparse.KindWorldSaved:
@@ -195,6 +204,7 @@ func (t *Tracker) SetStatus(status string) {
 	t.hub.Publish("server_state", map[string]any{"status": status})
 	if status != StatusRunning {
 		t.setCount(0)
+		t.pending = nil // every connection closed with the game
 	}
 }
 
@@ -215,8 +225,11 @@ func (t *Tracker) Snapshot() Snapshot {
 }
 
 // dropPeer forgets one peer id and takes its name off the list once no other
-// peer is online under it. Caller holds mu.
-func (t *Tracker) dropPeer(uid string) {
+// peer is online under it. lost means the peer disconnected: it then also
+// comes off the reported count, which the lagging connection-lost line
+// leaves one too high. The count stays at least the number of names listed
+// and of peers still online. Caller holds mu.
+func (t *Tracker) dropPeer(uid string, lost bool) {
 	name, ok := t.uids[uid]
 	if !ok {
 		return
@@ -227,6 +240,13 @@ func (t *Tracker) dropPeer(uid string) {
 	if len(peers) == 0 {
 		delete(t.current, name)
 		t.leave(name)
+	}
+	if !lost {
+		return
+	}
+	if n := max(t.s.PlayersReported-1, len(t.s.Players), len(t.uids)); n < t.s.PlayersReported {
+		t.s.PlayersReported = n
+		t.hub.Publish("player_count", map[string]any{"count": n})
 	}
 }
 
@@ -258,11 +278,12 @@ func (t *Tracker) claimPlatform(now time.Time) string {
 }
 
 // join adds a player unless already online; a known platform fills in an
-// unknown one. Caller holds mu.
+// unknown one but never replaces a known one, which may belong to another
+// player with the same name. Caller holds mu.
 func (t *Tracker) join(name, platform string, now time.Time) {
 	for i, p := range t.s.Players {
 		if p.Name == name {
-			if platform != "" && platform != logparse.PlatformUnknown && p.Platform != platform {
+			if platform != "" && platform != logparse.PlatformUnknown && p.Platform == logparse.PlatformUnknown {
 				t.s.Players[i].Platform = platform
 			}
 			return
@@ -275,18 +296,12 @@ func (t *Tracker) join(name, platform string, now time.Time) {
 	t.hub.Publish("player_join", map[string]any{"name": name, "platform": platform})
 }
 
-// leave removes one name and takes it off the reported count, which
-// the lagging connection-lost line leaves one too high. The count stays at
-// least the number still listed. Caller holds mu.
+// leave takes one name off the list. Caller holds mu.
 func (t *Tracker) leave(name string) {
 	for i, p := range t.s.Players {
 		if p.Name == name {
 			t.s.Players = append(t.s.Players[:i:i], t.s.Players[i+1:]...)
 			t.hub.Publish("player_leave", map[string]any{"name": name})
-			if n := max(t.s.PlayersReported-1, len(t.s.Players)); n < t.s.PlayersReported {
-				t.s.PlayersReported = n
-				t.hub.Publish("player_count", map[string]any{"count": n})
-			}
 			return
 		}
 	}
@@ -307,8 +322,9 @@ func (t *Tracker) setCount(n int) {
 		t.s.Players = []Player{}
 	}
 	if n == 0 {
+		// Pending platforms stay: they expire on their own, and a client
+		// still loading can be outside a lagging count.
 		clear(t.uids)
 		clear(t.current)
-		t.pending = nil
 	}
 }

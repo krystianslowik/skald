@@ -11,8 +11,8 @@ above them.
 
 ### Fixed
 
-- A player who connected and dropped before their character loaded no longer passes their platform (Xbox, Steam and so on) to the next player who joins, and a player who reconnects while loading no longer leaves a spare platform behind for someone else. A client that stays connected without ever loading in can still, in rare cases, lend its platform to a player who spawns while it waits, because the game's log does not say which connection a character belongs to.
-- When two players use characters with the same name, the name stays on the player list until both have left. Before, the second one leaving took the name off the list while the first was still playing, and the first one's leave was then missed. The list still shows one entry for the name.
+- A player who connected and dropped before their character loaded no longer passes their platform (Xbox, Steam and so on) to the next player who joins, and a player who reconnects while loading no longer leaves a spare platform behind for someone else. A player respawning after a death no longer takes the platform of someone who is still loading in. A client that stays connected without ever loading in can still, in rare cases, lend its platform to a player who spawns while it waits, because the game's log does not say which connection a character belongs to.
+- When two players use characters with the same name, the name stays on the player list until both have left. Before, the second one leaving took the name off the list while the first was still playing, and the first one's leave was then missed. The list still shows one entry for the name, with the platform of whoever joined first, and the player count drops as each of them leaves.
 - Platforms of clients that never load in are now forgotten after three minutes even while other players stay online, instead of piling up until the server is empty.
 
 ## [2026.10.4] - 2026-10-16

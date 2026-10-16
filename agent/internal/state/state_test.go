@@ -429,6 +429,49 @@ func TestReconnectBeforeSpawnQueuesOnePlatform(t *testing.T) {
 	}
 }
 
+// A respawn after a death is the same connection: it must not take the
+// platform of a client that is still loading.
+func TestRespawnDoesNotClaimAnotherPlatform(t *testing.T) {
+	tr := New(events.New(100, 100))
+	tr.SetStatus("running")
+	feed(t, tr,
+		`PlayFab socket with remote ID playfab/0A1B2C3D4E5F6071 received local Platform ID Xbox_2533274900000001`,
+		"+30s",
+		`Got character ZDOID from Ragnar : 111111111:1`,
+		"+10m",
+		`PlayFab socket with remote ID playfab/1B2C3D4E5F607182 received local Platform ID Steam_76561190000000003`,
+		"+5s",
+		`Got character ZDOID from Ragnar : 0:0`,
+		"+8s",
+		`Got character ZDOID from Ragnar : 111111111:2`,
+		"+10s",
+		`Got character ZDOID from Bjorn : 333333333:10`,
+	)
+	if got, want := platforms(tr), map[string]string{"Ragnar": "xbox", "Bjorn": "steam"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("platforms = %v, want %v", got, want)
+	}
+}
+
+// A client's platform survives a count of 0 that arrives while it loads:
+// the count can lag, and the entry expires on its own.
+func TestPendingPlatformSurvivesCountZero(t *testing.T) {
+	tr := New(events.New(100, 100))
+	tr.SetStatus("running")
+	feed(t, tr,
+		`PlayFab socket with remote ID playfab/0A1B2C3D4E5F6071 received local Platform ID Xbox_2533274900000001`,
+		`Player connection lost server "Midgard" that has join code 482915, now 0 player(s)`,
+		"+30s",
+		`Got character ZDOID from Freya : -22222222:50`,
+	)
+	if got, want := platforms(tr), map[string]string{"Freya": "xbox"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("platforms = %v, want %v", got, want)
+	}
+	tr.SetStatus("stopping")
+	if len(tr.pending) != 0 {
+		t.Fatalf("pending after stop = %+v", tr.pending)
+	}
+}
+
 // Platforms of clients that never spawn expire with the TTL even when the
 // count never reaches 0 (#25).
 func TestStalePendingPlatformsArePruned(t *testing.T) {
@@ -458,17 +501,27 @@ func TestSameNameTwoPlayers(t *testing.T) {
 	tr.SetStatus("running")
 	feed(t, tr,
 		`Player joined server "Midgard" that has join code 482915, now 1 player(s)`,
+		`PlayFab socket with remote ID playfab/0A1B2C3D4E5F6071 received local Platform ID Xbox_2533274900000001`,
+		"+30s",
 		`Got character ZDOID from Ragnar : 111111111:1`,
 		"+5m",
 		`Player joined server "Midgard" that has join code 482915, now 2 player(s)`,
+		`PlayFab socket with remote ID playfab/1B2C3D4E5F607182 received local Platform ID Steam_76561190000000003`,
+		"+30s",
 		`Got character ZDOID from Ragnar : 333333333:10`,
-		"+20m",
+	)
+	// The second Ragnar's platform does not replace the first one's.
+	if got, want := platforms(tr), map[string]string{"Ragnar": "xbox"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("platforms = %v, want %v", got, want)
+	}
+	feed(t, tr,
 		`Destroying abandoned non persistent zdo 333333333:10 owner 333333333`,
 		`Destroying abandoned non persistent zdo 333333333:11 owner 333333333`,
-		`Player connection lost server "Midgard" that has join code 482915, now 1 player(s)`,
+		// The connection-lost count lags by one.
+		`Player connection lost server "Midgard" that has join code 482915, now 2 player(s)`,
 	)
-	if s := tr.Snapshot(); len(s.Players) != 1 || s.Players[0].Name != "Ragnar" {
-		t.Fatalf("after the second Ragnar left: players = %+v", s.Players)
+	if s := tr.Snapshot(); len(s.Players) != 1 || s.Players[0].Name != "Ragnar" || s.PlayersReported != 1 {
+		t.Fatalf("after the second Ragnar left: players = %+v, reported = %d", s.Players, s.PlayersReported)
 	}
 	feed(t, tr,
 		`Destroying abandoned non persistent zdo 111111111:1 owner 111111111`,
