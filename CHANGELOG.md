@@ -45,6 +45,7 @@ above them.
 - A tab left open across an update no longer turns blank when you open the map, a sheet or a profile: it reloads once into the new version. If that does not help, the broken part shows a short note with a Reload button instead of a white page.
 - skald-web answers a missing `/assets/` file with 404 instead of the panel's HTML page, and the offline cache never stores an HTML page under a script or style address, so a retry after an update reaches the new files.
 - The offline cache on phones no longer grows with every update: each release replaces the cache, and the previous release's files are deleted.
+- The admin item picker no longer offers items the game itself marks as unused, such as the "Knight shield UNUSED" left over in Valheim's files.
 
 ## [2026.10.4] - 2026-10-16
 

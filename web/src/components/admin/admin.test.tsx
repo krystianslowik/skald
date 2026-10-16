@@ -110,6 +110,20 @@ describe("admin", () => {
     expect(screen.queryByRole("button", { name: "Starter7" })).not.toBeInTheDocument();
   });
 
+  it("never offers items the game marks as unused, in either language", () => {
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() });
+    api(status());
+    render(<I18nProvider locale="en"><LocaleToggle /><ItemPicker target={{ at: { x: 0, z: 0 } }} onClose={() => {}} /></I18nProvider>);
+    const results = () => screen.getByRole("list", { name: "Items" });
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "shield" } });
+    expect(within(results()).getByRole("button", { name: /Iron Shield/ })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "knight" } });
+    expect(within(results()).queryByRole("button", { name: /UNUSED/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Zmień język na Polski" }));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "unused" } });
+    expect(screen.queryByRole("button", { name: /UNUSED/ })).not.toBeInTheDocument();
+  });
+
   it("preserves user kit names when the language changes", () => {
     const kits = [{ name: "Starter", lines: [{ item: "Wood", amount: 50, quality: 1 }] }];
     vi.stubGlobal("localStorage", { getItem: (key: string) => key === "skald.admin.kits" ? JSON.stringify(kits) : null, setItem: vi.fn() });

@@ -89,6 +89,8 @@ export default defineConfig({
     // The integration-style files mount the whole Dashboard; under heavy CPU load one test can take well over 5 s.
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // Vitest blanks CSS by default; the font test reads the stylesheet's source with `?raw`.
+    css: { include: [/index\.css/] },
   },
   build: {
     outDir: "dist",

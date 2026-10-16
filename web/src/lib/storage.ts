@@ -92,6 +92,20 @@ export function fold(s: string): string {
 const searchCache = new Map<string, string>();
 let cacheVersion = -1;
 
+/**
+ * Items the game itself marks as cut: Valheim's own name for them carries the
+ * word UNUSED (ShieldKnight is "Knight shield UNUSED" in every language), so
+ * they cannot be had in play and are never offered. Any loaded dictionary
+ * tells, so it works whichever language this visit loaded.
+ */
+export function isUnusedItem(name: string): boolean {
+  const key = `item.${name}`;
+  return loadedDicts().some((d) => {
+    const label = (d as Record<string, unknown>)[key];
+    return typeof label === "string" && /\bUNUSED\b/.test(label);
+  });
+}
+
 /** Everything an item can be found by: its names in the loaded languages and its prefab. */
 export function itemSearchText(name: string): string {
   if (cacheVersion !== localesVersion()) {
