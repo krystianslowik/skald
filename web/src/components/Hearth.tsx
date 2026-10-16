@@ -10,8 +10,10 @@ import { Shield } from "./Shield";
 export const Hearth = memo(function Hearth({ players, now }: { players: Player[]; now: number }) {
   const { t, duration } = useI18n();
   const reduced = useReducedMotion();
+  const empty = players.length === 0;
   return (
-    <div className="flex min-h-45 flex-wrap content-start justify-center gap-x-3 gap-y-5 pt-1">
+    // Sized by who is there: a row of shields, or one quiet line when nobody is.
+    <div className={`flex flex-wrap justify-center gap-x-3 gap-y-5 ${empty ? "min-h-24 content-center" : "content-start pt-1"}`}>
       <AnimatePresence mode="popLayout">
         {players.map((p) => (
           <motion.figure
@@ -36,9 +38,14 @@ export const Hearth = memo(function Hearth({ players, now }: { players: Player[]
           </motion.figure>
         ))}
       </AnimatePresence>
-      {players.length === 0 && (
-        <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-[26ch] self-center text-sm leading-relaxed text-ash">
-          {t("hearth.empty")}
+      {empty && (
+        <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex max-w-[34ch] items-center gap-3 text-sm leading-relaxed text-ash">
+          <svg width="30" height="30" viewBox="0 0 30 30" fill="none" strokeLinecap="round" aria-hidden className="shrink-0">
+            {/* A cold fire: the logs and one ember. */}
+            <path d="M5 24l18-6M25 24L7 18" stroke="#6b5745" strokeWidth="3" />
+            <circle cx="15" cy="19.5" r="1.6" fill="#c2812f" opacity="0.8" />
+          </svg>
+          <span>{t("hearth.empty")}</span>
         </motion.p>
       )}
     </div>

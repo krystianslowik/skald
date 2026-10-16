@@ -154,7 +154,7 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
   );
   // No board: the code sits straight on the world, like the game's centre-screen messages.
   const join = (
-    <section className="relative flex flex-col items-center justify-center bg-[radial-gradient(55%_60%_at_50%_50%,rgba(70,104,112,0.13),transparent_72%)] px-4 py-8 sm:py-12 lg:col-span-8" aria-label={t("plank.joinCode")}>
+    <section className="relative flex flex-col items-center justify-center bg-[radial-gradient(55%_60%_at_50%_50%,rgba(70,104,112,0.13),transparent_72%)] px-4 py-8 sm:py-12 lg:col-span-7 lg:py-6" aria-label={t("plank.joinCode")}>
       <JoinPanel
         code={state.server.joinCode}
         codeAt={state.server.joinCodeAt}
@@ -168,7 +168,7 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
     </section>
   );
   const hearth = (
-    <Plank title={t("plank.hearth")} id="hearth" aside={tn("plank.hearth.aside", players.length)} className="lg:col-span-4">
+    <Plank title={t("plank.hearth")} id="hearth" aside={tn("plank.hearth.aside", players.length)} className="lg:col-span-5">
       <Hearth players={players} now={now} />
     </Plank>
   );
@@ -215,12 +215,12 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
     </Plank>
   );
   const treasury = (
-    <Plank title={t("plank.treasury")} id="treasury" aside={tn("plank.treasury.aside", state.backups.length)} className="lg:col-span-6">
+    <Plank title={t("plank.treasury")} id="treasury" aside={tn("plank.treasury.aside", state.backups.length)} className="lg:col-span-7">
       <Treasury backups={state.backups} now={now} />
     </Plank>
   );
   const runes = (
-    <Plank title={t("plank.runes")} id="runes" className="lg:col-span-6">
+    <Plank title={t("plank.runes")} id="runes" className="lg:col-span-5 lg:flex lg:flex-col">
       <Runes online={online} lastAction={lastAction} />
     </Plank>
   );
@@ -280,7 +280,8 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
             transition={{ duration: 0.8 }}
           >
             {header}
-            <div className="grid gap-5 lg:grid-cols-12 lg:gap-6">
+            {/* The code and who is at the fire side by side, centred on each other: the board as tall as its players. */}
+            <div className="grid gap-5 lg:grid-cols-12 lg:items-center lg:gap-6">
               {join}
               {hearth}
             </div>
