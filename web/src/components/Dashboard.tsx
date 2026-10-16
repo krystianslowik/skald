@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Valheim } from "../lib/useValheim";
 import { useI18n } from "../i18n";
 import { Atmosphere } from "./Atmosphere";
@@ -27,12 +27,14 @@ import { PHONE, useMedia } from "../lib/useMedia";
 import { TABS, useRoute, type Tab } from "../lib/useRoute";
 import { AdminProvider } from "./admin/AdminContext";
 import { AdminBoard } from "./admin/AdminBoard";
+import { lazyChunk } from "../lib/chunks";
+import { ChunkBoundary } from "./ErrorBoundary";
 
 // Opened on demand; the chunk is preloaded as soon as a pointer reaches a player name.
-const ProfileSheet = lazy(() => import("./ProfileSheet"));
-const SettingsSheet = lazy(() => import("./SettingsSheet"));
-const MapView = lazy(() => import("./map/MapView"));
-const MapPreview = lazy(() => import("./map/MapPreview"));
+const ProfileSheet = lazyChunk(() => import("./ProfileSheet"));
+const SettingsSheet = lazyChunk(() => import("./SettingsSheet"));
+const MapView = lazyChunk(() => import("./map/MapView"));
+const MapPreview = lazyChunk(() => import("./map/MapPreview"));
 
 function useNow(ms = 15_000): number {
   const [now, setNow] = useState(() => Date.now());
@@ -184,9 +186,11 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
   );
   const mapBoard = (
     <Plank title={t("map.title")} id="map" aside={t("map.preview.aside")}>
-      <Suspense fallback={<div className="h-56 sm:h-64" />}>
-        <MapPreview saveKey={saveKey} onOpen={showMap} />
-      </Suspense>
+      <ChunkBoundary>
+        <Suspense fallback={<div className="h-56 sm:h-64" />}>
+          <MapPreview saveKey={saveKey} onOpen={showMap} />
+        </Suspense>
+      </ChunkBoundary>
     </Plank>
   );
   const stores = (
@@ -309,19 +313,25 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
         )}
         {phone && <TabBar tab={tab} tabs={TABS} onTab={go} />}
         {profile && (
-          <Suspense fallback={null}>
-            <ProfileSheet key={profile} name={profile} now={now} onClose={closeProfile} />
-          </Suspense>
+          <ChunkBoundary overlay onClose={closeProfile}>
+            <Suspense fallback={null}>
+              <ProfileSheet key={profile} name={profile} now={now} onClose={closeProfile} />
+            </Suspense>
+          </ChunkBoundary>
         )}
         {mapOpen && (
-          <Suspense fallback={null}>
-            <MapView seedName={state.world.meta?.seedName ?? ""} saveKey={saveKey} now={now} onClose={closeMap} asTab={phone} focus={mapFocus} onFocusClear={clearFocus} />
-          </Suspense>
+          <ChunkBoundary overlay onClose={closeMap}>
+            <Suspense fallback={null}>
+              <MapView seedName={state.world.meta?.seedName ?? ""} saveKey={saveKey} now={now} onClose={closeMap} asTab={phone} focus={mapFocus} onFocusClear={clearFocus} />
+            </Suspense>
+          </ChunkBoundary>
         )}
         {settingsOpen && state.settings?.enabled && (
-          <Suspense fallback={null}>
-            <SettingsSheet summary={state.settings} effectiveName={state.server.name} worldModifiers={state.world.meta?.modifiers} focusFooter={settingsOpen === "footer"} onClose={closeSettings} />
-          </Suspense>
+          <ChunkBoundary overlay onClose={closeSettings}>
+            <Suspense fallback={null}>
+              <SettingsSheet summary={state.settings} effectiveName={state.server.name} worldModifiers={state.world.meta?.modifiers} focusFooter={settingsOpen === "footer"} onClose={closeSettings} />
+            </Suspense>
+          </ChunkBoundary>
         )}
       </div>
     </ProfileProvider>

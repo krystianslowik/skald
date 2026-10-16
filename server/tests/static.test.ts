@@ -49,12 +49,16 @@ describe("mountStatic", () => {
     expect((await app.request("/apiary")).headers.get("content-type")).toContain("text/html");
   });
 
-  it("caches hashed assets for good, but not the shell served for a missing one", async () => {
+  it("caches hashed assets for good and answers a missing one with 404, not the shell", async () => {
     const js = await app.request("/assets/index-AbC123.js");
     expect(js.headers.get("content-type")).toContain("javascript");
     expect(js.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
     const gone = await app.request("/assets/index-Old999.js");
-    expect(gone.headers.get("content-type")).toContain("text/html");
-    expect(gone.headers.get("cache-control")).toBe("no-cache");
+    expect(gone.status).toBe(404);
+    expect(gone.headers.get("content-type")).not.toContain("text/html");
+    expect(gone.headers.get("cache-control")).toBe("no-store");
+    expect((await app.request("/assets/nested/old.css")).status).toBe(404);
+    // Only files under /assets/ are assets; a page at /assets is still the app.
+    expect((await app.request("/assets")).headers.get("content-type")).toContain("text/html");
   });
 });

@@ -17,6 +17,11 @@ export const plural = (p: Plural): Plural => p;
 
 export const en = {
   "app.loading": "Stirring the embers...",
+  "crash.title": "Something went wrong",
+  "crash.body": "Part of the panel stopped working. Reloading the page usually fixes it.",
+  "crash.stale": "Skald was updated while this page was open. Reload to get the new version.",
+  "crash.reload": "Reload",
+  "crash.close": "Close",
   "footer.unofficial": "Skald is a fan project, not affiliated with Iron Gate Studio or Coffee Stain.",
   "version.label": "Skald {v}",
   "version.mismatch": "Agent {agent}, panel {web}: update the other part so they match.",

@@ -2,6 +2,7 @@ import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import { useCallback, useEffect, useState } from "react";
 import { Dashboard } from "./components/Dashboard";
 import { Login } from "./components/Login";
+import { ChunkBoundary } from "./components/ErrorBoundary";
 import { I18nProvider, storedLocale, type Locale } from "./i18n";
 import { getConfig, logout, me } from "./lib/api";
 import { setIconBuild } from "./lib/itemicons";
@@ -43,20 +44,22 @@ export default function App() {
   if (auth === "checking" || !locale) return <div className="min-h-dvh bg-coal" />;
   return (
     <I18nProvider locale={locale}>
-      {/* Reduced motion: transforms and layout animations are dropped app-wide, opacity cross-fades stay. */}
-      <MotionConfig reducedMotion="user">
-        <AnimatePresence mode="wait">
-          {auth === "in" ? (
-            <motion.div key="in" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <Panel onUnauthorized={toLogin} onLogout={doLogout} />
-            </motion.div>
-          ) : (
-            <motion.div key="out" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.3 } }}>
-              <Login onSuccess={() => setAuth("in")} />
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </MotionConfig>
+      <ChunkBoundary resetKey={auth}>
+        {/* Reduced motion: transforms and layout animations are dropped app-wide, opacity cross-fades stay. */}
+        <MotionConfig reducedMotion="user">
+          <AnimatePresence mode="wait">
+            {auth === "in" ? (
+              <motion.div key="in" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <Panel onUnauthorized={toLogin} onLogout={doLogout} />
+              </motion.div>
+            ) : (
+              <motion.div key="out" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.3 } }}>
+                <Login onSuccess={() => setAuth("in")} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </MotionConfig>
+      </ChunkBoundary>
     </I18nProvider>
   );
 }

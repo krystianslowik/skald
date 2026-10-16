@@ -1,12 +1,14 @@
-import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AdminCommand, AdminStatus, AgentEvent, ApiState, Platform, RestoreBackup } from "../../types";
 import { getAdminStatus, postAdmin, runAdmin, type AdminOutcome, type KitLine } from "../../lib/admin";
 import { Unauthorized } from "../../lib/api";
 import { useWorldMap } from "../../lib/useWorldMap";
 import { useI18n } from "../../i18n";
+import { lazyChunk, preload } from "../../lib/chunks";
+import { ChunkBoundary } from "../ErrorBoundary";
 
-const AdminSheets = lazy(() => import("./AdminSheets"));
-export const preloadAdmin = () => void import("./AdminSheets");
+const AdminSheets = lazyChunk(() => import("./AdminSheets"));
+export const preloadAdmin = () => preload(() => import("./AdminSheets"));
 
 /** Where a command acts: next to a player, or at a point of the world. */
 export type Target = { player: string } | { at: { x: number; z: number }; label?: string };
@@ -259,9 +261,17 @@ export function AdminProvider({
     <AdminCtx.Provider value={value}>
       {children}
       {(view || unlocking) && (
-        <Suspense fallback={null}>
-          <AdminSheets view={view} unlocking={unlocking} />
-        </Suspense>
+        <ChunkBoundary
+          overlay
+          onClose={() => {
+            unlocking?.(false);
+            setView(null);
+          }}
+        >
+          <Suspense fallback={null}>
+            <AdminSheets view={view} unlocking={unlocking} />
+          </Suspense>
+        </ChunkBoundary>
       )}
       <Toasts toasts={toasts} />
     </AdminCtx.Provider>

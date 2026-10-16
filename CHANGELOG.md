@@ -39,6 +39,9 @@ above them.
 - Looking at the map no longer fills the bridge's log with "too many terrain requests" audit lines. The bridge plugin (now **v0.2.1**) writes audit lines only for commands that change the world, never for reads, also when a read fails (#63).
 - Unlocking a phone, switching back to the tab or coming back online now reconnects the live link at once instead of waiting up to 30 seconds, and reloads the server state and the Chronicle's log lines, so nothing that happened while the screen was off is missing.
 - A signed-in viewer is no longer sent to the login screen when the server is briefly unreachable (no network, or a restart that answers with an error). The panel opens and keeps retrying; only an expired session shows the login.
+- A tab left open across an update no longer turns blank when you open the map, a sheet or a profile: it reloads once into the new version. If that does not help, the broken part shows a short note with a Reload button instead of a white page.
+- skald-web answers a missing `/assets/` file with 404 instead of the panel's HTML page, and the offline cache never stores an HTML page under a script or style address, so a retry after an update reaches the new files.
+- The offline cache on phones no longer grows with every update: each release replaces the cache, and the previous release's files are deleted.
 
 ## [2026.10.4] - 2026-10-16
 
