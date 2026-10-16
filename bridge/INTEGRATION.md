@@ -121,14 +121,30 @@ pyramid, `GET /terrain/tiles.json` and `GET /terrain/tile?z=&x=&y=&v=`.
   running world, plus the tile format. A game update is a new build: old URLs
   404, new tiles are sampled. Tiles are `immutable` with an ETag.
 - Disk cache under `TERRAIN_CACHE_DIR` (default `$SETTINGS_DIR/terrain-tiles`),
-  bounded by `TERRAIN_CACHE_MB` (256), least recently used out first (recency
+  bounded by `TERRAIN_CACHE_MB` (1024), least recently used out first (recency
   is the file mtime, so it survives restarts). An unwritable directory falls
   back to a 64 MB memory cache.
-- One plugin call at a time; concurrent viewers of the same tile share it; a
-  viewer who goes away does not cancel a tile someone else will want. 429s are
-  retried with back-off.
-- Levels 0..3 of a new build are pre-warmed in the background (85 tiles), so
-  the whole-world view paints from the cache.
+- One plugin call at a time (`internal/terrain/queue.go`). Viewers' tiles wait
+  in a priority queue, nearest the centre of the latest 16 requests first
+  (cache hits count: they move the view too). Everyone asking for the same
+  tile, viewers and the bake, shares one job. A queued tile is dropped before
+  sampling when its last viewer's request is cancelled, or when it is
+  superseded: viewers asked for other tiles since, and none of them within 10
+  of its own tile widths (answered 503). A tile already being sampled finishes
+  and is cached. 429s are retried with back-off.
+- The bake (`internal/terrain/bake.go`, `TERRAIN_BAKE`) fills a build's whole
+  pyramid in the background, taking the slot only when no viewer waits and
+  never within 2 s of a viewer request: levels 0..3 (85 tiles), then level 7
+  in level-4 blocks from the centre out. Levels 4..6 are downsampled in the
+  agent from the level below as soon as a tile's 4 children and their 12
+  neighbours are on disk: biome by the mode of the 2 x 2 samples (ties to the
+  north-west-most; a mean of biome indices means nothing), height and forest
+  by the rounded mean (the coarse pixel's centre is the four samples' centre).
+  Tiles with a child outside the world disc (164) are sampled at the end. It
+  paces itself to one bridge call per 300 ms (1 s with players online), under
+  the plugin's 4/s limit, and stops when the build fills 90 % of the cache.
+  The cache is the progress: a restarted agent skips every tile on disk.
+  `tiles.json` carries `bake: {state, done, total, level}`.
 - The Job's grid is used for levels 0..3 only when it is from the same seed,
   generator and game build and the plugin has no forest channel (grid tiles have
   none, and mixing them with forest-shaded tiles would change a place's colour
@@ -140,7 +156,8 @@ pyramid, `GET /terrain/tiles.json` and `GET /terrain/tile?z=&x=&y=&v=`.
   west-to-east differences, low bytes of the whole grid then high bytes. About
   half the size on real terrain.
 - `/metrics`: `valheim_terrain_tiles_total{result}`,
-  `valheim_terrain_bridge_sample_seconds_total`, `valheim_terrain_cache_bytes`.
+  `valheim_terrain_bridge_sample_seconds_total`, `valheim_terrain_cache_bytes`,
+  `valheim_terrain_bake_progress`.
 
 Why sampling off the main thread is safe, from the game's own structure (read
 by reflection, not from its code): `HeightmapBuilder` starts its own thread

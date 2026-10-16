@@ -9,6 +9,12 @@ above them.
 
 ## [Unreleased]
 
+### Changed
+
+- The map's terrain no longer waits for the game where nobody has looked yet. Once per game build the agent bakes the whole world's terrain tiles in the background, the whole-world view first, then full detail from the centre outwards. It takes about 67 minutes on an empty server and about 3.7 hours while people play, and it always steps aside while someone looks at the map. Progress shows in `/terrain/tiles.json` and the new `valheim_terrain_bake_progress` metric; `TERRAIN_BAKE=false` turns it off.
+- **Operators:** a baked world takes about 0.5-0.85 GB on the agent's tile cache (the config volume in Kubernetes), and the default `TERRAIN_CACHE_MB` rises from 256 to 1024 to hold it. A game update bakes again and replaces the old tiles.
+- Map tiles are fetched nearest to where you look first, and tiles for a place you already scrolled away from are no longer sampled.
+
 ## [2026.10.1] - 2026-10-16
 
 ### Fixed
