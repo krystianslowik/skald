@@ -8,6 +8,7 @@ import { Sheet } from "../Sheet";
 import { targetBody, useAdmin, type Target } from "./AdminContext";
 import { AdminGlyph } from "./glyphs";
 import { HoldButton } from "./HoldButton";
+import { SkaldVersion } from "../SkaldVersion";
 import { AdminHead, BridgeBanner, Btn, Chip, HealthBar, Section, TargetChips } from "./parts";
 import { AccessLists, RestoreSection } from "./WorldTools";
 
@@ -94,6 +95,7 @@ export function AdminPanel({ picked, onClose }: { picked?: { x: number; z: numbe
             )}
           </div>
         </Section>
+        <SkaldVersion web={admin.versions.web} agent={admin.versions.agent} update={st?.update} className="mt-6 border-t border-iron/25 pt-3" />
       </div>
     </Sheet>
   );

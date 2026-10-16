@@ -21,5 +21,7 @@ LABEL org.opencontainers.image.title=skald-terrain \
 COPY --from=build /out/SkaldTerrain.dll /skald/SkaldTerrain.dll
 COPY --chmod=0755 run.sh /skald/run.sh
 COPY --chmod=0644 hook.sh /skald/hook.sh
+# The release this image belongs to; the plugin keeps its own version.
+ENV SKALD_VERSION=$VERSION
 # Copies the files into the volume mounted at /dest and exits.
 CMD ["sh", "-c", "cp -f /skald/SkaldTerrain.dll /skald/run.sh /skald/hook.sh /dest/ && chmod 0755 /dest/run.sh && ls -l /dest"]

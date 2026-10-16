@@ -1,3 +1,4 @@
+import { VERSION } from "./buildinfo";
 import type { ActionResponse, AgentAsset, AgentSource, BridgeRequest, MapSourceResult, PiecesBox, Proxied, TerrainTileRef, ToolsRequest } from "./agent";
 import { mockMap } from "./mapmock";
 import { mockNature, natureIn } from "./mocknature";
@@ -289,7 +290,7 @@ export class MockAgent implements AgentSource {
         const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}00`;
         return { name: `worlds-${stamp}.zip`, sizeBytes: 41_000_000 - i * 1_350_000, modifiedAt: d.toISOString() };
       }),
-      agent: { startedAt: this.startedAt, lastLogAt: null },
+      agent: { startedAt: this.startedAt, lastLogAt: null, version: VERSION },
       settings: { enabled: true, pending: false, armed: false, passwordSet: true },
     };
     this.settingsCur = { name: this.state.server.name, public: true, ...parseArgs(this.state.server.args) };

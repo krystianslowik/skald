@@ -28,6 +28,15 @@ describe("config", () => {
     expect(() => loadConfig({ ...base, SKALD_TZ: "Mars/Olympus" })).toThrow("SKALD_TZ");
   });
 
+  it("checks for updates unless SKALD_UPDATE_CHECK is off", () => {
+    expect(loadConfig(base).updateCheck).toBe(true);
+    expect(loadConfig(base).metricsBind).toBe("");
+    expect(loadConfig({ ...base, METRICS_BIND: "0.0.0.0:9465" }).metricsBind).toBe("0.0.0.0:9465");
+    expect(loadConfig({ ...base, SKALD_UPDATE_CHECK: "off" }).updateCheck).toBe(false);
+    expect(loadConfig({ ...base, SKALD_UPDATE_CHECK: "OFF " }).updateCheck).toBe(false);
+    expect(loadConfig({ ...base, SKALD_UPDATE_CHECK: "on" }).updateCheck).toBe(true);
+  });
+
   it("only turns the Secure cookie off when asked", () => {
     expect(loadConfig({ ...base, COOKIE_SECURE: "false" }).cookieSecure).toBe(false);
     expect(loadConfig({ ...base, COOKIE_SECURE: "0" }).cookieSecure).toBe(true);

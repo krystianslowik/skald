@@ -63,6 +63,8 @@ type Options struct {
 	PingEvery time.Duration
 	// ActionTimeout bounds stop/start during a restart; 5 min when zero.
 	ActionTimeout time.Duration
+	// Version is the Skald release the agent was built from; "dev" when empty.
+	Version string
 }
 
 type Server struct {
@@ -94,6 +96,9 @@ func New(opt Options) *Server {
 	}
 	if opt.Logger == nil {
 		opt.Logger = slog.Default()
+	}
+	if opt.Version == "" {
+		opt.Version = "dev"
 	}
 	return &Server{opt: opt, startedAt: time.Now().UTC(), world: world.NewReader(opt.ConfigDir, opt.WorldName)}
 }

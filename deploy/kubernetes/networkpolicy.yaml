@@ -61,6 +61,12 @@ spec:
     #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}
     - ports:
         - {protocol: TCP, port: 8080}
+    # Metrics listener (METRICS_BIND) has no session: keep it to the
+    # monitoring namespace. Expose only port 8080 through the ingress.
+    - from:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+      ports:
+        - {protocol: TCP, port: 9465}
   egress:
     - to:
         - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
@@ -77,8 +83,9 @@ spec:
         - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
       ports:
         - {protocol: TCP, port: 9090}
-    # Discord notifications (only if DISCORD_WEBHOOK_URL is set): HTTPS to
-    # the public internet.
+    # Discord notifications (only if DISCORD_WEBHOOK_URL is set) and the
+    # update check (api.github.com, unless SKALD_UPDATE_CHECK=off): HTTPS to
+    # the public internet. Without this rule both fail quietly.
     # - to:
     #     - ipBlock:
     #         cidr: 0.0.0.0/0

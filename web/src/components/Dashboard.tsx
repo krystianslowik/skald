@@ -262,7 +262,7 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
               {shownTab === "settings" && (
                 <>
                   <AdminBoard />
-                  <Preferences onServerSettings={state.settings?.enabled ? openServerSettings : undefined} onLogout={onLogout} />
+                  <Preferences onServerSettings={state.settings?.enabled ? openServerSettings : undefined} onLogout={onLogout} webVersion={state.webVersion} agentVersion={state.agent.version} />
                   {runes}
                   {forge}
                   {treasury}

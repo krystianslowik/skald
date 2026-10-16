@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import type { AgentSource } from "../src/agent";
 import { createApp } from "../src/app";
+import { metricsFetch } from "../src/buildinfo";
 import { RateLimiter } from "../src/auth";
 import { HistoryStore } from "../src/db";
 import { Hub } from "../src/hub";
@@ -10,7 +11,7 @@ import { emptyAgentState, type ActionName, type PlayerProfile, type SettingsRequ
 const HASH = await Bun.password.hash("ognisko");
 
 function setup(
-  opts: { online?: boolean; actionStatus?: number; backup?: AgentSource["backup"]; trustedIpHeader?: string; settings?: AgentSource["settings"]; asset?: AgentSource["asset"] } = {},
+  opts: { online?: boolean; actionStatus?: number; backup?: AgentSource["backup"]; trustedIpHeader?: string; settings?: AgentSource["settings"]; asset?: AgentSource["asset"]; version?: string; update?: () => { version: string; url: string } | null } = {},
 ) {
   const actions: ActionName[] = [];
   const backups: string[] = [];
@@ -67,6 +68,8 @@ function setup(
     locale: "pl",
     trustedIpHeader: opts.trustedIpHeader ?? "CF-Connecting-IP",
     limiter: new RateLimiter(5, 60_000, 900_000, () => t),
+    version: opts.version,
+    update: opts.update,
   });
   return { app, actions, backups, settingsCalls, advance: (ms: number) => (t += ms) };
 }
@@ -398,5 +401,34 @@ describe("terrain", () => {
     const dv = new DataView(png.buffer, png.byteOffset);
     expect([dv.getUint32(16), dv.getUint32(20)]).toEqual([doc.resolution, doc.resolution]);
     agent.stop();
+  });
+});
+
+describe("version", () => {
+  it("has no /metrics on the panel port", async () => {
+    const { app } = setup({ version: "2026.10.0" });
+    expect((await app.request("/metrics")).status).toBe(404);
+  });
+
+  it("serves skald_build_info on the METRICS_BIND listener only at GET /metrics", async () => {
+    const fetchMetrics = metricsFetch("2026.10.0");
+    const res = fetchMetrics(new Request("http://127.0.0.1:9465/metrics"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/plain; version=0.0.4");
+    expect(await res.text()).toContain('\nskald_build_info{component="web",version="2026.10.0"} 1\n');
+    expect(fetchMetrics(new Request("http://127.0.0.1:9465/api/state")).status).toBe(404);
+    expect(fetchMetrics(new Request("http://127.0.0.1:9465/metrics", { method: "POST" })).status).toBe(404);
+  });
+
+  it("reports its own version in /api/state and a newer release in /api/admin/status", async () => {
+    const { app } = setup({ version: "2026.10.0", update: () => ({ version: "2026.11.0", url: "https://github.com/krystianslowik/skald/releases/tag/v2026.11.0" }) });
+    const cookie = await sessionCookie(app);
+    const st = (await (await app.request("/api/state", { headers: { Cookie: cookie } })).json()) as { webVersion: string };
+    expect(st.webVersion).toBe("2026.10.0");
+    const admin = (await (await app.request("/api/admin/status", { headers: { Cookie: cookie } })).json()) as { update: unknown };
+    expect(admin.update).toEqual({ version: "2026.11.0", url: "https://github.com/krystianslowik/skald/releases/tag/v2026.11.0" });
+    const off = setup();
+    const c2 = await sessionCookie(off.app);
+    expect(((await (await off.app.request("/api/admin/status", { headers: { Cookie: c2 } })).json()) as { update: unknown }).update).toBeNull();
   });
 });

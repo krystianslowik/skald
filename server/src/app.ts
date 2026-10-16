@@ -54,6 +54,10 @@ export interface AppDeps {
   notifyTest?: () => Promise<SendResult>;
   verifyPassword?: (password: string, hash: string) => Promise<boolean>;
   clock?: () => number;
+  /** This build's Skald release; "dev" when unset. */
+  version?: string;
+  /** A newer Skald release, from the update check; unset when it is off. */
+  update?: () => { version: string; url: string } | null;
 }
 
 /**
@@ -194,6 +198,7 @@ export function createApp(deps: AppDeps): Hono {
       history: deps.hub.history(),
       metricsConfigured: deps.metricsConfigured ?? true,
       metrics: await deps.metrics(),
+      webVersion: deps.version ?? "dev",
     };
     c.header("Cache-Control", "no-store");
     return c.json(body);
@@ -503,6 +508,7 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/admin/status", async (c) => {
     c.header("Cache-Control", "no-store");
     const body: AdminStatus = { bridge: await bridgeStatus(), required: adminRequired, unlocked: isAdmin(c), idleMs: ADMIN_IDLE_MS, notifyConfigured: Boolean(deps.notifyTest) };
+    body.update = deps.update?.() ?? null;
     return c.json(body);
   });
 

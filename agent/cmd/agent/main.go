@@ -25,6 +25,10 @@ import (
 	"github.com/krystianslowik/skald/agent/internal/worldmap"
 )
 
+// version is the release this binary was built from, set at build time with
+// -ldflags "-X main.version=2026.10.0". Local builds report "dev".
+var version = "dev"
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -134,6 +138,7 @@ func main() {
 		Bridge:     br,
 		Access:     access.New(cfg.ConfigDir),
 		Logger:     logger,
+		Version:    version,
 	})
 	go s.RunSettingsWatcher(ctx)
 	if br != nil {
@@ -148,7 +153,7 @@ func main() {
 			fail(fmt.Errorf("metrics listen %s: %w", cfg.MetricsAddr, err))
 		}
 	}()
-	logger.Info("starting skald-agent", "addr", cfg.ListenAddr, "metrics", cfg.MetricsAddr, "syslog", cfg.SyslogAddr)
+	logger.Info("starting skald-agent", "version", version, "addr", cfg.ListenAddr, "metrics", cfg.MetricsAddr, "syslog", cfg.SyslogAddr)
 	if err := s.ListenAndServe(ctx, cfg.ListenAddr); err != nil {
 		fail(err)
 	}

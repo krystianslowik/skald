@@ -106,7 +106,8 @@ export interface AgentState {
     clock?: WorldClock | null;
   };
   backups: Backup[];
-  agent: { startedAt: string; lastLogAt: string | null };
+  /** `version`: the agent's Skald release ("dev" for local builds); missing from agents older than 2026.10.0. */
+  agent: { startedAt: string; lastLogAt: string | null; version?: string };
   /** null when the agent has no writable SETTINGS_DIR (or predates the feature). */
   settings?: SettingsSummary | null;
   /** Item icons from the operator's own game files; null when the agent has no ICONS_DIR (or predates 0.7.0). */
@@ -334,6 +335,8 @@ export type ApiState = AgentState & {
   metricsConfigured: boolean;
   /** null when Prometheus is configured but did not answer. */
   metrics: Metrics | null;
+  /** This skald-web's Skald release ("dev" for local builds). Always set by the server; optional for test fixtures. */
+  webVersion?: string;
 };
 
 export type Locale = "en" | "pl";
@@ -701,6 +704,8 @@ export interface AdminStatus {
   idleMs: number;
   /** DISCORD_WEBHOOK_URL is set; the URL itself never leaves the server. */
   notifyConfigured: boolean;
+  /** A newer Skald release than this skald-web; null when none is known or the check is off. */
+  update?: { version: string; url: string } | null;
 }
 
 /** A connected player as the agent serves it: never a platform or peer id. */

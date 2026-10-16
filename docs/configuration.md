@@ -48,12 +48,14 @@
 | `PROM_POD_REGEX` | `valheim-[a-z0-9]+-[a-z0-9]+` | Pod regex for the network series (anchored by PromQL) |
 | `DB_PATH` | `/data/skald.db` | SQLite file for the event history |
 | `BIND` | `0.0.0.0:8080` | Listen address |
+| `METRICS_BIND` | (empty = off) | Prometheus listener, e.g. `0.0.0.0:9465`, serving `GET /metrics` with `skald_build_info`. No session, like the agent's `METRICS_ADDR`: restrict it with a NetworkPolicy or firewall. The panel port never serves `/metrics` |
 | `WEB_ROOT` | `../web/dist` | Built SPA, relative to the working directory |
 | `DISCORD_WEBHOOK_URL` | (empty) | A Discord channel webhook for notifications. Empty turns them off at no cost. A secret: it is never logged or sent to the browser. See [Discord notifications](#discord-notifications) |
 | `DISCORD_NOTIFY` | all | Which notifications to send, comma-separated: `join`, `leave`, `death`, `raid`, `server`, `join_code`, `version`, `failure`. An unknown name stops skald-web at startup |
 | `MAP_SPOILERS` | `false` | `true` shows every boss altar, trader and dungeon of the seed on the world map. Off, only places someone has been to are sent to the browser |
 | `MOCK_AGENT` | (unset) | `1` runs against a built-in fake server (development). It also turns `COOKIE_SECURE` off and keeps the history in memory unless `DB_PATH` is set |
 | `MOCK_BRIDGE` | `on` | With `MOCK_AGENT=1`: the fake bridge's state, `on`, `off`, `untested` or `disabled` |
+| `SKALD_UPDATE_CHECK` | `on` | `off` stops skald-web from asking GitHub whether a newer Skald release exists. See [Versions and the update check](#versions-and-the-update-check) |
 
 The resource charts query cAdvisor series as kube-prometheus-stack scrapes
 them (`container_cpu_usage_seconds_total`, `container_memory_working_set_bytes`,
@@ -90,6 +92,35 @@ sends a test message (an admin session when `ADMIN_PASSWORD_HASH` is set).
 
 On Kubernetes, the example `skald-web` NetworkPolicy allows no internet
 egress; uncomment its Discord rule.
+
+## Versions and the update check
+
+Every image knows the Skald release it was built from (`2026.10.0`; a local
+build says `dev`). The panel shows it in small print under the phone's
+Settings tab and at the foot of the admin sheet. The agent and skald-web are
+deployed separately, so when their releases differ the same place says so,
+for example "Agent 2026.10.0, panel 2026.11.0: update the other part so they
+match". A `dev` build never warns, and neither does an agent from before
+2026.10.0, which does not report its release.
+
+Both also export it to Prometheus as `skald_build_info` (see
+[metrics](metrics.md)).
+
+skald-web also checks whether a newer Skald release is out: once at start and
+then at most every 12 hours, while someone has the panel open. When there is
+one, the admin sheet shows "New version 2026.11.0" with a link to its release
+notes. It never updates anything by itself.
+
+- **What is sent:** one plain `GET https://api.github.com/repos/krystianslowik/skald/releases/latest`
+  with the User-Agent `skald/<version>` and the ETag of the last answer.
+  No server name, world, player, address or any other identifying data. GitHub
+  sees the request's IP address, as with any HTTPS request.
+- **Blocked network:** the check gives up after 10 seconds, logs one line the
+  first time it fails and stays quiet after that. Nothing else changes.
+- **Turning it off:** `SKALD_UPDATE_CHECK=off`. `dev` builds never check.
+- **Kubernetes:** it needs egress to `api.github.com` on TCP 443. The example
+  `skald-web` NetworkPolicy allows no internet egress; uncomment its update
+  check rule, or leave it blocked and the check stays silent.
 
 ## Server settings
 

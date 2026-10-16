@@ -18,6 +18,9 @@ export const plural = (p: Plural): Plural => p;
 export const en = {
   "app.loading": "Stirring the embers...",
   "footer.unofficial": "Skald is a fan project, not affiliated with Iron Gate Studio or Coffee Stain.",
+  "version.label": "Skald {v}",
+  "version.mismatch": "Agent {agent}, panel {web}: update the other part so they match.",
+  "version.update": "New version {v}",
   "key.hold": "Hold",
   "key.esc": "Esc",
   "lang.label": "Language",
