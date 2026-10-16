@@ -78,6 +78,32 @@ describe("server settings behind an admin password", () => {
     await waitFor(() => expect(calls).toContain("/api/settings"));
   });
 
+  it("keeps the sheet shut until the unlock is dismissed, even if a status poll reports it first", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const calls = api(false);
+      renderDashboard();
+      await waitFor(() => expect(calls).toContain("/api/admin/status"));
+      await act(async () => {});
+      fireEvent.click(screen.getByRole("button", { name: "Server settings" }));
+      const unlock = await screen.findByRole("dialog", { name: "Admin password" });
+      fireEvent.change(within(unlock).getByLabelText("Admin password"), { target: { value: "jarl" } });
+      fireEvent.click(within(unlock).getByRole("button", { name: "Unlock" }));
+      const cont = await within(unlock).findByRole("button", { name: "Continue" });
+      const polls = calls.filter((u) => u === "/api/admin/status").length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(21_000);
+      });
+      await waitFor(() => expect(calls.filter((u) => u === "/api/admin/status").length).toBeGreaterThan(polls));
+      await act(async () => {});
+      expect(screen.queryByRole("dialog", { name: "Settings" })).not.toBeInTheDocument();
+      fireEvent.click(cont);
+      expect(await screen.findByRole("dialog", { name: "Settings" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not hand a viewer the server password on the join panel", async () => {
     const calls = api(false);
     renderDashboard();

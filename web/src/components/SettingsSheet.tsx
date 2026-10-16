@@ -27,6 +27,9 @@ export default function SettingsSheet(props: SheetProps) {
   const { onClose } = props;
   const asked = useRef(false);
   const shown = useRef(false);
+  // The unlock sheet stays up until it is dismissed; a status poll can
+  // report the unlock before that, and the form must not open over it.
+  const [asking, setAsking] = useState(false);
   useEffect(() => {
     if (!locked || !admin) return;
     // Locked again (the idle timeout) while open: close rather than ask twice.
@@ -35,9 +38,13 @@ export default function SettingsSheet(props: SheetProps) {
       return;
     }
     asked.current = true;
-    void admin.unlock().then((ok) => !ok && onClose());
+    setAsking(true);
+    void admin.unlock().then((ok) => {
+      setAsking(false);
+      if (!ok) onClose();
+    });
   }, [locked, admin, onClose]);
-  if (locked) return null;
+  if (locked || asking) return null;
   shown.current = true;
   return <SettingsForm {...props} />;
 }
