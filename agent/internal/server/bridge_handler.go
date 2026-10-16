@@ -32,7 +32,7 @@ func (s *Server) bridgePlayers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "data": map[string]any{"players": players}})
 }
 
-// bridgeRead serves the allow-listed GETs: time, events, globalkeys,
+// bridgeRead serves the allow-listed GETs: time, events, globalkeys, stations,
 // locations, and bans (by opaque id).
 func (s *Server) bridgeRead(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")

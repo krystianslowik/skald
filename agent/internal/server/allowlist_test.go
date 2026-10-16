@@ -28,15 +28,17 @@ func repoFile(t *testing.T, rel string) string {
 	return string(raw)
 }
 
-func TestAdminCommandsMatchDashboard(t *testing.T) {
+// tsList reads the names of `export const <name> = [...] as const` in server/src/types.ts.
+func tsList(t *testing.T, name string) []string {
+	t.Helper()
 	src := repoFile(t, "server/src/types.ts")
-	_, rest, ok := strings.Cut(src, "export const ADMIN_COMMANDS = [")
+	_, rest, ok := strings.Cut(src, "export const "+name+" = [")
 	if !ok {
-		t.Fatal("ADMIN_COMMANDS not found in server/src/types.ts")
+		t.Fatalf("%s not found in server/src/types.ts", name)
 	}
 	list, _, ok := strings.Cut(rest, "] as const")
 	if !ok {
-		t.Fatal("ADMIN_COMMANDS is not closed by `] as const`")
+		t.Fatalf("%s is not closed by `] as const`", name)
 	}
 	var got []string
 	for _, line := range strings.Split(list, "\n") {
@@ -48,13 +50,32 @@ func TestAdminCommandsMatchDashboard(t *testing.T) {
 	slices.Sort(got)
 	for i := 1; i < len(got); i++ {
 		if got[i] == got[i-1] {
-			t.Errorf("ADMIN_COMMANDS lists %q twice", got[i])
+			t.Errorf("%s lists %q twice", name, got[i])
 		}
 	}
+	return slices.Compact(got)
+}
+
+func TestAdminCommandsMatchDashboard(t *testing.T) {
+	got := tsList(t, "ADMIN_COMMANDS")
 	want := append(bridge.CommandNames(), "ack-build")
 	slices.Sort(want)
-	if !slices.Equal(slices.Compact(got), want) {
+	if !slices.Equal(got, want) {
 		t.Errorf("server/src/types.ts ADMIN_COMMANDS = %v\nagent allow-list = %v", got, want)
+	}
+}
+
+// The reads the dashboard may ask for: bridge.Reads plus "bans", which
+// bridgeRead serves from the client's own ban list call.
+func TestAdminReadsMatchDashboard(t *testing.T) {
+	got := tsList(t, "ADMIN_READS")
+	want := []string{"bans"}
+	for name := range bridge.Reads {
+		want = append(want, name)
+	}
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("server/src/types.ts ADMIN_READS = %v\nagent reads = %v", got, want)
 	}
 }
 
