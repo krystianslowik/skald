@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Admins and bans in the admin sheet: see who is on `adminlist.txt` and `bannedlist.txt` (by name where Skald knows the player), add an id by hand or a player at the fire in one tap, and remove entries. Bans go through the bridge when the game runs with it and apply at once; otherwise the file changes and the change applies at the next start. Comments and unknown lines in the files are kept. Every change is a line in the Saga, without the platform id.
+- Restore a world backup from the admin sheet, from the image's backups or Skald's own safety copies. It needs the world name typed and an empty server, saves and verifies a copy of the current world first, stops the server, puts the backup in place and starts the server again, with each step in the Saga. Any failure after the stop puts the previous world back. See [Admins, bans and world restore](docs/configuration.md#admins-bans-and-world-restore).
+- The admin sheet opens without the bridge too, with only the lists and backups.
+
+### Changed
+
+- Both features need the agent to write the config volume, which the example deployments do not allow; the sheet shows the lists and backups read-only until it can.
+
 ## [0.10.2] - 2026-10-16
 
 ### Changed
