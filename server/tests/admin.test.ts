@@ -143,6 +143,7 @@ describe("admin with an admin password", () => {
       ["PUT", "/api/settings"],
       ["POST", "/api/settings/apply"],
       ["DELETE", "/api/settings/apply"],
+      ["GET", "/api/settings/password"],
     ] as const) {
       const res = await app.request(path, { method, headers: { Cookie: cookie, "Content-Type": "application/json" }, body: method === "GET" ? undefined : "{}" });
       expect(res.status, `${method} ${path}`).toBe(403);
@@ -167,6 +168,8 @@ describe("admin with an admin password", () => {
     expect(r.status).toBe(200);
     admin = adminCookie(r) || admin;
     expect((await post(app, "/api/action/backup", both())).status).toBe(200);
+    // The server password too, once unlocked.
+    expect((await app.request("/api/settings/password", { headers: { Cookie: both() } })).status).toBe(200);
     // 29 minutes idle: still in; each call restarts the clock.
     advance(29 * 60_000);
     r = await post(app, "/api/admin/save", both(), {});

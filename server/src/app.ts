@@ -365,8 +365,9 @@ export function createApp(deps: AppDeps): Hono {
   };
 
   app.get("/api/settings", (c) => settings(c, { op: "get" }));
-  // Separate on purpose: the password only travels when someone asks to see it.
-  app.get("/api/settings/password", (c) => settings(c, { op: "password" }));
+  // Separate on purpose: the password only travels when someone asks to see
+  // it, and with an admin password only to an unlocked admin.
+  app.get("/api/settings/password", (c) => needAdmin(c) ?? settings(c, { op: "password" }));
   app.put("/api/settings", async (c) => {
     const denied = needAdmin(c);
     if (denied) return denied;
