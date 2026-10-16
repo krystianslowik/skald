@@ -13,7 +13,7 @@ export interface Plural {
   other: string;
 }
 
-export const plural = (p: Plural): Plural => p;
+const plural = (p: Plural): Plural => p;
 
 export const en = {
   "app.loading": "Stirring the embers...",
@@ -29,7 +29,6 @@ export const en = {
   "key.hold": "Hold",
   "key.esc": "Esc",
   "lang.label": "Language",
-  "lang.switchTo": "Switch language to {lang}",
 
   "login.title": "The fire is dying down",
   "login.subtitle": "Speak the word and the flame returns.",

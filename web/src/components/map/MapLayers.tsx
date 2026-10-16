@@ -1,5 +1,5 @@
 import { useId, useMemo, useState } from "react";
-import { useI18n, type TextKey } from "../../i18n";
+import { useEveryLocale, useI18n, type TextKey } from "../../i18n";
 import { LAYERS, markerItems, markerStores, searchMarkers, type IconId, type LayerId, type Marker } from "../../lib/mapgeo";
 import { fold, matchingItems } from "../../lib/storage";
 import type { ApiMap } from "../../types";
@@ -124,6 +124,8 @@ export function MapLayers({
   const { t, tn, lookup, number, ago } = useI18n();
   const [query, setQuery] = useState("");
   const searchId = useId();
+  // Item names in every language match; the other dictionaries load once a query is typed.
+  const langs = useEveryLocale(query.trim().length >= 2);
   const results = useMemo(() => {
     const shown = markers.filter((m) => layers[m.layer]);
     const byName = searchMarkers(shown, query, (m) => `${markerTitle(m, t, lookup)} ${markerKind(m, t, lookup)}`);
@@ -150,7 +152,7 @@ export function MapLayers({
       held.sort((a, b) => b.count - a.count);
     }
     return [...byName.map((m): { m: Marker; hint: string; item?: string; level?: number } => ({ m, hint: "" })), ...held.slice(0, 10)];
-  }, [markers, layers, query, t, lookup, number]);
+  }, [markers, layers, query, t, lookup, number, langs]);
   return (
     <div className="space-y-5 text-sm">
       <div role="search">

@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { buildId, stampServiceWorker } from "./src/lib/swversion.ts";
+import { LOCALES, type Locale } from "./src/i18n/locales.ts";
+import { localePreloadScript } from "./src/i18n/preload.ts";
 
 // `npm run dev` talks to the Skald server on :8080 (run it with `bun run dev` for the mock agent).
 const SERVER = process.env.SERVER_URL ?? "http://127.0.0.1:8080";
@@ -45,8 +47,32 @@ const stampSw = (): Plugin => {
   };
 };
 
+/**
+ * Each dictionary is its own chunk (`src/i18n/load.ts`). The built page gets a
+ * tiny inline script that preloads the one the app will start in; the server
+ * fills in `<html data-locale>` with SKALD_LOCALE (server/src/static.ts).
+ */
+const localePreload = (): Plugin => ({
+  name: "skald-locale-preload",
+  transformIndexHtml: {
+    order: "post",
+    handler(_html, ctx) {
+      if (!ctx.bundle) return [];
+      const chunks: Partial<Record<Locale, string>> = {};
+      for (const out of Object.values(ctx.bundle)) {
+        const file = out.type === "chunk" ? (out.facadeModuleId ?? "").replace(/\\/g, "/") : "";
+        const l = LOCALES.find((x) => file.endsWith(`/src/i18n/${x}.ts`));
+        if (l) chunks[l] = `/${out.fileName}`;
+      }
+      const missing = LOCALES.filter((l) => !chunks[l]);
+      if (missing.length) throw new Error(`skald-locale-preload: no chunk for ${missing.join(", ")}`);
+      return [{ tag: "script", children: localePreloadScript(chunks as Record<Locale, string>), injectTo: "head-prepend" as const }];
+    },
+  },
+});
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), preloadBodyFont(), stampSw()],
+  plugins: [react(), tailwindcss(), preloadBodyFont(), stampSw(), localePreload()],
   resolve: {
     alias: { "@server": fileURLToPath(new URL("../server/src", import.meta.url)) },
   },

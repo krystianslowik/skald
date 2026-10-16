@@ -1,5 +1,5 @@
 import { memo, useCallback, useDeferredValue, useId, useMemo, useState, type ReactNode } from "react";
-import { useI18n } from "../../i18n";
+import { useEveryLocale, useI18n } from "../../i18n";
 import type { IconId } from "../../lib/mapgeo";
 import { groupStacks, stackIndex, type StackPlace } from "../../lib/stacks";
 import { aggregate, CATEGORIES, searchStore, type Category, type StoreEntry } from "../../lib/storage";
@@ -111,7 +111,9 @@ export function VillageStores({ saveKey, onShow }: { saveKey: string; onShow: (e
   const containers = load.status === "ready" ? load.storage.containers : null;
   const entries = useMemo(() => (containers ? aggregate(containers, lookup) : []), [containers, lookup]);
   const stacks = useMemo(() => stackIndex(groupStacks(containers ?? [])), [containers]);
-  const found = useMemo(() => searchStore(entries, deferred), [entries, deferred]);
+  // Names in every language match; the other dictionaries load once a query is typed.
+  const langs = useEveryLocale(deferred.trim() !== "");
+  const found = useMemo(() => searchStore(entries, deferred), [entries, deferred, langs]);
   const counts = useMemo(() => {
     const by = new Map<Category, number>();
     for (const e of found) by.set(e.category, (by.get(e.category) ?? 0) + 1);

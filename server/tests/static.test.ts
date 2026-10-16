@@ -3,10 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { Hono } from "hono";
-import { mountStatic } from "../src/static";
+import { mountStatic, withLocale } from "../src/static";
 
 const root = mkdtempSync(join(tmpdir(), "skald-web-"));
-writeFileSync(join(root, "index.html"), "<!doctype html><title>x</title>");
+writeFileSync(join(root, "index.html"), '<!doctype html><html lang="en"><head><title>x</title></head><body></body></html>');
 writeFileSync(join(root, "sw.js"), "self.addEventListener('fetch', () => {});");
 writeFileSync(join(root, "manifest.webmanifest"), "{}");
 writeFileSync(join(root, "icon.svg"), "<svg xmlns='http://www.w3.org/2000/svg'/>");
@@ -60,5 +60,31 @@ describe("mountStatic", () => {
     expect((await app.request("/assets/nested/old.css")).status).toBe(404);
     // Only files under /assets/ are assets; a page at /assets is still the app.
     expect((await app.request("/assets")).headers.get("content-type")).toContain("text/html");
+  });
+});
+
+describe("default language in the page", () => {
+  const app = new Hono();
+  mountStatic(app, relative(process.cwd(), root), "pl");
+
+  it("writes SKALD_LOCALE onto <html> for every way the shell is served", async () => {
+    for (const path of ["/", "/index.html", "/some/route"]) {
+      const res = await app.request(path);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/html");
+      expect(res.headers.get("cache-control")).toBe("no-cache");
+      const body = await res.text();
+      expect(body).toContain('<html lang="pl" data-locale="pl">');
+      expect(body).not.toContain('lang="en"');
+    }
+  });
+
+  it("leaves other files alone", async () => {
+    expect(await (await app.request("/assets/index-AbC123.js")).text()).toBe("export {};");
+  });
+
+  it("replaces an existing lang or data-locale and keeps other attributes", () => {
+    expect(withLocale('<html class="a" lang="en" data-locale=\'pl\'><body>', "en")).toBe('<html class="a" lang="en" data-locale="en"><body>');
+    expect(withLocale("<!doctype html><html><head>", "pl")).toBe('<!doctype html><html lang="pl" data-locale="pl"><head>');
   });
 });

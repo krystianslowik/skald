@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Dashboard } from "./components/Dashboard";
 import { Login } from "./components/Login";
 import { ChunkBoundary } from "./components/ErrorBoundary";
-import { I18nProvider, storedLocale, type Locale } from "./i18n";
+import { I18nProvider, loadLocale, serverLocale, storedLocale, type Locale } from "./i18n";
 import { getConfig, logout, me } from "./lib/api";
 import { setIconBuild } from "./lib/itemicons";
 import { useValheim } from "./lib/useValheim";
@@ -18,11 +18,16 @@ function Panel({ onUnauthorized, onLogout }: { onUnauthorized: () => void; onLog
 
 export default function App() {
   const [auth, setAuth] = useState<"checking" | "out" | "in">("checking");
-  // The viewer's stored choice wins; otherwise the server's SKALD_LOCALE.
-  const [locale, setLocale] = useState<Locale | null>(storedLocale);
+  // The viewer's stored choice wins; otherwise the server's SKALD_LOCALE, which
+  // the served page carries. Only `vite` dev (no server-side page) asks the API.
+  const [locale, setLocale] = useState<Locale | null>(() => storedLocale() ?? serverLocale());
 
   useEffect(() => {
-    if (locale) return;
+    if (locale) {
+      // Fetch the dictionary alongside the session check, not after it.
+      loadLocale(locale).catch(() => undefined);
+      return;
+    }
     getConfig()
       .then((c) => setLocale(c.locale))
       .catch(() => setLocale("en"));
@@ -41,9 +46,10 @@ export default function App() {
     void logout().finally(() => setAuth("out"));
   }, []);
 
-  if (auth === "checking" || !locale) return <div className="min-h-dvh bg-coal" />;
+  const blank = <div className="min-h-dvh bg-coal" />;
+  if (auth === "checking" || !locale) return blank;
   return (
-    <I18nProvider locale={locale}>
+    <I18nProvider locale={locale} fallback={blank}>
       <ChunkBoundary resetKey={auth}>
         {/* Reduced motion: transforms and layout animations are dropped app-wide, opacity cross-fades stay. */}
         <MotionConfig reducedMotion="user">

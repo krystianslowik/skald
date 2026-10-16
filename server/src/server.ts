@@ -105,7 +105,7 @@ const app = createApp({
 });
 
 // Static SPA, resolved relative to the process CWD (image: /app/bin -> /app/web/dist).
-mountStatic(app, cfg.webRoot);
+mountStatic(app, cfg.webRoot, cfg.locale);
 
 const live = liveSocket(hub);
 

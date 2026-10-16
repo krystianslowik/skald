@@ -1,5 +1,19 @@
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { serveStatic } from "hono/bun";
+import type { Locale } from "./types";
+
+/**
+ * Writes the server's default language (SKALD_LOCALE) onto the page's `<html>`
+ * tag. The built page's inline script reads `data-locale` (unless the viewer
+ * stored a choice) and preloads that one dictionary chunk next to the app, so
+ * the first render never waits for a config fetch or a second round trip.
+ */
+export function withLocale(html: string, locale: Locale): string {
+  return html.replace(/<html\b([^>]*)>/i, (_m, attrs: string) => {
+    const rest = attrs.replace(/\s+(?:lang|data-locale)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+    return `<html${rest} lang="${locale}" data-locale="${locale}">`;
+  });
+}
 
 /**
  * Serves the built SPA (`web/dist`) plus its PWA files. The HTML shell, the web
@@ -9,7 +23,7 @@ import { serveStatic } from "hono/bun";
  * else keeps a phone from downloading the whole app on every visit. Mount it
  * last, after the API routes.
  */
-export function mountStatic(app: Hono, webRoot: string): void {
+export function mountStatic(app: Hono, webRoot: string, locale: Locale = "en"): void {
   // Registered after every API route: an /api path none of them took is a
   // JSON 404, not the app shell with a 200.
   app.all("/api/*", (c) => c.json({ error: "not found" }, 404));
@@ -23,9 +37,20 @@ export function mountStatic(app: Hono, webRoot: string): void {
       c.res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
     }
   });
+  // Rewritten once per build: a rebuilt `web/dist` (new mtime) is picked up without a restart.
+  let cached: { mtime: number; html: string } | null = null;
+  const shell = async (c: Context) => {
+    const file = Bun.file(`${webRoot}/index.html`);
+    if (!(await file.exists())) return c.notFound();
+    if (cached?.mtime !== file.lastModified) cached = { mtime: file.lastModified, html: withLocale(await file.text(), locale) };
+    return c.html(cached.html);
+  };
+  app.get("/", shell);
+  app.get("/index.html", shell);
   app.use("/*", serveStatic({ root: webRoot }));
-  // A missing hashed asset is a 404, never the HTML shell: a tab still on the old
-  // build must see its import fail (and reload) rather than run HTML as JavaScript.
+  // A missing hashed asset (a tab older than the last deploy asking for a lazy chunk)
+  // is a 404, never the HTML shell: the tab must see its import fail (and reload)
+  // rather than run HTML as JavaScript, and the service worker must not keep it.
   app.all("/assets/*", (c, next) => (c.req.path.startsWith("/assets/") ? c.text("Not found", 404, { "Cache-Control": "no-store" }) : next()));
-  app.get("*", serveStatic({ path: `${webRoot}/index.html` }));
+  app.get("*", shell);
 }

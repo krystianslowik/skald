@@ -1,5 +1,12 @@
 import "@testing-library/jest-dom/vitest";
 import { configure } from "@testing-library/react";
+import { en } from "./i18n/en";
+import { registerLocale } from "./i18n/load";
+import { pl } from "./i18n/pl";
+
+// The app fetches each dictionary as its own chunk; tests have both in place up front.
+registerLocale("en", en);
+registerLocale("pl", pl);
 
 // findBy*/waitFor give up after 1 s by default. On a saturated machine (CI, parallel builds) mounting the
 // Dashboard and opening a sheet can take longer than that, so wait up to 10 s. Passing tests are no slower.

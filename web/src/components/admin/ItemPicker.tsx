@@ -3,17 +3,12 @@ import { useMemo, useState } from "react";
 import { loadKits, PRESET_KITS, saveKits, stacksOf, stackSize, type Kit, type KitLine } from "../../lib/admin";
 import { useIconSheet } from "../../lib/itemicons";
 import { fold, itemLabel, itemMatches } from "../../lib/storage";
-import { en } from "../../i18n/en";
-import { useI18n } from "../../i18n";
+import { useEveryLocale, useI18n } from "../../i18n";
+import { dictFor } from "../../i18n/load";
 import { Sheet } from "../Sheet";
 import { ItemIcon } from "../storage/ItemIcon";
 import { targetBody, useAdmin, type Target } from "./AdminContext";
 import { AdminHead, Btn, Chip, Stepper, TargetChips } from "./parts";
-
-/** Items the dictionaries name: offered even without an icon sheet. */
-const KNOWN = Object.keys(en)
-  .filter((k) => k.startsWith("item."))
-  .map((k) => k.slice(5));
 
 /** The plugin's caps: 20 lines and 60 stacks per call. */
 const MAX_LINES = 20;
@@ -28,7 +23,7 @@ const SHOWN = 72;
  * kit on this device, and drop it next to a player or at a point.
  */
 export function ItemPicker({ target: initial, lines: initialLines, onClose }: { target: Target; lines?: KitLine[]; onClose: () => void }) {
-  const { t, tn, lookup } = useI18n();
+  const { t, tn, lookup, locale } = useI18n();
   const admin = useAdmin();
   const reduced = useReducedMotion() ?? false;
   const sheet = useIconSheet();
@@ -40,17 +35,25 @@ export function ItemPicker({ target: initial, lines: initialLines, onClose }: { 
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // Item names in every language are searched; the other dictionaries load once a query is typed.
+  const langs = useEveryLocale(query.trim() !== "");
+
   const all = useMemo(() => {
-    const names = new Set(KNOWN);
+    // Items the dictionaries name (the same keys in each): offered even without an icon sheet.
+    const names = new Set(
+      Object.keys(dictFor(locale) ?? {})
+        .filter((k) => k.startsWith("item."))
+        .map((k) => k.slice(5)),
+    );
     if (sheet) for (const n of Object.keys(sheet.items)) names.add(n);
     return [...names].map((name) => ({ name, label: itemLabel(name, lookup), icon: !!sheet?.items[name] })).sort((a, b) => Number(b.icon) - Number(a.icon) || a.label.localeCompare(b.label));
-  }, [sheet, lookup]);
+  }, [sheet, lookup, locale]);
 
   const shown = useMemo(() => {
     const q = fold(query.trim());
     const list = q ? all.filter((i) => fold(i.label).includes(q) || itemMatches(i.name, q)) : all;
     return list.slice(0, SHOWN);
-  }, [all, query]);
+  }, [all, query, langs]);
 
   const stacks = stacksOf(lines, stackSize);
   const tooMany = stacks > MAX_STACKS;
