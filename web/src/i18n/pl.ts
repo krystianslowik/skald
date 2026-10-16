@@ -4,6 +4,9 @@ import { plural, type Dict } from "./en";
 export const pl: Dict = {
   "app.loading": "Rozdmuchuję żar...",
   "footer.unofficial": "Skald to projekt fanowski, niezwiązany z Iron Gate Studio ani Coffee Stain.",
+  "version.label": "Skald {v}",
+  "version.mismatch": "Agent {agent}, panel {web}: zaktualizuj drugą część, żeby się zgadzały.",
+  "version.update": "Nowa wersja {v}",
   "key.hold": "Przytrzymaj",
   "key.esc": "Esc",
   "lang.label": "Język",

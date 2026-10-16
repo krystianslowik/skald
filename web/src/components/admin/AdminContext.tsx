@@ -77,6 +77,8 @@ export interface Admin {
   world: string;
   /** Recent events, for following a restore's steps. */
   events: AgentEvent[];
+  /** Skald releases of this panel and of the agent (missing from agents before 2026.10.0). */
+  versions: { web: string; agent?: string };
 }
 
 const AdminCtx = createContext<Admin | null>(null);
@@ -213,6 +215,9 @@ export function AdminProvider({
   else if (!bridge.tested && !bridge.acknowledged) blocker = "untested";
   const unlocked = !status?.required || status.unlocked;
 
+  const webVersion = state.webVersion ?? "dev";
+  const agentVersion = state.agent.version;
+  const versions = useMemo(() => ({ web: webVersion, agent: agentVersion }), [webVersion, agentVersion]);
   const value = useMemo<Admin>(
     () => ({
       status,
@@ -235,8 +240,9 @@ export function AdminProvider({
       mainBase,
       world: state.server.world,
       events: state.history.events,
+      versions,
     }),
-    [status, present, bridgeOn, blocker, unlocked, refresh, run, post, unlock, pick, startPick, completePick, cancelPick, toast, state.players, mainBase, state.server.world, state.history.events],
+    [status, present, bridgeOn, blocker, unlocked, refresh, run, post, unlock, pick, startPick, completePick, cancelPick, toast, state.players, mainBase, state.server.world, state.history.events, versions],
   );
 
   return (

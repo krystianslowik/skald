@@ -3,6 +3,7 @@ import { LocaleToggle, useI18n } from "../i18n";
 import { SoundToggle } from "./Header";
 import { Plank } from "./Plank";
 import { preloadSettingsSheet, SettingsGlyph } from "./SettingsGlyph";
+import { SkaldVersion } from "./SkaldVersion";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -17,7 +18,17 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
  * The phone's Settings tab opens with what the desktop header carries: the
  * server settings, language, the campfire sound and logging out.
  */
-export const Preferences = memo(function Preferences({ onServerSettings, onLogout }: { onServerSettings?: () => void; onLogout: () => void }) {
+export const Preferences = memo(function Preferences({
+  onServerSettings,
+  onLogout,
+  webVersion,
+  agentVersion,
+}: {
+  onServerSettings?: () => void;
+  onLogout: () => void;
+  webVersion?: string;
+  agentVersion?: string;
+}) {
   const { t } = useI18n();
   return (
     <Plank title={t("tab.settings")} id="prefs">
@@ -45,6 +56,7 @@ export const Preferences = memo(function Preferences({ onServerSettings, onLogou
       <button type="button" onClick={onLogout} className="plaque press mt-3 min-h-12 w-full font-bold">
         {t("header.logout")}
       </button>
+      {webVersion && <SkaldVersion web={webVersion} agent={agentVersion} className="mt-4 text-center" />}
     </Plank>
   );
 });
