@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mockTerrainTile } from "@server/mocktiles";
 import { fogField } from "./fogfield";
-import { Fades, FADE_MS, heldLevel, HYSTERESIS, slotQuads, subRect, TexturePool, UploadBudget } from "./gltiles";
+import { closeColour, Fades, FADE_MS, flatColour, heldLevel, HYSTERESIS, premultiply, selfTestTile, slotQuads, subRect, TexturePool, UploadBudget, Watchdog } from "./gltiles";
 import { chunkCapacity, poolCapacity, TILE_EDGE } from "./mapgl";
-import { boldFaceReady } from "./maprender";
+import { boldFaceReady, canvasForced, RENDERER_KEY } from "./maprender";
 import { TileFeed } from "./terraindata";
-import { decodeTile, packTile, paletteOf } from "./terrainpaint";
+import { decodeTile, packTile, paintTile, paletteOf } from "./terrainpaint";
 import { levelFor, planView, tileKey, type TileRef, type TilesDoc } from "./terraintiles";
 
 const R = 10500;
@@ -231,5 +231,65 @@ describe("mark badges", () => {
     expect(boldFaceReady([face("700", "loading")])).toBe(false);
     expect(boldFaceReady([face("700", "error")])).toBe(true);
     expect(boldFaceReady([])).toBe(true);
+  });
+});
+
+describe("WebGL safety", () => {
+  afterEach(() => localStorage.removeItem(RENDERER_KEY));
+
+  it("is switched off by ?map=canvas or by localStorage", () => {
+    expect(canvasForced("")).toBe(false);
+    expect(canvasForced("?map=canvas")).toBe(true);
+    expect(canvasForced("?x=1&map=canvas")).toBe(true);
+    expect(canvasForced("?map=gl")).toBe(false);
+    localStorage.setItem(RENDERER_KEY, "canvas");
+    expect(canvasForced("")).toBe(true);
+  });
+
+  it("self-tests against what paintTile makes of the same tile", () => {
+    const t = selfTestTile(TILE_EDGE, 1, 31500);
+    expect(t).toHaveLength(TILE_EDGE * TILE_EDGE * 4);
+    expect([t[0], t[1], (t[2]! << 8) | t[3]!]).toEqual([1, 0, 31500]);
+    // paintTile on that tile, decoded the way the bridge's tiles are: flat Meadows, dry, no forest.
+    // With a forest channel of zeros, as the self-test tile has.
+    const raw = new Uint8Array(24 + TILE_EDGE * TILE_EDGE * 4);
+    const dv = new DataView(raw.buffer);
+    dv.setUint32(0, 0x31544b53, true);
+    dv.setUint16(4, 1, true);
+    dv.setUint16(6, 1, true);
+    dv.setInt32(8, TILE_EDGE, true);
+    dv.setFloat32(20, 0.64, true);
+    for (let i = 0; i < TILE_EDGE * TILE_EDGE; i++) {
+      raw[24 + i] = 1;
+      dv.setUint16(24 + TILE_EDGE * TILE_EDGE + 2 * i, 31500, true);
+    }
+    const px = paintTile(decodeTile(raw.buffer), { factor: 1, palette: paletteOf(null), waterLevel: 30, radius: R });
+    const want = flatColour(paletteOf(null).biome[1]!).map(Math.round);
+    expect([...px.subarray(4 * 1000, 4 * 1000 + 3)]).toEqual(want);
+    expect(closeColour([10, 20, 30, 255], [12, 18, 30, 255], 4)).toBe(true);
+    expect(closeColour([0, 0, 0, 0], [200, 100, 50, 255], 4)).toBe(false);
+  });
+
+  it("premultiplies chunk pixels for upload", () => {
+    const px = new Uint8ClampedArray([200, 100, 50, 255, 200, 100, 50, 128, 9, 9, 9, 0]);
+    expect([...premultiply(px)]).toEqual([200, 100, 50, 255, 100, 50, 25, 128, 0, 0, 0, 0]);
+  });
+
+  it("gives up on tiles stuck off the GPU, or on a feed that only fails", () => {
+    const w = new Watchdog(5000, 8);
+    expect(w.frame(0, true, { ok: 5, errors: 0 })).toBeNull();
+    expect(w.frame(3000, true, { ok: 5, errors: 0 })).toBeNull();
+    // Unstuck in between: the clock starts over.
+    expect(w.frame(4000, false, { ok: 5, errors: 0 })).toBeNull();
+    expect(w.frame(4100, true, { ok: 5, errors: 0 })).toBeNull();
+    expect(w.frame(9000, true, { ok: 5, errors: 0 })).toBeNull();
+    expect(w.frame(9200, true, { ok: 5, errors: 0 })).toMatch(/GPU/);
+    // Reported once.
+    expect(w.frame(9300, true, { ok: 5, errors: 0 })).toBeNull();
+    const d = new Watchdog(5000, 8);
+    expect(d.frame(0, false, { ok: 0, errors: 7 })).toBeNull();
+    expect(d.frame(1, false, { ok: 0, errors: 8 })).toMatch(/decode/);
+    // Some tiles fine: a few errors are not a broken pipeline.
+    expect(new Watchdog(5000, 8).frame(0, false, { ok: 3, errors: 20 })).toBeNull();
   });
 });

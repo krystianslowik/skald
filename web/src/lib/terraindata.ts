@@ -40,6 +40,9 @@ export class TileFeed {
   private readonly meanForest: number[];
   /** Keys the cache must not drop (what the map draws). */
   keep: ReadonlySet<string> = new Set();
+  /** Tiles that arrived, and loads that failed in the worker (not 404s): the WebGL map gives up on a feed that only fails. */
+  ok = 0;
+  errors = 0;
   /** Called with each tile's key as it arrives. */
   onTile: ((key: string) => void) | null = null;
 
@@ -52,7 +55,7 @@ export class TileFeed {
     for (let i = 0; i < (o.workers ?? workerCount()); i++) {
       const w = new Worker(new URL("./terraindata.worker.ts", import.meta.url), { type: "module" });
       const slot = { w, busy: 0 };
-      w.onmessage = (e: MessageEvent<{ key: string; data?: Uint8Array; status?: number }>) => this.arrive(e.data);
+      w.onmessage = (e: MessageEvent<{ key: string; data?: Uint8Array; status?: number; error?: string }>) => this.arrive(e.data);
       this.workers.push(slot);
     }
     this.sched = new TileScheduler(o.concurrency ?? 6, (key) => {
@@ -74,13 +77,15 @@ export class TileFeed {
     });
   }
 
-  private arrive({ key, data, status }: { key: string; data?: Uint8Array; status?: number }) {
+  private arrive({ key, data, status, error }: { key: string; data?: Uint8Array; status?: number; error?: string }) {
     const slot = this.owner.get(key);
     if (slot) {
       slot.busy--;
       this.owner.delete(key);
     }
+    if (error && this.errors++ === 0) console.warn(`map: terrain tile ${key} failed: ${error}`);
     if (data) {
+      this.ok++;
       this.cache.set(key, data, data.byteLength, this.keep);
       this.onTile?.(key);
     } else if (status === 404) this.missing.add(key);

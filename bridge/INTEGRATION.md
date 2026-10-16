@@ -264,7 +264,12 @@ of a level past each boundary). Woods and floor plans are rasterized by
 Canvas2D in 256 px world-anchored chunks, a few per frame, and composited from a
 second texture array, so no frame redraws a whole layer. The marks stay on
 a Canvas2D layer above, redrawn only when they or the view change. Without
-WebGL2, or while a lost context is away, the painted path above is used.
+WebGL2, or while a lost context is away, the painted path above is used. Before
+first use the GPU path draws a known tile and a known chunk from a high array
+layer and reads them back; on a mismatch or a GL error it logs the read-back
+values and the painted path is used, as it is when arrived tiles cannot reach
+the GPU for 5 s. `?map=canvas` or localStorage `skald.map.renderer=canvas`
+forces the painted path.
 
 ## 4. Deploy changes to the game pod (`deploy/kubernetes/valheim.yaml` and the homelab manifest)
 

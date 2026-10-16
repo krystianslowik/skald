@@ -46,6 +46,8 @@ above them.
 - skald-web answers a missing `/assets/` file with 404 instead of the panel's HTML page, and the offline cache never stores an HTML page under a script or style address, so a retry after an update reaches the new files.
 - The offline cache on phones no longer grows with every update: each release replaces the cache, and the previous release's files are deleted.
 - The admin item picker no longer offers items the game itself marks as unused, such as the "Knight shield UNUSED" left over in Valheim's files.
+- In desktop Safari the map could stay blurry and blocky when zoomed in, with solid orange squares over it. Before drawing, the map now checks that the browser's WebGL draws a known piece of terrain correctly, and falls back to the previous drawing if it does not, or if terrain stops reaching the graphics chip while the map is open. Adding `?map=canvas` to the page's address, or setting `skald.map.renderer` to `canvas` in the browser's local storage, always uses the previous drawing.
+- Small things to gather and the fading in of woods and floor plans appear at the same zoom as before the map moved to the graphics chip; at some zooms they were missing.
 
 ## [2026.10.4] - 2026-10-16
 
