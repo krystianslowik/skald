@@ -646,7 +646,8 @@ export interface ApiNature {
 /**
  * Commands the panel may send (agent POST /bridge/{command}). The agent keeps
  * the same allow-list; `ack-build` lets commands run on a game build that is
- * not on the tested list.
+ * not on the tested list. The agent owns it: its allowlist_test.go fails when
+ * this list and agent/internal/bridge Commands drift apart.
  */
 export const ADMIN_COMMANDS = [
   "broadcast",

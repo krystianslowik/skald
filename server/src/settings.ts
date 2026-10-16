@@ -2,6 +2,8 @@
 // mirror of agent/internal/settings (the agent is the authority; this copy
 // lets the dashboard validate as you type and powers the mock agent). Kept
 // free of Bun/Node imports: the web package compiles it via `@server/*`.
+// Both sides' tests load agent/internal/settings/testdata/rules.json, so a
+// rule changed here and not in the agent (or the reverse) fails a test.
 //
 // Launch options follow Iron Gate's dedicated server guide,
 // https://valheimgame.com/support/a-guide-to-dedicated-servers/ ("List of

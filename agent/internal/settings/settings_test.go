@@ -5,9 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func ptr(s string) *string { return &s }
@@ -20,93 +22,148 @@ func input(s Settings) Input {
 	return Input{Name: s.Name, Public: s.Public, Preset: s.Preset, Modifiers: s.Modifiers, Keys: s.Keys, SaveInterval: s.SaveInterval}
 }
 
-func TestValidateName(t *testing.T) {
-	for _, tc := range []struct {
-		name, want string
-	}{
-		{"Midgard", ""},
-		{"Łódź Długa Noc", ""},
-		{"Ragnar's Hall!", ""},
-		{"a-b_c.d", ""},
-		{"abc", ""},
-		{strings.Repeat("x", 40), ""},
-		{"ab", "length"},
-		{strings.Repeat("x", 41), "length"},
-		{strings.Repeat("ż", 40), ""}, // runes, not bytes
-		{"Hall $(id)", "chars"},
-		{"Hall `id`", "chars"},
-		{"Hall; rm", "chars"},
-		{"tab\there", "chars"},
-		{"new\nline", "chars"},
-		{"a=b c", "chars"},
+// rules is testdata/rules.json: the allow-lists, limits and validation cases
+// the dashboard's mirror (server/src/settings.ts) must agree with. Its test
+// loads the same file, so a rule changed on one side only fails a test.
+type rules struct {
+	Presets      []string   `json:"presets"`
+	Modifiers    []Modifier `json:"modifiers"`
+	Keys         []string   `json:"keys"`
+	SaveInterval struct {
+		Min, Max, Default int
+	} `json:"saveInterval"`
+	NameLength     struct{ Min, Max int } `json:"nameLength"`
+	PasswordLength struct{ Min, Max int } `json:"passwordLength"`
+	Names          []struct {
+		Name string  `json:"name"`
+		Want *string `json:"want"` // null = valid
+	} `json:"names"`
+	Passwords []struct {
+		Password string  `json:"password"`
+		Name     string  `json:"name"`
+		Want     *string `json:"want"`
+	} `json:"passwords"`
+	Inputs struct {
+		Prev struct {
+			Name     string `json:"name"`
+			Password string `json:"password"`
+		} `json:"prev"`
+		Base  json.RawMessage `json:"base"`
+		Cases []struct {
+			Desc   string            `json:"desc"`
+			Edit   json.RawMessage   `json:"edit"`
+			Errors map[string]string `json:"errors"`
+		} `json:"cases"`
+	} `json:"inputs"`
+}
+
+func loadRules(t *testing.T) rules {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "rules.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r rules
+	if err := json.Unmarshal(raw, &r); err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestRulesMatchFixture(t *testing.T) {
+	r := loadRules(t)
+	if !reflect.DeepEqual(Presets, r.Presets) {
+		t.Errorf("Presets = %v, fixture %v", Presets, r.Presets)
+	}
+	if !reflect.DeepEqual(Modifiers, r.Modifiers) {
+		t.Errorf("Modifiers = %v, fixture %v", Modifiers, r.Modifiers)
+	}
+	if !reflect.DeepEqual(Keys, r.Keys) {
+		t.Errorf("Keys = %v, fixture %v", Keys, r.Keys)
+	}
+	si := r.SaveInterval
+	if si.Min != SaveIntervalMin || si.Max != SaveIntervalMax || si.Default != SaveIntervalDefault {
+		t.Errorf("save interval %d..%d (%d), fixture %+v", SaveIntervalMin, SaveIntervalMax, SaveIntervalDefault, si)
+	}
+	if r.NameLength.Min != NameMin || r.NameLength.Max != NameMax {
+		t.Errorf("name length %d..%d, fixture %+v", NameMin, NameMax, r.NameLength)
+	}
+	if r.PasswordLength.Min != PasswordMin || r.PasswordLength.Max != PasswordMax {
+		t.Errorf("password length %d..%d, fixture %+v", PasswordMin, PasswordMax, r.PasswordLength)
+	}
+
+	// The long literals in the fixture must stay at the limit and one past it.
+	at := map[string]bool{}
+	for _, c := range r.Names {
+		at["name "+strconv.Itoa(utf8.RuneCountInString(c.Name))+" "+want(t, c.Want)] = true
+	}
+	for _, c := range r.Passwords {
+		at["password "+strconv.Itoa(len(c.Password))+" "+want(t, c.Want)] = true
+	}
+	for _, k := range []string{
+		"name " + strconv.Itoa(NameMax) + " ", "name " + strconv.Itoa(NameMax+1) + " length",
+		"password " + strconv.Itoa(PasswordMax) + " ", "password " + strconv.Itoa(PasswordMax+1) + " length",
 	} {
-		if got := ValidateName(tc.name); got != tc.want {
-			t.Errorf("ValidateName(%q) = %q, want %q", tc.name, got, tc.want)
+		if !at[k] {
+			t.Errorf("fixture has no case %q", k)
+		}
+	}
+}
+
+// want reads a fixture verdict: null is valid, "" is a mistake (the dashboard
+// test would read it differently).
+func want(t *testing.T, w *string) string {
+	t.Helper()
+	if w == nil {
+		return ""
+	}
+	if *w == "" {
+		t.Fatal(`fixture verdict "" is ambiguous; write null for valid`)
+	}
+	return *w
+}
+
+func TestValidateName(t *testing.T) {
+	for _, tc := range loadRules(t).Names {
+		if got := ValidateName(tc.Name); got != want(t, tc.Want) {
+			t.Errorf("ValidateName(%q) = %q, want %q", tc.Name, got, want(t, tc.Want))
 		}
 	}
 }
 
 func TestValidatePassword(t *testing.T) {
-	for _, tc := range []struct {
-		pw, name, want string
-	}{
-		{"ognisko", "Midgard", ""},
-		{"a$b`c;d=e'f\"", "Midgard", ""},
-		{"abcd", "Midgard", "length"},
-		{strings.Repeat("x", 32), "Midgard", ""},
-		{strings.Repeat("x", 33), "Midgard", "length"},
-		{"has space", "Midgard", "chars"},
-		{"zażółć", "Midgard", "chars"},
-		{"tab\tx1", "Midgard", "chars"},
-		{"midga", "Midgard", "inName"},
-		{"HALL1", "The hall1 of fire", "inName"},
-	} {
-		if got := ValidatePassword(tc.pw, tc.name); got != tc.want {
-			t.Errorf("ValidatePassword(%q, %q) = %q, want %q", tc.pw, tc.name, got, tc.want)
+	for _, tc := range loadRules(t).Passwords {
+		if got := ValidatePassword(tc.Password, tc.Name); got != want(t, tc.Want) {
+			t.Errorf("ValidatePassword(%q, %q) = %q, want %q", tc.Password, tc.Name, got, want(t, tc.Want))
 		}
 	}
 }
 
 func TestApply(t *testing.T) {
+	r := loadRules(t)
 	prev := base()
-	for _, tc := range []struct {
-		desc string
-		edit func(*Input)
-		errs map[string]string
-	}{
-		{"unchanged", func(*Input) {}, nil},
-		{"trimmed name", func(in *Input) { in.Name = "  Midgard Hall  " }, nil},
-		{"bad name", func(in *Input) { in.Name = "x" }, map[string]string{"name": "length"}},
-		{"short password", func(in *Input) { in.Password = ptr("abc") }, map[string]string{"password": "length"}},
-		{"name swallows password", func(in *Input) { in.Name = "Ognisko Hall" }, map[string]string{"password": "inName"}},
-		{"preset", func(in *Input) { in.Preset = "Hardcore" }, nil},
-		{"unknown preset", func(in *Input) { in.Preset = "nightmare" }, map[string]string{"preset": "value"}},
-		{"modifier", func(in *Input) { in.Modifiers = map[string]string{"raids": "none", "Combat": "VeryHard"} }, nil},
-		{"normal modifier is no modifier", func(in *Input) { in.Modifiers = map[string]string{"raids": "normal"} }, nil},
-		{"modifier value", func(in *Input) { in.Modifiers = map[string]string{"raids": "most"} }, map[string]string{"modifier.raids": "value"}},
-		{"modifier name", func(in *Input) { in.Modifiers = map[string]string{"weather": "none"} }, map[string]string{"modifier.weather": "unknown"}},
-		{"injection in value", func(in *Input) { in.Modifiers = map[string]string{"raids": "none;id"} }, map[string]string{"modifier.raids": "value"}},
-		{"keys", func(in *Input) { in.Keys = []string{"nomap", "nobuildcost"} }, nil},
-		{"bad key", func(in *Input) { in.Keys = []string{"godmode"} }, map[string]string{"keys": "value"}},
-		{"save interval", func(in *Input) { in.SaveInterval = 600 }, nil},
-		{"save interval low", func(in *Input) { in.SaveInterval = 59 }, map[string]string{"saveInterval": "range"}},
-		{"save interval high", func(in *Input) { in.SaveInterval = 7201 }, map[string]string{"saveInterval": "range"}},
-	} {
-		in := input(prev)
-		tc.edit(&in)
+	prev.Name, prev.Password = r.Inputs.Prev.Name, r.Inputs.Prev.Password
+	for _, tc := range r.Inputs.Cases {
+		var in Input
+		if err := json.Unmarshal(r.Inputs.Base, &in); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(tc.Edit, &in); err != nil {
+			t.Fatalf("%s: %v", tc.Desc, err)
+		}
 		got, err := Apply(prev, in)
-		if tc.errs == nil {
+		if len(tc.Errors) == 0 {
 			if err != nil {
-				t.Errorf("%s: %v", tc.desc, err)
+				t.Errorf("%s: %v", tc.Desc, err)
 			}
 			continue
 		}
 		e, ok := err.(Errors)
-		if !ok || !reflect.DeepEqual(map[string]string(e), tc.errs) {
-			t.Errorf("%s: err = %v, want %v", tc.desc, err, tc.errs)
+		if !ok || !reflect.DeepEqual(map[string]string(e), tc.Errors) {
+			t.Errorf("%s: err = %v, want %v", tc.Desc, err, tc.Errors)
 		}
 		if !reflect.DeepEqual(got, prev) {
-			t.Errorf("%s: invalid input changed settings: %+v", tc.desc, got)
+			t.Errorf("%s: invalid input changed settings: %+v", tc.Desc, got)
 		}
 	}
 }

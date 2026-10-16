@@ -1,0 +1,377 @@
+{
+  "_comment": "The settings rules, shared by agent/internal/settings (the authority) and server/src/settings.ts (the dashboard's mirror, which the web compiles too). Both test suites load this file: a rule changed in one code and not the other fails a test.",
+  "presets": [
+    "normal",
+    "casual",
+    "easy",
+    "hard",
+    "hardcore",
+    "immersive",
+    "hammer"
+  ],
+  "modifiers": [
+    {
+      "name": "combat",
+      "values": [
+        "veryeasy",
+        "easy",
+        "hard",
+        "veryhard"
+      ]
+    },
+    {
+      "name": "deathpenalty",
+      "values": [
+        "casual",
+        "veryeasy",
+        "easy",
+        "hard",
+        "hardcore"
+      ]
+    },
+    {
+      "name": "resources",
+      "values": [
+        "muchless",
+        "less",
+        "more",
+        "muchmore",
+        "most"
+      ]
+    },
+    {
+      "name": "raids",
+      "values": [
+        "none",
+        "muchless",
+        "less",
+        "more",
+        "muchmore"
+      ]
+    },
+    {
+      "name": "portals",
+      "values": [
+        "casual",
+        "hard",
+        "veryhard"
+      ]
+    }
+  ],
+  "keys": [
+    "nobuildcost",
+    "playerevents",
+    "passivemobs",
+    "nomap"
+  ],
+  "saveInterval": {
+    "min": 60,
+    "max": 7200,
+    "default": 1800
+  },
+  "nameLength": {
+    "min": 3,
+    "max": 40
+  },
+  "passwordLength": {
+    "min": 5,
+    "max": 32
+  },
+  "names": [
+    {
+      "name": "Midgard",
+      "want": null
+    },
+    {
+      "name": "Łódź Długa Noc",
+      "want": null
+    },
+    {
+      "name": "Ragnar's Hall!",
+      "want": null
+    },
+    {
+      "name": "a-b_c.d",
+      "want": null
+    },
+    {
+      "name": "abc",
+      "want": null
+    },
+    {
+      "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "want": null
+    },
+    {
+      "name": "ab",
+      "want": "length"
+    },
+    {
+      "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "want": "length"
+    },
+    {
+      "name": "żżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżż",
+      "want": null
+    },
+    {
+      "name": "Hall $(id)",
+      "want": "chars"
+    },
+    {
+      "name": "Hall `id`",
+      "want": "chars"
+    },
+    {
+      "name": "Hall; rm",
+      "want": "chars"
+    },
+    {
+      "name": "tab\there",
+      "want": "chars"
+    },
+    {
+      "name": "new\nline",
+      "want": "chars"
+    },
+    {
+      "name": "a=b c",
+      "want": "chars"
+    }
+  ],
+  "passwords": [
+    {
+      "password": "ognisko",
+      "name": "Midgard",
+      "want": null
+    },
+    {
+      "password": "a$b`c;d=e'f\"",
+      "name": "Midgard",
+      "want": null
+    },
+    {
+      "password": "abcd",
+      "name": "Midgard",
+      "want": "length"
+    },
+    {
+      "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "name": "Midgard",
+      "want": null
+    },
+    {
+      "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "name": "Midgard",
+      "want": "length"
+    },
+    {
+      "password": "has space",
+      "name": "Midgard",
+      "want": "chars"
+    },
+    {
+      "password": "zażółć",
+      "name": "Midgard",
+      "want": "chars"
+    },
+    {
+      "password": "tab\tx1",
+      "name": "Midgard",
+      "want": "chars"
+    },
+    {
+      "password": "midga",
+      "name": "Midgard",
+      "want": "inName"
+    },
+    {
+      "password": "HALL1",
+      "name": "The hall1 of fire",
+      "want": "inName"
+    }
+  ],
+  "inputs": {
+    "prev": {
+      "name": "Midgard Hall",
+      "password": "ognisko"
+    },
+    "base": {
+      "name": "Midgard Hall",
+      "public": true,
+      "preset": "normal",
+      "modifiers": {},
+      "keys": [],
+      "saveInterval": 1800
+    },
+    "cases": [
+      {
+        "desc": "unchanged",
+        "edit": {},
+        "errors": {}
+      },
+      {
+        "desc": "trimmed name",
+        "edit": {
+          "name": "  Midgard Hall  "
+        },
+        "errors": {}
+      },
+      {
+        "desc": "bad name",
+        "edit": {
+          "name": "x"
+        },
+        "errors": {
+          "name": "length"
+        }
+      },
+      {
+        "desc": "short password",
+        "edit": {
+          "password": "abc"
+        },
+        "errors": {
+          "password": "length"
+        }
+      },
+      {
+        "desc": "name swallows password",
+        "edit": {
+          "name": "Ognisko Hall"
+        },
+        "errors": {
+          "password": "inName"
+        }
+      },
+      {
+        "desc": "preset",
+        "edit": {
+          "preset": "Hardcore"
+        },
+        "errors": {}
+      },
+      {
+        "desc": "unknown preset",
+        "edit": {
+          "preset": "nightmare"
+        },
+        "errors": {
+          "preset": "value"
+        }
+      },
+      {
+        "desc": "modifier",
+        "edit": {
+          "modifiers": {
+            "raids": "none",
+            "Combat": "VeryHard"
+          }
+        },
+        "errors": {}
+      },
+      {
+        "desc": "normal modifier is no modifier",
+        "edit": {
+          "modifiers": {
+            "raids": "normal"
+          }
+        },
+        "errors": {}
+      },
+      {
+        "desc": "modifier value",
+        "edit": {
+          "modifiers": {
+            "raids": "most"
+          }
+        },
+        "errors": {
+          "modifier.raids": "value"
+        }
+      },
+      {
+        "desc": "modifier name",
+        "edit": {
+          "modifiers": {
+            "weather": "none"
+          }
+        },
+        "errors": {
+          "modifier.weather": "unknown"
+        }
+      },
+      {
+        "desc": "injection in value",
+        "edit": {
+          "modifiers": {
+            "raids": "none;id"
+          }
+        },
+        "errors": {
+          "modifier.raids": "value"
+        }
+      },
+      {
+        "desc": "keys",
+        "edit": {
+          "keys": [
+            "nomap",
+            "nobuildcost"
+          ]
+        },
+        "errors": {}
+      },
+      {
+        "desc": "bad key",
+        "edit": {
+          "keys": [
+            "godmode"
+          ]
+        },
+        "errors": {
+          "keys": "value"
+        }
+      },
+      {
+        "desc": "save interval",
+        "edit": {
+          "saveInterval": 600
+        },
+        "errors": {}
+      },
+      {
+        "desc": "save interval low",
+        "edit": {
+          "saveInterval": 59
+        },
+        "errors": {
+          "saveInterval": "range"
+        }
+      },
+      {
+        "desc": "save interval high",
+        "edit": {
+          "saveInterval": 7201
+        },
+        "errors": {
+          "saveInterval": "range"
+        }
+      },
+      {
+        "desc": "save interval at the low bound",
+        "edit": {
+          "saveInterval": 60
+        },
+        "errors": {}
+      },
+      {
+        "desc": "save interval at the high bound",
+        "edit": {
+          "saveInterval": 7200
+        },
+        "errors": {}
+      }
+    ]
+  }
+}
