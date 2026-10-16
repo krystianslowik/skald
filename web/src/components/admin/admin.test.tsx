@@ -1,11 +1,12 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "../Dashboard";
 import { describeAdmin } from "../Saga";
 import { I18nProvider, LocaleToggle, makeI18n } from "../../i18n";
 import { ItemPicker } from "./ItemPicker";
 import { Glide } from "../../lib/live";
 import { createLogStore } from "../../lib/useValheim";
+import { preloadLazyChunks } from "../../test-preload";
 import { emptyAgentState, type AccessState, type AdminStatus, type AgentEvent, type ApiState, type RestoreInfo } from "../../types";
 import { restoreProgress, RestoreSheet } from "./WorldTools";
 import { AdminProvider } from "./AdminContext";
@@ -84,6 +85,8 @@ async function openAdmin() {
   fireEvent.click(button);
   return screen.findByRole("dialog", { name: "Admin" });
 }
+
+beforeAll(preloadLazyChunks);
 
 afterEach(() => {
   vi.unstubAllGlobals();
