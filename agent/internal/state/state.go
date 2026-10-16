@@ -31,6 +31,9 @@ type Player struct {
 const platformTTL = 3 * time.Minute
 
 type pendingPlatform struct {
+	// remote is the connection's PlayFab remote id; "" when the line had
+	// none. It stays inside the tracker.
+	remote   string
 	platform string
 	at       time.Time
 }
@@ -65,11 +68,14 @@ type Tracker struct {
 	now func() time.Time
 	s   Snapshot
 
-	// uids maps a character's peer id to its name; current is the reverse,
-	// for the peer id each online name joined with last.
+	// uids maps an online character's peer id to its name; current is the
+	// reverse: every peer id online under a name. A name holds several while
+	// a reconnect's old peer is not cleaned up yet, or when two players'
+	// characters share the name. The name leaves when its last peer does.
 	uids    map[string]string
-	current map[string]string
-	// pending platforms, oldest first, waiting for a character to claim them.
+	current map[string]map[string]struct{}
+	// pending platforms of open connections, oldest first, at most one per
+	// remote id, waiting for a character to claim them.
 	pending []pendingPlatform
 }
 
@@ -80,7 +86,7 @@ func New(hub *events.Hub) *Tracker {
 		s:   Snapshot{Playfab: StatusUnknown, Players: []Player{}},
 
 		uids:    map[string]string{},
-		current: map[string]string{},
+		current: map[string]map[string]struct{}{},
 	}
 }
 
@@ -122,7 +128,14 @@ func (t *Tracker) HandleLine(raw string) {
 				t.hub.Publish("playfab", map[string]any{"state": m.State})
 			}
 		case logparse.KindPlatform:
-			t.pending = append(t.pending, pendingPlatform{platform: m.Platform, at: now})
+			// A reconnect, or a repeated line, replaces the connection's
+			// entry rather than queueing a second one.
+			t.dropPending(m.Remote, now)
+			t.pending = append(t.pending, pendingPlatform{remote: m.Remote, platform: m.Platform, at: now})
+		case logparse.KindSocketLost:
+			if m.Remote != "" {
+				t.dropPending(m.Remote, now)
+			}
 		case logparse.KindCharacter:
 			if m.Death {
 				// A death line also proves the player is online, so join
@@ -131,23 +144,29 @@ func (t *Tracker) HandleLine(raw string) {
 				t.hub.Publish("death", map[string]any{"name": m.Name})
 				continue
 			}
-			if old, ok := t.current[m.Name]; ok && old != m.UID {
-				delete(t.uids, old) // a reconnect: the old peer's objects no longer mean a leave
-			}
-			t.uids[m.UID] = m.Name
-			t.current[m.Name] = m.UID
-			t.join(m.Name, t.claimPlatform(now), now)
-		case logparse.KindAbandoned:
-			// One line per object the peer owned; the first one is the leave.
-			name, ok := t.uids[m.UID]
-			if !ok {
+			old, known := t.uids[m.UID]
+			if known && old == m.Name {
+				// A respawn: same connection, whose platform was claimed at
+				// its first spawn. Claiming again would take another client's.
+				t.join(m.Name, "", now)
 				continue
 			}
-			delete(t.uids, m.UID)
-			if t.current[name] == m.UID {
-				delete(t.current, name)
-				t.leave(name)
+			if known {
+				// A peer id is one connection; never seen renamed. Move it
+				// without counting a leave.
+				t.dropPeer(m.UID, false)
 			}
+			if t.current[m.Name] == nil {
+				t.current[m.Name] = map[string]struct{}{}
+			}
+			t.uids[m.UID] = m.Name
+			t.current[m.Name][m.UID] = struct{}{}
+			t.join(m.Name, t.claimPlatform(now), now)
+		case logparse.KindAbandoned:
+			// One line per object the peer owned; the first one is the
+			// peer's leave. Its character is one of them, so every peer that
+			// spawned gets one.
+			t.dropPeer(m.UID, true)
 		case logparse.KindWorldBackup:
 			t.hub.Publish("world_backup", map[string]any{"ms": m.Ms})
 		case logparse.KindWorldSaved:
@@ -185,6 +204,7 @@ func (t *Tracker) SetStatus(status string) {
 	t.hub.Publish("server_state", map[string]any{"status": status})
 	if status != StatusRunning {
 		t.setCount(0)
+		t.pending = nil // every connection closed with the game
 	}
 }
 
@@ -204,26 +224,67 @@ func (t *Tracker) Snapshot() Snapshot {
 	return s
 }
 
-// claimPlatform takes the oldest unexpired platform waiting for a
-// character. The ZDOID line carries no PlayFab id, so arrival order is all
-// there is to match on. Caller holds mu.
-func (t *Tracker) claimPlatform(now time.Time) string {
-	for len(t.pending) > 0 {
-		p := t.pending[0]
-		t.pending = t.pending[1:]
-		if now.Sub(p.at) <= platformTTL {
-			return p.platform
+// dropPeer forgets one peer id and takes its name off the list once no other
+// peer is online under it. lost means the peer disconnected: it then also
+// comes off the reported count, which the lagging connection-lost line
+// leaves one too high. The count stays at least the number of names listed.
+// Not the number of peer ids: a reconnect's old id lingers until its
+// abandoned lines come. Caller holds mu.
+func (t *Tracker) dropPeer(uid string, lost bool) {
+	name, ok := t.uids[uid]
+	if !ok {
+		return
+	}
+	delete(t.uids, uid)
+	peers := t.current[name]
+	delete(peers, uid)
+	if len(peers) == 0 {
+		delete(t.current, name)
+		t.leave(name)
+	}
+	if !lost {
+		return
+	}
+	if n := max(t.s.PlayersReported-1, len(t.s.Players)); n < t.s.PlayersReported {
+		t.s.PlayersReported = n
+		t.hub.Publish("player_count", map[string]any{"count": n})
+	}
+}
+
+// dropPending removes expired platforms and the entry of one connection
+// ("" removes none), so the queue holds only recent, open connections
+// whatever the player count does. Caller holds mu.
+func (t *Tracker) dropPending(remote string, now time.Time) {
+	kept := t.pending[:0]
+	for _, p := range t.pending {
+		if now.Sub(p.at) <= platformTTL && (remote == "" || p.remote != remote) {
+			kept = append(kept, p)
 		}
 	}
-	return logparse.PlatformUnknown
+	clear(t.pending[len(kept):])
+	t.pending = kept
+}
+
+// claimPlatform takes the oldest unexpired platform of a connection still
+// open. The ZDOID line carries no PlayFab id, so among open connections
+// arrival order is all there is to match on. Caller holds mu.
+func (t *Tracker) claimPlatform(now time.Time) string {
+	t.dropPending("", now)
+	if len(t.pending) == 0 {
+		return logparse.PlatformUnknown
+	}
+	p := t.pending[0]
+	t.pending = t.pending[1:]
+	return p.platform
 }
 
 // join adds a player unless already online; a known platform fills in an
-// unknown one. Caller holds mu.
+// unknown one but never replaces a known one, which may belong to another
+// player with the same name. Caller holds mu.
 func (t *Tracker) join(name, platform string, now time.Time) {
 	for i, p := range t.s.Players {
 		if p.Name == name {
-			if platform != "" && platform != logparse.PlatformUnknown && p.Platform != platform {
+			if platform != "" && platform != logparse.PlatformUnknown && p.Platform == logparse.PlatformUnknown {
 				t.s.Players[i].Platform = platform
 			}
 			return
@@ -236,18 +297,12 @@ func (t *Tracker) join(name, platform string, now time.Time) {
 	t.hub.Publish("player_join", map[string]any{"name": name, "platform": platform})
 }
 
-// leave removes one player and takes them off the reported count, which
-// the lagging connection-lost line leaves one too high. The count stays at
-// least the number still listed. Caller holds mu.
+// leave takes one name off the list. Caller holds mu.
 func (t *Tracker) leave(name string) {
 	for i, p := range t.s.Players {
 		if p.Name == name {
 			t.s.Players = append(t.s.Players[:i:i], t.s.Players[i+1:]...)
 			t.hub.Publish("player_leave", map[string]any{"name": name})
-			if n := max(t.s.PlayersReported-1, len(t.s.Players)); n < t.s.PlayersReported {
-				t.s.PlayersReported = n
-				t.hub.Publish("player_count", map[string]any{"count": n})
-			}
 			return
 		}
 	}
@@ -268,8 +323,9 @@ func (t *Tracker) setCount(n int) {
 		t.s.Players = []Player{}
 	}
 	if n == 0 {
+		// Pending platforms stay: they expire on their own, and a client
+		// still loading can be outside a lagging count.
 		clear(t.uids)
 		clear(t.current)
-		t.pending = nil
 	}
 }
