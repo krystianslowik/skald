@@ -91,7 +91,7 @@ namespace Skald.Bridge
                     {
                         if (route.Mutating)
                             SkaldBridgePlugin.Info("audit actor=" + actor + " cmd=" + cmd + " args=" + Compact(args));
-                        body = SkaldBridgePlugin.RunOnMainThread(() => route.Handler(args), CommandTimeoutMs);
+                        body = route.OffThread ? route.Handler(args) : SkaldBridgePlugin.RunOnMainThread(() => route.Handler(args), CommandTimeoutMs);
                         if (route.Mutating)
                             SkaldBridgePlugin.Info("audit actor=" + actor + " cmd=" + cmd + " result=ok " + Compact(body));
                     }
@@ -164,10 +164,13 @@ namespace Skald.Bridge
         {
             try
             {
-                var bytes = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(body));
+                var raw = body as RawBody;
+                var bytes = raw != null ? raw.Bytes : Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(body));
                 ctx.Response.StatusCode = status;
-                ctx.Response.ContentType = "application/json";
+                ctx.Response.ContentType = raw != null ? raw.ContentType : "application/json";
                 ctx.Response.Headers["Cache-Control"] = "no-store";
+                if (raw?.Headers != null)
+                    foreach (var h in raw.Headers) ctx.Response.Headers[h.Key] = h.Value;
                 ctx.Response.ContentLength64 = bytes.Length;
                 ctx.Response.OutputStream.Write(bytes, 0, bytes.Length);
                 ctx.Response.OutputStream.Close();
@@ -198,6 +201,18 @@ namespace Skald.Bridge
         static byte[] Sha256(string s)
         {
             using (var sha = SHA256.Create()) return sha.ComputeHash(Encoding.UTF8.GetBytes(s));
+        }
+    }
+
+    // A non-JSON answer (a terrain tile), written as it is.
+    sealed class RawBody
+    {
+        public readonly byte[] Bytes;
+        public readonly string ContentType;
+        public readonly System.Collections.Generic.IDictionary<string, string> Headers;
+        public RawBody(byte[] bytes, string contentType, System.Collections.Generic.IDictionary<string, string> headers)
+        {
+            Bytes = bytes; ContentType = contentType; Headers = headers;
         }
     }
 

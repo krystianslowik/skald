@@ -1,4 +1,4 @@
-import { mockElevation } from "./mapmock";
+import { biome, height, MOCK_TERRAIN_RADIUS, type RGB } from "./mocktiles";
 import { encodePng } from "./png";
 
 /**
@@ -8,33 +8,9 @@ import { encodePng } from "./png";
  * noise, not the game's world generator, and looks nothing like a real seed.
  */
 
+export { MOCK_TERRAIN_RADIUS, MOCK_TILE_BUILD, mockTerrainTile, mockTilesDoc, packHeights } from "./mocktiles";
+
 const SIZE = 1024;
-export const MOCK_TERRAIN_RADIUS = 10500;
-const LAND = 0.5;
-
-type RGB = [number, number, number];
-const MEADOWS: RGB = [156, 172, 92];
-const FOREST: RGB = [78, 102, 64];
-const SWAMP: RGB = [118, 102, 72];
-const MOUNTAIN: RGB = [226, 226, 230];
-const PLAINS: RGB = [208, 188, 116];
-const MIST: RGB = [112, 98, 124];
-const NORTH: RGB = [206, 220, 232];
-const ASH: RGB = [150, 66, 48];
-
-const height = (x: number, z: number) => (mockElevation(x, z) - LAND) * 700 + 30;
-
-function biome(x: number, z: number, h: number): RGB {
-  const r = Math.hypot(x, z);
-  if (z > 7600 && r > 7600) return NORTH;
-  if (z < -7600 && r > 7600) return ASH;
-  if (h > 150) return MOUNTAIN;
-  if (r < 2200) return MEADOWS;
-  const n = mockElevation(x + 52_000, z - 37_000);
-  if (h < 36 && n > 0.45) return SWAMP;
-  if (r > 5200) return n > 0.5 ? MIST : PLAINS;
-  return n > 0.42 ? FOREST : r > 3600 ? PLAINS : MEADOWS;
-}
 
 export interface MockTerrain {
   build: string;

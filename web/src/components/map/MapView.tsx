@@ -6,6 +6,7 @@ import type { NatureItem } from "../../lib/nature";
 import type { StoreyInfo, StoreyPick } from "../../lib/planrender";
 import { COARSE, PHONE, useMedia } from "../../lib/useMedia";
 import { useTerrain } from "../../lib/useTerrain";
+import { useTerrainTiles } from "../../lib/terraintiles";
 import { useWorldMap } from "../../lib/useWorldMap";
 import { terrainUrl } from "../../lib/world";
 import { Sheet, SheetClose } from "../Sheet";
@@ -219,6 +220,7 @@ function SaveMap({
 
   const terrain = useTerrain(`${map.meta.seed}:${map.meta.generation}`);
   const relief = terrain.status === "ready" ? terrain.relief : null;
+  const tiles = useTerrainTiles(`${map.meta.seed}:${map.meta.generation}`);
   const markers = useMemo(() => buildMarkers(map, lookup), [map, lookup]);
   const mask = useMemo(() => (map.explored.available ? decodeRLE(map.explored.rle, map.explored.size) : null), [map]);
   const counts = useMemo(() => layerCounts(markers, map), [markers, map]);
@@ -479,7 +481,7 @@ function SaveMap({
   }, [pick, admin]);
   const openPlayer = useMemo(() => (admin?.present ? (name: string) => admin.open({ kind: "player", name }) : undefined), [admin]);
 
-  const reliefState = terrain.status === "ready" ? (terrain.doc.stale ? "stale" : "ready") : "none";
+  const reliefState = tiles ? (tiles.stale ? "stale" : "ready") : terrain.status === "ready" ? (terrain.doc.stale ? "stale" : "ready") : "none";
   const panel = <MapLayers map={map} markers={markers} layers={layers} counts={counts} relief={reliefState} onToggle={toggle} onPick={pickResult} now={now} />;
   const bottom = "bottom-[max(0.75rem,env(safe-area-inset-bottom))]";
 
@@ -493,7 +495,8 @@ function SaveMap({
         layers={layers}
         selected={selected}
         highlighted={highlighted}
-        relief={relief}
+        relief={tiles ? null : relief}
+        tiles={tiles}
         storey={storey}
         onStoreys={onStoreys}
         onSelect={onSelect}

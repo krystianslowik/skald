@@ -307,6 +307,45 @@ export function createApp(deps: AppDeps): Hono {
   // itself it is only for signed-in viewers. The web draws it under the fog.
   app.get("/api/terrain.json", (c) => proxyAsset(c, "terrain.json", "private, no-cache"));
   app.get("/api/terrain.png", (c) => proxyAsset(c, "terrain.png", "private, max-age=31536000, immutable"));
+  // The terrain as tiles sampled from the running server. A tile URL carries
+  // its build (v), so it is cached for good; the body is a gzipped binary
+  // tile the web decodes itself, passed through untouched.
+  app.get("/api/terrain/tiles.json", (c) => proxyAsset(c, "terrain/tiles.json", "private, no-cache"));
+  app.get("/api/terrain/tile", async (c) => {
+    const int = (k: string) => {
+      const v = c.req.query(k) ?? "";
+      return /^\d{1,4}$/.test(v) ? Number(v) : -1;
+    };
+    const z = int("z");
+    const x = int("x");
+    const y = int("y");
+    const v = c.req.query("v") ?? "";
+    if (z < 0 || x < 0 || y < 0 || !/^[\w.-]{1,64}$/.test(v)) return c.json({ error: "bad tile" }, 400);
+    let up: Response;
+    try {
+      if (!deps.agent.terrainTile) return c.json({ error: "not available" }, 404);
+      up = await deps.agent.terrainTile({ z, x, y, v }, c.req.header("If-None-Match") ?? null, c.req.raw.signal);
+    } catch {
+      return c.json({ error: "agent unreachable" }, 502);
+    }
+    const headers = new Headers({ "Cache-Control": "private, max-age=31536000, immutable" });
+    const etag = up.headers.get("ETag");
+    if (etag) headers.set("ETag", etag);
+    if (up.status === 304) {
+      await up.body?.cancel();
+      return new Response(null, { status: 304, headers });
+    }
+    if (up.status !== 200 || !up.body) {
+      await up.body?.cancel();
+      const status = up.status === 404 ? 404 : up.status === 429 || up.status === 503 ? 503 : 502;
+      // A missing or busy tile may be there later: never cache the refusal.
+      return c.json({ error: status === 404 ? "not available" : "terrain busy" }, status, { "Cache-Control": "no-store" });
+    }
+    headers.set("Content-Type", "application/octet-stream");
+    const len = up.headers.get("Content-Length");
+    if (len) headers.set("Content-Length", len);
+    return new Response(up.body, { status: 200, headers });
+  });
 
   app.get("/api/players", (c) => {
     c.header("Cache-Control", "no-store");

@@ -12,6 +12,9 @@ All notable changes to this project are documented here. The format follows
 - Admins and bans in the admin sheet: see who is on `adminlist.txt` and `bannedlist.txt` (by name where Skald knows the player), add an id by hand or a player at the fire in one tap, and remove entries. Bans go through the bridge when the game runs with it and apply at once; otherwise the file changes and the change applies at the next start. Comments and unknown lines in the files are kept. Every change is a line in the Saga, without the platform id.
 - Restore a world backup from the admin sheet, from the image's backups or Skald's own safety copies. It needs the world name typed and an empty server, saves and verifies a copy of the current world first, stops the server, puts the backup in place and starts the server again, with each step in the Saga. Any failure after the stop puts the previous world back. See [Admins, bans and world restore](docs/configuration.md#admins-bans-and-world-restore).
 - The admin sheet opens without the bridge too, with the Discord status, the lists and backups.
+- The map's terrain can now come from the running server: with the admin bridge installed, the agent samples the live world generator in tiles, from the whole world down to 0.64 m per pixel near the view, so biome borders and coasts are right to the metre around bases. Tiles are always for the running game build, so a game update no longer needs a new terrain run or a 2 GB download, and they are cached on disk per seed, generator and build (`TERRAIN_CACHE_DIR`, `TERRAIN_CACHE_MB`).
+- Bridge 0.2.0: read-only `GET /v1/terrain/info` and `GET /v1/terrain/tile`, sampled off the game's main thread, one tile at a time, rate-limited and capped to half a core (`SKALD_BRIDGE_TERRAIN`, `SKALD_BRIDGE_TERRAIN_RATE`, `SKALD_BRIDGE_TERRAIN_DUTY`). It also reads the game's own minimap colours and forest mask when it can.
+- Metrics: `valheim_terrain_tiles_total`, `valheim_terrain_bridge_sample_seconds_total`, `valheim_terrain_cache_bytes`.
 
 ### Changed
 
@@ -19,10 +22,13 @@ All notable changes to this project are documented here. The format follows
 - Floor plans show their roofs when zoomed out: a translucent roof lies over each house, so a base reads as buildings from afar, and fades away as you zoom in until the rooms are clear. This includes one-storey houses, whose roofs were never drawn before. A storey picked in the floor switcher shows without it.
 - With item icons on, floor plans take their colours from the materials they are built of: wood, core wood, stone, iron, black marble, grausten and ashwood each get a tone from their item icon. Without icons the plans look as before.
 - Admins, bans and world restore need the agent to write the config volume, which the example deployments do not allow; the sheet shows the lists and backups read-only until it can.
+- The terrain looks like the game's map: biome colours, darker forest, relief and water by depth, painted the same way at every zoom, so a place keeps its colour as you zoom in. Swamps are dark mud with water pools instead of beige patches with outlines, and biome borders are smooth curves instead of blocks. Tiles are painted in a background worker, at most four load at once, nearest the view first, and tiles that leave the view are cancelled.
+- The terrain Job stays as a fallback: when the bridge is not reachable, its grid serves the low zoom levels and the terrain image as before.
 
 ### Fixed
 
 - Rocks and logs on the seabed no longer draw inside lakes and the sea. Anything more than 4 m under the water is left out of the map's nature; beach stones, swamp trees and ore deposits stay.
+- The development mock's terrain now has swamps, forests and mist lands; its noise was faded out far from the centre, so they never appeared.
 
 ## [0.10.2] - 2026-10-16
 

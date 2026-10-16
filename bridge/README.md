@@ -100,6 +100,9 @@ Success looks like this in the server log:
 | `SKALD_BRIDGE` | `on` | `off` / `false` / `0`: the plugin loads, logs one line and serves nothing (kill switch) |
 | `SKALD_BRIDGE_TOKEN` | none | Shared secret, 16 characters or more. If it is missing or short the plugin serves nothing |
 | `SKALD_BRIDGE_PORT` | `9010` | Loopback port |
+| `SKALD_BRIDGE_TERRAIN` | `on` | `off` / `false` / `0`: the terrain routes answer 503, everything else keeps working |
+| `SKALD_BRIDGE_TERRAIN_RATE` | `4` | Terrain tile requests per second (burst 8); more answer 429 |
+| `SKALD_BRIDGE_TERRAIN_DUTY` | `50` | Percent of one core terrain sampling may use (5..100); the sampler sleeps between rows to stay under it |
 
 ## API
 
@@ -183,6 +186,26 @@ These answer `501` with the reason, because the state they touch lives only on
 the client: `POST /v1/weather`, `/v1/player/feed`, `/v1/player/godmode`,
 `/v1/player/fly`, `/v1/player/ghost` and `/v1/player/freebuild`.
 
+### Terrain (read-only)
+
+The live world generator, sampled the way the terrain Job samples it (same
+calls, same reflection binding), for the agent's terrain tiles. Not audited,
+not gated on the tested-build list: they change nothing.
+
+| Method + path | Arguments | Does |
+|---|---|---|
+| `GET /v1/terrain/info` | | `seedHash`, `worldGenVersion` and `gameBuild` of the running world, `waterLevel`, the biome index order, `forest` (`mask`, `factor` or `none`), the limits, and `palette`: the game's own minimap colours by biome when the plugin could read them (`source` `instance` or `prefab`), else `{"source":"none"}` |
+| `GET /v1/terrain/tile` | `x`, `z` (the north-west sample, metres), `step` (metres, 0.25..128), `n` (samples per edge, at most 260) | A binary grid, `application/octet-stream`: `"SKT1"`, version, flags, `n`, `x0`, `z0`, `step`, then `n*n` biome indices, `n*n` u16 heights (`(metres + 500) * 50`) and, with flag 1, `n*n` forest values 0..255. Layout in `plugin/TerrainTile.cs`. Headers `X-Skald-Sample-Ms` (sampling time), `X-Skald-Wall-Ms` (with the duty-cycle rests), `X-Skald-Seed-Hash`, `X-Skald-WorldGen-Version`, `X-Skald-Game-Build` |
+
+Tiles never run on the game's main thread: they are sampled on the request's
+own thread, one at a time (a second waits up to 3 s, then 429), at below-normal
+priority, duty-cycled to `SKALD_BRIDGE_TERRAIN_DUTY` and abandoned after 20 s.
+The game does the same: its `HeightmapBuilder` samples the world generator on
+its own thread while the main thread runs. Only `/v1/terrain/info` touches the
+main thread, once per process, to read the minimap colours (Unity objects).
+503 means the world is not loaded yet, terrain is switched off, or a game
+update broke the binding (one log line, the route stays off).
+
 ## Audit log
 
 Each mutating command writes two lines to the server log: the arguments before
@@ -216,6 +239,9 @@ logged.
   every case. No Harmony patches are used.
 - **Token.** It is compared as constant-time SHA-256. Bodies over 64 KB are
   refused. Strings are length-capped.
+- **Terrain.** Read-only, off the main thread, one tile at a time, rate-limited
+  and duty-cycled (see [Terrain](#terrain-read-only)); its sampling buffers are
+  reused, so a tile leaves one encoded answer behind for the collector.
 - **Bounds.** Coordinates must lie within ±10500. Radius is at most 100 m,
   spawns at most 60 stacks or 20 creatures, and time only moves forward.
 
@@ -326,3 +352,11 @@ joined over crossplay with BepInEx loaded.
 - chat lines: see above
 - god mode, fly, ghost, per-player free build: local client debug flags.
   The world-wide alternative is the `nobuildcost` global key.
+
+**New in v0.2.0, not yet verified on a live server:** the terrain routes are
+compiled against the 1.0 reference assemblies and their codec, limits, rate
+limit and duty cycle are unit-tested, but sampling, the minimap forest mask on an
+uninitialised `Minimap` and the palette lookup have not run against a loaded
+world yet. Check after deploying: `GET /v1/terrain/info` answers, its `forest`
+is `mask` and `palette.source` says whether the colours came from the game;
+`X-Skald-Sample-Ms` on a 260 x 260 tile shows the real cost per tile.

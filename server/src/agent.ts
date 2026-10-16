@@ -20,7 +20,15 @@ export interface MapSourceResult {
 }
 
 /** Files the agent serves as they are: the item icon sheet and its map, the terrain image and its facts. */
-export type AgentAsset = "icons/map.json" | "icons/sheet.webp" | "terrain.png" | "terrain.json";
+export type AgentAsset = "icons/map.json" | "icons/sheet.webp" | "terrain.png" | "terrain.json" | "terrain/tiles.json";
+
+/** One terrain tile: level, column, row and the build from tiles.json. */
+export interface TerrainTileRef {
+  z: number;
+  x: number;
+  y: number;
+  v: string;
+}
 
 /** A world-space box for floor plans: [x0, z0, x1, z1] in metres. */
 export type PiecesBox = readonly [x0: number, z0: number, x1: number, z1: number];
@@ -54,6 +62,8 @@ export interface AgentSource {
   map(etag: string | null): Promise<MapSourceResult>;
   /** Raw agent file response (200 with a body, 304, 404, 503); the caller owns the body. */
   asset(path: AgentAsset, etag: string | null, signal: AbortSignal): Promise<Response>;
+  /** Raw `GET /terrain/tile` (200 gzipped tile, 304, 404, 429, 502); the caller owns the body. */
+  terrainTile?(tile: TerrainTileRef, etag: string | null, signal: AbortSignal): Promise<Response>;
   /** Raw `GET /pieces` for a box (200, 304, 400, 404, 503); the caller owns the body. */
   pieces(box: PiecesBox, etag: string | null, signal: AbortSignal): Promise<Response>;
   /**
@@ -155,6 +165,14 @@ export class HttpAgent implements AgentSource {
     const headers: Record<string, string> = this.headers();
     if (etag) headers["If-None-Match"] = etag;
     return this.fetchImpl(`${this.baseUrl}/${path}`, { headers, signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]) });
+  }
+
+  terrainTile(t: TerrainTileRef, etag: string | null, signal: AbortSignal): Promise<Response> {
+    const headers: Record<string, string> = this.headers();
+    if (etag) headers["If-None-Match"] = etag;
+    // A tile the bridge has to sample can take seconds; the agent queues it.
+    const q = `z=${t.z}&x=${t.x}&y=${t.y}&v=${encodeURIComponent(t.v)}`;
+    return this.fetchImpl(`${this.baseUrl}/terrain/tile?${q}`, { headers, signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]) });
   }
 
   pieces(box: PiecesBox, etag: string | null, signal: AbortSignal): Promise<Response> {

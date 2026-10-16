@@ -12,6 +12,9 @@ namespace Skald.Bridge
         public string Method, Path;
         public bool Mutating;
         public Func<JObject, object> Handler;
+        // Runs on the request's own thread instead of the Unity main thread:
+        // only for read-only work that is safe there (Terrain.cs).
+        public bool OffThread;
         // Set when a game patch broke this command; it then answers 503.
         public volatile string Broken;
     }
@@ -57,6 +60,9 @@ namespace Skald.Bridge
             R("POST", "/v1/map/reveal", true, Extras.RevealMap),
             R("POST", "/v1/map/pins", true, Extras.AddPins),
             R("POST", "/v1/nearby", false, Extras.Nearby),
+            // Read-only terrain sampling, off the main thread (see Terrain.cs).
+            new Route { Method = "GET", Path = "/v1/terrain/info", Handler = Terrain.Info, OffThread = true },
+            new Route { Method = "GET", Path = "/v1/terrain/tile", Handler = Terrain.Tile, OffThread = true },
 #if SKALD_TEST
             R("POST", "/v1/debug/spawn-prefab", true, Extras.DebugSpawnPrefab),
 #endif

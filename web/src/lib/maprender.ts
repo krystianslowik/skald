@@ -28,6 +28,7 @@ import {
   type View,
 } from "./mapgeo";
 import { ICONS } from "./mapicons";
+import { TerrainTiles, type TilesDoc } from "./terraintiles";
 import { CLOUD_TILE, PAPER_TILE, textures as paperTextures, type Textures } from "./paper";
 import { natureTint, wobble, type NatureItem } from "./nature";
 import { NatureLayer, natureAlpha } from "./naturerender";
@@ -242,6 +243,7 @@ export class MapRenderer {
   /** Building material tones from the icon sheet; empty without one. */
   private tones: ReadonlyMap<Material, Rgb> = new Map();
   private relief: Relief | null = null;
+  private tiles: TerrainTiles | null = null;
   /** The relief's traced coast: land loops and the sea around them, `mpp` metres per image pixel. */
   private coast: { of: Relief; path: Path2D; sea: Path2D; mpp: number } | null = null;
   private coastFor: Relief | null = null;
@@ -325,6 +327,25 @@ export class MapRenderer {
       this.coastFor = relief;
       if (relief) this.traceCoast(relief);
     }
+  }
+
+  /** The terrain tile pyramid, or null; one per build, its tiles cached until the build changes. */
+  setTiles(doc: TilesDoc | null): void {
+    if (!this.ctx || doc?.build === this.tiles?.doc.build) return;
+    this.tiles?.dispose();
+    this.tiles = null;
+    if (doc) {
+      try {
+        this.tiles = new TerrainTiles(doc);
+        this.tiles.onTile = () => {
+          this.version++;
+          this.onChange?.();
+        };
+      } catch {
+        // no worker here: the relief image, if any, stands in
+      }
+    }
+    this.version++;
   }
 
   /** Traces the relief's coast in a worker, once per image; no worker, no coast line. */
@@ -552,7 +573,20 @@ export class MapRenderer {
     g.fillRect(-WORLD_RADIUS, -WORLD_RADIUS, WORLD_RADIUS * 2, WORLD_RADIUS * 2);
     this.drawPaper(g, v);
     const relief = layers.relief ? this.relief : null;
-    if (p && relief) {
+    const tiles = layers.relief ? this.tiles : null;
+    if (p && tiles) {
+      // Tiles painted in the game's map colours, the same at every zoom: no
+      // fades between levels, no traced coast (the tiles carry the water).
+      g.save();
+      if (!this.spoilers) g.clip(p.sea);
+      const [x0, z0, x1, z1] = viewBox(v);
+      tiles.draw(g, { x0, z0, x1, z1 }, v.scale, dpr);
+      this.drawPaper(g, v, 0.28);
+      g.restore();
+      if (layers.terrain) this.drawTerrain(g, v, p);
+      this.drawNature(g, v, layers);
+      this.drawFog(g, v, p, layers);
+    } else if (p && relief) {
       const coast = this.coast?.of === relief ? this.coast : null;
       // Screen px per image pixel. Close in, the image is only blur: it fades
       // to a light wash over a flat sea, and the traced coast, inked at a

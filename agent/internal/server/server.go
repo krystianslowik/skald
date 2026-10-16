@@ -50,6 +50,8 @@ type Options struct {
 	// Terrain is the world generator's terrain from TERRAIN_DIR; nil leaves
 	// /state.terrain null and answers /terrain.* with 404.
 	Terrain *terrain.Terrain
+	// Tiles is the terrain tile pyramid; nil answers /terrain/tile* with 404.
+	Tiles *terrain.Tiles
 	// Bridge is the admin plugin in the game process; nil (no BRIDGE_TOKEN)
 	// leaves the /bridge routes unregistered (404).
 	Bridge *bridge.Client
@@ -111,6 +113,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /icons/sheet.webp", s.iconsSheet)
 	mux.HandleFunc("GET /terrain.png", s.terrainPNG)
 	mux.HandleFunc("GET /terrain.json", s.terrainJSON)
+	mux.HandleFunc("GET /terrain/tiles.json", s.terrainTilesJSON)
+	mux.HandleFunc("GET /terrain/tile", s.terrainTile)
 	if s.opt.Settings != nil {
 		mux.HandleFunc("GET /settings", s.settingsGet)
 		mux.HandleFunc("GET /settings/password", s.settingsPassword)

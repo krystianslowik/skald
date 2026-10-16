@@ -102,6 +102,20 @@ func main() {
 		Logger:      logger,
 	})
 	go terr.Run(ctx, terrain.RefreshEvery)
+	// Tiles from the running server through the bridge, the Job's grid for
+	// the low levels when it is current. A nil *bridge.Client must not
+	// become a non-nil interface.
+	var tileSource terrain.Source
+	if br != nil {
+		tileSource = br
+	}
+	tiles := terrain.NewTiles(terr, terrain.TileOptions{
+		Source:     tileSource,
+		CacheDir:   cfg.TerrainCacheDir,
+		CacheBytes: int64(cfg.TerrainCacheMB) << 20,
+		Prewarm:    true,
+		Logger:     logger,
+	})
 
 	s := server.New(server.Options{
 		Token:      cfg.AgentToken,
@@ -116,6 +130,7 @@ func main() {
 		Map:        worldMap,
 		Icons:      icons.New(cfg.IconsDir),
 		Terrain:    terr,
+		Tiles:      tiles,
 		Bridge:     br,
 		Access:     access.New(cfg.ConfigDir),
 		Logger:     logger,
