@@ -117,7 +117,7 @@ func (s *Server) terrainTile(w http.ResponseWriter, r *http.Request) {
 		} else if r.Context().Err() != nil {
 			return
 		}
-		if status == http.StatusTooManyRequests {
+		if status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable {
 			w.Header().Set("Retry-After", "1")
 		}
 		writeJSON(w, status, map[string]any{"ok": false, "message": err.Error()})
@@ -139,9 +139,15 @@ func (s *Server) terrainTileMetrics(p *promWriter) {
 	p.sample("valheim_terrain_tiles_total", float64(st.Hits), "result", "cache")
 	p.sample("valheim_terrain_tiles_total", float64(st.BridgeTiles), "result", "bridge")
 	p.sample("valheim_terrain_tiles_total", float64(st.GridTiles), "result", "grid")
+	p.sample("valheim_terrain_tiles_total", float64(st.Derived), "result", "derived")
 	p.sample("valheim_terrain_tiles_total", float64(st.Errors), "result", "error")
+	p.sample("valheim_terrain_tiles_total", float64(st.Dropped), "result", "dropped")
 	p.family("valheim_terrain_bridge_sample_seconds_total", "counter", "Time the bridge plugin spent sampling terrain tiles.")
 	p.sample("valheim_terrain_bridge_sample_seconds_total", float64(st.BridgeMs)/1000)
 	p.family("valheim_terrain_cache_bytes", "gauge", "Bytes of terrain tiles in the cache.")
 	p.sample("valheim_terrain_cache_bytes", float64(st.CacheBytes))
+	if st.BakeTotal > 0 {
+		p.family("valheim_terrain_bake_progress", "gauge", "Share of the current build's tile pyramid on disk, 0 to 1.")
+		p.sample("valheim_terrain_bake_progress", float64(st.BakeDone)/float64(st.BakeTotal))
+	}
 }

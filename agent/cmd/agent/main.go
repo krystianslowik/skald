@@ -117,9 +117,14 @@ func main() {
 		Source:     tileSource,
 		CacheDir:   cfg.TerrainCacheDir,
 		CacheBytes: int64(cfg.TerrainCacheMB) << 20,
-		Prewarm:    true,
-		Logger:     logger,
+		Bake:       cfg.TerrainBake,
+		PlayersOnline: func() bool {
+			snap := tracker.Snapshot()
+			return snap.PlayersReported > 0 || len(snap.Players) > 0
+		},
+		Logger: logger,
 	})
+	go tiles.Run(ctx)
 
 	s := server.New(server.Options{
 		Token:      cfg.AgentToken,

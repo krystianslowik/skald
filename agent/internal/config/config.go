@@ -41,8 +41,10 @@ type Config struct {
 	// TerrainCacheDir keeps terrain tiles across restarts; empty keeps them
 	// in memory (default: terrain-tiles under SettingsDir).
 	TerrainCacheDir string
-	// TerrainCacheMB bounds the terrain tile cache; 0 is the default (256).
+	// TerrainCacheMB bounds the terrain tile cache; 0 is the default (1024).
 	TerrainCacheMB int
+	// TerrainBake fills the whole tile pyramid in the background (default on).
+	TerrainBake bool
 	// BridgeURL is the Skald bridge plugin inside the game process; the
 	// agent shares the pod's network namespace, so loopback reaches it.
 	BridgeURL string
@@ -86,6 +88,7 @@ func Load() (Config, error) {
 	if v, err := strconv.Atoi(os.Getenv("TERRAIN_CACHE_MB")); err == nil && v > 0 {
 		c.TerrainCacheMB = v
 	}
+	c.TerrainBake = parseBool(os.Getenv("TERRAIN_BAKE"), true)
 	if c.AgentToken == "" {
 		return c, errors.New("AGENT_TOKEN is required")
 	}

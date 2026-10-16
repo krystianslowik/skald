@@ -47,8 +47,9 @@ const (
 	tileFormat = "1"
 	tileMagic  = 0x31544B53
 	tileHeader = 24
-	// DefaultCacheBytes bounds the disk cache when TERRAIN_CACHE_MB is unset.
-	DefaultCacheBytes = 256 << 20
+	// DefaultCacheBytes bounds the disk cache when TERRAIN_CACHE_MB is unset:
+	// room for one fully baked pyramid (about 0.5-0.85 GB, see bake.go).
+	DefaultCacheBytes = 1024 << 20
 	// infoEvery is how long the bridge's world facts are trusted.
 	infoEvery = time.Minute
 	infoRetry = 15 * time.Second
@@ -92,9 +93,12 @@ type TileOptions struct {
 	CacheDir string
 	// CacheBytes bounds the cache; DefaultCacheBytes when zero.
 	CacheBytes int64
-	// Prewarm samples levels 0..PrewarmLevels of each bridge build in the background.
-	Prewarm bool
-	Logger  *slog.Logger
+	// Bake fills the whole pyramid of each bridge build in the background
+	// (bake.go): levels 0..PrewarmLevels first, then the finest level.
+	Bake bool
+	// PlayersOnline slows the bake down while someone plays; nil is never.
+	PlayersOnline func() bool
+	Logger        *slog.Logger
 }
 
 // Tiles serves the pyramid.
@@ -107,21 +111,24 @@ type Tiles struct {
 	info    *bridge.TerrainInfo
 	infoAt  time.Time
 	infoErr error
-	flight  map[string]*tileCall
-	// sem lets one bridge call run at a time: the plugin samples one tile
-	// at a time anyway, and a queue here is cheaper than 429s there.
-	sem chan struct{}
-	// warmed is the build prewarm last started for.
-	warmed string
+	// flight is every tile being made, so concurrent askers share one.
+	flight map[string]*job
+	// queue holds the tiles waiting for the one bridge slot (queue.go).
+	queue   []*job
+	pumping bool
+	jobs    uint64
+	views   [viewRing]view
+	viewN   uint64
+	viewAt  time.Time
+
+	bake bakeState
+	// Pacing of the bake (bake.go); constants outside tests.
+	bakeLevel                      int
+	bakeEvery, bakeBusy, bakeRetry time.Duration
+	viewerHold                     time.Duration
 
 	// Counters for /metrics.
 	stats TileStats
-}
-
-type tileCall struct {
-	done chan struct{}
-	body []byte
-	err  error
 }
 
 // NewTiles builds the pyramid over t's grid and opt.Source.
@@ -137,7 +144,10 @@ func NewTiles(t *Terrain, opt TileOptions) *Tiles {
 		opt.Logger.Info("terrain tile cache in memory only", "dir", opt.CacheDir, "reason", err.Error())
 		c, _ = openTileCache("", min(opt.CacheBytes, 64<<20))
 	}
-	return &Tiles{t: t, opt: opt, cache: c, flight: map[string]*tileCall{}, sem: make(chan struct{}, 1)}
+	return &Tiles{
+		t: t, opt: opt, cache: c, flight: map[string]*job{},
+		bakeLevel: MaxLevel, bakeEvery: bakeEvery, bakeBusy: bakeBusyEvery, bakeRetry: bakeRetry, viewerHold: viewerHold,
+	}
 }
 
 // TilesDoc is GET /terrain/tiles.json.
@@ -158,6 +168,8 @@ type TilesDoc struct {
 	// factor) or "none" in bridge tiles.
 	Forest  string                 `json:"forest"`
 	Palette *bridge.TerrainPalette `json:"palette,omitempty"`
+	// Bake is the background bake of this build; bridge builds only.
+	Bake *BakeStatus `json:"bake,omitempty"`
 }
 
 type tileKey struct {
@@ -237,11 +249,11 @@ func (ts *Tiles) plan(ctx context.Context) (*plan, error) {
 		// and build, and when the bridge has no forest channel either: grid
 		// tiles have none, and mixing them with forest-shaded bridge tiles
 		// would change a place's colour between zoom levels. The low levels
-		// are pre-warmed from the bridge instead (prewarm).
+		// are baked from the bridge instead (bake.go).
 		if gl >= 0 && info.Forest == "none" && gm.SeedHash == k.SeedHash && gm.WorldGenVersion == k.WorldGenVersion && gm.GameBuild == k.GameBuild {
 			p.grid, p.doc.GridLevel = gm, gl
 		}
-		ts.prewarm(p)
+		ts.startBake(p)
 		return p, nil
 	}
 	if gl < 0 {
@@ -254,51 +266,9 @@ func (ts *Tiles) plan(ctx context.Context) (*plan, error) {
 	}}, nil
 }
 
-// PrewarmLevels are the levels sampled in the background once per build,
-// so the whole-world view paints from the cache: 85 tiles.
+// PrewarmLevels are the levels the bake samples first, so the whole-world
+// view paints from the cache: 85 tiles.
 const PrewarmLevels = 3
-
-// prewarm fills levels 0..PrewarmLevels of a bridge build into the cache,
-// one tile at a time behind viewers' requests (they share the one bridge
-// slot), once per build per agent run.
-func (ts *Tiles) prewarm(p *plan) {
-	if !ts.opt.Prewarm {
-		return
-	}
-	b := p.doc.Build
-	ts.mu.Lock()
-	if ts.warmed == b {
-		ts.mu.Unlock()
-		return
-	}
-	ts.warmed = b
-	ts.mu.Unlock()
-	go func() {
-		for z := 0; z <= PrewarmLevels; z++ {
-			for y := 0; y < 1<<z; y++ {
-				for x := 0; x < 1<<z; x++ {
-					if !TileInWorld(z, x, y) {
-						continue
-					}
-					ctx, cancel := context.WithTimeout(context.Background(), 2*bridge.TerrainTimeout)
-					_, _, err := ts.Tile(ctx, z, x, y, b)
-					cancel()
-					var te *TileError
-					if errors.As(err, &te) && te.Status == http.StatusNotFound {
-						// The build changed or the bridge went away: stop, a new plan starts again.
-						ts.mu.Lock()
-						if ts.warmed == b {
-							ts.warmed = ""
-						}
-						ts.mu.Unlock()
-						return
-					}
-				}
-			}
-		}
-		ts.opt.Logger.Info("terrain tiles pre-warmed", "build", b, "levels", PrewarmLevels)
-	}()
-}
 
 // Doc is what the web needs to ask for tiles; errNoTerrain when there is none.
 func (ts *Tiles) Doc(ctx context.Context) (*TilesDoc, error) {
@@ -307,6 +277,9 @@ func (ts *Tiles) Doc(ctx context.Context) (*TilesDoc, error) {
 		return nil, err
 	}
 	d := p.doc
+	if d.Source == "bridge" {
+		d.Bake = ts.bakeStatus(d.Build)
+	}
 	return &d, nil
 }
 
@@ -335,30 +308,19 @@ func (ts *Tiles) Tile(ctx context.Context, z, x, y int, build string) ([]byte, s
 	if !TileInWorld(z, x, y) {
 		return nil, b, &TileError{http.StatusNotFound, "outside the world"}
 	}
-	key := fmt.Sprintf("%s/%d/%d-%d.skt.gz", b, z, x, y)
-	if body, ok := ts.cache.get(key); ok {
+	ts.noteView(z, x, y)
+	if body, ok := ts.cache.get(tilePath(b, z, x, y)); ok {
 		ts.count(&ts.stats.Hits)
 		return body, b, nil
 	}
 	ts.count(&ts.stats.Misses)
-	ts.mu.Lock()
-	c, busy := ts.flight[key]
-	if !busy {
-		c = &tileCall{done: make(chan struct{})}
-		ts.flight[key] = c
-	}
-	ts.mu.Unlock()
-	if !busy {
-		// Detached from this request: a viewer who scrolls away should not
-		// waste a tile someone else (or the next pan) asks for again.
-		go ts.produce(c, key, p, z, x, y)
-	}
-	select {
-	case <-c.done:
-		return c.body, b, c.err
-	case <-ctx.Done():
-		return nil, b, ctx.Err()
-	}
+	body, err := ts.fetch(ctx, p, z, x, y, false)
+	return body, b, err
+}
+
+// tilePath is a tile's cache key.
+func tilePath(build string, z, x, y int) string {
+	return fmt.Sprintf("%s/%d/%d-%d.skt.gz", build, z, x, y)
 }
 
 func (ts *Tiles) count(n *uint64) {
@@ -367,53 +329,22 @@ func (ts *Tiles) count(n *uint64) {
 	ts.mu.Unlock()
 }
 
-func (ts *Tiles) produce(c *tileCall, key string, p *plan, z, x, y int) {
-	defer func() {
-		ts.mu.Lock()
-		delete(ts.flight, key)
-		ts.mu.Unlock()
-		close(c.done)
-	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*bridge.TerrainTimeout)
-	defer cancel()
-	var raw []byte
-	var err error
-	if p.grid != nil && z <= p.doc.GridLevel {
-		raw, err = gridTile(ts.t.opt.Dir, p.grid, p.doc.GridLevel, z, x, y)
-		if err == nil {
-			ts.count(&ts.stats.GridTiles)
-		}
-	} else if ts.opt.Source != nil {
-		raw, err = ts.bridgeTile(ctx, z, x, y)
-	} else {
-		err = &TileError{http.StatusNotFound, "no source for this level"}
-	}
-	if err != nil {
-		ts.count(&ts.stats.Errors)
-		ts.opt.Logger.Debug("terrain tile failed", "z", z, "x", x, "y", y, "err", err.Error())
-		c.err = err
-		return
-	}
+// gzipLevel is the tiles' compression (tests trade size for speed).
+var gzipLevel = gzip.BestCompression
+
+// serve gzips a raw tile with its heights packed, as tiles are cached and sent.
+func serve(raw []byte) []byte {
 	var buf bytes.Buffer
-	zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	zw, _ := gzip.NewWriterLevel(&buf, gzipLevel)
 	_, _ = zw.Write(packHeights(raw))
 	_ = zw.Close()
-	c.body = buf.Bytes()
-	if err := ts.cache.put(key, c.body); err != nil {
-		ts.opt.Logger.Debug("terrain tile not cached", "key", key, "err", err.Error())
-	}
+	return buf.Bytes()
 }
 
 func (ts *Tiles) bridgeTile(ctx context.Context, z, x, y int) ([]byte, error) {
 	x0, z0, step := TileOrigin(z, x, y)
 	for attempt := 0; ; attempt++ {
-		select {
-		case ts.sem <- struct{}{}:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
 		body, ms, err := ts.opt.Source.TerrainTile(ctx, TileEdge, x0, z0, step)
-		<-ts.sem
 		if err == nil {
 			if err := checkTile(body, TileEdge); err != nil {
 				return nil, &TileError{http.StatusBadGateway, err.Error()}
@@ -578,8 +509,13 @@ func gridTile(dir string, m *Manifest, gl, z, x, y int) ([]byte, error) {
 // TileStats are the pyramid's counters since the agent started.
 type TileStats struct {
 	Hits, Misses, BridgeTiles, GridTiles, BridgeMs, Errors uint64
-	CacheBytes                                             int64
-	CacheTiles                                             int
+	// Derived tiles were downsampled from the level below; Dropped viewer
+	// requests were cancelled or superseded before the bridge sampled them.
+	Derived, Dropped uint64
+	CacheBytes       int64
+	CacheTiles       int
+	// The bake of the current build: tiles on disk out of BakeTotal (0 when off).
+	BakeDone, BakeTotal int
 }
 
 // Stats is a snapshot of the counters, for /metrics.
@@ -588,5 +524,12 @@ func (ts *Tiles) Stats() TileStats {
 	s := ts.stats
 	ts.mu.Unlock()
 	s.CacheBytes, s.CacheTiles = ts.cache.size()
+	ts.mu.Lock()
+	b := ts.bake.build
+	ts.mu.Unlock()
+	if b != "" {
+		st := ts.bakeStatus(b)
+		s.BakeDone, s.BakeTotal = st.Done, st.Total
+	}
 	return s
 }

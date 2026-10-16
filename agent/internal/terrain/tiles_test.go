@@ -31,6 +31,13 @@ type fakeBridge struct {
 	busy    int // answer 429 this many times first
 	delay   time.Duration
 	garbage bool
+	// in is told of every call; hold, when set, keeps each call until it is
+	// closed (or sent to).
+	in   chan struct{}
+	hold chan struct{}
+	// failAfter > 0: calls past it answer 503 and the world facts fail, as
+	// when the bridge goes away.
+	failAfter int
 }
 
 func (f *fakeBridge) TerrainInfo(context.Context) (*bridge.TerrainInfo, error) {
@@ -45,8 +52,18 @@ func (f *fakeBridge) TerrainInfo(context.Context) (*bridge.TerrainInfo, error) {
 
 func (f *fakeBridge) TerrainTile(ctx context.Context, n int, x0, z0, step float64) ([]byte, int, error) {
 	time.Sleep(f.delay)
+	if f.in != nil {
+		f.in <- struct{}{}
+	}
+	if f.hold != nil {
+		<-f.hold
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failAfter > 0 && f.calls >= f.failAfter {
+		f.infoErr = &bridge.Error{Status: http.StatusBadGateway, Message: "bridge unavailable"}
+		return nil, 0, &bridge.Error{Status: http.StatusServiceUnavailable, Message: "world not loaded yet"}
+	}
 	if f.busy > 0 {
 		f.busy--
 		return nil, 0, &bridge.Error{Status: http.StatusTooManyRequests, Message: "terrain sampler busy"}
@@ -436,41 +453,23 @@ func TestCacheEvictsLeastRecentlyUsed(t *testing.T) {
 	}
 }
 
-func TestPrewarmFillsTheLowLevelsOnce(t *testing.T) {
+func TestBakeWithoutADiskCacheFillsOnlyTheLowLevels(t *testing.T) {
 	fb := &fakeBridge{info: info}
-	ts := NewTiles(nil, TileOptions{Source: fb, Prewarm: true, Logger: quiet()})
-	if _, err := ts.Doc(context.Background()); err != nil {
+	ts := NewTiles(nil, TileOptions{Source: fb, Bake: true, Logger: quiet()})
+	ts.bakeEvery, ts.viewerHold = 0, 0
+	doc, err := ts.Doc(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
-	want := 0
-	for z := 0; z <= PrewarmLevels; z++ {
-		for y := 0; y < 1<<z; y++ {
-			for x := 0; x < 1<<z; x++ {
-				if TileInWorld(z, x, y) {
-					want++
-				}
-			}
-		}
-	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		fb.mu.Lock()
-		n := fb.calls
-		fb.mu.Unlock()
-		if n == want {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%d of %d tiles pre-warmed", n, want)
-		}
-		time.Sleep(20 * time.Millisecond)
+	st := waitBake(t, ts, doc.Build)
+	want := bakeTotal(PrewarmLevels)
+	if st.State != "memory" || fb.callCount() != want {
+		t.Fatalf("state %q, %d bridge calls, want %d", st.State, fb.callCount(), want)
 	}
 	// Asking again for the same build starts nothing new.
 	_, _ = ts.Doc(context.Background())
 	time.Sleep(50 * time.Millisecond)
-	fb.mu.Lock()
-	defer fb.mu.Unlock()
-	if fb.calls != want {
-		t.Fatalf("%d calls after a second plan, want %d", fb.calls, want)
+	if fb.callCount() != want {
+		t.Fatalf("%d calls after a second plan, want %d", fb.callCount(), want)
 	}
 }

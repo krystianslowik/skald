@@ -23,7 +23,8 @@
 | `ICONS_DIR` | (empty) | Where the opt-in `skald-icons` sidecar writes the item icon sheet (`/config/skald-icons` in Kubernetes, `/icons` in Compose). Empty turns the icon routes off; see [Item icons](#item-icons) |
 | `TERRAIN_DIR` | (empty) | Where terrain runs leave the world generator's grids (`/terrain`); empty turns the terrain image off. See [Terrain](#terrain) |
 | `TERRAIN_CACHE_DIR` | `$SETTINGS_DIR/terrain-tiles` | Where terrain tiles sampled through the bridge are cached across restarts. Unwritable: a 64 MB memory cache. See [Terrain tiles](#terrain-tiles) |
-| `TERRAIN_CACHE_MB` | `256` | Size bound of that cache; least recently used tiles go first |
+| `TERRAIN_CACHE_MB` | `1024` | Size bound of that cache; least recently used tiles go first. The default holds one fully baked world (about 0.5-0.85 GB) |
+| `TERRAIN_BAKE` | `true` | Sample the whole terrain tile pyramid in the background once per game build, so the map never waits for the bridge. See [Terrain tiles](#terrain-tiles) |
 | `BRIDGE_URL` | `http://127.0.0.1:9010` | The Skald bridge plugin inside the game process; the agent shares the pod's (or container's) network namespace, so loopback reaches it. See [Admin bridge](#admin-bridge) |
 | `BRIDGE_TOKEN` | (empty) | Same value as the game container's `SKALD_BRIDGE_TOKEN` (16+ characters). Empty leaves the `/bridge` routes unregistered and the admin UI hidden |
 | `BRIDGE_TESTED_BUILDS` | `l-1.0.17,l-1.0.20` | Game builds admin commands may run on without a confirmation from the panel, comma-separated; `*` allows any |
@@ -438,17 +439,36 @@ The look is the game's map: its own minimap colours when the bridge can read
 them, otherwise tuned colours close to it, with forest darkening, relief and
 water depth, the same at every zoom.
 
-- Agent: `TERRAIN_CACHE_DIR` and `TERRAIN_CACHE_MB` (above). In Kubernetes the
-  default cache sits on the config volume under `skald/terrain-tiles`; 256 MB
-  holds well over the tiles a group explores. Point it at an `emptyDir` to keep
-  it off that volume (tiles are then sampled again after a restart).
+- Agent: `TERRAIN_CACHE_DIR`, `TERRAIN_CACHE_MB` and `TERRAIN_BAKE` (above).
+  In Kubernetes the default cache sits on the config volume under
+  `skald/terrain-tiles`. Point it at an `emptyDir` to keep it off that volume,
+  but then every restart bakes the world again; a volume is the better home.
+- **The bake.** Once per game build the agent fills the whole pyramid in the
+  background: levels 0 to 3 first (85 tiles, the whole-world view, under a
+  minute), then the finest level over the whole world, the centre outwards.
+  The levels in between are not sampled but downsampled by the agent from the
+  level below (biome by majority of the four samples, height and forest by
+  their mean), which leaves the bridge for the level only it can make. That
+  is about 13,350 bridge calls: about **67 minutes** when nobody plays (one
+  tile every 0.3 s, about a third of one core of the game container), about
+  **3.7 hours** while players are online (one a second). Whoever looks at the
+  map always goes first, and the bake holds off for two seconds after any map
+  request. On disk a baked world is about 0.5-0.85 GB; it stops (state
+  `budget`) rather than fill more than 90 % of `TERRAIN_CACHE_MB`. A game
+  update starts a new bake; the old build's tiles are evicted as the new ones
+  arrive. An agent restart carries on where it stopped: tiles already on disk
+  are skipped. Progress is in `/terrain/tiles.json` (`bake`) and in the
+  `valheim_terrain_bake_progress` metric. `TERRAIN_BAKE=false` samples tiles
+  only when someone looks and nothing in the background.
+- Map requests are served nearest the viewer first. A tile the viewer no
+  longer waits for (the request was cancelled, or every newer request is far
+  away from it) is dropped before the bridge samples it.
 - Game container: `SKALD_BRIDGE_TERRAIN=off` switches the terrain routes off;
   `SKALD_BRIDGE_TERRAIN_RATE` (4 tiles per second) and
   `SKALD_BRIDGE_TERRAIN_DUTY` (50 % of one core) bound what sampling may cost.
   See [bridge/README.md](../bridge/README.md#terrain-read-only).
 - The Job above stays useful: with the bridge down, its grid serves the four
-  lowest levels (and `/terrain.png` as before). With the bridge up, the agent
-  samples those levels itself once per game build, in the background.
+  lowest levels (and `/terrain.png` as before).
 - Same visibility rules as the image: signed-in viewers only, drawn under the
   fog and cut to generated zones unless `MAP_SPOILERS=true`.
 

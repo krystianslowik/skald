@@ -107,6 +107,27 @@ func (c *tileCache) get(key string) ([]byte, bool) {
 	return b, true
 }
 
+// has reports whether a tile is cached, without reading it or touching its recency.
+func (c *tileCache) has(key string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.items[key]
+	return ok
+}
+
+// countPrefix is the number of tiles and bytes under a key prefix (one build).
+func (c *tileCache) countPrefix(prefix string) (n int, bytes int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, el := range c.items {
+		if strings.HasPrefix(k, prefix) {
+			n++
+			bytes += el.Value.(*cacheEntry).size
+		}
+	}
+	return n, bytes
+}
+
 func (c *tileCache) put(key string, data []byte) error {
 	if int64(len(data)) > c.max {
 		return errors.New("tile larger than the cache")
