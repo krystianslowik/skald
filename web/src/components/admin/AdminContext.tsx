@@ -119,11 +119,21 @@ export function AdminProvider({
   }, []);
 
   // Status now, on every server state change, and every 20 s (the idle timeout and a patched game show up).
+  // A hidden tab skips the 20 s ticks and asks again when it is looked at.
   const serverStatus = state.server.status;
   useEffect(() => {
     refresh();
-    const timer = setInterval(refresh, 20_000);
-    return () => clearInterval(timer);
+    const timer = setInterval(() => {
+      if (!document.hidden) refresh();
+    }, 20_000);
+    const onVisible = () => {
+      if (!document.hidden) refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [refresh, serverStatus, online]);
 
   const toast = useCallback((ok: boolean, text: string) => {

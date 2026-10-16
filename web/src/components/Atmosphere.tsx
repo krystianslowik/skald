@@ -18,6 +18,8 @@ const HUE_MIN = 14;
 const HUE_SPAN = 20;
 const HUE_STEPS = 12;
 const SPRITE = 32;
+/** Embers drift slowly: 30 frames a second look the same and cost half of 60. */
+const FRAME_MS = 1000 / 30;
 
 /**
  * One pre-rendered glow per hue band, drawn with globalAlpha each frame: far
@@ -56,15 +58,15 @@ function spawn(w: number, h: number, initial: boolean): Ember {
   };
 }
 
-/** Rising embers on a canvas behind the page. Paused when the tab is hidden or motion is reduced. */
-export const Embers = memo(function Embers({ intensity = 1 }: { intensity?: number }) {
+/** Rising embers on a canvas behind the page. Paused when the tab is hidden, motion is reduced, or `paused` (the map covers them). */
+export const Embers = memo(function Embers({ intensity = 1, paused = false }: { intensity?: number; paused?: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const reduced = useReducedMotion();
 
   useEffect(() => {
     const canvas = ref.current;
     const ctx = canvas?.getContext?.("2d");
-    if (!canvas || !ctx || reduced) return;
+    if (!canvas || !ctx || reduced || paused) return;
 
     let w = 0;
     let h = 0;
@@ -84,6 +86,9 @@ export const Embers = memo(function Embers({ intensity = 1 }: { intensity?: numb
     let last = performance.now();
 
     const frame = (t: number) => {
+      raf = requestAnimationFrame(frame);
+      // Draw every other frame at 60 Hz; the slack keeps timing jitter from making it every third.
+      if (t - last < FRAME_MS - 4) return;
       const dt = Math.min(0.05, (t - last) / 1000);
       last = t;
       ctx.clearRect(0, 0, w, h);
@@ -103,7 +108,6 @@ export const Embers = memo(function Embers({ intensity = 1 }: { intensity?: numb
         ctx.drawImage(glow[e.hue]!, e.x - size / 2, e.y - size / 2, size, size);
       }
       ctx.globalAlpha = 1;
-      raf = requestAnimationFrame(frame);
     };
 
     const start = () => {
@@ -117,20 +121,22 @@ export const Embers = memo(function Embers({ intensity = 1 }: { intensity?: numb
     window.addEventListener("resize", resize, { passive: true });
     return () => {
       cancelAnimationFrame(raf);
+      // Paused or restarted: no frozen embers left on the canvas.
+      ctx.clearRect(0, 0, w, h);
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("resize", resize);
     };
-  }, [reduced, intensity]);
+  }, [reduced, intensity, paused]);
 
   return <canvas ref={ref} aria-hidden className="pointer-events-none fixed inset-0 z-1 h-full w-full" />;
 });
 
-export const Atmosphere = memo(function Atmosphere({ dim = false }: { dim?: boolean }) {
+export const Atmosphere = memo(function Atmosphere({ dim = false, paused = false }: { dim?: boolean; paused?: boolean }) {
   return (
     <>
       <div className="firelight" aria-hidden style={dim ? { opacity: 0.6 } : undefined} />
       <div className="treeline" aria-hidden />
-      <Embers intensity={dim ? 0.25 : 1} />
+      <Embers intensity={dim ? 0.25 : 1} paused={paused} />
       <div className="vignette" aria-hidden />
       <div className="grain" aria-hidden />
     </>
