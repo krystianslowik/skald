@@ -147,10 +147,11 @@ func main() {
 	})
 	go s.RunSettingsWatcher(ctx)
 	if br != nil {
-		// Live positions only while someone watches and someone plays.
+		// Live positions only while a browser has the map or a player list
+		// open (or an older skald-web is connected) and someone plays.
 		go br.RunPositions(ctx, 2*time.Second, func() bool {
 			snap := tracker.Snapshot()
-			return hub.Subscribers() > 0 && (snap.PlayersReported > 0 || len(snap.Players) > 0) && !s.Restarting()
+			return hub.Subscribers() > 0 && s.PositionsWanted() && (snap.PlayersReported > 0 || len(snap.Players) > 0) && !s.Restarting()
 		})
 	}
 	go func() {

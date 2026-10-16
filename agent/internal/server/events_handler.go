@@ -29,6 +29,13 @@ func (s *Server) eventsHandler(w http.ResponseWriter, r *http.Request) {
 		since = v
 	}
 
+	// A web tier that says when someone watches (?positions=lease) gets
+	// positions only then; any other stream wants them all along.
+	if r.URL.Query().Get("positions") != "lease" {
+		s.legacyStreams.Add(1)
+		defer s.legacyStreams.Add(-1)
+	}
+
 	rc := http.NewResponseController(w)
 	// The server-wide WriteTimeout would cut the stream; disable it here.
 	_ = rc.SetWriteDeadline(time.Time{})

@@ -85,6 +85,15 @@ type Server struct {
 	// running server; zero while players are online. Watcher goroutine only.
 	zeroSince time.Time
 	clocks    clockTracker
+	// legacyStreams counts open /events streams without ?positions=lease:
+	// they get positions whenever someone plays, as before the lease.
+	legacyStreams atomic.Int64
+	// watches maps each positions lease holder (POST /positions/watch) to
+	// when its lease runs out.
+	watchMu sync.Mutex
+	watches map[string]time.Time
+	// now is the lease clock; time.Now when nil. Tests set it.
+	now func() time.Time
 }
 
 func New(opt Options) *Server {
@@ -108,6 +117,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /state", s.stateHandler)
 	mux.HandleFunc("GET /events", s.eventsHandler)
+	mux.HandleFunc("POST /positions/watch", s.positionsWatch)
+	mux.HandleFunc("DELETE /positions/watch", s.positionsUnwatch)
 	mux.HandleFunc("GET /logs", s.logsHandler)
 	mux.HandleFunc("GET /backups/{name}", s.backupHandler)
 	mux.HandleFunc("POST /action/{name}", s.actionHandler)
