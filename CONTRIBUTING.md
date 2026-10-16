@@ -50,6 +50,34 @@ cd bridge  && dotnet test tests && sh build.sh
 first run (about 2 MB, into the gitignored `bridge/refs/`); see
 [bridge/README.md](bridge/README.md#build).
 
+### Real-world tests
+
+The agent's save parser also has tests against a real 1.0 world. They skip
+unless `SKALD_REAL_WORLD` points at a world directory (the one holding
+`<world>.db2`, `<world>.fwl2` and the `.chunk` files):
+
+```sh
+cd agent && SKALD_REAL_WORLD=/path/to/world go test -count=1 -v -run RealWorld ./internal/world/ ./internal/worldmap/
+```
+
+Real saves hold player names and ids, so they never go into the repository;
+keep the copy outside the checkout. The map and storage expectations in
+`internal/worldmap` are calibrated on the save the format was worked out on;
+`internal/world` only checks that the world's keys and bosses decode.
+
+- Exact, on any copy of that save: no failed or skipped chunks, every
+  inventory decodes, no unknown items, no world containers in the snapshot,
+  and the generated location total (fixed by the seed, so a different world
+  fails this check).
+- Ranges, because they change with play: object count, placed locations,
+  portals, beds, pins, bases, chest and vehicle counts, and item totals. They
+  are wide enough for older and newer copies of that save and tight enough to
+  catch dropped objects or misread stack sizes.
+- A 2 second build budget, which depends on the machine.
+
+All mismatches are reported in one message; `-v` logs the actual numbers, so
+a range that a newer copy outgrows can be widened from them.
+
 ## Guidelines
 
 - **Every user-visible string goes through `t()`**, with the key added to both

@@ -252,54 +252,59 @@ func TestStackedContainers(t *testing.T) {
 }
 
 // TestRealWorldStorage reads a real 1.0 save when SKALD_REAL_WORLD points at
-// its world directory. It is never committed; the expectations are that
-// save's counts.
+// its world directory. The save is never committed. Decoding is checked
+// exactly (every inventory reads, every item is known, no world container
+// leaks); what players keep in their chests is a range calibrated on the save
+// TestRealWorld describes.
 func TestRealWorldStorage(t *testing.T) {
 	dir := os.Getenv("SKALD_REAL_WORLD")
 	if dir == "" {
 		t.Skip("SKALD_REAL_WORLD not set")
 	}
 	s := build(t, dir, true).Current().Snapshot
+	var ck checks
 	kinds := map[string]int{}
 	totals := map[string]int{}
 	for _, c := range s.Storage {
 		kinds[c.Prefab]++
 		if c.Unreadable {
-			t.Errorf("%s: inventory did not decode", c.ID)
+			ck.fail("%s: inventory did not decode", c.ID)
 		}
 		for _, it := range c.Items {
 			totals[it.Name] += it.Stack
 			if strings.HasPrefix(it.Name, "#") {
-				t.Errorf("%s: unknown item %s", c.ID, it.Name)
+				ck.fail("%s: unknown item %s", c.ID, it.Name)
 			}
 		}
 		if strings.Contains(c.Prefab, "Treasure") || strings.Contains(c.Prefab, "shipwreck") {
-			t.Errorf("world container exported: %s", c.ID)
+			ck.fail("world container exported: %s", c.ID)
 		}
 	}
-	for prefab, n := range map[string]int{"piece_chest_wood": 42, "Cart": 2, "Karve": 1, "Raft": 2} {
-		if kinds[prefab] != n {
-			t.Errorf("%s = %d, want %d", prefab, kinds[prefab], n)
-		}
+	raw, _ := json.Marshal(s)
+	if bytes.Contains(raw, []byte("TreasureChest")) || bytes.Contains(raw, []byte("shipwreck")) {
+		ck.fail("snapshot names a world container")
 	}
-	if len(s.Storage) != 47 {
-		t.Errorf("storage = %d containers, want 47: %v", len(s.Storage), kinds)
+
+	// Play state.
+	ck.in("containers", len(s.Storage), 40, 70)
+	ck.in("piece_chest_wood", kinds["piece_chest_wood"], 35, 60)
+	// Vehicles take their own export path; keep each kind exercised.
+	for _, v := range []string{"Cart", "Karve", "Raft"} {
+		ck.in(v, kinds[v], 1, 5)
 	}
-	for name, n := range map[string]int{"Honey": 523, "Wood": 471, "Stone": 295} {
-		if totals[name] != n {
-			t.Errorf("%s total = %d, want %d", name, totals[name], n)
-		}
+	ck.in("item kinds", len(totals), 60, 150)
+	// Totals sum many stacks, so a stack-size decoding slip (every stack read
+	// as 1, or halved) falls far below these floors.
+	for name, lo := range map[string]int{"Honey": 400, "Wood": 200, "Stone": 200} {
+		ck.in(name+" total", totals[name], lo, 2000)
 	}
 	graveItems := 0
 	for _, g := range s.Tombstones {
 		graveItems += len(g.Items)
 	}
-	if len(s.Tombstones) != 5 || graveItems == 0 {
-		t.Errorf("graves = %d with %d items", len(s.Tombstones), graveItems)
-	}
-	raw, _ := json.Marshal(s)
-	if bytes.Contains(raw, []byte("TreasureChest")) || bytes.Contains(raw, []byte("shipwreck")) {
-		t.Error("snapshot names a world container")
-	}
+	ck.in("graves", len(s.Tombstones), 1, 15)
+	ck.in("grave stacks", graveItems, 1, 15*60)
+	ck.report(t)
+
 	t.Logf("storage: %v, %d item kinds; graves %d with %d stacks; json %d bytes", kinds, len(totals), len(s.Tombstones), graveItems, len(raw))
 }

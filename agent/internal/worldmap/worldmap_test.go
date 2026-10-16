@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"math/rand"
@@ -492,10 +493,45 @@ func TestRunStopsWithContext(t *testing.T) {
 	}
 }
 
+// realWorldLocations is the number of locations world generation placed in
+// the calibration save. The seed and the game version fix it, so it is pinned
+// exactly; everything that changes with play is a range.
+const realWorldLocations = 12362
+
+// checks collects real-world mismatches so one run reports all of them.
+type checks []string
+
+func (c *checks) fail(format string, args ...any) {
+	*c = append(*c, fmt.Sprintf(format, args...))
+}
+
+// eq is a parser-integrity check: it holds exactly on any copy of the save.
+func (c *checks) eq(name string, got, want int) {
+	if got != want {
+		c.fail("%s = %d, want %d", name, got, want)
+	}
+}
+
+// in is a play-state check: the value moves as the world is played.
+func (c *checks) in(name string, got, lo, hi int) {
+	if got < lo || got > hi {
+		c.fail("%s = %d, want %d..%d", name, got, lo, hi)
+	}
+}
+
+func (c checks) report(t *testing.T) {
+	t.Helper()
+	if len(c) > 0 {
+		t.Errorf("%d real-world mismatches:\n  %s", len(c), strings.Join(c, "\n  "))
+	}
+}
+
 // TestRealWorld builds the map of a played world when SKALD_REAL_WORLD
 // points at its directory. Real saves hold private player data and never
-// enter the repository; the expected counts are those of the world used to
-// work out the format (a 1.0 save of about 376k objects).
+// enter the repository. The expectations are calibrated on the 1.0 save used
+// to work out the format (about 375k objects; see "Real-world tests" in
+// CONTRIBUTING.md): parser integrity is exact, play state is a range wide
+// enough for older and newer copies of that save.
 func TestRealWorld(t *testing.T) {
 	dir := os.Getenv("SKALD_REAL_WORLD")
 	if dir == "" {
@@ -505,32 +541,14 @@ func TestRealWorld(t *testing.T) {
 	b := build(t, dir, true)
 	took := time.Since(start)
 	s := b.Current().Snapshot
-	paired := 0
-	for _, p := range s.Portals {
-		if p.PairedWith != "" {
-			paired++
-		}
-	}
-	if len(s.Portals) != 8 || paired != 4 {
-		t.Errorf("portals = %d, paired = %d (want 8 and 2 pairs)", len(s.Portals), paired)
-	}
-	if len(s.Tombstones) != 5 || len(s.Beds) != 5 {
-		t.Errorf("tombstones = %d, beds = %d", len(s.Tombstones), len(s.Beds))
-	}
-	if s.Explored.Tables != 1 || len(s.Pins) != 50 {
-		t.Errorf("tables = %d, pins = %d", s.Explored.Tables, len(s.Pins))
-	}
-	if n := len(s.Bases); n < 12 || n > 16 {
-		t.Errorf("bases = %d, want about 15", n)
-	}
-	if s.Stats.LocationsTotal != 12362 || s.Stats.LocationsPlaced != 948 {
-		t.Errorf("locations = %d / %d placed", s.Stats.LocationsTotal, s.Stats.LocationsPlaced)
-	}
-	if s.Stats.ZDOs != 376222 || s.Stats.ChunksFailed != 0 {
-		t.Errorf("stats = %+v", s.Stats)
-	}
-	if len(s.TerrainEdits) == 0 || len(s.TerrainEdits) > 33 {
-		t.Errorf("terrain edits = %d", len(s.TerrainEdits))
+	var c checks
+
+	// Parser integrity.
+	c.eq("chunks failed", s.Stats.ChunksFailed, 0)
+	c.eq("chunks parsed", s.Stats.ChunksParsed, s.Stats.Chunks)
+	c.eq("locations total", s.Stats.LocationsTotal, realWorldLocations)
+	if s.Stats.LocationsPlaced > s.Stats.LocationsTotal {
+		c.fail("locations placed = %d, more than the %d total", s.Stats.LocationsPlaced, s.Stats.LocationsTotal)
 	}
 	// Pins are placed where people have been: nearly all inside the mask.
 	mask := decodeRLE(t, s.Explored.RLE)
@@ -541,16 +559,40 @@ func TestRealWorld(t *testing.T) {
 		}
 	}
 	if in*10 < len(s.Pins)*9 {
-		t.Errorf("only %d/%d pins inside the explored mask", in, len(s.Pins))
+		c.fail("only %d/%d pins inside the explored mask", in, len(s.Pins))
 	}
+	// Performance budget; depends on the machine, not on the save.
 	if took > 2*time.Second {
-		t.Errorf("build took %v", took)
+		c.fail("build took %v", took)
 	}
+
+	// Play state. The ranges hold copies of the calibration save from about
+	// 374k to 376k objects and 942 to 948 placed locations, with room to
+	// grow, but stay tight enough that dropping a slice of objects or
+	// misreading the placed flags still fails.
+	paired := 0
+	for _, p := range s.Portals {
+		if p.PairedWith != "" {
+			paired++
+		}
+	}
+	c.in("ZDOs", s.Stats.ZDOs, 365000, 400000)
+	c.in("locations placed", s.Stats.LocationsPlaced, 930, 1050)
+	c.in("portals", len(s.Portals), 6, 16)
+	// Every portal but a stray unlinked one or two is paired, in pairs.
+	if paired%2 != 0 || paired < len(s.Portals)-3 {
+		c.fail("paired portals = %d of %d, want an even number missing at most 3", paired, len(s.Portals))
+	}
+	c.in("beds", len(s.Beds), 1, 15)
+	c.in("cartography tables", s.Explored.Tables, 1, 5)
+	c.in("pins", len(s.Pins), 30, 120)
+	c.in("bases", len(s.Bases), 10, 25)
+	c.in("terrain edits", len(s.TerrainEdits), 1, 40)
 	// About 293k trees, rocks, bushes, ore and pickables outside dungeons and
 	// above the seabed (about 23k seabed rocks and sunken logs are left out).
-	if n := b.Current().Nature.Len(); n < 280000 || n > 310000 {
-		t.Errorf("nature = %d objects", n)
-	}
-	t.Logf("build %v (%.3f s inside), JSON %d B, gzip %d B, bases %d, listed locations %d, nature %d",
-		took, s.Stats.BuildSeconds, len(b.Current().JSON), len(b.Current().Gzip), len(s.Bases), len(s.Locations), b.Current().Nature.Len())
+	c.in("nature", b.Current().Nature.Len(), 280000, 310000)
+	c.report(t)
+
+	t.Logf("build %v (%.3f s inside), JSON %d B, gzip %d B, stats %+v, portals %d (%d paired), beds %d, pins %d, terrain edits %d, bases %d, listed locations %d, nature %d",
+		took, s.Stats.BuildSeconds, len(b.Current().JSON), len(b.Current().Gzip), s.Stats, len(s.Portals), paired, len(s.Beds), len(s.Pins), len(s.TerrainEdits), len(s.Bases), len(s.Locations), b.Current().Nature.Len())
 }
