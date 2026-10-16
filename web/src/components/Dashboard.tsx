@@ -196,7 +196,7 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
   );
   const saga = (
     <Plank title={t("plank.saga")} id="saga" aside={t("plank.saga.aside")} className="lg:col-span-7">
-      <Saga events={state.history.events} now={now} />
+      <Saga events={state.history.events} now={now} online={players} />
     </Plank>
   );
   const ranking = (

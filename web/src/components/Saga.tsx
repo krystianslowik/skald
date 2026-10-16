@@ -1,7 +1,8 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { memo, useMemo } from "react";
+import { memo, useId, useMemo, useState, type ReactNode } from "react";
 import type { AgentEvent } from "../types";
 import { gameVersion } from "../lib/format";
+import { sagaRows, type SagaRow } from "../lib/saga";
 import { gameClock } from "../lib/admin";
 import { itemLabel } from "../lib/storage";
 import { useI18n, type I18n, type TextKey } from "../i18n";
@@ -40,7 +41,7 @@ export function actionTitle(i: Pick<I18n, "t">, name: string): string {
   return key ? i.t(key) : name;
 }
 
-type Tone = "join" | "leave" | "death" | "save" | "server" | "action" | "raid" | "settings" | "admin";
+type Tone = "join" | "leave" | "death" | "save" | "slow" | "server" | "action" | "raid" | "settings" | "admin";
 
 /** Commands whose saga line names a player when there was one ("for X", "near X"). */
 const WITH_PLAYER = new Set(["spawn", "creature-spawn", "creature-kill", "creature-tame", "repair", "fill", "grow", "map-reveal", "map-pins", "event-start"]);
@@ -208,8 +209,9 @@ function Glyph({ tone }: { tone: Tone }) {
         </svg>
       );
     case "save":
+    case "slow":
       return (
-        <svg {...common} stroke="#d79c34" aria-hidden>
+        <svg {...common} stroke={tone === "slow" ? "#ecc212" : "#d79c34"} aria-hidden>
           <path d="M4 10h12M10 4v12M6 6l8 8M14 6l-8 8" />
         </svg>
       );
@@ -246,40 +248,102 @@ function Glyph({ tone }: { tone: Tone }) {
   }
 }
 
-/** The event scroll: newest first, grouped by day. */
-export const Saga = memo(function Saga({ events, now }: { events: AgentEvent[]; now: number }) {
+type Line = { text: string; tone: Tone; player?: string };
+
+/** The words for one saga row; a fold reads "World saved 47×, 12 backups · last 16:09". */
+function rowLine(i18n: I18n, row: SagaRow): Line | null {
+  const { t, tn, clock, duration } = i18n;
+  switch (row.kind) {
+    case "visit": {
+      const { name, join, leave } = row;
+      const text = leave
+        ? t("saga.visit", { name, from: clock(join.ts), to: clock(leave.ts), duration: duration(Date.parse(leave.ts) - Date.parse(join.ts)) })
+        : t("saga.visitOpen", { name, from: clock(join.ts) });
+      return { text, tone: "join", player: name };
+    }
+    case "fold": {
+      const parts = row.saves > 0 ? [t("saga.fold.saves", { n: row.saves }), ...(row.backups > 0 ? [tn("saga.fold.backups", row.backups)] : [])] : [tn("saga.fold.backupsOnly", row.backups)];
+      return { text: `${parts.join(", ")} · ${t("saga.fold.last", { time: clock(row.e.ts) })}`, tone: "save" };
+    }
+    case "event": {
+      const d = describe(i18n, row.e);
+      if (!d) return null;
+      if (row.updated) return { text: t("saga.versionUpdated", { version: gameVersion(String(row.e.data.version ?? "")) }), tone: "server" };
+      return row.slow ? { ...d, tone: "slow" } : d;
+    }
+  }
+}
+
+const TEXT_TONE: Partial<Record<Tone, string>> = { death: "text-blood", leave: "text-ash", slow: "text-gold" };
+
+/** A line in the top-left message feed: a small slot icon, the text, the time. */
+function FeedLine({ d, time, quiet = false }: { d: Line; time?: ReactNode; quiet?: boolean }) {
+  return (
+    <div className="flex items-center gap-2.5 py-1">
+      <span className="slot grid h-7 w-7 shrink-0 place-items-center">
+        <Glyph tone={d.tone} />
+      </span>
+      <span className={`on-world flex-1 text-sm font-bold leading-snug ${quiet ? "text-ash" : (TEXT_TONE[d.tone] ?? "text-bone")}`}>
+        {d.player && d.text.startsWith(d.player) ? (
+          <>
+            <PlayerName name={d.player} />
+            {d.text.slice(d.player.length)}
+          </>
+        ) : (
+          d.text
+        )}
+      </span>
+      {time}
+    </div>
+  );
+}
+
+/** The event scroll: newest first, grouped by day; routine saves fold away, a visit is one line. */
+export const Saga = memo(function Saga({ events, now, online }: { events: AgentEvent[]; now: number; online?: readonly { name: string }[] }) {
   const i18n = useI18n();
   const { t, dayLabel, clock, fullDate } = i18n;
   const reduced = useReducedMotion();
-  const rows = useMemo(
-    () => events.flatMap((e) => {
-      const d = describe(i18n, e);
-      return d ? [{ e, d }] : [];
-    }),
-    [events, i18n],
+  const foldId = useId();
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const rows = useMemo(() => {
+    const shown = events.filter((e) => describe(i18n, e) !== null);
+    return sagaRows(shown, online ? new Set(online.map((p) => p.name)) : undefined).flatMap((row) => {
+      const d = rowLine(i18n, row);
+      return d ? [{ row, d }] : [];
+    });
+  }, [events, online, i18n]);
+  const toggle = (key: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  const timeOf = (ts: string) => (
+    <time className="shrink-0 text-xs tabular-nums text-ash" dateTime={ts} title={fullDate(ts)}>
+      {clock(ts)}
+    </time>
   );
+  const spring = { type: "spring", bounce: 0, visualDuration: 0.35 } as const;
   let lastDay = "";
   return (
     <div className="scroll-quiet relative max-h-105 overflow-y-auto pr-2 mask-[linear-gradient(180deg,#000_85%,transparent)]">
       {rows.length === 0 && <p className="text-sm text-ash">{t("saga.empty")}</p>}
       <ol className="relative">
         <AnimatePresence initial={false}>
-          {rows.map(({ e, d }) => {
+          {rows.map(({ row, d }) => {
+            const e = row.e;
             const day = dayLabel(e.ts, now);
             const header = day !== lastDay ? day : null;
             lastDay = day;
-            const time = (
-              <time className="shrink-0 text-xs tabular-nums text-ash" dateTime={e.ts} title={fullDate(e.ts)}>
-                {clock(e.ts)}
-              </time>
-            );
+            const expanded = row.kind === "fold" && open.has(row.key);
+            const listId = `${foldId}-${row.key}`;
             return (
               <motion.li
-                key={`${e.ts}-${e.seq}-${e.type}`}
+                key={row.key}
                 layout={reduced ? false : "position"}
                 initial={{ opacity: 0, x: reduced ? 0 : -10 }}
                 animate={{ opacity: 1, x: 0 }}
-                transition={{ type: "spring", bounce: 0, visualDuration: 0.35 }}
+                transition={spring}
               >
                 {header && (
                   <div className="mb-1 mt-3 flex items-center gap-3 first:mt-0">
@@ -291,26 +355,52 @@ export const Saga = memo(function Saga({ events, now }: { events: AgentEvent[]; 
                   // A raid reads like the game's centre-screen warning: gold caps, no box.
                   <div className="flex flex-col items-center py-3 text-center">
                     <span className="raid-cry text-lg leading-tight sm:text-xl">{d.text}</span>
-                    {time}
+                    {timeOf(e.ts)}
                   </div>
-                ) : (
-                  // Everything else is a line in the top-left message feed: a small slot icon and the text.
-                  <div className="flex items-center gap-2.5 py-1">
-                    <span className="slot grid h-7 w-7 shrink-0 place-items-center">
-                      <Glyph tone={d.tone} />
-                    </span>
-                    <span className={`on-world flex-1 text-sm font-bold leading-snug ${d.tone === "death" ? "text-blood" : d.tone === "leave" ? "text-ash" : "text-bone"}`}>
-                      {d.player && d.text.startsWith(d.player) ? (
-                        <>
-                          <PlayerName name={d.player} />
-                          {d.text.slice(d.player.length)}
-                        </>
-                      ) : (
-                        d.text
+                ) : row.kind === "fold" ? (
+                  // Routine bookkeeping: one quiet line that opens into the saves it stands for.
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => toggle(row.key)}
+                      aria-expanded={expanded}
+                      aria-controls={expanded ? listId : undefined}
+                      className="press-soft -mx-1 block w-[calc(100%+0.5rem)] rounded-[2px] px-1 text-left hover:bg-black/25"
+                    >
+                      <FeedLine
+                        d={d}
+                        quiet
+                        time={
+                          <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden className={`shrink-0 text-ash transition-transform ${expanded ? "rotate-180" : ""}`}>
+                            <path d="M2.5 4.5L6 8l3.5-3.5" />
+                          </svg>
+                        }
+                      />
+                    </button>
+                    <AnimatePresence initial={false}>
+                      {expanded && (
+                        <motion.ol
+                          id={listId}
+                          className="overflow-hidden border-l border-iron/40 pl-3"
+                          initial={reduced ? { opacity: 0 } : { opacity: 0, height: 0 }}
+                          animate={reduced ? { opacity: 1 } : { opacity: 1, height: "auto" }}
+                          exit={reduced ? { opacity: 0 } : { opacity: 0, height: 0 }}
+                          transition={spring}
+                        >
+                          {row.events.map((f) => {
+                            const fd = describe(i18n, f);
+                            return fd ? (
+                              <li key={`${f.ts}-${f.seq}-${f.type}`}>
+                                <FeedLine d={fd} quiet time={timeOf(f.ts)} />
+                              </li>
+                            ) : null;
+                          })}
+                        </motion.ol>
                       )}
-                    </span>
-                    {time}
-                  </div>
+                    </AnimatePresence>
+                  </>
+                ) : (
+                  <FeedLine d={d} time={row.kind === "visit" ? undefined : timeOf(e.ts)} />
                 )}
               </motion.li>
             );
