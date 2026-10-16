@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http/httptest"
@@ -111,6 +112,7 @@ func TestMetrics(t *testing.T) {
 
 	body, samples := scrape(t, h.s)
 	want := []string{
+		`skald_build_info{component="agent",version="dev"} 1`,
 		`valheim_server_up 1`,
 		`valheim_server_status{status="running"} 1`,
 		`valheim_server_started_timestamp_seconds 1791584875`,
@@ -155,6 +157,28 @@ func TestMetrics(t *testing.T) {
 	}
 	if n := strings.Count(body, "valheim_server_status{"); n != 1 {
 		t.Errorf("server_status samples = %d, want 1", n)
+	}
+}
+
+// A release build reports its version in /metrics and /state; a build
+// without -ldflags reports "dev" (covered by TestMetrics).
+func TestBuildVersion(t *testing.T) {
+	h := newHarness(t)
+	h.s.opt.Version = "2026.10.0"
+	if body, _ := scrape(t, h.s); !strings.Contains(body, "\nskald_build_info{component=\"agent\",version=\"2026.10.0\"} 1\n") {
+		t.Errorf("skald_build_info missing:\n%s", body)
+	}
+	r := h.do(t, "GET", "/state", token)
+	var got struct {
+		Agent struct {
+			Version string `json:"version"`
+		} `json:"agent"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Agent.Version != "2026.10.0" {
+		t.Errorf("agent.version = %q", got.Agent.Version)
 	}
 }
 

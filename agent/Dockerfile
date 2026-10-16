@@ -12,8 +12,9 @@ WORKDIR /src
 # Stdlib only: there is no go.sum to copy.
 COPY go.mod ./
 COPY . .
+# VERSION is the release (2026.10.0); local builds report "dev".
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -ldflags="-s -w" -o /out/skald-agent ./cmd/agent
+    go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o /out/skald-agent ./cmd/agent
 
 FROM gcr.io/distroless/static:nonroot
 COPY --from=build /out/skald-agent /skald-agent

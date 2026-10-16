@@ -60,6 +60,8 @@ type worldState struct {
 type agentState struct {
 	StartedAt time.Time  `json:"startedAt"`
 	LastLogAt *time.Time `json:"lastLogAt"`
+	// Version is the Skald release of this agent ("dev" for local builds).
+	Version string `json:"version"`
 }
 
 func (s *Server) stateHandler(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +109,7 @@ func (s *Server) stateHandler(w http.ResponseWriter, r *http.Request) {
 		Players:  snap.Players,
 		World:    worldState{SizeBytes: size, LastSaveAt: lastSave, LastSaveMs: snap.LastSaveMs, Meta: meta, Clock: s.clock(meta, snap.Players, now)},
 		Backups:  files.Backups(s.opt.ConfigDir),
-		Agent:    agentState{StartedAt: s.startedAt, LastLogAt: snap.LastLogAt},
+		Agent:    agentState{StartedAt: s.startedAt, LastLogAt: snap.LastLogAt, Version: s.opt.Version},
 		Settings: sum,
 		Icons:    s.opt.Icons.Info(),
 		Terrain:  terrainInfo(s.opt.Terrain),

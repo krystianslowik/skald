@@ -32,6 +32,9 @@ func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
 
 	var p promWriter
 
+	p.family("skald_build_info", "gauge", "The Skald release this component was built from; value is always 1.")
+	p.sample("skald_build_info", 1, "component", "agent", "version", s.opt.Version)
+
 	p.family("valheim_server_up", "gauge", "1 if the server status file says running, else 0.")
 	p.sample("valheim_server_up", boolf(snap.Status == state.StatusRunning))
 
