@@ -87,19 +87,21 @@ const app = createApp({
 // Static SPA, resolved relative to the process CWD (image: /app/bin -> /app/web/dist).
 mountStatic(app, cfg.webRoot);
 
-type WsData = { unsubscribe?: () => void };
+/** `history`: the page applies "history" deltas (asked with /live?history=1); older pages refetch instead. */
+type WsData = { history: boolean; unsubscribe?: () => void };
 
 const [host, portStr] = cfg.bind.split(":");
 const server = Bun.serve<WsData>({
   hostname: host || "0.0.0.0",
   port: Number.parseInt(portStr ?? "8080", 10),
   fetch(req, srv) {
-    if (new URL(req.url).pathname === "/live") {
+    const url = new URL(req.url);
+    if (url.pathname === "/live") {
       // Authenticate before the upgrade, never after.
       if (!verifySession(cfg.sessionSecret, readCookie(req.headers.get("cookie"), SESSION_COOKIE))) {
         return new Response("unauthorized", { status: 401 });
       }
-      if (srv.upgrade(req, { data: {} })) return undefined;
+      if (srv.upgrade(req, { data: { history: url.searchParams.get("history") === "1" } })) return undefined;
       return new Response("ws upgrade failed", { status: 400 });
     }
     return app.fetch(req, { server: srv });
@@ -110,7 +112,7 @@ const server = Bun.serve<WsData>({
       send({ type: "state", state: hub.getState(), online: hub.online });
       const positions = hub.latestPositions();
       if (positions) send(positions);
-      ws.data.unsubscribe = hub.subscribe(send);
+      ws.data.unsubscribe = hub.subscribe(send, { history: ws.data.history });
     },
     close(ws) {
       ws.data.unsubscribe?.();

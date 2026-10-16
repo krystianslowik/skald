@@ -4,6 +4,8 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const RECENT_LIMIT = 200;
 /** Routine bookkeeping: a save every 30 min and a backup every 2 h, ~60 lines a day. */
 export const ROUTINE_EVENTS: readonly AgentEventType[] = ["world_saved", "world_backup"];
+/** The types deriveHistory folds into the rankings and the 7-day series; the rest only reach the saga. */
+export const RANKING_EVENTS: readonly AgentEventType[] = ["player_join", "player_leave", "death", "player_count", "server_state"];
 
 /**
  * Caps a newest-first recent list so routine saves can never push real events

@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { AgentSource } from "../src/agent";
 import { HistoryStore } from "../src/db";
 import { Hub } from "../src/hub";
-import { emptyAgentState, type AgentEvent } from "../src/types";
+import { emptyAgentState, type AgentEvent, type LiveMessage } from "../src/types";
 
 const ev = (seq: number, type: AgentEvent["type"], data: Record<string, unknown>): AgentEvent => ({
   seq,
@@ -173,5 +173,66 @@ describe("Hub bridge reads", () => {
     // Rows stored by an older panel are hidden too.
     store.insert("A", ev(3, "admin", { actor: "dashboard-abc", command: "GET /v1/terrain/info", result: "error", error: "x" }));
     expect(hub.history().events.map((e) => e.data.command)).toEqual(["broadcast"]);
+  });
+});
+
+describe("Hub history deltas", () => {
+  it("flags stored events and sends one rankings delta per burst, none for repeats or logs", async () => {
+    const store = new HistoryStore(":memory:");
+    const hub = new Hub(fakeAgent("A", []), store, { historyDeltaMs: 10 });
+    (hub as unknown as { state: ReturnType<typeof emptyAgentState> }).state = emptyAgentState(new Date("2026-10-09T17:00:00Z"));
+    const msgs: LiveMessage[] = [];
+    const plain: LiveMessage[] = []; // the notifier, or a page from before deltas
+    hub.subscribe((m) => msgs.push(m), { history: true });
+    hub.subscribe((m) => plain.push(m));
+    hub.ingest("A", ev(1, "join_code", { code: "111111" }));
+    hub.ingest("A", ev(2, "player_join", { name: "Ragnar" }));
+    hub.ingest("A", ev(3, "death", { name: "Ragnar" }));
+    hub.ingest("A", ev(4, "join_code", { code: "111111" })); // unchanged: broadcast, not stored
+    hub.ingest("A", ev(5, "log", { line: "x" }));
+    const flags = msgs.flatMap((m) => (m.type === "event" ? [`${m.event.type}:${m.stored === true}`] : []));
+    expect(flags).toEqual(["join_code:true", "player_join:true", "death:true", "join_code:false", "log:false"]);
+    expect(msgs.some((m) => m.type === "history")).toBe(false);
+    await settle();
+    const deltas = msgs.filter((m) => m.type === "history");
+    expect(deltas).toHaveLength(1);
+    const d = deltas[0] as Extract<LiveMessage, { type: "history" }>;
+    expect(d.players.map((p) => [p.name, p.deaths, p.online])).toEqual([["Ragnar", 1, true]]);
+    expect(d).not.toHaveProperty("events");
+    expect(plain.some((m) => m.type === "history")).toBe(false);
+    expect(plain.filter((m) => m.type === "event")).toHaveLength(5);
+
+    // Only repeats, logs and saga-only events since (a save changes no ranking): no new delta.
+    hub.ingest("A", ev(6, "join_code", { code: "111111" }));
+    hub.ingest("A", ev(7, "log", { line: "y" }));
+    hub.ingest("A", ev(8, "world_saved", { ms: 120 }));
+    hub.ingest("A", ev(9, "join_code", { code: "222222" }));
+    await settle();
+    expect(msgs.filter((m) => m.type === "history")).toHaveLength(1);
+    hub.stop();
+  });
+
+  it("derives nothing when no page asked for deltas", async () => {
+    const hub = new Hub(fakeAgent("A", []), new HistoryStore(":memory:"), { historyDeltaMs: 10 });
+    (hub as unknown as { state: ReturnType<typeof emptyAgentState> }).state = emptyAgentState(new Date("2026-10-09T17:00:00Z"));
+    let derives = 0;
+    const history = hub.history.bind(hub);
+    hub.history = () => (derives++, history());
+    hub.subscribe(() => undefined);
+    hub.ingest("A", ev(1, "player_join", { name: "Freya" }));
+    await settle();
+    expect(derives).toBe(0);
+    hub.stop();
+  });
+
+  it("sends no delta after stop", async () => {
+    const hub = new Hub(fakeAgent("A", []), new HistoryStore(":memory:"), { historyDeltaMs: 10 });
+    (hub as unknown as { state: ReturnType<typeof emptyAgentState> }).state = emptyAgentState(new Date("2026-10-09T17:00:00Z"));
+    const msgs: LiveMessage[] = [];
+    hub.subscribe((m) => msgs.push(m), { history: true });
+    hub.ingest("A", ev(1, "player_join", { name: "Freya" }));
+    hub.stop();
+    await settle();
+    expect(msgs.filter((m) => m.type === "history")).toHaveLength(0);
   });
 });

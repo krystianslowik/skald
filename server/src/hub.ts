@@ -1,7 +1,7 @@
 import type { AgentSource } from "./agent";
 import { applyEvent } from "./apply";
 import type { HistoryStore } from "./db";
-import { deriveHistory } from "./history";
+import { deriveHistory, RANKING_EVENTS } from "./history";
 import { deriveProfiles } from "./profiles";
 import { emptyAgentState, isBridgeRead, UNSTORED_EVENTS, type AgentEvent, type AgentEventType, type AgentState, type History, type LiveMessage, type LivePlayer, type PlayerProfile } from "./types";
 
@@ -9,6 +9,8 @@ import { emptyAgentState, isBridgeRead, UNSTORED_EVENTS, type AgentEvent, type A
 const POSITIONS_EVERY_MS = 2_000;
 /** A positions sample older than this is not handed to a new socket. */
 const POSITIONS_FRESH_MS = 10_000;
+/** Stored events within this window share one history delta (a replay can store hundreds at once). */
+const HISTORY_DELTA_MS = 1_000;
 
 /** Types the agent re-emits without a change; stored only when the value moves. */
 const ON_CHANGE: Partial<Record<AgentEventType, (d: Record<string, unknown>) => string>> = {
@@ -23,6 +25,8 @@ export interface HubOptions {
   statePollMs?: number;
   maxBackoffMs?: number;
   historyCacheMs?: number;
+  /** How long stored events are gathered before one history delta goes out. */
+  historyDeltaMs?: number;
   /** IANA zone for profile calendar days. */
   timeZone?: string;
   clock?: () => number;
@@ -40,7 +44,8 @@ export class Hub {
   private lastSeq = 0;
   private epoch = "";
   private lastValue = new Map<AgentEventType, string>();
-  private listeners = new Set<(m: LiveMessage) => void>();
+  /** Each listener, and whether it takes "history" messages (browsers that asked; the notifier does not). */
+  private listeners = new Map<(m: LiveMessage) => void, boolean>();
   private abort: AbortController | null = null;
   private stopped = false;
   private timers: ReturnType<typeof setInterval>[] = [];
@@ -49,6 +54,7 @@ export class Hub {
   private positionsSentAt = 0;
   private positionsTimer: ReturnType<typeof setTimeout> | null = null;
   private profilesCache: { at: number; value: PlayerProfile[] } | null = null;
+  private historyTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly opts: Required<HubOptions>;
 
   constructor(
@@ -60,6 +66,7 @@ export class Hub {
       statePollMs: opts.statePollMs ?? 15_000,
       maxBackoffMs: opts.maxBackoffMs ?? 30_000,
       historyCacheMs: opts.historyCacheMs ?? 5_000,
+      historyDeltaMs: opts.historyDeltaMs ?? HISTORY_DELTA_MS,
       timeZone: opts.timeZone ?? "UTC",
       clock: opts.clock ?? Date.now,
     };
@@ -77,8 +84,8 @@ export class Hub {
     return this.state;
   }
 
-  subscribe(fn: (m: LiveMessage) => void): () => void {
-    this.listeners.add(fn);
+  subscribe(fn: (m: LiveMessage) => void, opts: { history?: boolean } = {}): () => void {
+    this.listeners.set(fn, opts.history === true);
     return () => this.listeners.delete(fn);
   }
 
@@ -108,6 +115,21 @@ export class Hub {
     this.abort?.abort();
     for (const t of this.timers) clearInterval(t);
     if (this.positionsTimer) clearTimeout(this.positionsTimer);
+    if (this.historyTimer) clearTimeout(this.historyTimer);
+  }
+
+  /**
+   * Sends the rankings and the 7-day series once stored events settle, so the
+   * clients never refetch /api/state for them: one derive for everyone.
+   */
+  private historySoon(): void {
+    if (this.historyTimer || this.stopped) return;
+    this.historyTimer = setTimeout(() => {
+      this.historyTimer = null;
+      if (![...this.listeners.values()].includes(true)) return;
+      const { players, online7d } = this.history();
+      this.emit({ type: "history", players, online7d });
+    }, this.opts.historyDeltaMs);
   }
 
   /** The latest live positions, for a socket that just opened; null when stale or none. */
@@ -150,6 +172,7 @@ export class Hub {
       this.state = applyEvent(this.state, ev);
       if (ev.type === "log") this.state = { ...this.state, agent: { ...this.state.agent, lastLogAt: ev.ts } };
     }
+    let stored = false;
     if (!UNSTORED_EVENTS.includes(ev.type)) {
       const key = ON_CHANGE[ev.type]?.(ev.data);
       const changed = key === undefined || this.lastValue.get(ev.type) !== key;
@@ -158,15 +181,18 @@ export class Hub {
         this.store.setMeta("lastSeq", String(ev.seq));
         this.historyCache = null;
         this.profilesCache = null;
+        stored = true;
       }
     }
-    this.emit({ type: "event", event: ev });
+    this.emit({ type: "event", event: ev, stored });
+    if (stored && RANKING_EVENTS.includes(ev.type)) this.historySoon();
     // A restart with new settings renames the server; fetch it now, not at the next poll.
     if (ev.type === "settings_apply" && ev.data.state === "applied" && !this.stopped) void this.pollState();
   }
 
   private emit(m: LiveMessage): void {
-    for (const fn of this.listeners) {
+    for (const [fn, history] of this.listeners) {
+      if (m.type === "history" && !history) continue;
       try {
         fn(m);
       } catch {
