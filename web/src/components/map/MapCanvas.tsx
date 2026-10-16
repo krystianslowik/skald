@@ -23,6 +23,7 @@ import { useIconSheet } from "../../lib/itemicons";
 import { COARSE, useMedia } from "../../lib/useMedia";
 import { inertiaStep, releaseVelocity, REST_SPEED, rubberBand, springStep, ZOOM_DECELERATION, ZOOM_REST } from "../../lib/mapmotion";
 import { MapRenderer, type Relief } from "../../lib/maprender";
+import type { TilesDoc } from "../../lib/terraintiles";
 import { NATURE_MIN_SCALE, natureLoader, type NatureItem } from "../../lib/nature";
 import { PieceLoader, type ChunkLoader } from "../../lib/pieceload";
 import { PLAN_MIN_SCALE, viewBox, type StoreyInfo, type StoreyPick } from "../../lib/planrender";
@@ -92,6 +93,8 @@ export const MapCanvas = forwardRef<
     highlighted?: ReadonlySet<string>;
     /** The world generator's terrain, drawn under everything when the relief layer is on. */
     relief?: Relief | null;
+    /** The terrain tile pyramid; drawn instead of `relief` when there is one. */
+    tiles?: TilesDoc | null;
     /** The storey picked in the floor switcher. */
     storey?: StoreyPick | null;
     /** The base the floor switcher is for, whenever it changes (null: no switcher), and when floor plans arrive. */
@@ -118,7 +121,7 @@ export const MapCanvas = forwardRef<
     interactive?: boolean;
     className?: string;
   }
->(function MapCanvas({ map, mask, markers, layers, selected, highlighted, relief = null, storey = null, onStoreys, onSelect, onGroup, onAnchor, onPointerWorld, onFrame, onLongPress, onTapWorld, onOre, remember = false, insets = NO_INSETS, interactive = true, className = "relative" }, ref) {
+>(function MapCanvas({ map, mask, markers, layers, selected, highlighted, relief = null, tiles = null, storey = null, onStoreys, onSelect, onGroup, onAnchor, onPointerWorld, onFrame, onLongPress, onTapWorld, onOre, remember = false, insets = NO_INSETS, interactive = true, className = "relative" }, ref) {
   const { t } = useI18n();
   const reduced = useReducedMotion() ?? false;
   const coarse = useMedia(COARSE);
@@ -325,6 +328,11 @@ export const MapCanvas = forwardRef<
     renderer.current?.setRelief(relief);
     schedule();
   }, [relief, schedule]);
+
+  useEffect(() => {
+    renderer.current?.setTiles(tiles);
+    schedule();
+  }, [tiles, schedule]);
 
   // Floor plans and nature: fetched as the view settles close in. Chunks
   // arrive one by one, and each full redraw of the map costs a frame or more
