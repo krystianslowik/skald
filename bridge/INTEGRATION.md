@@ -213,17 +213,23 @@ A new **Admin** sheet, opened from the header next to Settings. Show it only whe
 
 ### Terrain tiles
 
-`lib/terraintiles.ts` picks the level for the zoom (tile pixels at most about
-1.5 device pixels), lists the tiles over the view nearest the centre first,
-fetches at most four at a time and cancels those that leave the view, keeps
-the painted bitmaps in a byte-bounded LRU (40 MB on phones with 4 GB or less,
-96 MB otherwise) and draws the nearest loaded ancestor until a tile arrives.
-`lib/terraintile.worker.ts` fetches, ungzips, decodes and paints in a worker
+`lib/terraintiles.ts` plans each view without knowing how tiles are drawn
+(`planView`, `TileScheduler`): the level whose samples are about one pixel of
+the canvas, the slots over the drawn box, and the load order. Level 0 comes
+first, then the visible tiles nearest the centre, then, at low priority and
+one at a time, a ring of one tile round the view and the rest of levels 0-3.
+At most four load at once and those that leave the wish list are cancelled.
+Levels 0-3 stay on the client for good once loaded; the rest of the painted
+bitmaps sit in a byte-bounded LRU (40 MB on phones with 4 GB or less, 96 MB
+otherwise). A missing tile shows its loaded descendants (two levels down) over
+its nearest loaded ancestor, so once level 0 is in no slot is blank; until
+then the map is inked from the save. An arriving tile redraws only the slots
+it changes in the cached base. `lib/terraintile.worker.ts` fetches, ungzips, decodes and paints in a worker
 and hands back an `ImageBitmap`; `lib/terrainpaint.ts` is the one paint model
 for every level: biome colour, forest darkening, hillshade from centred
 slopes, water by depth (swamp pools keep some mud), with biome borders as
-smooth curves between samples. Tiles are painted at 2x, the top level at 4x
-when zoomed far in. Without a worker, `OffscreenCanvas` or
+smooth curves between samples. Tiles are painted 1:1 below 1 px/m, at 2x
+closer in, and the top level at 4x when zoomed far in. Without a worker, `OffscreenCanvas` or
 `DecompressionStream` the map keeps `/terrain.png`.
 
 ## 4. Deploy changes to the game pod (`deploy/kubernetes/valheim.yaml` and the homelab manifest)

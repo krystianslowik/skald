@@ -9,6 +9,12 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.3] - 2026-10-16
+
+### Changed
+
+- The map no longer shows bare parchment while terrain loads. The whole world's coarse terrain is fetched as soon as the map opens and kept, so zooming out or flying across the map shows a blurry version of the place at once, and tiles already loaded closer in stand in while the coarser ones arrive. Until the first, coarsest tile is in, the map shows the land from the save. Each arriving tile redraws only its own part of the map instead of the whole map, which makes panning and zooming far smoother while terrain streams in, and tiles are painted at screen resolution, so the map holds about a quarter of the memory and fills a view with fewer requests.
+
 ## [2026.10.2] - 2026-10-16
 
 ### Changed
