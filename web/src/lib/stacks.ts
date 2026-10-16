@@ -68,6 +68,15 @@ export function groupStacks(containers: readonly MapContainer[]): ChestStack[] {
   });
 }
 
+/**
+ * A stack's chests in the order they are seen standing in front of it: the
+ * top one first. `index` stays the level from the bottom (0 for the lowest),
+ * so "1st from the bottom" is always the last row.
+ */
+export function topDown<T>(chests: readonly T[]): { chest: T; index: number }[] {
+  return chests.map((chest, index) => ({ chest, index })).reverse();
+}
+
 /** Where each chest sits in its stack, by container id. */
 export function stackIndex(stacks: readonly ChestStack[]): Map<string, StackPlace> {
   const out = new Map<string, StackPlace>();
