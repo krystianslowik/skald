@@ -24,6 +24,25 @@ function pathFor(points: SeriesPoint[], x: (t: number) => number, y: (v: number)
 }
 
 /**
+ * Tick times in (t0, t1], aligned to local hours. Day ticks step by calendar
+ * day, so they stay on local midnight across a DST change (a day is 23 or 25 h).
+ */
+export function chartTicks(t0: number, t1: number, every: number): number[] {
+  const out: number[] = [];
+  const d = new Date(t0);
+  d.setMinutes(0, 0, 0);
+  if (every >= 86_400_000) {
+    d.setHours(0);
+    const days = Math.round(every / 86_400_000);
+    for (; d.getTime() <= t1; d.setDate(d.getDate() + days)) if (d.getTime() > t0) out.push(d.getTime());
+    return out;
+  }
+  d.setHours(d.getHours() - (d.getHours() % Math.max(1, Math.round(every / 3_600_000))));
+  for (let t = d.getTime(); t <= t1; t += every) if (t > t0) out.push(t);
+  return out;
+}
+
+/**
  * Hand-rolled SVG area/line chart in HUD colours with a hover readout, drawn in a dark inset well.
  * Stretches to its container width; strokes stay crisp via non-scaling-stroke.
  */
@@ -88,14 +107,7 @@ export const Chart = memo(function Chart({
     );
   }
 
-  const tickTimes: number[] = [];
-  if (ticks) {
-    const d = new Date(geo.t0);
-    d.setMinutes(0, 0, 0);
-    if (ticks.every >= 86_400_000) d.setHours(0);
-    else d.setHours(d.getHours() - (d.getHours() % Math.max(1, Math.round(ticks.every / 3_600_000))));
-    for (let t = d.getTime(); t <= geo.t1; t += ticks.every) if (t > geo.t0) tickTimes.push(t);
-  }
+  const tickTimes = ticks ? chartTicks(geo.t0, geo.t1, ticks.every) : [];
 
   const hoverT = hover === null ? null : geo.t0 + (hover / W) * (geo.t1 - geo.t0);
   const nearest = (pts: SeriesPoint[], t: number): SeriesPoint | undefined => {

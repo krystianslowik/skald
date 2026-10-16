@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - The player count drops back to 0 when the last player leaves. The game's "connection lost" line still counts the player who just left, so the count used to stay at 1 until the next join or restart: "apply settings when the server is empty" never fired, the agent kept asking the bridge for positions with nobody on, and `valheim_players_online` stayed at 1. The game's 10-minute network summary showing 0 connections now also resets it.
+- The day labels on the 7-day online chart stay on local midnight across a daylight saving change. After the autumn change they used to sit an hour early, under the previous day's name, with Sunday shown twice.
 
 ## [0.10.2] - 2026-10-16
 
