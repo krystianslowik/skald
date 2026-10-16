@@ -5,6 +5,7 @@ import type { AgentAsset, AgentSource, PiecesBox, ToolsRequest } from "./agent";
 import { ADMIN_COOKIE, ADMIN_IDLE_MS, createAdminSession, createSession, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS, sessionHash, verifyAdminSession, verifySession } from "./auth";
 import type { Hub } from "./hub";
 import type { MapCache, MapView } from "./map";
+import { buildInfoMetric } from "./buildinfo";
 import type { SendResult } from "./notify";
 import {
   ACCESS_LISTS,
@@ -54,6 +55,10 @@ export interface AppDeps {
   notifyTest?: () => Promise<SendResult>;
   verifyPassword?: (password: string, hash: string) => Promise<boolean>;
   clock?: () => number;
+  /** This build's Skald release; "dev" when unset. */
+  version?: string;
+  /** A newer Skald release, from the update check; unset when it is off. */
+  update?: () => { version: string; url: string } | null;
 }
 
 /**
@@ -103,6 +108,7 @@ export function createApp(deps: AppDeps): Hono {
   const authed = (c: Context) => verifySession(deps.sessionSecret, getCookie(c, SESSION_COOKIE), clock());
 
   app.get("/healthz", (c) => c.text("ok"));
+  app.get("/metrics", (c) => c.text(buildInfoMetric("web", deps.version ?? "dev"), 200, { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" }));
 
   // Public on purpose: the login screen is translated before anyone signs in.
   // Never put anything here that should stay behind the password.
@@ -194,6 +200,7 @@ export function createApp(deps: AppDeps): Hono {
       history: deps.hub.history(),
       metricsConfigured: deps.metricsConfigured ?? true,
       metrics: await deps.metrics(),
+      webVersion: deps.version ?? "dev",
     };
     c.header("Cache-Control", "no-store");
     return c.json(body);
@@ -498,6 +505,7 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/admin/status", async (c) => {
     c.header("Cache-Control", "no-store");
     const body: AdminStatus = { bridge: await bridgeStatus(), required: adminRequired, unlocked: isAdmin(c), idleMs: ADMIN_IDLE_MS, notifyConfigured: Boolean(deps.notifyTest) };
+    body.update = deps.update?.() ?? null;
     return c.json(body);
   });
 

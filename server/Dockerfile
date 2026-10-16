@@ -20,6 +20,8 @@ RUN npm run build
 
 FROM --platform=$BUILDPLATFORM oven/bun:1.4-alpine AS server-build
 ARG TARGETARCH
+# The release (2026.10.0), compiled into the binary; local builds report "dev".
+ARG VERSION=dev
 WORKDIR /server
 COPY server/package.json server/bun.lock ./
 RUN bun install --frozen-lockfile --production
@@ -30,7 +32,7 @@ RUN case "$TARGETARCH" in \
       arm64) target=bun-linux-arm64-musl ;; \
       *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
     esac \
- && bun build --compile --minify --target="$target" src/server.ts --outfile /out/skald-web
+ && bun build --compile --minify --target="$target" --define "process.env.SKALD_VERSION=\"$VERSION\"" src/server.ts --outfile /out/skald-web
 
 FROM oven/bun:1.4-alpine
 RUN addgroup -g 65532 -S nonroot && adduser -u 65532 -S nonroot -G nonroot \

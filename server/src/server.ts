@@ -8,9 +8,12 @@ import { Hub } from "./hub";
 import { MapCache } from "./map";
 import { MockAgent, mockMetrics } from "./mock";
 import { DiscordNotifier } from "./notify";
+import { VERSION } from "./buildinfo";
 import { cachedMetrics, fetchMetrics } from "./prom";
 import { mountStatic } from "./static";
 import type { LiveMessage } from "./types";
+import { UpdateChecker } from "./update";
+import { isRelease } from "./version";
 
 // `skald-web hash-password`: reads a password on stdin, prints an argon2id hash
 // for PANEL_PASSWORD_HASH or ADMIN_PASSWORD_HASH. Handled before loadConfig, which needs the secrets.
@@ -60,6 +63,10 @@ const metrics = cachedMetrics(async () => {
   return cfg.mock ? mockMetrics() : null;
 });
 
+// Once at boot, then again on the first admin status after 12 h. Release builds only.
+const updates = cfg.updateCheck && isRelease(VERSION) ? new UpdateChecker({ current: VERSION }) : null;
+void updates?.check();
+
 const app = createApp({
   sessionSecret: cfg.sessionSecret,
   passwordHash,
@@ -73,6 +80,8 @@ const app = createApp({
   trustedIpHeader: cfg.trustedIpHeader,
   map: new MapCache((etag) => agent.map(etag), cfg.mapSpoilers),
   notifyTest: notifier ? () => notifier.test() : undefined,
+  version: VERSION,
+  update: updates ? () => updates.get() : undefined,
 });
 
 // Static SPA, resolved relative to the process CWD (image: /app/bin -> /app/web/dist).
@@ -113,5 +122,5 @@ const server = Bun.serve<WsData>({
 });
 
 console.log(
-  `skald-web listening on ${server.hostname}:${server.port} (locale ${cfg.locale}, tz ${cfg.timeZone}, metrics ${metricsConfigured ? "on" : "off"}, map spoilers ${cfg.mapSpoilers ? "on" : "off"}, admin password ${adminPasswordHash ? "on" : "off"}, discord ${notifier ? "on" : "off"})${cfg.mock ? " (mock agent)" : ""}`,
+  `skald-web ${VERSION} listening on ${server.hostname}:${server.port} (locale ${cfg.locale}, tz ${cfg.timeZone}, metrics ${metricsConfigured ? "on" : "off"}, map spoilers ${cfg.mapSpoilers ? "on" : "off"}, admin password ${adminPasswordHash ? "on" : "off"}, discord ${notifier ? "on" : "off"}, update check ${updates ? "on" : "off"})${cfg.mock ? " (mock agent)" : ""}`,
 );

@@ -40,6 +40,8 @@ export interface Config {
   discordWebhookUrl: string;
   /** Which notifications go to Discord (DISCORD_NOTIFY); all when unset. */
   discordNotify: NotifyKind[];
+  /** Ask GitHub for a newer Skald release (SKALD_UPDATE_CHECK, off with `off`). */
+  updateCheck: boolean;
 }
 
 type Env = Record<string, string | undefined>;
@@ -100,5 +102,6 @@ export function loadConfig(env: Env = process.env): Config {
     mockBridge: opt("MOCK_BRIDGE", "on").toLowerCase(),
     discordWebhookUrl,
     discordNotify,
+    updateCheck: !["off", "false", "0", "no"].includes(opt("SKALD_UPDATE_CHECK", "on").trim().toLowerCase()),
   };
 }
