@@ -11,7 +11,7 @@ above them.
 
 ### Fixed
 
-- On narrow phones the Treasury cut off the time of each backup and its file name, so backups from the same day looked alike. The date and time now wrap onto a second line when space is short, and the full file name is always shown.
+- On narrow phones the Treasury cut off the time of each backup and its file name, so backups from the same day looked alike. The date and time now wrap onto a second line when space is short, and the full file name is always shown. The restore list in the admin sheet keeps the time the same way.
 
 ## [2026.10.0] - 2026-10-16
 
