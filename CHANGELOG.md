@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Changed
+
+- The admin sheet says first when your session is view-only, with the Unlock button at the top, instead of at the bottom after all the controls.
+
 ## [2026.10.0] - 2026-10-16
 
 The first calendar-versioned release (it follows 0.10.2). When upgrading:

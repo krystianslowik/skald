@@ -1742,6 +1742,7 @@ export const pl: Dict = {
   "admin.you.open": "Każdy z hasłem do panelu może tego używać. Ustaw ADMIN_PASSWORD_HASH, aby wymagać osobnego hasła admina.",
   "admin.you.unlocked": "Sesja administratora odblokowana. Wygasa po {min} min bezczynności.",
   "admin.you.locked": "Tylko podgląd",
+  "admin.you.lockedBody": "Polecenia, listy adminów i banów oraz kopie zapasowe wymagają hasła administratora. Odblokuj teraz albo podaj je przy pierwszej akcji.",
   "admin.you.lock": "Zablokuj",
   "admin.you.unlock": "Odblokuj",
   "admin.unlock.title": "Hasło admina",
