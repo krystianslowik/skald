@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.2] - 2026-10-16
+
 ### Changed
 
 - The admin sheet says first when your session is view-only, with the Unlock button at the top, instead of at the bottom after all the controls.
