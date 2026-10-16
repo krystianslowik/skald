@@ -1,6 +1,6 @@
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { AdminCommand, AdminStatus, ApiState, Platform } from "../../types";
-import { getAdminStatus, runAdmin, type AdminOutcome, type KitLine } from "../../lib/admin";
+import type { AdminCommand, AdminStatus, AgentEvent, ApiState, Platform, RestoreBackup } from "../../types";
+import { getAdminStatus, postAdmin, runAdmin, type AdminOutcome, type KitLine } from "../../lib/admin";
 import { Unauthorized } from "../../lib/api";
 import { useWorldMap } from "../../lib/useWorldMap";
 import { useI18n } from "../../i18n";
@@ -24,6 +24,7 @@ export type AdminView = (
   | { kind: "items"; target: Target; lines?: KitLine[] }
   | { kind: "creatures"; target: Target }
   | { kind: "point"; x: number; z: number }
+  | { kind: "restore"; backup: RestoreBackup }
 ) & { picked?: { x: number; z: number } };
 
 /** A map tap someone is waiting for (teleport here, spawn here). */
@@ -44,13 +45,20 @@ export type Blocker = "off" | "unreachable" | "disabled" | "token" | "loading" |
 
 export interface Admin {
   status: AdminStatus | null;
-  /** The agent has a bridge at all; without one the admin UI stays hidden. */
+  /**
+   * The admin layer is there: the web tier answered. The access lists and
+   * world restore need no bridge, so the panel shows even without one.
+   */
   present: boolean;
+  /** The agent has a bridge (working or not); without one only the file tools show. */
+  bridgeOn: boolean;
   blocker: Blocker;
   /** May command now (no admin password, or unlocked). */
   unlocked: boolean;
   refresh(): void;
   run(command: AdminCommand, body?: Record<string, unknown>, opts?: { quiet?: boolean; done?: string }): Promise<AdminOutcome>;
+  /** Any other admin POST (lists, restore), with the same unlock-and-retry and toasts. */
+  post(path: string, body: Record<string, unknown>, opts?: { quiet?: boolean; done?: string }): Promise<AdminOutcome>;
   open(view: AdminView): void;
   close(): void;
   /** Ask for the admin password; resolves true once unlocked. */
@@ -65,6 +73,10 @@ export interface Admin {
   /** Players at the fire, for the target pickers. */
   players: { name: string; platform?: Platform }[];
   mainBase: { x: number; z: number } | null;
+  /** The world's name, which a restore asks to have typed. */
+  world: string;
+  /** Recent events, for following a restore's steps. */
+  events: AgentEvent[];
 }
 
 const AdminCtx = createContext<Admin | null>(null);
@@ -130,12 +142,12 @@ export function AdminProvider({
     [refresh],
   );
 
-  const run = useCallback<Admin["run"]>(
-    async (command, body = {}, opts = {}) => {
+  const call = useCallback(
+    async (send: () => Promise<AdminOutcome>, opts: { quiet?: boolean; done?: string } = {}) => {
       let res: AdminOutcome;
       try {
-        res = await runAdmin(command, body);
-        if (res.needsAdmin && (await unlock())) res = await runAdmin(command, body);
+        res = await send();
+        if (res.needsAdmin && (await unlock())) res = await send();
       } catch (e) {
         if (e instanceof Unauthorized) unauth.current();
         return { ok: false, status: 401 };
@@ -149,6 +161,8 @@ export function AdminProvider({
     },
     [unlock, refresh, toast, t],
   );
+  const run = useCallback<Admin["run"]>((command, body = {}, opts) => call(() => runAdmin(command, body), opts), [call]);
+  const post = useCallback<Admin["post"]>((path, body, opts) => call(() => postAdmin(path, body), opts), [call]);
 
   const startPick = useCallback(
     (req: PickRequest) => {
@@ -190,7 +204,8 @@ export function AdminProvider({
   }, [load]);
 
   const bridge = status?.bridge;
-  const present = !!bridge && bridge.reason !== "off";
+  const present = !!status;
+  const bridgeOn = !!bridge && bridge.reason !== "off";
   let blocker: Blocker = null;
   if (!online) blocker = "offline";
   else if (!bridge) blocker = "agent";
@@ -202,10 +217,12 @@ export function AdminProvider({
     () => ({
       status,
       present,
+      bridgeOn,
       blocker,
       unlocked,
       refresh,
       run,
+      post,
       open: setView,
       close: () => setView(null),
       unlock,
@@ -216,8 +233,10 @@ export function AdminProvider({
       toast,
       players: state.players,
       mainBase,
+      world: state.server.world,
+      events: state.history.events,
     }),
-    [status, present, blocker, unlocked, refresh, run, unlock, pick, startPick, completePick, cancelPick, toast, state.players, mainBase],
+    [status, present, bridgeOn, blocker, unlocked, refresh, run, post, unlock, pick, startPick, completePick, cancelPick, toast, state.players, mainBase, state.server.world, state.history.events],
   );
 
   return (

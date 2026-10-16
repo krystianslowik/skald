@@ -46,6 +46,9 @@ function setup(
     async bridge() {
       return { status: 404, body: { ok: false, message: "not found" } };
     },
+    async tools() {
+      return { status: 404, body: { ok: false, message: "not found" } };
+    },
     async settings(req) {
       settingsCalls.push(req);
       return opts.settings ? opts.settings(req) : { status: 404, body: { ok: false, message: "not found" } };

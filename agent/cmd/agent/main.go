@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/krystianslowik/skald/agent/internal/access"
 	"github.com/krystianslowik/skald/agent/internal/bridge"
 	"github.com/krystianslowik/skald/agent/internal/config"
 	"github.com/krystianslowik/skald/agent/internal/events"
@@ -116,6 +117,7 @@ func main() {
 		Icons:      icons.New(cfg.IconsDir),
 		Terrain:    terr,
 		Bridge:     br,
+		Access:     access.New(cfg.ConfigDir),
 		Logger:     logger,
 	})
 	go s.RunSettingsWatcher(ctx)

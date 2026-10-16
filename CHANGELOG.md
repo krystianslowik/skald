@@ -9,12 +9,16 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - Discord notifications. Set `DISCORD_WEBHOOK_URL` and skald-web posts joins and leaves (with the visit length), deaths, raids, server stops and starts, new join codes, game updates and failed admin commands or settings to a Discord channel, in the `SKALD_LOCALE` language. `DISCORD_NOTIFY` picks which ones. Players arriving together share one message, a quick restart does not flap, world saves are never sent, and nothing from before skald-web started is repeated. The admin sheet says whether notifications are on and sends a test message.
+- Admins and bans in the admin sheet: see who is on `adminlist.txt` and `bannedlist.txt` (by name where Skald knows the player), add an id by hand or a player at the fire in one tap, and remove entries. Bans go through the bridge when the game runs with it and apply at once; otherwise the file changes and the change applies at the next start. Comments and unknown lines in the files are kept. Every change is a line in the Saga, without the platform id.
+- Restore a world backup from the admin sheet, from the image's backups or Skald's own safety copies. It needs the world name typed and an empty server, saves and verifies a copy of the current world first, stops the server, puts the backup in place and starts the server again, with each step in the Saga. Any failure after the stop puts the previous world back. See [Admins, bans and world restore](docs/configuration.md#admins-bans-and-world-restore).
+- The admin sheet opens without the bridge too, with the Discord status, the lists and backups.
 
 ### Changed
 
 - Game build `l-1.0.20` is a tested build for the admin bridge, so admin commands run on it without a confirmation from the panel.
 - Floor plans show their roofs when zoomed out: a translucent roof lies over each house, so a base reads as buildings from afar, and fades away as you zoom in until the rooms are clear. This includes one-storey houses, whose roofs were never drawn before. A storey picked in the floor switcher shows without it.
 - With item icons on, floor plans take their colours from the materials they are built of: wood, core wood, stone, iron, black marble, grausten and ashwood each get a tone from their item icon. Without icons the plans look as before.
+- Admins, bans and world restore need the agent to write the config volume, which the example deployments do not allow; the sheet shows the lists and backups read-only until it can.
 
 ### Fixed
 

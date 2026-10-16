@@ -510,3 +510,80 @@ behind your access layer, or set an admin password:
 - The admin session is a second signed cookie, tied to the panel session,
   that lasts 30 minutes from the last admin action. "Lock" ends it at once;
   logging out ends both.
+
+## Admins, bans and world restore
+
+The admin sheet also edits the game's `adminlist.txt` and `bannedlist.txt`
+and restores world backups. Neither needs the bridge, so the sheet opens even
+without one. Both are admin-only: with `ADMIN_PASSWORD_HASH` set, even
+reading the lists needs an unlocked admin session, because they show raw
+platform ids. Ids never reach `/api/state`, the event stream or the Saga,
+which name the player or show a masked id (`X_***4321`).
+
+### Write access for the agent
+
+The example deployments mount `/config` read-only in the agent, and the
+sheet then shows the lists and backups but cannot change anything. To turn
+the writes on, the agent needs to create and rename files in `/config` and
+`/config/worlds_local` and to delete the old world's files. The simplest way
+is to run the game as the agent's user, so both own everything they write:
+
+- the game container: `PUID=65532` and `PGID=65532` (the image chowns
+  `/config` to them at every start; use an image with the fix for non-root
+  world directories, whose version the image README does not name, and check
+  the log for `UnauthorizedAccessException` after the first start);
+- the agent: drop `readOnly: true` from its `/config` mount (`:ro` in
+  Compose).
+
+### Admins and bans
+
+- One id per line; lines starting with `//`, blank lines and lines in
+  formats Skald does not know are kept as they are, in order. Files are
+  written to a temp file and renamed into place.
+- Accepted ids: the F2 panel's form (`X_` Xbox, `V_` Steam, `S_`, `N_`, `A_`
+  and digits), the long form the game logs (`Xbox_...`, `Steam_...`) and a
+  bare SteamID64. `V_n`, `Steam_n` and a bare `n` count as the same account.
+- Names come from the world's player list and from players the bridge has
+  seen. "Make admin" and "Ban" next to a player at the fire use the long id
+  the game reports. If admin rights do not take, add the id from the
+  player's F2 panel by hand.
+- Bans go through the bridge while the game runs with it (the game keeps the
+  list in memory and would overwrite the file), and apply at once. Without
+  the bridge, and for admins always, the file is changed and the change
+  applies at the next start. If the game container sets `ADMINLIST_IDS` or
+  `BANNEDLIST_IDS`, it overwrites the files at every start.
+- Every change is an `admin` event in the Saga ("Sigrun made Ragnar an
+  admin").
+
+### Restoring a backup
+
+The list shows the image's backups (`/config/backups/worlds-*.zip`) and
+Skald's own safety copies (`/config/skald-backups/pre-restore-*.zip`). A
+restore needs the world name typed, a long press, and an empty server. Then
+the agent:
+
+1. checks the archive: every entry name is refused if it is absolute or
+   climbs out with `..` (zip-slip), and it must hold files of this world;
+2. zips the current world (`worlds_local/<WORLD>/` and any pre-1.0
+   `<WORLD>.db`/`.fwl`) into `skald-backups/pre-restore-<time>.zip` and
+   verifies it: the sha256 of the file read back (also written next to it as
+   `.sha256`) and every entry read through its CRC;
+3. pauses the image's updater and stops the server through supervisord,
+   which waits for the shutdown save;
+4. extracts only this world's files into `worlds_local/.skald-restore-<time>/`;
+5. swaps by renames: the old world to `worlds_local/.skald-prev-<time>/`, the
+   restored one into place;
+6. starts the server and the updater again, and deletes the old world's
+   directory.
+
+Each step is a line in the Saga. If anything fails after the stop, the old
+world is renamed back (or, if that fails, extracted from the safety copy)
+and the server started; the live world is always either the old one or the
+new one, never half of each. Only if putting the old world back fails too
+does the server stay stopped, and the Saga names the safety copy.
+
+**To undo a restore**, restore the safety copy the same way: it is at the top
+of the list. By hand, with the server stopped: move
+`worlds_local/<WORLD>` aside and unzip the safety copy in `/config`
+(`unzip pre-restore-<time>.zip 'worlds_local/<WORLD>/*'`). Safety copies are
+never pruned; delete old ones yourself.

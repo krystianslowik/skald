@@ -1,5 +1,5 @@
 import { SseParser } from "./sse";
-import type { ActionName, ActionResult, AdminCommand, AdminRead, AgentEvent, AgentState, LogLine, MapSnapshot, SettingsRequest } from "./types";
+import type { AccessListName, AccessOp, ActionName, ActionResult, AdminCommand, AdminRead, AgentEvent, AgentState, LogLine, MapSnapshot, SettingsRequest } from "./types";
 
 export interface ActionResponse {
   status: number;
@@ -32,6 +32,13 @@ export type BridgeRequest =
   | { op: "read"; name: AdminRead }
   | { op: "run"; command: AdminCommand; body: Record<string, unknown>; actor: string };
 
+/** The admin and ban lists and the world restore: agent file tools, bridge or not. */
+export type ToolsRequest =
+  | { op: "access" }
+  | { op: "access-change"; list: AccessListName; change: AccessOp; body: Record<string, unknown>; actor: string }
+  | { op: "restore-info" }
+  | { op: "restore"; body: Record<string, unknown>; actor: string };
+
 /** Everything the web tier needs from the agent; implemented over HTTP and by the mock. */
 export interface AgentSource {
   getState(): Promise<AgentState>;
@@ -56,6 +63,8 @@ export interface AgentSource {
   nature(box: PiecesBox, spoilers: boolean, etag: string | null, signal: AbortSignal): Promise<Response>;
   /** The admin bridge: 404 when the agent has no BRIDGE_TOKEN. */
   bridge(req: BridgeRequest): Promise<Proxied>;
+  /** Access lists and restore; 404 from agents older than this feature. */
+  tools(req: ToolsRequest): Promise<Proxied>;
 }
 
 const SETTINGS_ROUTE: Record<SettingsRequest["op"], [method: string, path: string]> = {
@@ -174,6 +183,26 @@ export class HttpAgent implements AgentSource {
     }
     // The agent gives the plugin 8 s; this leaves room for its answer.
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, { method: body ? "POST" : "GET", headers, body, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch {
+      json = { ok: false, error: `HTTP ${res.status}` };
+    }
+    return { status: res.status, body: json };
+  }
+
+  async tools(req: ToolsRequest): Promise<Proxied> {
+    const path = req.op === "access" ? "/access" : req.op === "access-change" ? `/access/${req.list}/${req.change}` : "/restore";
+    const headers: Record<string, string> = this.headers();
+    let body: string | undefined;
+    if (req.op === "access-change" || req.op === "restore") {
+      headers["Content-Type"] = "application/json";
+      headers["X-Skald-Actor"] = req.actor;
+      body = JSON.stringify(req.body);
+    }
+    // The ban list may go through the bridge (8 s); a restore's checks read the archive's directory.
+    const res = await this.fetchImpl(`${this.baseUrl}${path}`, { method: body ? "POST" : "GET", headers, body, signal: AbortSignal.timeout(20_000) });
     let json: unknown;
     try {
       json = await res.json();

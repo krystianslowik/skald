@@ -2,7 +2,7 @@
 // the per-device things (the name in the saga, saved kits).
 
 import type { TextKey } from "../i18n";
-import type { AdminCatalog, AdminCommand, AdminRead, AdminResult, AdminStatus, BanEntry, LivePlayer } from "../types";
+import type { AccessListName, AccessOp, AccessState, AdminCatalog, AdminCommand, AdminRead, AdminResult, AdminStatus, BanEntry, LivePlayer, RestoreInfo } from "../types";
 import { Unauthorized } from "./api";
 
 /** A command's outcome; `status` 403 + `needsAdmin` means: unlock first. */
@@ -70,14 +70,17 @@ export async function lockAdmin(): Promise<void> {
 function outcome(status: number, body: AdminResult | null, fallback: string): AdminOutcome {
   const b = body ?? { ok: false, error: fallback };
   const needsAdmin = status === 403 && (b as { error?: string }).error === "admin_required";
-  return { ...b, ok: status === 200 && b.ok !== false, status, needsAdmin };
+  return { ...b, ok: status >= 200 && status < 300 && b.ok !== false, status, needsAdmin };
 }
 
 /** POST /api/admin/{command}; the name rides along URI-encoded (header values are bytes). */
-export async function runAdmin(command: AdminCommand, body: Record<string, unknown> = {}): Promise<AdminOutcome> {
+export const runAdmin = (command: AdminCommand, body: Record<string, unknown> = {}) => postAdmin(`/api/admin/${command}`, body);
+
+/** Any admin POST, signed with this device's name. */
+export async function postAdmin(path: string, body: Record<string, unknown> = {}): Promise<AdminOutcome> {
   let res: Response;
   try {
-    res = await fetch(`/api/admin/${command}`, {
+    res = await fetch(path, {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json", "X-Skald-Name": encodeURIComponent(storedActorName()) },
@@ -114,6 +117,16 @@ export const getCatalog = () => getAdmin<AdminCatalog>("/api/admin/catalog");
 export const getBans = () => getAdmin<{ data: BanEntry[] }>("/api/admin/read/bans").then((r) => ({ ...r, data: r.data?.data ?? null }));
 export const getAdminPlayers = () => getAdmin<{ data: { players: (LivePlayer & { y: number })[] } }>("/api/admin/players").then((r) => ({ ...r, data: r.data?.data.players ?? null }));
 export const readAdmin = (name: AdminRead) => getAdmin<{ data: unknown }>(`/api/admin/read/${name}`);
+export const getAccess = () => getAdmin<{ data: AccessState }>("/api/admin/access").then((r) => ({ ...r, data: r.data?.data ?? null }));
+export const getRestoreInfo = () => getAdmin<{ data: RestoreInfo }>("/api/admin/restore").then((r) => ({ ...r, data: r.data?.data ?? null }));
+export const accessPath = (list: AccessListName, op: AccessOp) => `/api/admin/access/${list}/${op}`;
+
+/**
+ * Platform ids the agent accepts, as the game's lists take them: the F2 panel's
+ * X_/V_/S_/N_/A_ form, the long Xbox_/Steam_ form from the logs, or a bare
+ * SteamID64. Case-sensitive, like the game.
+ */
+export const PLATFORM_ID = /^([XVSNA]_[0-9]{1,24}|(Xbox|Steam|PlayStation|Nintendo)_[0-9]{1,24}|7656119[0-9]{10})$/;
 
 // ---- kits ------------------------------------------------------------------
 

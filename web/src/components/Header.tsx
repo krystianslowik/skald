@@ -152,7 +152,7 @@ export const Header = memo(function Header({
   );
 });
 
-/** Opens the admin sheet; hidden when the agent has no bridge. A dot says why it cannot act. */
+/** Opens the admin sheet. A dot says the bridge cannot act. */
 function AdminButton() {
   const { t } = useI18n();
   const admin = useAdmin();
@@ -169,7 +169,7 @@ function AdminButton() {
       className="plaque press relative grid h-8 w-8 place-items-center coarse:h-11 coarse:w-11"
     >
       <AdminGlyph size={18} />
-      {admin.blocker && <span aria-hidden className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-ember" />}
+      {admin.bridgeOn && admin.blocker && <span aria-hidden className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-ember" />}
     </button>
   );
 }
