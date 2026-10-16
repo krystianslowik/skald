@@ -35,6 +35,8 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test-setup.ts"],
+    // Vitest blanks CSS by default; the font test reads the stylesheet's source with `?raw`.
+    css: { include: [/index\.css/] },
   },
   build: {
     outDir: "dist",

@@ -93,6 +93,16 @@ const dictEn = en as Record<string, unknown>;
 const dictPl = pl as Record<string, unknown>;
 const searchCache = new Map<string, string>();
 
+/**
+ * Items the game itself marks as cut: Valheim's own name for them carries the
+ * word UNUSED (ShieldKnight is "Knight shield UNUSED" in every language), so
+ * they cannot be had in play and are never offered.
+ */
+export function isUnusedItem(name: string): boolean {
+  const label = dictEn[`item.${name}`];
+  return typeof label === "string" && /\bUNUSED\b/.test(label);
+}
+
 /** Everything an item can be found by: its names in both languages and its prefab. */
 export function itemSearchText(name: string): string {
   let s = searchCache.get(name);

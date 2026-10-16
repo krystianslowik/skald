@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- The admin item picker no longer offers items the game itself marks as unused, such as the "Knight shield UNUSED" left over in Valheim's files.
+
 ## [2026.10.4] - 2026-10-16
 
 ### Changed

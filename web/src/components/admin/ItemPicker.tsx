@@ -2,7 +2,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useMemo, useState } from "react";
 import { loadKits, PRESET_KITS, saveKits, stacksOf, stackSize, type Kit, type KitLine } from "../../lib/admin";
 import { useIconSheet } from "../../lib/itemicons";
-import { fold, itemLabel, itemMatches } from "../../lib/storage";
+import { fold, isUnusedItem, itemLabel, itemMatches } from "../../lib/storage";
 import { en } from "../../i18n/en";
 import { useI18n } from "../../i18n";
 import { Sheet } from "../Sheet";
@@ -43,7 +43,7 @@ export function ItemPicker({ target: initial, lines: initialLines, onClose }: { 
   const all = useMemo(() => {
     const names = new Set(KNOWN);
     if (sheet) for (const n of Object.keys(sheet.items)) names.add(n);
-    return [...names].map((name) => ({ name, label: itemLabel(name, lookup), icon: !!sheet?.items[name] })).sort((a, b) => Number(b.icon) - Number(a.icon) || a.label.localeCompare(b.label));
+    return [...names].filter((name) => !isUnusedItem(name)).map((name) => ({ name, label: itemLabel(name, lookup), icon: !!sheet?.items[name] })).sort((a, b) => Number(b.icon) - Number(a.icon) || a.label.localeCompare(b.label));
   }, [sheet, lookup]);
 
   const shown = useMemo(() => {
