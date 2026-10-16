@@ -20,6 +20,8 @@ LABEL org.opencontainers.image.title=skald-bridge \
       org.opencontainers.image.description="Skald bridge: a server-side BepInEx plugin with live admin commands for the Skald agent" \
       org.opencontainers.image.licenses=Apache-2.0 \
       org.opencontainers.image.version=$VERSION
+# The release this image belongs to; the plugin keeps its own version.
+ENV SKALD_VERSION=$VERSION
 COPY --from=build /src/out/SkaldBridge.dll /skald/SkaldBridge.dll
 COPY --chmod=0755 install.sh /skald/install.sh
 CMD ["/skald/install.sh"]
