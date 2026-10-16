@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/krystianslowik/skald/agent/internal/access"
 	"github.com/krystianslowik/skald/agent/internal/bridge"
 	"github.com/krystianslowik/skald/agent/internal/events"
 	"github.com/krystianslowik/skald/agent/internal/icons"
@@ -52,6 +53,9 @@ type Options struct {
 	// Bridge is the admin plugin in the game process; nil (no BRIDGE_TOKEN)
 	// leaves the /bridge routes unregistered (404).
 	Bridge *bridge.Client
+	// Access edits adminlist.txt and bannedlist.txt in ConfigDir; nil leaves
+	// the /access routes unregistered (404).
+	Access *access.Store
 	Logger *slog.Logger
 	// PingEvery is the SSE keepalive interval; 15 s when zero.
 	PingEvery time.Duration
@@ -68,6 +72,8 @@ type Server struct {
 	// restarting is set while a stop+start runs: the bridge plugin is down
 	// with the game then.
 	restarting atomic.Bool
+	// restoring is set while a world restore runs (restarting is too).
+	restoring atomic.Bool
 	// procs is the last supervisor answer, shared by /state and /metrics.
 	procMu sync.Mutex
 	procs  procSnapshot
@@ -112,6 +118,12 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("POST /settings/apply", s.settingsApply)
 		mux.HandleFunc("DELETE /settings/apply", s.settingsCancel)
 	}
+	if s.opt.Access != nil {
+		mux.HandleFunc("GET /access", s.accessGet)
+		mux.HandleFunc("POST /access/{list}/{op}", s.accessChange)
+	}
+	mux.HandleFunc("GET /restore", s.restoreGet)
+	mux.HandleFunc("POST /restore", s.restorePost)
 	if s.opt.Bridge != nil {
 		mux.HandleFunc("GET /bridge/status", s.bridgeStatus)
 		mux.HandleFunc("GET /bridge/players", s.bridgePlayers)

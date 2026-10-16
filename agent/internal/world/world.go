@@ -256,34 +256,72 @@ func parseFWL2(b []byte) (*Meta, error) {
 	// has a name, seed and day.
 	if keys, players, err := parseFWL2Keys(rd); err == nil {
 		m.Modifiers, m.WorldKeys = splitStartingKeys(keys)
-		m.KnownPlayers = players
+		m.KnownPlayers = len(players)
 	}
 	return m, nil
 }
 
+// KnownPlayer is one entry of the world's player list. The id is private:
+// only the agent's admin-list routes use it, to put names on list entries.
+type KnownPlayer struct {
+	ID   string
+	Name string
+}
+
+// KnownPlayers reads the player list of the latest save generation in dir.
+func KnownPlayers(dir string) ([]KnownPlayer, error) {
+	n, ok := latestGeneration(dir)
+	if !ok {
+		return nil, errors.New("no save generation")
+	}
+	b, err := readHead(filepath.Join(dir, "_main."+strconv.Itoa(n)+".fwl2"), maxFWL2)
+	if err != nil {
+		return nil, err
+	}
+	rd := bytes.NewReader(b)
+	if _, err := rd.Seek(8, io.SeekStart); err != nil {
+		return nil, errShort
+	}
+	for range 2 { // name, seedName
+		if _, err := readString(rd); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := rd.Seek(16, io.SeekCurrent); err != nil { // seed, uid, worldGenVersion
+		return nil, errShort
+	}
+	_, players, err := parseFWL2Keys(rd)
+	return players, err
+}
+
 // parseFWL2Keys reads bool needsDB, the starting keys and the player list
-// (counted, then skipped).
-func parseFWL2Keys(rd *bytes.Reader) ([]string, int, error) {
+// (platform id, name, name, hex id each).
+func parseFWL2Keys(rd *bytes.Reader) ([]string, []KnownPlayer, error) {
 	if _, err := rd.ReadByte(); err != nil {
-		return nil, 0, errShort
+		return nil, nil, errShort
 	}
 	keys, err := readStrings(rd, maxKeys)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, err
 	}
-	var players int32
-	if err := binary.Read(rd, binary.LittleEndian, &players); err != nil {
-		return nil, 0, errShort
+	var count int32
+	if err := binary.Read(rd, binary.LittleEndian, &count); err != nil {
+		return nil, nil, errShort
 	}
-	if players < 0 || players > maxPlayers {
-		return nil, 0, errors.New("bad player count")
+	if count < 0 || count > maxPlayers {
+		return nil, nil, errors.New("bad player count")
 	}
-	for i := 0; i < int(players)*4; i++ {
-		if _, err := readString(rd); err != nil {
-			return nil, 0, err
+	players := make([]KnownPlayer, 0, count)
+	for range count {
+		var f [4]string
+		for j := range f {
+			if f[j], err = readString(rd); err != nil {
+				return nil, nil, err
+			}
 		}
+		players = append(players, KnownPlayer{ID: f[0], Name: f[1]})
 	}
-	return keys, int(players), nil
+	return keys, players, nil
 }
 
 // splitStartingKeys turns "preset combat_default:resources_muchmore:..."

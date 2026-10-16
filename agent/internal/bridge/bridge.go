@@ -134,6 +134,8 @@ type Client struct {
 	// nameByUserID remembers which platform id belonged to which character,
 	// so a ban list entry can be shown by name. Never served.
 	nameByUserID map[string]string
+	// userIDByName (lower-cased name) is the reverse, for the last player list.
+	userIDByName map[string]string
 	// banIDs maps the opaque ids handed to the web back to ban list entries.
 	banIDs   map[string]string
 	health   *Health
@@ -173,6 +175,7 @@ func New(opt Options) *Client {
 		uidByName:    map[string]string{},
 		nameByUID:    map[string]string{},
 		nameByUserID: map[string]string{},
+		userIDByName: map[string]string{},
 		banIDs:       map[string]string{},
 		pending:      map[string]map[string]any{},
 	}
@@ -471,6 +474,7 @@ func (c *Client) Players(ctx context.Context) ([]Player, error) {
 	c.mu.Lock()
 	c.uidByName = map[string]string{}
 	c.nameByUID = map[string]string{}
+	c.userIDByName = map[string]string{}
 	for _, p := range body.Players {
 		uid := p.UID.String()
 		c.uidByName[strings.ToLower(p.Name)] = uid
@@ -481,6 +485,9 @@ func (c *Client) Players(ctx context.Context) ([]Player, error) {
 		}
 		if id != "" && len(c.nameByUserID) < 1000 {
 			c.nameByUserID[strings.ToLower(id)] = p.Name
+		}
+		if id != "" {
+			c.userIDByName[strings.ToLower(p.Name)] = id
 		}
 		out = append(out, Player{
 			Name:         p.Name,
@@ -537,6 +544,63 @@ func (c *Client) Bans(ctx context.Context) ([]Ban, error) {
 	}
 	c.mu.Unlock()
 	return out, nil
+}
+
+// BanEntries reads the game's ban list as it stores it. For the agent's own
+// admin-list routes only; never served as is to a viewer.
+func (c *Client) BanEntries(ctx context.Context) ([]string, error) {
+	data, err := c.call(ctx, http.MethodGet, "/v1/bans", "", nil)
+	if err != nil {
+		return nil, err
+	}
+	var list []string
+	if err := json.Unmarshal(data, &list); err != nil {
+		return nil, &Error{http.StatusBadGateway, "bad ban list"}
+	}
+	return list, nil
+}
+
+// BanEntry bans a platform id (or a connected player by name) live, and
+// UnbanEntry lifts one ban list entry. The plugin writes bannedlist.txt and
+// its audit line becomes the `admin` event.
+func (c *Client) BanEntry(ctx context.Context, who, actor string) error {
+	return c.post(ctx, "/v1/ban", who, actor)
+}
+
+func (c *Client) UnbanEntry(ctx context.Context, entry, actor string) error {
+	return c.post(ctx, "/v1/unban", entry, actor)
+}
+
+func (c *Client) post(ctx context.Context, path, player, actor string) error {
+	if err := c.gate(ctx); err != nil {
+		return err
+	}
+	_, err := c.call(ctx, http.MethodPost, path, actor, map[string]any{"player": player})
+	return err
+}
+
+// UserIDs maps the connected players of the last player list (lower-cased
+// names) to their platform ids. A copy; private to the agent.
+func (c *Client) UserIDs() map[string]string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[string]string, len(c.userIDByName))
+	for name, id := range c.userIDByName {
+		out[name] = id
+	}
+	return out
+}
+
+// Names is every platform id this agent has seen connected, with its
+// character name. A copy; private to the agent.
+func (c *Client) Names() map[string]string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[string]string, len(c.nameByUserID))
+	for id, name := range c.nameByUserID {
+		out[id] = name
+	}
+	return out
 }
 
 // ---- reads and commands -----------------------------------------------------

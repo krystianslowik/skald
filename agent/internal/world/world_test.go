@@ -268,3 +268,17 @@ func TestRealWorld(t *testing.T) {
 	t.Logf("day %d, modifiers %v, world keys %v, known players %d, global keys %v, bosses %v",
 		m.Day, m.Modifiers, m.WorldKeys, m.KnownPlayers, m.GlobalKeys, m.Bosses)
 }
+
+func TestKnownPlayers(t *testing.T) {
+	got, err := KnownPlayers(progressFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []KnownPlayer{{ID: "Xbox_2533274900000001", Name: "ragnar#1111"}, {ID: "Steam_76561190000000003", Name: "bjornthebold"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("KnownPlayers = %+v", got)
+	}
+	if _, err := KnownPlayers(t.TempDir()); err == nil {
+		t.Fatal("no save should be an error")
+	}
+}
