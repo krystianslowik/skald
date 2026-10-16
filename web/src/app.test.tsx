@@ -474,6 +474,44 @@ describe("App", () => {
     render(<App />);
     await waitFor(() => expect(screen.getByPlaceholderText("Speak the word")).toBeInTheDocument());
   });
+
+  it.each([
+    ["a 502 from /api/me", () => new Response("bad gateway", { status: 502 })],
+    ["no network", () => Promise.reject(new TypeError("Failed to fetch"))],
+  ])("keeps a signed-in viewer on the panel on %s, and only a 401 signs them out", async (_, fail) => {
+    memoryStorage();
+    let signedIn = true;
+    const sockets: { onclose: (() => void) | null }[] = [];
+    vi.stubGlobal(
+      "WebSocket",
+      class {
+        readyState = 0;
+        onopen = null;
+        onmessage = null;
+        onclose: (() => void) | null = null;
+        constructor() {
+          sockets.push(this);
+        }
+        close() {}
+      },
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url) === "/api/config") return Response.json({ locale: "en" });
+        if (String(url) === "/api/me") return fail();
+        if (signedIn) return new Response("down", { status: 503 });
+        return new Response("{}", { status: 401 });
+      }),
+    );
+    render(<App />);
+    expect(await screen.findByText("Stirring the embers...")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Speak the word")).not.toBeInTheDocument();
+    // The session really expired: the server drops the socket, and the panel's check sees the 401.
+    signedIn = false;
+    act(() => sockets.at(-1)?.onclose?.());
+    await waitFor(() => expect(screen.getByPlaceholderText("Speak the word")).toBeInTheDocument());
+  });
 });
 
 describe("i18n", () => {

@@ -28,9 +28,11 @@ export default function App() {
   }, [locale]);
 
   useEffect(() => {
+    // Unknown (offline, server restarting): open the panel anyway. It keeps
+    // retrying, and the first 401 it meets sends the viewer to the login.
     me()
       .then((ok) => setAuth(ok ? "in" : "out"))
-      .catch(() => setAuth("out"));
+      .catch(() => setAuth("in"));
   }, []);
 
   const toLogin = useCallback(() => setAuth("out"), []);

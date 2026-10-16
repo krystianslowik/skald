@@ -16,9 +16,15 @@ export async function getConfig(): Promise<PublicConfig> {
   return (await res.json()) as PublicConfig;
 }
 
+/**
+ * Only a 401 means signed out. Anything else that is not a 2xx (no network, a
+ * 502 while the server restarts) throws: the session is unknown, not gone.
+ */
 export async function me(): Promise<boolean> {
   const res = await fetch("/api/me", { credentials: "same-origin" });
-  return res.ok;
+  if (res.status === 401) return false;
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return true;
 }
 
 export type LoginResult = { ok: true } | { ok: false; retryAfter?: number };

@@ -29,7 +29,7 @@ if (!("ResizeObserver" in window)) {
   };
 }
 class FakeWebSocket {
-  // Never opens: nothing is sent over it.
+  // Never connects: CONNECTING for good, so nothing is sent over it.
   static OPEN = 1;
   readyState = 0;
   send() {}
