@@ -17,6 +17,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A pile of chests each pushed a little sideways (0.4 to 0.6 m is common) lost its bottom chest, which the map then counted as a stack of its own: the stack label was off by one. Chests now stack when their footprints overlap and one stands a level (or a shelf) over the other, so a pile stays whole and two columns side by side stay apart.
 - A stack of chests is listed as it stands, the top chest first, so "1st from the bottom" is the lowest row of the list.
 - Boss altars marked by a Vegvisir showed the game's raw token ("$enemy_gdking"); they now carry the boss's name, and any other token is put into words.
 

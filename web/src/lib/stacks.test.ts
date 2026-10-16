@@ -26,6 +26,40 @@ describe("groupStacks", () => {
     expect(stacks[0]!.chests.map((c) => c.id)).toEqual(["x@3,3", "x@3,3#1", "x@3,3#2"]);
   });
 
+  it("keeps a pile set 0.6 m sideways per level whole, and the column beside it apart", () => {
+    // From a real save: three wood chests piled by hand, each pushed sideways, and a second column 0.9 m away in z.
+    const stacks = groupStacks([
+      chest("piece_chest_wood@-371,6#2", -371.05, 6.05, 45.5),
+      chest("piece_chest_wood@-371,5", -371.7, 5.2, 43.75),
+      chest("piece_chest_wood@-371,6#1", -371.15, 6.05, 44.65),
+      chest("piece_chest_wood@-371,5#1", -371.25, 5.2, 44.65),
+      chest("piece_chest_wood@-372,6", -371.75, 6.1, 43.75),
+      chest("piece_chest_wood@-371,5#2", -371.05, 5.2, 45.5),
+    ]);
+    expect(stacks).toHaveLength(2);
+    const front = stacks.find((s) => s.chests[0]!.z === 6.1)!;
+    const back = stacks.find((s) => s.chests[0]!.z === 5.2)!;
+    expect(front.chests.map((c) => [c.x, c.y])).toEqual([
+      [-371.75, 43.75],
+      [-371.15, 44.65],
+      [-371.05, 45.5],
+    ]);
+    expect(back.chests.map((c) => c.y)).toEqual([43.75, 44.65, 45.5]);
+    expect(back.chests.every((c) => c.z === 5.2)).toBe(true);
+    // The real bottom is the first of three, not the second chest the first of two.
+    expect(stackIndex(stacks).get("piece_chest_wood@-372,6")).toMatchObject({ index: 0 });
+    expect(stackIndex(stacks).get("piece_chest_wood@-371,6#1")!.stack.chests).toHaveLength(3);
+  });
+
+  it("chains a chest on a shelf over a pile, but not one on the loft floor above", () => {
+    const stacks = groupStacks([chest("a", 10, 4, 31.7), chest("b", 10.3, 4.1, 32.6), chest("shelf", 10.2, 3.9, 34.5), chest("loft", 10, 4, 37.6)]);
+    expect(stacks.map((s) => s.chests.map((c) => c.id))).toEqual([["a", "b", "shelf"], ["loft"]]);
+  });
+
+  it("never stacks chests side by side at one height, however close", () => {
+    expect(groupStacks([chest("a", 0, 0, 30), chest("b", 0.6, 0, 30.05)])).toHaveLength(2);
+  });
+
   it("lists a stack top first, each chest keeping its level from the bottom", () => {
     // Two wood chests on a floor at 31.85 m, the upper one's pivot 0.9 m higher; handed over top first.
     const [stack] = groupStacks([chest("piece_chest_wood@40,-12#1", 40.15, -11.9, 32.75), chest("piece_chest_wood@40,-12", 40.1, -12.05, 31.85)]);
