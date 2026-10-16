@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- With `ADMIN_PASSWORD_HASH` set, the server settings sheet and the server password are the admin's: a viewer is asked to unlock first, and `GET /api/settings/password` answers 403 without an admin session. On the join panel a viewer shares the join code alone.
+- The Forge card is even: the processor, memory and network gauges are built the same way, each with its bar, chart and legend. The world facts, modifiers and processes sit in one band under them.
+- Processes read by what they do ("game server", "backups", "updates"), a finished first-start bootstrap shows as done instead of a red "exited", and the container's cron and syslog fold into one "system" line. Every state is translated.
+- The Runes of power are three compact rows, each the thing to press and hold, with the status in words and a line of fire along the bottom while held. Beside the Treasury they share its height.
+- On wide screens the join code and the players at the fire sit side by side, centred on each other, and an empty fire is one quiet line instead of a tall empty board.
+- Close in on the map, a wood has one outline round its edge instead of one round every tree, and trees are drawn by species: swamp trees dark, small and gnarled, conifers as low stars, birches small and light, oaks broad.
+
+### Fixed
+
+- A stack of chests is listed as it stands, the top chest first, so "1st from the bottom" is the lowest row of the list.
+- Boss altars marked by a Vegvisir showed the game's raw token ("$enemy_gdking"); they now carry the boss's name, and any other token is put into words.
+
 ## [0.10.2] - 2026-10-16
 
 ### Changed
