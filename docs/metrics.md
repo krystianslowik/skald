@@ -4,6 +4,7 @@ The agent serves the Prometheus text format on `:9464/metrics`:
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
+| `skald_build_info` | gauge | `component`, `version` | Always 1; `component="agent"` and the Skald release it was built from (`dev` for local builds) |
 | `valheim_server_up` | gauge | | 1 when the status file says `running` |
 | `valheim_server_status` | gauge | `status` | Current status file value (only the current one is emitted) |
 | `valheim_server_started_timestamp_seconds` | gauge | | When supervisord started the server process |
@@ -30,6 +31,18 @@ The agent serves the Prometheus text format on `:9464/metrics`:
 | `valheim_terrain_tiles_total` | counter | `result` | Terrain tiles answered since agent start: `cache`, `bridge` (sampled by the bridge), `grid` (cut from the Job's grid), `error` |
 | `valheim_terrain_bridge_sample_seconds_total` | counter | | Time the bridge plugin spent sampling terrain tiles (its own measurement, without rests) |
 | `valheim_terrain_cache_bytes` | gauge | | Bytes of terrain tiles in the agent's cache |
+
+skald-web answers `GET /metrics` on its own port (`8080`) with one metric,
+`skald_build_info{component="web",version="..."} 1`, so Prometheus can tell
+when the agent and the panel run different releases:
+
+```promql
+count(count by (version) (skald_build_info)) > 1
+```
+
+That endpoint needs no session, like `/healthz`. It only tells which release
+runs; if that should not be public, keep `/metrics` away from your ingress or
+tunnel.
 
 [`deploy/monitoring`](../deploy/monitoring) has:
 
