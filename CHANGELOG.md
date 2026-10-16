@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- On a tablet (about 640 to 1023 px wide) the header no longer squeezes the server name and status into a sliver beside the version and buttons: the name and status keep their own row, with the facts and buttons below them, until the screen is wide enough for one row.
+
 ## [2026.10.0] - 2026-10-16
 
 The first calendar-versioned release (it follows 0.10.2). When upgrading:
