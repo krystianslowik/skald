@@ -36,6 +36,9 @@ const (
 	// KindPlatform is "PlayFab socket ... received local Platform ID X_id":
 	// a connecting client's platform, before its character is known.
 	KindPlatform = "platform"
+	// KindSocketLost is "Keep socket for playfab/X, try to reconnect": the
+	// connection with that remote id dropped.
+	KindSocketLost = "socket_lost"
 	// KindAdmin is the Skald bridge plugin's audit line: one with the
 	// arguments before a command runs (Args set) and one with its outcome
 	// after (Result set).
@@ -77,8 +80,12 @@ type Match struct {
 	// UID is the peer id part of a character ZDOID (character) or the owner
 	// of an abandoned object (abandoned).
 	UID      string
-	Platform string  // platform: one of the Platform* constants
-	Ms       float64 // world_saved; 0 when the line had no duration
+	Platform string // platform: one of the Platform* constants
+	// Remote is the PlayFab remote id of a connection (platform,
+	// socket_lost). It only pairs lines inside the agent and is never
+	// published.
+	Remote string
+	Ms     float64 // world_saved; 0 when the line had no duration
 	// admin: Actor and Cmd ("POST /v1/spawn") on both lines; Args is the raw
 	// JSON on the first, Result (ok, error, timeout, exception) and Detail
 	// (the response or the error) on the second.
@@ -153,8 +160,12 @@ var table = []rule{
 		n, _ := strconv.Atoi(s[2])
 		return []Match{{Kind: KindPlayerCount, Count: n, Lost: s[1] != ""}}
 	}},
-	{regexp.MustCompile(`received local Platform ID ([A-Za-z]+)_`), func(s []string) []Match {
-		return []Match{{Kind: KindPlatform, Platform: PlatformOf(s[1])}}
+	{regexp.MustCompile(`(?:remote ID playfab/([0-9A-Za-z]+) )?received local Platform ID ([A-Za-z]+)_`), func(s []string) []Match {
+		return []Match{{Kind: KindPlatform, Remote: s[1], Platform: PlatformOf(s[2])}}
+	}},
+	// The connection dropped; a reconnect logs a fresh platform line.
+	{regexp.MustCompile(`Keep socket for playfab/([0-9A-Za-z]+)`), func(s []string) []Match {
+		return []Match{{Kind: KindSocketLost, Remote: s[1]}}
 	}},
 	// A death: the character ZDOID is reset to 0:0 while the player is dead.
 	// The respawn about 8 s later is a new ZDOID with the same peer id.

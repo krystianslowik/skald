@@ -84,11 +84,15 @@ func TestMatchMsg(t *testing.T) {
 		{"connection lost", `Player connection lost server "My Valheim" that has join code 482915, now 1 player(s)`,
 			[]Match{{Kind: KindPlayerCount, Count: 1, Lost: true}}},
 		{"platform xbox", `PlayFab socket with remote ID playfab/0A1B2C3D4E5F6071 received local Platform ID Xbox_2533274900000001`,
-			[]Match{{Kind: KindPlatform, Platform: PlatformXbox}}},
+			[]Match{{Kind: KindPlatform, Remote: "0A1B2C3D4E5F6071", Platform: PlatformXbox}}},
 		{"platform steam", `PlayFab socket with remote ID playfab/1B2C3D4E5F607182 received local Platform ID Steam_76561190000000003`,
-			[]Match{{Kind: KindPlatform, Platform: PlatformSteam}}},
+			[]Match{{Kind: KindPlatform, Remote: "1B2C3D4E5F607182", Platform: PlatformSteam}}},
 		{"platform other", `PlayFab socket with remote ID playfab/1 received local Platform ID Stadia_1`,
-			[]Match{{Kind: KindPlatform, Platform: PlatformUnknown}}},
+			[]Match{{Kind: KindPlatform, Remote: "1", Platform: PlatformUnknown}}},
+		{"platform without remote id", `received local Platform ID Xbox_2533274900000001`,
+			[]Match{{Kind: KindPlatform, Platform: PlatformXbox}}},
+		{"socket kept", `Keep socket for playfab/0A1B2C3D4E5F6071, try to reconnect before timeout`,
+			[]Match{{Kind: KindSocketLost, Remote: "0A1B2C3D4E5F6071"}}},
 		{"abandoned", `Destroying abandoned non persistent zdo 111111111:65 owner 111111111`,
 			[]Match{{Kind: KindAbandoned, UID: "111111111"}}},
 		{"abandoned negative", `Destroying abandoned non persistent zdo -22222222:50 owner -22222222`,
@@ -158,7 +162,7 @@ func TestStartupLog(t *testing.T) {
 				counts = append(counts, m)
 			case KindPlayfab:
 				lastPlayfab = m.State
-			case KindCharacter, KindWorldSaved, KindWorldBackup, KindRaid, KindNetStats, KindPlatform, KindAbandoned:
+			case KindCharacter, KindWorldSaved, KindWorldBackup, KindRaid, KindNetStats, KindPlatform, KindSocketLost, KindAbandoned:
 				t.Errorf("unexpected %s match in startup log", m.Kind)
 			}
 		}
