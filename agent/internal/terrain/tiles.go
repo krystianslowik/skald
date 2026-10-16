@@ -92,7 +92,9 @@ type TileOptions struct {
 	CacheDir string
 	// CacheBytes bounds the cache; DefaultCacheBytes when zero.
 	CacheBytes int64
-	Logger     *slog.Logger
+	// Prewarm samples levels 0..PrewarmLevels of each bridge build in the background.
+	Prewarm bool
+	Logger  *slog.Logger
 }
 
 // Tiles serves the pyramid.
@@ -109,6 +111,8 @@ type Tiles struct {
 	// sem lets one bridge call run at a time: the plugin samples one tile
 	// at a time anyway, and a queue here is cheaper than 429s there.
 	sem chan struct{}
+	// warmed is the build prewarm last started for.
+	warmed string
 
 	// Counters for /metrics.
 	stats TileStats
@@ -229,10 +233,15 @@ func (ts *Tiles) plan(ctx context.Context) (*plan, error) {
 			Build: k.build(), TileSize: TileSize, Apron: Apron, MaxLevel: MaxLevel, GridLevel: -1, Radius: WorldRadius,
 			Source: "bridge", WaterLevel: WaterLevel, Biomes: BiomeNames, Forest: info.Forest, Palette: &info.Palette,
 		}}
-		// The grid serves its levels only when it is from exactly this world and build.
-		if gl >= 0 && gm.SeedHash == k.SeedHash && gm.WorldGenVersion == k.WorldGenVersion && gm.GameBuild == k.GameBuild {
+		// The grid serves its levels only when it is from exactly this world
+		// and build, and when the bridge has no forest channel either: grid
+		// tiles have none, and mixing them with forest-shaded bridge tiles
+		// would change a place's colour between zoom levels. The low levels
+		// are pre-warmed from the bridge instead (prewarm).
+		if gl >= 0 && info.Forest == "none" && gm.SeedHash == k.SeedHash && gm.WorldGenVersion == k.WorldGenVersion && gm.GameBuild == k.GameBuild {
 			p.grid, p.doc.GridLevel = gm, gl
 		}
+		ts.prewarm(p)
 		return p, nil
 	}
 	if gl < 0 {
@@ -243,6 +252,52 @@ func (ts *Tiles) plan(ctx context.Context) (*plan, error) {
 		Build: k.build(), TileSize: TileSize, Apron: Apron, MaxLevel: gl, GridLevel: gl, Radius: WorldRadius,
 		Source: "grid", Stale: ginfo.Stale, WaterLevel: WaterLevel, Biomes: BiomeNames, Forest: "none",
 	}}, nil
+}
+
+// PrewarmLevels are the levels sampled in the background once per build,
+// so the whole-world view paints from the cache: 85 tiles.
+const PrewarmLevels = 3
+
+// prewarm fills levels 0..PrewarmLevels of a bridge build into the cache,
+// one tile at a time behind viewers' requests (they share the one bridge
+// slot), once per build per agent run.
+func (ts *Tiles) prewarm(p *plan) {
+	if !ts.opt.Prewarm {
+		return
+	}
+	b := p.doc.Build
+	ts.mu.Lock()
+	if ts.warmed == b {
+		ts.mu.Unlock()
+		return
+	}
+	ts.warmed = b
+	ts.mu.Unlock()
+	go func() {
+		for z := 0; z <= PrewarmLevels; z++ {
+			for y := 0; y < 1<<z; y++ {
+				for x := 0; x < 1<<z; x++ {
+					if !TileInWorld(z, x, y) {
+						continue
+					}
+					ctx, cancel := context.WithTimeout(context.Background(), 2*bridge.TerrainTimeout)
+					_, _, err := ts.Tile(ctx, z, x, y, b)
+					cancel()
+					var te *TileError
+					if errors.As(err, &te) && te.Status == http.StatusNotFound {
+						// The build changed or the bridge went away: stop, a new plan starts again.
+						ts.mu.Lock()
+						if ts.warmed == b {
+							ts.warmed = ""
+						}
+						ts.mu.Unlock()
+						return
+					}
+				}
+			}
+		}
+		ts.opt.Logger.Info("terrain tiles pre-warmed", "build", b, "levels", PrewarmLevels)
+	}()
 }
 
 // Doc is what the web needs to ask for tiles; errNoTerrain when there is none.

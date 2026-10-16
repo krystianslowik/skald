@@ -112,6 +112,7 @@ func main() {
 		Source:     tileSource,
 		CacheDir:   cfg.TerrainCacheDir,
 		CacheBytes: int64(cfg.TerrainCacheMB) << 20,
+		Prewarm:    true,
 		Logger:     logger,
 	})
 

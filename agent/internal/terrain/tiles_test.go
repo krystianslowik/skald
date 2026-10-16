@@ -290,7 +290,15 @@ func TestBridgeTilesAreCachedAndKeyed(t *testing.T) {
 
 func TestGridServesLowLevelsOnlyForTheSameBuild(t *testing.T) {
 	ctx := context.Background()
-	fb := &fakeBridge{info: info}
+	// A bridge with a forest channel: the grid (which has none) is not
+	// mixed in, so a place has one colour at every level.
+	withForest := newTerrainTiles(gridTerrain(t, 512), &fakeBridge{info: info}, t.TempDir())
+	if doc, _ := withForest.Doc(ctx); doc.GridLevel != -1 {
+		t.Fatalf("grid mixed with forest tiles: %+v", doc)
+	}
+	noForest := info
+	noForest.Forest = "none"
+	fb := &fakeBridge{info: noForest}
 	ts := newTerrainTiles(gridTerrain(t, 512), fb, t.TempDir())
 	doc, _ := ts.Doc(ctx)
 	if doc.Source != "bridge" || doc.GridLevel != 1 {
@@ -303,7 +311,7 @@ func TestGridServesLowLevelsOnlyForTheSameBuild(t *testing.T) {
 		t.Fatalf("level 2: %v calls %d", err, fb.calls)
 	}
 	// Another game build than the grid's: every level from the bridge.
-	fb2 := &fakeBridge{info: info}
+	fb2 := &fakeBridge{info: noForest}
 	fb2.info.GameBuild = "l-1.0.18"
 	ts2 := newTerrainTiles(gridTerrain(t, 512), fb2, t.TempDir())
 	doc2, _ := ts2.Doc(ctx)
@@ -425,5 +433,44 @@ func TestCacheEvictsLeastRecentlyUsed(t *testing.T) {
 	}
 	if b, ok := m.get("c"); !ok || b[0] != 3 {
 		t.Fatal("memory cache lost the newest")
+	}
+}
+
+func TestPrewarmFillsTheLowLevelsOnce(t *testing.T) {
+	fb := &fakeBridge{info: info}
+	ts := NewTiles(nil, TileOptions{Source: fb, Prewarm: true, Logger: quiet()})
+	if _, err := ts.Doc(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want := 0
+	for z := 0; z <= PrewarmLevels; z++ {
+		for y := 0; y < 1<<z; y++ {
+			for x := 0; x < 1<<z; x++ {
+				if TileInWorld(z, x, y) {
+					want++
+				}
+			}
+		}
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		fb.mu.Lock()
+		n := fb.calls
+		fb.mu.Unlock()
+		if n == want {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d of %d tiles pre-warmed", n, want)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	// Asking again for the same build starts nothing new.
+	_, _ = ts.Doc(context.Background())
+	time.Sleep(50 * time.Millisecond)
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+	if fb.calls != want {
+		t.Fatalf("%d calls after a second plan, want %d", fb.calls, want)
 	}
 }
