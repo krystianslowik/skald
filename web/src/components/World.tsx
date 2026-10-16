@@ -2,10 +2,11 @@ import { memo, useRef, useState } from "react";
 import type { WorldMeta } from "../types";
 import { useI18n } from "../i18n";
 import { mapUrl, type BossProgress } from "../lib/world";
+import { RelativeTime } from "./RelativeTime";
 
 /** World: in-game day, seed and a link to the world map. */
-export const World = memo(function World({ meta, now }: { meta: WorldMeta | null; now: number }) {
-  const { t, ago } = useI18n();
+export const World = memo(function World({ meta }: { meta: WorldMeta | null }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -45,7 +46,7 @@ export const World = memo(function World({ meta, now }: { meta: WorldMeta | null
         </div>
         <div>
           <dt className="text-xs text-ash">{t("world.savedOnDisk")}</dt>
-          <dd className="text-bone">{ago(meta.savedAt, now)}</dd>
+          <dd className="text-bone"><RelativeTime iso={meta.savedAt} /></dd>
         </div>
         <div className="col-span-2 sm:col-span-1">
           <a

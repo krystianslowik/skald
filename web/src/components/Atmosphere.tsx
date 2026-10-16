@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef } from "react";
-import { useReducedMotion } from "motion/react";
+import { useEmbers } from "../lib/embers";
 
 interface Ember {
   x: number;
@@ -58,15 +58,19 @@ function spawn(w: number, h: number, initial: boolean): Ember {
   };
 }
 
-/** Rising embers on a canvas behind the page. Paused when the tab is hidden, motion is reduced, or `paused` (the map covers them). */
+/**
+ * Rising embers on a canvas behind the page. Gone when switched off in the
+ * preferences (off by default under reduced motion); paused when the tab is
+ * hidden or `paused` (the map covers them).
+ */
 export const Embers = memo(function Embers({ intensity = 1, paused = false }: { intensity?: number; paused?: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const reduced = useReducedMotion();
+  const { on } = useEmbers();
 
   useEffect(() => {
     const canvas = ref.current;
     const ctx = canvas?.getContext?.("2d");
-    if (!canvas || !ctx || reduced || paused) return;
+    if (!canvas || !ctx || paused) return;
 
     let w = 0;
     let h = 0;
@@ -126,8 +130,9 @@ export const Embers = memo(function Embers({ intensity = 1, paused = false }: { 
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("resize", resize);
     };
-  }, [reduced, intensity, paused]);
+  }, [intensity, paused, on]);
 
+  if (!on) return null;
   return <canvas ref={ref} aria-hidden className="pointer-events-none fixed inset-0 z-1 h-full w-full" />;
 });
 

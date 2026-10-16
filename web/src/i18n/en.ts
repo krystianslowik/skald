@@ -53,6 +53,9 @@ export const en = {
   "sound.label": "Campfire crackle",
   "sound.on": "Campfire crackle: on",
   "sound.off": "Campfire crackle: off",
+  "embers.label": "Embers",
+  "embers.on": "Embers: on",
+  "embers.off": "Embers: off",
   "offline.title": "The fire has dimmed.",
   "offline.body": "Lost contact with the server. Showing the last known state and retrying; actions are paused.",
 

@@ -9,6 +9,14 @@ above them.
 
 ## [Unreleased]
 
+### Added
+
+- An Embers switch in the phone's Settings tab, next to the campfire crackle, turns off the sparks rising behind the page to save battery. Your choice is remembered in this browser. Until you choose, the embers are off when your system asks for reduced motion.
+
+### Changed
+
+- The dashboard costs less while it sits open: "5 min ago" labels and running times now update on their own every 15 seconds instead of redrawing the whole page.
+
 ## [2026.10.4] - 2026-10-16
 
 ### Changed

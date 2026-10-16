@@ -6,6 +6,7 @@ import { LocaleToggle, useI18n, type TextKey } from "../i18n";
 import { Flame, type FlameLevel } from "./Flame";
 import { preloadSettingsSheet, SettingsGlyph } from "./SettingsGlyph";
 import { WorldClock } from "./WorldClock";
+import { Elapsed } from "./RelativeTime";
 import { preloadAdmin, useAdmin } from "./admin/AdminContext";
 import { AdminGlyph } from "./admin/glyphs";
 import type { WorldClock as Clock } from "../types";
@@ -36,7 +37,6 @@ const toRunes = (s: string) =>
 export const Header = memo(function Header({
   server: s,
   online,
-  now,
   onLogout,
   settings,
   onSettings,
@@ -48,7 +48,6 @@ export const Header = memo(function Header({
 }: {
   server: ApiState["server"];
   online: boolean;
-  now: number;
   onLogout: () => void;
   /** Present when the agent can change server settings. */
   settings?: SettingsSummary | null;
@@ -63,9 +62,9 @@ export const Header = memo(function Header({
   /** Phones: one line of status, one row of facts, and the buttons live in the tab bar and the Settings tab. */
   compact?: boolean;
 }) {
-  const { t, duration } = useI18n();
+  const { t } = useI18n();
   const level = flameLevel(s, online);
-  const up = s?.serverStartedAt && s.status === "running" ? duration(now - Date.parse(s.serverStartedAt)) : null;
+  const since = s?.serverStartedAt && s.status === "running" ? s.serverStartedAt : null;
   return (
     <header className={compact ? "flex flex-col gap-3" : "flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-6"}>
       <div className={`flex min-w-0 items-center lg:flex-1 ${compact ? "gap-3" : "gap-4"}`}>
@@ -100,7 +99,7 @@ export const Header = memo(function Header({
         </div>
         <div>
           <dt className="text-xs text-ash">{t("header.burning")}</dt>
-          <dd className="whitespace-nowrap font-bold text-bone">{up ?? t("header.notBurning")}</dd>
+          <dd className="whitespace-nowrap font-bold text-bone">{since ? <Elapsed since={since} /> : t("header.notBurning")}</dd>
         </div>
         <WorldClock clock={clock} day={day} />
         {!compact && (

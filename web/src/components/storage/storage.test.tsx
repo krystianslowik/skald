@@ -122,7 +122,7 @@ describe("map storage", () => {
   it("finds items with the map search", () => {
     const picks: Marker[] = [];
     inLocale(
-      <MapLayers map={snap} markers={markers} layers={DEFAULT_LAYERS} counts={layerCounts(markers, snap)} onToggle={() => {}} onPick={(m) => picks.push(m)} now={Date.now()} />,
+      <MapLayers map={snap} markers={markers} layers={DEFAULT_LAYERS} counts={layerCounts(markers, snap)} onToggle={() => {}} onPick={(m) => picks.push(m)} />,
       "pl",
     );
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "żelazo" } });
@@ -220,7 +220,7 @@ describe("MapView focus", () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(snap)));
     const iron = snap.storage.filter((c) => c.items.some((i) => i.name === "Iron"));
     const onClear = vi.fn();
-    inLocale(<MapView seedName="s" saveKey="f" now={Date.now()} onClose={() => {}} focus={{ ids: iron.map((c) => c.id), open: iron[0]!.id, label: "Iron", key: 1 }} onFocusClear={onClear} />);
+    inLocale(<MapView seedName="s" saveKey="f" onClose={() => {}} focus={{ ids: iron.map((c) => c.id), open: iron[0]!.id, label: "Iron", key: 1 }} onFocusClear={onClear} />);
     expect(await screen.findByText(`Iron: ${iron.length} places`)).toBeInTheDocument();
     expect(await screen.findByRole("list", { name: "Contents" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Stop highlighting" }));

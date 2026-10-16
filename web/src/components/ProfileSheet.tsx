@@ -1,11 +1,12 @@
 import { motion, useReducedMotion } from "motion/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Badge, DailyPlay, PlayerProfile } from "../types";
 import { getPlayer } from "../lib/api";
 import { useI18n } from "../i18n";
 import { Sheet, SheetClose, SETTLE } from "./Sheet";
 import { PlatformGlyph } from "./PlatformGlyph";
 import { Shield } from "./Shield";
+import { RelativeTime } from "./RelativeTime";
 
 /** Intl formatters for the active language, built once per language. */
 function useFormats() {
@@ -22,8 +23,8 @@ function useFormats() {
 }
 
 /** A warrior's stats, last 30 days and badges, in a draggable sheet. */
-export default function ProfileSheet({ name, now, onClose }: { name: string; now: number; onClose: () => void }) {
-  const { t, ago } = useI18n();
+export default function ProfileSheet({ name, onClose }: { name: string; onClose: () => void }) {
+  const { t } = useI18n();
   const reduced = useReducedMotion() ?? false;
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   const [failed, setFailed] = useState(false);
@@ -62,7 +63,7 @@ export default function ProfileSheet({ name, now, onClose }: { name: string; now
                   <span aria-hidden>·</span>
                 </>
               )}
-              {profile ? (profile.online ? <span className="text-flame">{t("profile.atFireNow")}</span> : t("profile.lastSeen", { ago: ago(profile.lastSeen, now) })) : " "}
+              {profile ? (profile.online ? <span className="text-flame">{t("profile.atFireNow")}</span> : <RelativeTime iso={profile.lastSeen} format={(ago) => t("profile.lastSeen", { ago })} />) : " "}
             </p>
           </div>
           <SheetClose label={t("profile.close")} escLabel={t("key.esc")} onClose={close} />
@@ -73,7 +74,7 @@ export default function ProfileSheet({ name, now, onClose }: { name: string; now
       {!profile && !failed && <p className="mt-4 text-sm font-bold uppercase tracking-[0.08em] text-flame">{t("profile.loading")}</p>}
       {profile && (
         <motion.div initial={{ opacity: 0, y: reduced ? 0 : 8 }} animate={{ opacity: 1, y: 0 }} transition={SETTLE}>
-          <Stats p={profile} now={now} />
+          <Stats p={profile} />
           <section aria-labelledby="profile-days-h" className="mt-7">
             <h3 id="profile-days-h" className="plank-title mb-3 text-base">
               {t("profile.last30")}
@@ -95,15 +96,15 @@ export default function ProfileSheet({ name, now, onClose }: { name: string; now
   );
 }
 
-function Stats({ p, now }: { p: PlayerProfile; now: number }) {
-  const { t, tn, number, duration, ago } = useI18n();
+function Stats({ p }: { p: PlayerProfile }) {
+  const { t, tn, number, duration } = useI18n();
   const f = useFormats();
-  const rows: [string, string, string?][] = [
+  const rows: [string, ReactNode, string?][] = [
     [t("profile.playtime"), duration(p.playtimeMs)],
     [t("profile.sessions"), String(p.sessions), t("profile.longest", { value: duration(p.longestSessionMs) })],
     [t("profile.deaths"), `${p.deaths}`, t("profile.perHour", { n: number(p.deathsPerHour, 2) })],
     [t("profile.streak"), tn("profile.days", p.currentStreak), t("profile.longest", { value: tn("profile.days", p.longestStreak) })],
-    [t("profile.lastSeenLabel"), p.online ? t("profile.now") : ago(p.lastSeen, now)],
+    [t("profile.lastSeenLabel"), p.online ? t("profile.now") : <RelativeTime iso={p.lastSeen} />],
     [t("profile.firstSeen"), f.shortDate.format(new Date(p.firstSeen))],
   ];
   return (

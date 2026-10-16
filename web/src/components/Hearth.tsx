@@ -5,10 +5,11 @@ import { useI18n } from "../i18n";
 import { PlatformGlyph } from "./PlatformGlyph";
 import { PlayerName } from "./PlayerName";
 import { Shield } from "./Shield";
+import { Elapsed } from "./RelativeTime";
 
 /** Players at the fire: they step out of the dark as shields and leave as smoke. */
-export const Hearth = memo(function Hearth({ players, now }: { players: Player[]; now: number }) {
-  const { t, duration } = useI18n();
+export const Hearth = memo(function Hearth({ players }: { players: Player[] }) {
+  const { t } = useI18n();
   const reduced = useReducedMotion();
   const empty = players.length === 0;
   return (
@@ -33,7 +34,7 @@ export const Hearth = memo(function Hearth({ players, now }: { players: Player[]
                 <PlatformGlyph platform={p.platform} className="text-label" />
                 <PlayerName name={p.name} className="block min-w-0 truncate text-[0.9375rem] font-bold text-bone" />
               </span>
-              <span className="block text-xs text-flame/90">{duration(now - Date.parse(p.since))}</span>
+              <span className="block text-xs text-flame/90"><Elapsed since={p.since} /></span>
             </figcaption>
           </motion.figure>
         ))}

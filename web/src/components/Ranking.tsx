@@ -3,13 +3,14 @@ import { memo, useMemo, useState } from "react";
 import type { PlayerStats } from "../types";
 import { useI18n } from "../i18n";
 import { PlayerName } from "./PlayerName";
+import { RelativeTime } from "./RelativeTime";
 
 type Key = "playtime" | "deaths";
 
 const SETTLE = { type: "spring" as const, bounce: 0, visualDuration: 0.35 };
 
-export const Ranking = memo(function Ranking({ players, now }: { players: PlayerStats[]; now: number }) {
-  const { t, ago, duration } = useI18n();
+export const Ranking = memo(function Ranking({ players }: { players: PlayerStats[] }) {
+  const { t, duration } = useI18n();
   const reduced = useReducedMotion();
   const [by, setBy] = useState<Key>("playtime");
   const sorted = useMemo(
@@ -64,7 +65,7 @@ export const Ranking = memo(function Ranking({ players, now }: { players: Player
               </div>
               <div className="text-right text-sm tabular-nums">
                 <div className="font-bold text-bone">{by === "playtime" ? duration(p.playtimeMs) : p.deaths}</div>
-                <div className="text-[0.6875rem] text-ash">{p.online ? <span className="text-flame">{t("ranking.atFire")}</span> : ago(p.lastSeen, now)}</div>
+                <div className="text-[0.6875rem] text-ash">{p.online ? <span className="text-flame">{t("ranking.atFire")}</span> : <RelativeTime iso={p.lastSeen} />}</div>
               </div>
             </motion.li>
           );

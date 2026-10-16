@@ -28,7 +28,7 @@ describe("backup timestamps", () => {
     ];
     render(
       <I18nProvider locale="pl">
-        <Treasury backups={rows.map(([b]) => b)} now={Date.parse(at) + 3_600_000} />
+        <Treasury backups={rows.map(([b]) => b)} />
       </I18nProvider>,
     );
     for (const [b, time] of rows) {

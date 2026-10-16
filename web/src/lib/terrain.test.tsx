@@ -51,7 +51,7 @@ describe("terrain layer", () => {
   it("shows its toggle only when there is terrain, and says when it is stale", () => {
     const panel = (relief: "none" | "ready" | "stale") => (
       <I18nProvider locale="en">
-        <MapLayers map={snap} markers={markers} layers={DEFAULT_LAYERS} counts={layerCounts(markers, snap)} relief={relief} onToggle={() => {}} onPick={() => {}} now={Date.now()} />
+        <MapLayers map={snap} markers={markers} layers={DEFAULT_LAYERS} counts={layerCounts(markers, snap)} relief={relief} onToggle={() => {}} onPick={() => {}} />
       </I18nProvider>
     );
     const { rerender } = render(panel("none"));

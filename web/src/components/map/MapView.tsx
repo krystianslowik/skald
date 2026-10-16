@@ -57,7 +57,6 @@ function storedLayers(): Record<LayerId, boolean> {
 export default function MapView({
   seedName,
   saveKey,
-  now,
   onClose,
   asTab = false,
   focus = null,
@@ -65,7 +64,6 @@ export default function MapView({
 }: {
   seedName: string;
   saveKey: string;
-  now: number;
   onClose: () => void;
   asTab?: boolean;
   focus?: MapFocus | null;
@@ -132,7 +130,7 @@ export default function MapView({
       <div className="relative min-h-0 flex-1">
         <div id="map-panel-map" role="tabpanel" hidden={tab !== "map"} className="absolute inset-0">
           {map ? (
-            <SaveMap map={map} stale={load.status === "ready" && load.stale} seed={seed} now={now} focus={focus} onFocusClear={onFocusClear} />
+            <SaveMap map={map} stale={load.status === "ready" && load.stale} seed={seed} focus={focus} onFocusClear={onFocusClear} />
           ) : (
             <MapMessage load={load.status} onRetry={retry} />
           )}
@@ -186,14 +184,12 @@ function SaveMap({
   map,
   stale,
   seed,
-  now,
   focus,
   onFocusClear,
 }: {
   map: import("../../types").ApiMap;
   stale: boolean;
   seed: string;
-  now: number;
   focus: MapFocus | null;
   onFocusClear?: () => void;
 }) {
@@ -482,7 +478,7 @@ function SaveMap({
   const openPlayer = useMemo(() => (admin?.present ? (name: string) => admin.open({ kind: "player", name }) : undefined), [admin]);
 
   const reliefState = tiles ? (tiles.stale ? "stale" : "ready") : terrain.status === "ready" ? (terrain.doc.stale ? "stale" : "ready") : "none";
-  const panel = <MapLayers map={map} markers={markers} layers={layers} counts={counts} relief={reliefState} onToggle={toggle} onPick={pickResult} now={now} />;
+  const panel = <MapLayers map={map} markers={markers} layers={layers} counts={counts} relief={reliefState} onToggle={toggle} onPick={pickResult} />;
   const bottom = "bottom-[max(0.75rem,env(safe-area-inset-bottom))]";
 
   return (
