@@ -368,7 +368,7 @@ code. Each item is a yes/no:
    - a spawned Boar, then kill
    - tame a spawned Boar
    - a damaged piece repaired
-   - smelter fill
+   - fill kilns (wood only), then fill smelters with a chosen ore and coal, and with "keep the current ore"
    - crop grow
    - cartography-table reveal, after recording the map on the table once
    - pins
