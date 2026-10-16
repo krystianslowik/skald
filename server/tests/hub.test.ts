@@ -159,3 +159,19 @@ describe("Hub settings events", () => {
     expect(hub.getState().settings).toBeNull();
   });
 });
+
+describe("Hub bridge reads", () => {
+  it("never stores, shows or emits a bridge read that reached the audit trail", () => {
+    const store = new HistoryStore(":memory:");
+    const hub = new Hub(fakeAgent("A", []), store);
+    const seen: string[] = [];
+    hub.subscribe((m) => m.type === "event" && seen.push(m.event.type));
+    hub.ingest("A", ev(1, "admin", { actor: "dashboard-abc", command: "GET /v1/terrain/tile", result: "error", error: "too many terrain requests" }));
+    hub.ingest("A", ev(2, "admin", { actor: "jarl", command: "broadcast", result: "ok", text: "hi" }));
+    expect(store.all().map((e) => e.data.command)).toEqual(["broadcast"]);
+    expect(seen).toEqual(["admin"]);
+    // Rows stored by an older panel are hidden too.
+    store.insert("A", ev(3, "admin", { actor: "dashboard-abc", command: "GET /v1/terrain/info", result: "error", error: "x" }));
+    expect(hub.history().events.map((e) => e.data.command)).toEqual(["broadcast"]);
+  });
+});

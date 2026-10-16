@@ -253,6 +253,15 @@ export type AgentEventType =
 /** High-frequency types that are broadcast live but never stored in history. */
 export const UNSTORED_EVENTS: readonly AgentEventType[] = ["log", "net_stats", "positions"];
 
+/**
+ * A bridge read (for example the map's terrain tiles) that reached the admin
+ * audit trail. Reads are not admin commands: they are never stored, shown or
+ * notified, even when the bridge turns one away with "too many requests".
+ */
+export function isBridgeRead(ev: AgentEvent): boolean {
+  return ev.type === "admin" && typeof ev.data.command === "string" && ev.data.command.startsWith("GET ");
+}
+
 export interface AgentEvent {
   seq: number;
   ts: string;

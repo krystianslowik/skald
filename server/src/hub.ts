@@ -3,7 +3,7 @@ import { applyEvent } from "./apply";
 import type { HistoryStore } from "./db";
 import { deriveHistory } from "./history";
 import { deriveProfiles } from "./profiles";
-import { emptyAgentState, UNSTORED_EVENTS, type AgentEvent, type AgentEventType, type AgentState, type History, type LiveMessage, type LivePlayer, type PlayerProfile } from "./types";
+import { emptyAgentState, isBridgeRead, UNSTORED_EVENTS, type AgentEvent, type AgentEventType, type AgentState, type History, type LiveMessage, type LivePlayer, type PlayerProfile } from "./types";
 
 /** Live positions go out at most this often, whatever the agent sends. */
 const POSITIONS_EVERY_MS = 2_000;
@@ -140,6 +140,7 @@ export class Hub {
   ingest(epoch: string, ev: AgentEvent): void {
     // Volatile (seq 0): not part of the sequence the stream resumes from.
     if (ev.type === "positions") return this.positionsEvent(ev);
+    if (isBridgeRead(ev)) return;
     if (epoch === this.epoch && ev.seq <= this.lastSeq) return;
     this.epoch = epoch;
     this.lastSeq = ev.seq;

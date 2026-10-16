@@ -1,4 +1,4 @@
-import { UNSTORED_EVENTS, type AgentEvent, type AgentEventType, type History, type PlayerStats, type SeriesPoint } from "./types";
+import { isBridgeRead, UNSTORED_EVENTS, type AgentEvent, type AgentEventType, type History, type PlayerStats, type SeriesPoint } from "./types";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const RECENT_LIMIT = 200;
@@ -108,7 +108,7 @@ export function deriveHistory(events: AgentEvent[], now = Date.now()): History {
   }
 
   const online7d: SeriesPoint[] = [[seriesStart, valueAtStart], ...series, [now, current]];
-  const recent = capRecent(events.filter((e) => e.type !== "player_count" && !UNSTORED_EVENTS.includes(e.type)).reverse(), now);
+  const recent = capRecent(events.filter((e) => e.type !== "player_count" && !UNSTORED_EVENTS.includes(e.type) && !isBridgeRead(e)).reverse(), now);
   const players = [...stats.values()].sort((a, b) => b.playtimeMs - a.playtimeMs);
   return { players, events: recent, online7d };
 }
