@@ -11,7 +11,7 @@ It contains no game code. Game and BepInEx DLLs are needed to compile it, but
 they are fetched at build time and never committed. Only `SkaldBridge.dll`
 (under 100 KB) ships.
 
-Verified against game build `l-1.0.17`, BepInEx 5.4.23.5 (BepInExPack Valheim
+Verified against game builds `l-1.0.17` and `l-1.0.20`, BepInEx 5.4.23.5 (BepInExPack Valheim
 5.4.2351), image `ghcr.io/community-valheim-tools/valheim-server:1.4.0`.
 
 ## Layout

@@ -36,7 +36,7 @@ import (
 const DefaultTimeout = 8 * time.Second
 
 // DefaultTestedBuilds are the game builds the plugin was checked against.
-var DefaultTestedBuilds = []string{"l-1.0.17"}
+var DefaultTestedBuilds = []string{"l-1.0.17", "l-1.0.20"}
 
 // Command is one entry of the allow-list: the plugin route behind an agent
 // command name. Every command here changes the world.
