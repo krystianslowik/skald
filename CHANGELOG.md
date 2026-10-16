@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Changed
+
+- **Operators:** the `skald-web` image no longer carries the development mock agent, so its binary is a little smaller. `MOCK_AGENT=1` on a release image now stops at startup with a clear message instead of starting a fake server; the mock stays available through `bun run dev` in a source checkout.
+
 ## [2026.10.4] - 2026-10-16
 
 ### Changed

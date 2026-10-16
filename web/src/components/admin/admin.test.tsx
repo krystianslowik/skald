@@ -9,6 +9,7 @@ import { createLogStore } from "../../lib/useValheim";
 import { emptyAgentState, type AccessState, type AdminStatus, type AgentEvent, type ApiState, type RestoreInfo } from "../../types";
 import { restoreProgress, RestoreSheet } from "./WorldTools";
 import { AdminProvider } from "./AdminContext";
+import { BRIDGE_PLUGIN_VERSION } from "@server/bridgeplugin";
 
 function fixture(): ApiState {
   const s = emptyAgentState(new Date("2026-10-09T20:00:00Z"));
@@ -27,7 +28,7 @@ function status(over: Partial<AdminStatus> = {}, bridge: Partial<AdminStatus["br
     idleMs: 1_800_000,
     notifyConfigured: false,
     ...over,
-    bridge: { available: true, plugin: "0.1.1", gameBuild: "l-1.0.17", worldLoaded: true, timeFrozen: false, tested: true, acknowledged: false, testedBuilds: ["l-1.0.17"], commands: [], ...bridge },
+    bridge: { available: true, plugin: BRIDGE_PLUGIN_VERSION, gameBuild: "l-1.0.17", worldLoaded: true, timeFrozen: false, tested: true, acknowledged: false, testedBuilds: ["l-1.0.17"], commands: [], ...bridge },
   };
 }
 

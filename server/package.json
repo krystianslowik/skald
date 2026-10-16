@@ -7,7 +7,7 @@
     "dev": "MOCK_AGENT=1 bun --watch src/server.ts",
     "start": "bun src/server.ts",
     "build:web": "cd ../web && npm install --silent && npm run build",
-    "build": "bun run build:web && bun build --compile --minify src/server.ts --outfile bin/skald-web",
+    "build": "bun run build:web && bun build --compile --minify --define 'process.env.SKALD_NO_MOCK=\"1\"' src/server.ts --outfile bin/skald-web",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
