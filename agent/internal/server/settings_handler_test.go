@@ -350,6 +350,25 @@ func TestSettingsApplyWhenEmpty(t *testing.T) {
 	}
 }
 
+// The last player's connection-lost line still says "now 1" (B-001): the
+// leave must bring the count to 0 so the armed apply fires.
+func TestSettingsApplyWhenEmptyAfterLaggingLeave(t *testing.T) {
+	h := newSettingsHarness(t)
+	ctx := context.Background()
+	h.send(t, "PUT", "/settings", validBody())
+	h.send(t, "POST", "/settings/apply", map[string]string{"mode": "when_empty"})
+	h.tr.SetStatus("running")
+	for _, l := range lastLeaveLines {
+		h.tr.HandleLine(l)
+	}
+	t0 := time.Date(2026, 10, 16, 11, 40, 0, 0, time.UTC)
+	h.s.applyTick(ctx, t0)
+	h.s.applyTick(ctx, t0.Add(61*time.Second))
+	if h.store.Armed() {
+		t.Fatal("still armed with nobody online")
+	}
+}
+
 func TestSettingsApplyWhenEmptyWaitsForLockAndCancels(t *testing.T) {
 	h := newSettingsHarness(t)
 	ctx := context.Background()

@@ -279,3 +279,77 @@ func TestPlatformClaimFIFOAndExpiry(t *testing.T) {
 		t.Fatalf("platforms = %v, want %v", got, want)
 	}
 }
+
+// lastLeaveLines is the prod sequence from B-001: the only player leaves and
+// the connection-lost line still says "now 1".
+var lastLeaveLines = []string{
+	`supervisord: valheim-server 10/16/2026 11:20:00: Player joined server "W" that has join code 123456, now 1 player(s)`,
+	`supervisord: valheim-server 10/16/2026 11:20:30: Got character ZDOID from PlayerA : 123:5`,
+	`supervisord: valheim-server 10/16/2026 11:39:00: Player connection lost server "W" that has join code 123456, now 1 player(s)`,
+	`supervisord: valheim-server 10/16/2026 11:39:00: Destroying abandoned non persistent zdo 123:9 owner 123`,
+}
+
+func TestLastLeaveLaggingCountEndsAtZero(t *testing.T) {
+	h := events.New(100, 100)
+	tr := New(h)
+	tr.SetStatus("running")
+	for _, l := range lastLeaveLines {
+		tr.HandleLine(l)
+	}
+	if s := tr.Snapshot(); s.PlayersReported != 0 || len(s.Players) != 0 {
+		t.Fatalf("players=%d reported=%d", len(s.Players), s.PlayersReported)
+	}
+	var counts []any
+	for _, e := range drain(h) {
+		if e.Type == "player_count" {
+			counts = append(counts, e.Data["count"])
+		}
+	}
+	if !reflect.DeepEqual(counts, []any{1, 0}) {
+		t.Errorf("player_count events = %v", counts)
+	}
+}
+
+func TestLaggingCountAfterLeaveDoesNotRaise(t *testing.T) {
+	tr := New(events.New(100, 100))
+	tr.SetStatus("running")
+	// The abandoned objects come first, then the stale "now 1".
+	for _, i := range []int{0, 1, 3, 2} {
+		tr.HandleLine(lastLeaveLines[i])
+	}
+	if s := tr.Snapshot(); s.PlayersReported != 0 || len(s.Players) != 0 {
+		t.Fatalf("players=%d reported=%d", len(s.Players), s.PlayersReported)
+	}
+}
+
+func TestLeaveKeepsAConnectingClientCounted(t *testing.T) {
+	tr := New(events.New(100, 100))
+	tr.SetStatus("running")
+	for _, l := range []string{
+		lastLeaveLines[0], lastLeaveLines[1],
+		// PlayerB connects but is still loading: no character yet.
+		`supervisord: valheim-server 10/16/2026 11:38:00: Player joined server "W" that has join code 123456, now 2 player(s)`,
+		`supervisord: valheim-server 10/16/2026 11:39:00: Player connection lost server "W" that has join code 123456, now 2 player(s)`,
+		lastLeaveLines[3],
+	} {
+		tr.HandleLine(l)
+	}
+	if s := tr.Snapshot(); s.PlayersReported != 1 || len(s.Players) != 0 {
+		t.Fatalf("players=%d reported=%d", len(s.Players), s.PlayersReported)
+	}
+}
+
+func TestNetStatsZeroConnectionsResetsCount(t *testing.T) {
+	tr := New(events.New(100, 100))
+	tr.SetStatus("running")
+	tr.HandleLine(lastLeaveLines[0])
+	tr.HandleLine(lastLeaveLines[1])
+	tr.HandleLine(`supervisord: valheim-server 10/16/2026 11:45:08:  Connections 1 ZDOS:500  sent:3 recv:40`)
+	if s := tr.Snapshot(); s.PlayersReported != 1 || len(s.Players) != 1 {
+		t.Fatalf("players=%d reported=%d", len(s.Players), s.PlayersReported)
+	}
+	tr.HandleLine(`supervisord: valheim-server 10/16/2026 11:55:08:  Connections 0 ZDOS:500  sent:0 recv:0`)
+	if s := tr.Snapshot(); s.PlayersReported != 0 || len(s.Players) != 0 {
+		t.Fatalf("players=%d reported=%d", len(s.Players), s.PlayersReported)
+	}
+}

@@ -109,7 +109,13 @@ func (t *Tracker) HandleLine(raw string) {
 				t.hub.Publish("join_code", map[string]any{"code": m.Code})
 			}
 		case logparse.KindPlayerCount:
-			t.setCount(m.Count)
+			n := m.Count
+			if m.Lost && n > t.s.PlayersReported {
+				// The connection-lost count can lag by one: it may lower
+				// the count, never raise it. The leave lowers it.
+				n = t.s.PlayersReported
+			}
+			t.setCount(n)
 		case logparse.KindPlayfab:
 			if m.State != t.s.Playfab {
 				t.s.Playfab = m.State
@@ -158,6 +164,10 @@ func (t *Tracker) HandleLine(raw string) {
 			t.s.NetStats = &ns
 			if changed {
 				t.hub.Publish("net_stats", map[string]any{"connections": ns.Connections, "zdos": ns.ZDOs, "sent": ns.Sent, "recv": ns.Recv})
+			}
+			if ns.Connections == 0 {
+				// The game's own 10-minute summary: nobody is connected.
+				t.setCount(0)
 			}
 		}
 	}
@@ -226,12 +236,18 @@ func (t *Tracker) join(name, platform string, now time.Time) {
 	t.hub.Publish("player_join", map[string]any{"name": name, "platform": platform})
 }
 
-// leave removes one player. Caller holds mu.
+// leave removes one player and takes them off the reported count, which
+// the lagging connection-lost line leaves one too high. The count stays at
+// least the number still listed. Caller holds mu.
 func (t *Tracker) leave(name string) {
 	for i, p := range t.s.Players {
 		if p.Name == name {
 			t.s.Players = append(t.s.Players[:i:i], t.s.Players[i+1:]...)
 			t.hub.Publish("player_leave", map[string]any{"name": name})
+			if n := max(t.s.PlayersReported-1, len(t.s.Players)); n < t.s.PlayersReported {
+				t.s.PlayersReported = n
+				t.hub.Publish("player_count", map[string]any{"count": n})
+			}
 			return
 		}
 	}
