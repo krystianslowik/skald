@@ -542,7 +542,7 @@ function SaveMap({
               <h2 id="map-layers-h" className="plank-title flex-1 text-lg">
                 {t("map.layers")}
               </h2>
-              <SheetClose label={t("map.close")} escLabel={t("key.esc")} onClose={close} />
+              <SheetClose label={t("map.closeLayers")} escLabel={t("key.esc")} onClose={close} />
             </div>
           )}
         >

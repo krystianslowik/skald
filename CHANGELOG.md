@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- Polish process names in Settings now agree with their state ("harmonogram kopii zatrzymany", "aktualizator działa" instead of "kopie działa"), and the item-locations and map-layers sheets' close buttons say what they close ("Close item locations", "Close layers") instead of "Close map".
+
 ## [2026.10.1] - 2026-10-16
 
 ### Fixed

@@ -232,7 +232,7 @@ function WhereSheet({ entry, stacks, onClose, onShow }: { entry: StoreEntry; sta
               {number(entry.total)} · {tn("store.places", entry.places.length)}
             </p>
           </div>
-          <SheetClose label={t("map.close")} escLabel={t("key.esc")} onClose={close} />
+          <SheetClose label={t("store.closeWhere")} escLabel={t("key.esc")} onClose={close} />
         </div>
       )}
     >

@@ -27,6 +27,14 @@ describe("processRows", () => {
     expect(processRows({})).toEqual([]);
   });
 
+  it("pairs every Polish process with every state in the same gender and number", () => {
+    // Labels are joined with independent state words, so both sides are masculine singular.
+    const labels = ["valheim-server", "valheim-backup", "valheim-updater", "valheim-bootstrap", "system"].map((n) => pl[`process.${n}` as keyof typeof pl]);
+    expect(labels).toEqual(["serwer gry", "harmonogram kopii", "aktualizator", "pierwszy start", "system"]);
+    const states = ["running", "done", "starting", "stopping", "backoff", "stopped", "exited", "fatal", "unknown"].map((s) => pl[`processState.${s}` as keyof typeof pl]);
+    expect(states).toEqual(["działa", "zakończony", "uruchamia się", "zatrzymuje się", "ponawia start", "zatrzymany", "zakończył się", "awaria", "nieznany"]);
+  });
+
   it("has every name and state in both languages", () => {
     const keys = ["process.valheim-server", "process.valheim-backup", "process.valheim-updater", "process.valheim-bootstrap", "process.system", ...["running", "done", "starting", "stopping", "backoff", "stopped", "exited", "fatal", "unknown"].map((s) => `processState.${s}`)];
     for (const k of keys) {
