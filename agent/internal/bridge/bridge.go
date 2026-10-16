@@ -69,6 +69,8 @@ var Commands = map[string]Command{
 	"status":           {"/v1/player/status"},
 	"repair":           {"/v1/build/repair"},
 	"fill":             {"/v1/build/fill"},
+	"fill-kilns":       {"/v1/build/fill-kilns"},
+	"fill-smelters":    {"/v1/build/fill-smelters"},
 	"grow":             {"/v1/build/grow"},
 	"map-reveal":       {"/v1/map/reveal"},
 	"map-pins":         {"/v1/map/pins"},
@@ -80,6 +82,7 @@ var Reads = map[string]string{
 	"events":     "/v1/events",
 	"globalkeys": "/v1/globalkeys",
 	"locations":  "/v1/locations",
+	"stations":   "/v1/build/stations",
 }
 
 // commandByPath is the reverse of Commands, for audit lines.
@@ -844,7 +847,7 @@ func (c *Client) publishAdmin(ev map[string]any) {
 var argKeys = map[string]bool{
 	"type": true, "item": true, "amount": true, "quality": true, "prefab": true, "count": true, "level": true,
 	"tamed": true, "includeBosses": true, "name": true, "key": true, "effect": true, "dayFraction": true,
-	"toSpot": true, "radius": true,
+	"toSpot": true, "radius": true, "what": true, "ore": true,
 }
 
 func (c *Client) summarizeArgs(raw string) map[string]any {
@@ -907,7 +910,7 @@ func (c *Client) summarizeResult(cmd, raw string, ev map[string]any) {
 	if !ok {
 		return
 	}
-	for _, k := range []string{"killed", "tamed", "alreadyTamed", "repaired", "smelters", "fermenters", "plants", "sentTo", "stopped", "started", "label", "stacks", "unloaded", "day"} {
+	for _, k := range []string{"killed", "tamed", "alreadyTamed", "repaired", "smelters", "kilns", "skipped", "full", "fermenters", "plants", "sentTo", "stopped", "started", "label", "stacks", "unloaded", "day"} {
 		if v, ok := d[k]; ok {
 			ev[k] = v
 		}
@@ -924,6 +927,19 @@ func (c *Client) summarizeResult(cmd, raw string, ev map[string]any) {
 	}
 	if t, ok := d["tables"].([]any); ok {
 		ev["tables"] = len(t)
+	}
+	// What the fill commands put in: item -> stations, and the fuel item.
+	if m, ok := d["added"].(map[string]any); ok {
+		added := map[string]any{}
+		for k, v := range m {
+			if n, ok := v.(float64); ok && len(added) < 10 {
+				added[truncate(k, 64)] = n
+			}
+		}
+		ev["added"] = added
+	}
+	if s, ok := d["fuel"].(string); ok && s != "" {
+		ev["fuel"] = truncate(s, 64)
 	}
 }
 

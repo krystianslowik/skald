@@ -312,6 +312,41 @@ func TestAuditToAdminEvents(t *testing.T) {
 	}
 }
 
+func TestFillAuditSaysWhatWentIn(t *testing.T) {
+	if Commands["fill-kilns"].Path != "/v1/build/fill-kilns" || Commands["fill-smelters"].Path != "/v1/build/fill-smelters" || Reads["stations"] != "/v1/build/stations" {
+		t.Fatalf("fill routes missing from the allow-lists")
+	}
+	hub := events.New(100, 10)
+	c := newClient(t, &fakePlugin{build: "l-1.0.17"}, hub, "")
+	_, _ = c.Players(context.Background())
+	line := func(s string) string {
+		return "Oct 10 18:01:02 supervisord: valheim-server [Info   :Skald Bridge] [SkaldBridge] audit " + s
+	}
+	c.NoteLine(line(`actor=k cmd=POST /v1/build/fill-smelters args={"what":"both","ore":"IronScrap","radius":50,"player":"1234567890123456789"}`))
+	c.NoteLine(line(`actor=k cmd=POST /v1/build/fill-smelters result=ok {"ok":true,"data":{"smelters":3,"skipped":1,"full":0,"unloaded":0,"added":{"IronScrap":3},"fuel":"Coal","near":"Ragnar","radius":50}}`))
+	c.NoteLine(line(`actor=k cmd=POST /v1/build/fill-kilns args={"radius":50,"at":{"x":10.4,"z":-3}}`))
+	c.NoteLine(line(`actor=k cmd=POST /v1/build/fill-kilns result=ok {"ok":true,"data":{"kilns":2,"full":1,"unloaded":0,"added":{"Wood":2},"near":"position","radius":50}}`))
+	replay, ch := hub.Subscribe(0)
+	hub.Unsubscribe(ch)
+	if len(replay) != 2 {
+		t.Fatalf("want 2 admin events, got %+v", replay)
+	}
+	sm := replay[0].Data
+	if sm["command"] != "fill-smelters" || sm["what"] != "both" || sm["ore"] != "IronScrap" || sm["smelters"] != float64(3) || sm["skipped"] != float64(1) || sm["fuel"] != "Coal" || sm["player"] != "Ragnar" {
+		t.Fatalf("fill-smelters %+v", sm)
+	}
+	if added, _ := sm["added"].(map[string]any); added["IronScrap"] != float64(3) {
+		t.Fatalf("fill-smelters added %+v", sm["added"])
+	}
+	k := replay[1].Data
+	if k["command"] != "fill-kilns" || k["kilns"] != float64(2) || k["full"] != float64(1) || k["player"] != nil || k["fuel"] != nil {
+		t.Fatalf("fill-kilns %+v", k)
+	}
+	if added, _ := k["added"].(map[string]any); added["Wood"] != float64(2) {
+		t.Fatalf("fill-kilns added %+v", k["added"])
+	}
+}
+
 func TestPositions(t *testing.T) {
 	hub := events.New(100, 10)
 	c := newClient(t, &fakePlugin{build: "l-1.0.17"}, hub, "")
