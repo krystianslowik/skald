@@ -17,6 +17,7 @@ above them.
 
 - **Operators:** the Grafana dashboard ConfigMap is now generated from `grafana-dashboard.json` with `kubectl apply -k deploy/monitoring`; `deploy/monitoring/grafana-dashboard-configmap.yaml` is gone, and the alert rules are applied with `kubectl apply -f deploy/monitoring/prometheusrule.yaml` (applying the whole directory with `-f` no longer works). The ConfigMap keeps its name, namespace and label, so nothing changes in Grafana.
 - The skald-web image is smaller: it runs on plain Alpine instead of a second copy of Bun, and Bun is pinned to 1.4.3 for the image, CI and the docs.
+- **Operators:** the `skald-web` image no longer carries the development mock agent, so its binary is a little smaller. `MOCK_AGENT=1` on a release image now stops at startup with a clear message instead of starting a fake server; the mock stays available through `bun run dev` in a source checkout.
 
 ## [2026.10.4] - 2026-10-16
 

@@ -1,4 +1,5 @@
 import { VERSION } from "./buildinfo";
+import { BRIDGE_PLUGIN_VERSION } from "./bridgeplugin";
 import type { ActionResponse, AgentAsset, AgentSource, BridgeRequest, MapSourceResult, PiecesBox, Proxied, TerrainTileRef, ToolsRequest } from "./agent";
 import { mockMap } from "./mapmock";
 import { mockNature, natureIn } from "./mocknature";
@@ -650,7 +651,7 @@ export class MockAgent implements AgentSource {
     const base = { testedBuilds: [MOCK_BUILD], commands: [] as string[], timeFrozen: this.frozen };
     if (this.bridgeMode === "disabled") return { ...base, available: false, reason: "disabled" as const, message: "bridge disabled: game API binding failed (ZNet.Kick), game build l-1.0.18", worldLoaded: false, tested: false, acknowledged: false };
     if (this.state.server.status !== "running") return { ...base, available: false, reason: "restarting" as const, worldLoaded: false, tested: false, acknowledged: false };
-    return { ...base, available: true, plugin: "0.1.1", gameBuild: untested ? "l-1.0.18" : MOCK_BUILD, worldLoaded: true, tested: !untested, acknowledged: untested && this.acked };
+    return { ...base, available: true, plugin: BRIDGE_PLUGIN_VERSION, gameBuild: untested ? "l-1.0.18" : MOCK_BUILD, worldLoaded: true, tested: !untested, acknowledged: untested && this.acked };
   }
 
   private livePlayers() {

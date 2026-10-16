@@ -6,12 +6,11 @@ import { HistoryStore } from "./db";
 import { hashPassword } from "./hash";
 import { Hub } from "./hub";
 import { MapCache } from "./map";
-import { MockAgent, mockMetrics } from "./mock";
 import { DiscordNotifier } from "./notify";
 import { metricsFetch, VERSION } from "./buildinfo";
 import { cachedMetrics, fetchMetrics } from "./prom";
 import { mountStatic } from "./static";
-import type { LiveMessage } from "./types";
+import type { LiveMessage, Metrics } from "./types";
 import { UpdateChecker } from "./update";
 import { isRelease } from "./version";
 
@@ -32,17 +31,28 @@ const cfg = loadConfig();
 let agent: AgentSource;
 let passwordHash = cfg.passwordHash;
 let adminPasswordHash = cfg.adminPasswordHash;
+let mockMetrics: (() => Metrics) | null = null;
 if (cfg.mock) {
-  const mock = new MockAgent(Date.now, cfg.timeZone, cfg.mockBridge);
-  mock.start();
-  agent = mock;
-  if (!passwordHash) {
-    passwordHash = await Bun.password.hash("ognisko");
-    console.log('MOCK_AGENT=1: fake agent, dev password is "ognisko"');
-  }
-  if (!adminPasswordHash && process.env.MOCK_ADMIN === "1") {
-    adminPasswordHash = await Bun.password.hash("jarl");
-    console.log('MOCK_ADMIN=1: admin actions need the admin password "jarl"');
+  // Release builds pass `--define process.env.SKALD_NO_MOCK='"1"'`. The test then
+  // folds to a constant and the bundler drops the else branch, and with it the
+  // dynamic import of the mock agent, from the binary.
+  if (process.env.SKALD_NO_MOCK === "1") {
+    console.error("MOCK_AGENT=1: this skald-web build has no mock agent. Unset MOCK_AGENT, or run `bun run dev` from a source checkout.");
+    process.exit(1);
+  } else {
+    const m = await import("./mock");
+    const mock = new m.MockAgent(Date.now, cfg.timeZone, cfg.mockBridge);
+    mock.start();
+    agent = mock;
+    mockMetrics = m.mockMetrics;
+    if (!passwordHash) {
+      passwordHash = await Bun.password.hash("ognisko");
+      console.log('MOCK_AGENT=1: fake agent, dev password is "ognisko"');
+    }
+    if (!adminPasswordHash && process.env.MOCK_ADMIN === "1") {
+      adminPasswordHash = await Bun.password.hash("jarl");
+      console.log('MOCK_ADMIN=1: admin actions need the admin password "jarl"');
+    }
   }
 } else {
   agent = new HttpAgent(cfg.agentUrl, cfg.agentToken);
@@ -57,10 +67,10 @@ if (notifier) hub.subscribe((m) => notifier.handle(m));
 hub.start();
 
 const target = { namespace: cfg.promNamespace, container: cfg.promContainer, podRegex: cfg.promPodRegex };
-const metricsConfigured = Boolean(cfg.promUrl) || cfg.mock;
+const metricsConfigured = Boolean(cfg.promUrl) || mockMetrics !== null;
 const metrics = cachedMetrics(async () => {
   if (cfg.promUrl) return fetchMetrics(cfg.promUrl, target);
-  return cfg.mock ? mockMetrics() : null;
+  return mockMetrics ? mockMetrics() : null;
 });
 
 // Once at boot, then again on the first admin status after 12 h. Release builds only.

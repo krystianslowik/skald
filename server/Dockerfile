@@ -32,12 +32,13 @@ COPY server/package.json server/bun.lock ./
 RUN bun install --frozen-lockfile --production
 COPY server/tsconfig.json ./
 COPY server/src ./src
+# SKALD_NO_MOCK leaves the mock agent (`bun run dev`) out of the binary.
 RUN case "$TARGETARCH" in \
       amd64) target=bun-linux-x64-musl ;; \
       arm64) target=bun-linux-arm64-musl ;; \
       *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
     esac \
- && bun build --compile --minify --target="$target" --define "process.env.SKALD_VERSION=\"$VERSION\"" src/server.ts --outfile /out/skald-web
+ && bun build --compile --minify --target="$target" --define "process.env.SKALD_VERSION=\"$VERSION\"" --define 'process.env.SKALD_NO_MOCK="1"' src/server.ts --outfile /out/skald-web
 
 # The same Alpine release as the oven/bun image above, for the same musl.
 FROM alpine:3.24
