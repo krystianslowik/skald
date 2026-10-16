@@ -11,6 +11,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -228,6 +229,9 @@ class SheetTest(unittest.TestCase):
         doc = extract.map_doc("abc", 16, 2, sheet.size, "sheet.abc.webp", {"A": 0, "B": 1, "C": 2})
         self.assertEqual(doc["items"], {"A": [0, 0], "B": [16, 0], "C": [0, 16]})
         self.assertEqual((doc["width"], doc["height"], doc["count"], doc["version"]), (32, 32, 3, 1))
+        self.assertEqual(doc["skald"], os.environ.get("SKALD_VERSION") or "dev")
+        with mock.patch.dict(os.environ, {"SKALD_VERSION": "2026.10.0"}):
+            self.assertEqual(extract.map_doc("abc", 16, 2, sheet.size, "sheet.abc.webp", {})["skald"], "2026.10.0")
 
     def test_publish_writes_map_last_and_prunes_old_sheets(self):
         with tempfile.TemporaryDirectory() as out:

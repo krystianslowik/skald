@@ -21,7 +21,8 @@ LABEL org.opencontainers.image.title=skald-icons \
       org.opencontainers.image.description="Item icon sheet for Skald, from the operator's own Valheim server files" \
       org.opencontainers.image.licenses=Apache-2.0 \
       org.opencontainers.image.version=$VERSION
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+# Recorded in map.json as "skald".
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 SKALD_VERSION=$VERSION
 WORKDIR /app
 RUN --mount=type=bind,from=wheels,source=/wheels,target=/wheels \
     pip install --no-cache-dir --no-deps --no-index /wheels/*.whl \

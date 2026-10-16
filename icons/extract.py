@@ -27,7 +27,8 @@ and a read that straddles an update is thrown away and retried next tick.
 Outputs, written atomically, map.json last:
     sheet.<build>.webp   the icons, `size` px cells, `columns` per row
     map.json             {"version", "build", "size", "columns", "width",
-                          "height", "sheet", "count", "items": {name: [x, y]}}
+                          "height", "sheet", "count", "skald",
+                          "items": {name: [x, y]}}
 Older sheets are removed once map.json points at the new one.
 
 Exit codes: 0 done or already up to date, 2 bad arguments or no game install,
@@ -406,6 +407,8 @@ def map_doc(build, size, columns, sheet_size, sheet_name, items):
         "height": h,
         "sheet": sheet_name,
         "count": len(items),
+        # The skald-icons release that wrote this file.
+        "skald": os.environ.get("SKALD_VERSION") or "dev",
         "items": {n: [(c % columns) * size, (c // columns) * size] for n, c in sorted(items.items())},
     }
 
