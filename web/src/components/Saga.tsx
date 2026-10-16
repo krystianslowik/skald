@@ -1,6 +1,6 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { memo, useId, useMemo, useState, type ReactNode } from "react";
-import type { AgentEvent } from "../types";
+import type { AgentEvent, Platform } from "../types";
 import { gameVersion } from "../lib/format";
 import { sagaRows, type SagaRow } from "../lib/saga";
 import { gameClock } from "../lib/admin";
@@ -58,13 +58,33 @@ function itemsText(i: Pick<I18n, "lookup" | "t">, d: Record<string, unknown>): s
   return more > 0 ? i.t("saga.admin.more", { list: parts.join(", "), n: more }) : parts.join(", ");
 }
 
+const PLATFORMS: readonly Platform[] = ["xbox", "steam", "playstation", "nintendo"];
+const platformKey = (p: unknown): Platform => (PLATFORMS as readonly unknown[]).includes(p) ? (p as Platform) : "unknown";
+
+/** One step of a world restore: each outcome its own line, failures saying what was kept. */
+function describeRestore(i: I18n, d: Record<string, unknown>, actor: string): string {
+  const { t, lookup } = i;
+  const step = String(d.step ?? "");
+  const vars = { actor, backup: String(d.backup ?? ""), archive: String(d.archive ?? ""), n: Number(d.files ?? 0), error: String(d.error ?? "") };
+  const key = d.result === "ok" ? `saga.restore.${step}` : `saga.restore.${step}.error`;
+  return lookup(key, vars) ?? t("saga.admin.failed", { actor, what: t("saga.admin.cmd.restore"), error: vars.error });
+}
+
 /** An admin command from the bridge's audit trail, as a line of the saga. */
 export function describeAdmin(i: I18n, d: Record<string, unknown>): string {
   const { t, lookup } = i;
   const raw = String(d.actor ?? "");
   const actor = !raw || raw === "unknown" || raw.startsWith("dashboard-") ? t("saga.admin.someone") : raw;
   const command = String(d.command ?? "");
-  const player = typeof d.player === "string" ? d.player : "";
+  if (command === "restore") return describeRestore(i, d, actor);
+  // A list file changed by the agent: the player by name, or unnamed with a masked id.
+  const fileChange = d.via === "file";
+  const player = typeof d.player === "string" ? d.player : fileChange ? t("saga.admin.anon", { platform: t(`platform.${platformKey(d.platform)}`), masked: String(d.masked ?? "") }) : "";
+  if (fileChange && d.result === "ok") {
+    const key = command === "unban" ? "saga.admin.unban.who" : `saga.admin.${command}`;
+    const line = lookup(key, { actor, player }) ?? t("saga.admin.generic", { actor, what: lookup(`saga.admin.cmd.${command}`) ?? command });
+    return t("saga.admin.afterRestart", { line });
+  }
   if (d.result !== "ok") {
     const what = lookup(`saga.admin.cmd.${command}`) ?? command;
     return d.result === "error" ? t("saga.admin.failed", { actor, what, error: String(d.error ?? "") }) : t("saga.admin.timeout", { actor, what });

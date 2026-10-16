@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AdminCatalog, BanEntry } from "../../types";
-import { BROADCAST_MAX, gameClock, getBans, getCatalog, lockAdmin, storeActorName, storedActorName, WORLD_KEYS } from "../../lib/admin";
+import type { AdminCatalog } from "../../types";
+import { BROADCAST_MAX, gameClock, getCatalog, lockAdmin, storeActorName, storedActorName, WORLD_KEYS } from "../../lib/admin";
 import { useLivePositions } from "../../lib/live";
 import { useI18n, type TextKey } from "../../i18n";
 import { PlatformGlyph } from "../PlatformGlyph";
@@ -9,6 +9,7 @@ import { targetBody, useAdmin, type Target } from "./AdminContext";
 import { AdminGlyph } from "./glyphs";
 import { HoldButton } from "./HoldButton";
 import { AdminHead, BridgeBanner, Btn, Chip, HealthBar, Section, TargetChips } from "./parts";
+import { AccessLists, RestoreSection } from "./WorldTools";
 
 type Style = "center" | "topleft" | "narrator";
 const STYLES: Style[] = ["center", "topleft", "narrator"];
@@ -16,21 +17,18 @@ const PRESETS = ["admin.preset.restart5", "admin.preset.boss21", "admin.preset.s
 
 /**
  * The admin sheet: everything the bridge can do to the world, in the order
- * an evening needs it. Controls are off (with the reason on top) while the
- * bridge cannot take commands.
+ * an evening needs it, then the game's admin and ban lists and world
+ * restore, which need no bridge. Bridge controls are off (with the reason on
+ * top) while it cannot take commands.
  */
 export function AdminPanel({ picked, onClose }: { picked?: { x: number; z: number }; onClose: () => void }) {
   const { t } = useI18n();
   const admin = useAdmin();
   const [catalog, setCatalog] = useState<AdminCatalog | null>(null);
-  const [bans, setBans] = useState<BanEntry[] | null>(null);
   const [name, setName] = useState(storedActorName);
   const reload = useCallback(() => {
     getCatalog()
       .then((r) => r.data && setCatalog(r.data))
-      .catch(() => undefined);
-    getBans()
-      .then((r) => r.data && setBans(r.data))
       .catch(() => undefined);
   }, []);
   const canRead = !!admin && admin.unlocked && !admin.blocker;
@@ -52,67 +50,17 @@ export function AdminPanel({ picked, onClose }: { picked?: { x: number; z: numbe
           kicker={t("admin.kicker")}
           title={t("admin.title")}
           emblem={<AdminGlyph size={34} className="text-flame" />}
-          sub={st?.bridge.gameBuild ? t("admin.sub", { plugin: st.bridge.plugin ?? "?", build: st.bridge.gameBuild }) : t("admin.subOff")}
+          sub={st?.bridge.gameBuild ? t("admin.sub", { plugin: st.bridge.plugin ?? "?", build: st.bridge.gameBuild }) : admin.bridgeOn ? t("admin.subOff") : t("admin.subFiles")}
           onClose={close}
         />
       )}
     >
       <div className="pb-6">
-        <BridgeBanner />
+        {admin.bridgeOn ? <BridgeTools catalog={catalog} picked={pickedTarget} reload={reload} /> : <p className="mt-2 text-sm text-ash">{t("admin.noBridge")}</p>}
 
-        <Players />
-        <Broadcast />
+        <AccessLists />
+        <RestoreSection />
 
-        <Section title={t("admin.items.title")}>
-          <p className="mb-2 text-sm text-ash">{t("admin.items.lead")}</p>
-          <Btn
-            className="w-full"
-            disabled={!!admin.blocker}
-            onClick={() => admin.open({ kind: "items", target: pickedTarget ?? (admin.players[0] ? { player: admin.players[0].name } : admin.mainBase ? { at: admin.mainBase, label: "base" } : { at: { x: 0, z: 0 }, label: "map" }) })}
-          >
-            {t("admin.items.open")}
-          </Btn>
-        </Section>
-
-        <TimeSection frozen={st?.bridge.timeFrozen ?? false} />
-        <Raids catalog={catalog} picked={pickedTarget} onChange={reload} />
-
-        <Section title={t("admin.creatures.title")}>
-          <Btn
-            className="w-full"
-            disabled={!!admin.blocker}
-            onClick={() => admin.open({ kind: "creatures", target: pickedTarget ?? (admin.players[0] ? { player: admin.players[0].name } : { at: admin.mainBase ?? { x: 0, z: 0 }, label: "base" }) })}
-          >
-            {t("admin.creatures.open")}
-          </Btn>
-        </Section>
-
-        <WorldKeys catalog={catalog} onChange={reload} />
-        <BaseHelpers picked={pickedTarget} />
-
-        <Section title={t("admin.save.title")}>
-          <Btn className="w-full" disabled={!!admin.blocker} onClick={() => void admin.run("save", {}, { done: t("admin.save.done") })}>
-            {t("admin.save.now")}
-          </Btn>
-        </Section>
-
-        <Section title={t("admin.bans.title")} aside={bans ? String(bans.length) : undefined}>
-          {!bans || bans.length === 0 ? (
-            <p className="text-sm text-ash">{bans ? t("admin.bans.none") : t("admin.bans.unknown")}</p>
-          ) : (
-            <ul className="space-y-2">
-              {bans.map((b) => (
-                <li key={b.id} className="flex items-center gap-3">
-                  <PlatformGlyph platform={b.platform} className="text-label" />
-                  <span className="flex-1 truncate text-sm text-bone">{b.name ?? t("admin.bans.unnamed", { platform: t(`platform.${b.platform}`) })}</span>
-                  <HoldButton danger={false} disabled={!!admin.blocker} onConfirm={() => void admin.run("unban", { id: b.id }, { done: t("admin.bans.lifted") }).then(reload)}>
-                    {t("admin.bans.unban")}
-                  </HoldButton>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
         <Section title={t("admin.you")}>
           <label htmlFor="admin-name" className="text-xs text-ash">
             {t("admin.you.name")}
@@ -145,9 +93,56 @@ export function AdminPanel({ picked, onClose }: { picked?: { x: number; z: numbe
             )}
           </div>
         </Section>
-
       </div>
     </Sheet>
+  );
+}
+
+/** Everything the bridge does to the live world; shown when the agent has a bridge. */
+function BridgeTools({ catalog, picked: pickedTarget, reload }: { catalog: AdminCatalog | null; picked: Target | null; reload: () => void }) {
+  const { t } = useI18n();
+  const admin = useAdmin()!;
+  const st = admin.status;
+  return (
+    <>
+      <BridgeBanner />
+
+      <Players />
+      <Broadcast />
+
+      <Section title={t("admin.items.title")}>
+        <p className="mb-2 text-sm text-ash">{t("admin.items.lead")}</p>
+        <Btn
+          className="w-full"
+          disabled={!!admin.blocker}
+          onClick={() => admin.open({ kind: "items", target: pickedTarget ?? (admin.players[0] ? { player: admin.players[0].name } : admin.mainBase ? { at: admin.mainBase, label: "base" } : { at: { x: 0, z: 0 }, label: "map" }) })}
+        >
+          {t("admin.items.open")}
+        </Btn>
+      </Section>
+
+      <TimeSection frozen={st?.bridge.timeFrozen ?? false} />
+      <Raids catalog={catalog} picked={pickedTarget} onChange={reload} />
+
+      <Section title={t("admin.creatures.title")}>
+        <Btn
+          className="w-full"
+          disabled={!!admin.blocker}
+          onClick={() => admin.open({ kind: "creatures", target: pickedTarget ?? (admin.players[0] ? { player: admin.players[0].name } : { at: admin.mainBase ?? { x: 0, z: 0 }, label: "base" }) })}
+        >
+          {t("admin.creatures.open")}
+        </Btn>
+      </Section>
+
+      <WorldKeys catalog={catalog} onChange={reload} />
+      <BaseHelpers picked={pickedTarget} />
+
+      <Section title={t("admin.save.title")}>
+        <Btn className="w-full" disabled={!!admin.blocker} onClick={() => void admin.run("save", {}, { done: t("admin.save.done") })}>
+          {t("admin.save.now")}
+        </Btn>
+      </Section>
+    </>
   );
 }
 
