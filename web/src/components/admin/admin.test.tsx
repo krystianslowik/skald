@@ -450,8 +450,10 @@ describe("admin lines in the saga", () => {
     expect(describeAdmin(pl, current)).toBe("k napełnił odlewnie (2, miedź i cyna)");
     expect(describeAdmin(en, { actor: "k", command: "fill-smelters", result: "ok", smelters: 2, added: {}, fuel: "Coal" })).toBe("k filled 2 smelters with coal");
     // An ore the game names but the panel does not still reads as words.
-    expect(describeAdmin(en, { actor: "k", command: "fill-smelters", result: "ok", smelters: 1, added: { MysteryOre: 1 } })).toBe("k filled 1 smelters with mystery ore");
-    expect(describeAdmin(en, { actor: "k", command: "fill-smelters", result: "ok", smelters: 0, skipped: 2, added: {}, player: "Freya" })).toBe("k found no smelters to fill near Freya");
+    expect(describeAdmin(en, { actor: "k", command: "fill-smelters", result: "ok", smelters: 1, added: { MysteryOre: 1 } })).toBe("k filled 1 smelter with mystery ore");
+    expect(describeAdmin(en, { actor: "k", command: "fill-smelters", result: "ok", smelters: 0, skipped: 2, added: {}, player: "Freya" })).toBe("k added nothing to the smelters near Freya: they are full or do not take that ore");
+    expect(describeAdmin(en, { actor: "k", command: "fill-smelters", result: "ok", smelters: 0, skipped: 0, full: 0, added: {}, player: "Freya" })).toBe("k found no smelters to fill near Freya");
+    expect(describeAdmin(pl, { actor: "k", command: "fill-kilns", result: "ok", kilns: 0, full: 2, added: {} })).toBe("k nie dosypał nic do mielerzy (są już pełne)");
     const kilns = { actor: "k", command: "fill-kilns", result: "ok", kilns: 2, added: { Wood: 2 }, player: "Ragnar" };
     expect(describeAdmin(en, kilns)).toBe("k filled 2 kilns with wood near Ragnar");
     expect(describeAdmin(pl, kilns)).toBe("k napełnił mielerze (2, drewno) obok: Ragnar");

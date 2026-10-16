@@ -918,6 +918,11 @@ export class MockAgent implements AgentSource {
         let skipped = 0;
         for (const { station, queued } of base) {
           const pick = ore === "current" ? queued : ore;
+          // Holding no ore to keep: coal only, if coal was asked for.
+          if (ore === "current" && !pick && what === "both") {
+            smelters++;
+            continue;
+          }
           if (ore && (!pick || !station.inputs.includes(pick))) {
             skipped++;
             continue;

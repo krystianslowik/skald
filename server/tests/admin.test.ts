@@ -314,6 +314,8 @@ describe("mock bridge", () => {
     expect((await run({}, "fill-kilns")).status).toBe(200);
     expect((await run({ what: "both", ore: "IronScrap" })).status).toBe(200);
     expect((await run({ what: "coal" })).status).toBe(200);
+    expect((await run({ what: "ore", ore: "current" })).status).toBe(200);
+    expect((await run({ what: "both", ore: "current" })).status).toBe(200);
     expect((await run({ what: "ore" })).status).toBe(400);
     expect((await run({ what: "everything", ore: "IronScrap" })).status).toBe(400);
     expect((await run({ ore: "Barley" })).status).toBe(400);
@@ -323,6 +325,10 @@ describe("mock bridge", () => {
     // A blast furnace does not take iron: two smelters filled, one skipped.
     expect(fills[1]).toMatchObject({ command: "fill-smelters", what: "both", ore: "IronScrap", smelters: 2, skipped: 1, added: { IronScrap: 2 }, fuel: "Coal" });
     expect(fills[2]).toMatchObject({ command: "fill-smelters", what: "coal", smelters: 3, added: {}, fuel: "Coal" });
+    // Keep the current ore: only the smelter holding iron gets ore; with coal the empty ones get coal.
+    expect(fills[3]).toMatchObject({ what: "ore", ore: "current", smelters: 1, skipped: 2, added: { IronScrap: 1 } });
+    expect(fills[3]).not.toHaveProperty("fuel");
+    expect(fills[4]).toMatchObject({ what: "both", ore: "current", smelters: 3, skipped: 0, added: { IronScrap: 1 }, fuel: "Coal" });
     abort.abort();
     mock.stop();
   });

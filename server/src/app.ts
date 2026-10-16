@@ -595,7 +595,8 @@ export function createApp(deps: AppDeps): Hono {
         spots: locs.status === 200 && Array.isArray(locd?.aliases) ? locd.aliases : [],
         stations: st.status === 200 ? fillStations((st.body as { data?: unknown }).data) : { kilns: [], smelters: [] },
       };
-      catalogCache = { at: now, value };
+      // A world still loading answers the stations read with 503: not kept, so the next open asks again.
+      if (st.status === 200 || st.status === 404) catalogCache = { at: now, value };
       return c.json(value);
     } catch {
       return c.json({ ok: false, error: "agent unreachable" }, 502);

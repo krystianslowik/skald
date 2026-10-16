@@ -98,7 +98,6 @@ export function describeAdmin(i: I18n, d: Record<string, unknown>): string {
     return d.result === "error" ? t("saga.admin.failed", { actor, what, error: String(d.error ?? "") }) : t("saga.admin.timeout", { actor, what });
   }
   const vars: Record<string, string | number> = { actor, player };
-  let variant = "";
   switch (command) {
     case "spawn":
       vars.what = itemsText(i, d);
@@ -139,10 +138,7 @@ export function describeAdmin(i: I18n, d: Record<string, unknown>): string {
       break;
     case "fill-kilns":
     case "fill-smelters":
-      vars.n = Number((command === "fill-kilns" ? d.kilns : d.smelters) ?? 0);
-      vars.what = fillText(i, d);
-      if (!vars.n) variant = ".none";
-      break;
+      return describeFill(i, command, d, actor, player);
     case "grow":
       vars.n = Number(d.plants ?? 0);
       break;
@@ -157,8 +153,24 @@ export function describeAdmin(i: I18n, d: Record<string, unknown>): string {
       vars.build = String(d.build ?? "");
       break;
   }
-  const key = `saga.admin.${command}${variant}${WITH_PLAYER.has(command) && !player ? ".at" : ""}`;
+  const key = WITH_PLAYER.has(command) && !player ? `saga.admin.${command}.at` : `saga.admin.${command}`;
   return lookup(key, vars) ?? t("saga.admin.generic", { actor, what: lookup(`saga.admin.cmd.${command}`) ?? command });
+}
+
+/**
+ * "filled 3 smelters with scrap iron and coal near Ragnar"; or that the
+ * stations there were full or refused the ore; or that there were none.
+ */
+function describeFill(i: I18n, command: "fill-kilns" | "fill-smelters", d: Record<string, unknown>, actor: string, player: string): string {
+  const n = Number((command === "fill-kilns" ? d.kilns : d.smelters) ?? 0) || 0;
+  const vars = { actor, player, what: fillText(i, d) };
+  if (n > 0) {
+    if (command === "fill-kilns") return player ? i.tn("saga.admin.fill-kilns", n, vars) : i.tn("saga.admin.fill-kilns.at", n, vars);
+    return player ? i.tn("saga.admin.fill-smelters", n, vars) : i.tn("saga.admin.fill-smelters.at", n, vars);
+  }
+  const untouched = (Number(d.skipped ?? 0) || 0) + (Number(d.full ?? 0) || 0) > 0;
+  const key = `saga.admin.${command}${untouched ? ".unchanged" : ".none"}${player ? "" : ".at"}`;
+  return i.lookup(key, vars) ?? i.t("saga.admin.generic", { actor, what: i.t(`saga.admin.cmd.${command}`) });
 }
 
 const SETTINGS_APPLY: Record<string, TextKey> = {
