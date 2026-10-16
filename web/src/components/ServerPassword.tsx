@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getServerPassword } from "../lib/api";
+import { useAdmin } from "./admin/AdminContext";
 import { useI18n } from "../i18n";
 
 const MASK = "\u2022".repeat(8);
@@ -43,15 +44,21 @@ export function useServerPassword(stamp: unknown): PasswordAccess {
     noteTimer.current = setTimeout(() => setNote(null), 1800);
   }, []);
 
+  // With an admin password, only an admin may read it: the unlock prompt first, as for any admin action.
+  const unlock = useAdmin()?.unlock;
   const load = useCallback(async (): Promise<string | null> => {
     if (cached.current !== null) return cached.current;
-    pending.current ??= getServerPassword()
-      .then((r) => {
-        if (r.status !== 200) throw new Error();
-        cached.current = r.body.password;
-        setValue(r.body.password);
-        return r.body.password;
-      })
+    pending.current ??= (async () => {
+      let r = await getServerPassword();
+      if (r.status === 403) {
+        if (!unlock || !(await unlock())) return null;
+        r = await getServerPassword();
+      }
+      if (r.status !== 200) throw new Error();
+      cached.current = r.body.password;
+      setValue(r.body.password);
+      return r.body.password;
+    })()
       .catch(() => {
         flash("failed");
         return null;
@@ -60,7 +67,7 @@ export function useServerPassword(stamp: unknown): PasswordAccess {
         pending.current = null;
       });
     return pending.current;
-  }, [flash]);
+  }, [flash, unlock]);
 
   return useMemo(() => ({ value, shown, setShown, note, flash, load }), [value, shown, note, flash, load]);
 }
