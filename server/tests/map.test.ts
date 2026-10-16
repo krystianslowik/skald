@@ -151,6 +151,59 @@ describe("MapCache", () => {
     expect(r4.ok && r4.stale).toBe(true);
   });
 
+  it("serves the stale copy at once while the agent fails, and asks again once per window", async () => {
+    let now = 0;
+    const hung = Promise.withResolvers<MapSourceResult>();
+    const replies: (() => Promise<MapSourceResult>)[] = [
+      async () => ({ status: 200, etag: '"a"', body }),
+      async () => {
+        throw new Error("down");
+      },
+      () => hung.promise,
+    ];
+    let calls = 0;
+    const cache = new MapCache(() => (calls++, replies.shift()!()), false, () => now);
+    await cache.get();
+
+    now += MAP_RECHECK_MS;
+    const down = await cache.get();
+    expect(down.ok && down.stale).toBe(true);
+    expect(calls).toBe(2);
+    // The agent is not asked again until the window has passed, for either view.
+    now += MAP_RECHECK_MS - 1;
+    const map = await cache.get();
+    const stores = await cache.get("storage");
+    expect(map.ok && map.stale && stores.ok && stores.stale).toBe(true);
+    expect(calls).toBe(2);
+
+    // Window over, agent hangs: the copy comes back at once, the check runs behind it.
+    now += 1;
+    const open = await cache.get();
+    const again = await cache.get();
+    expect(open.ok && open.stale && again.ok && again.stale).toBe(true);
+    expect(calls).toBe(3);
+
+    hung.resolve({ status: 304, etag: '"a"', body: null });
+    await Bun.sleep(0);
+    const back = await cache.get();
+    expect(back.ok && !back.stale).toBe(true);
+    expect(calls).toBe(3);
+  });
+
+  it("does not ask an unreachable agent again within the window when it has no copy", async () => {
+    let now = 0;
+    const src = source([new Error("down"), { status: 200, etag: '"a"', body }]);
+    const cache = new MapCache(src.fetchMap, false, () => now);
+    expect(await cache.get()).toEqual({ ok: false, status: 502, message: "agent unreachable" });
+    now += MAP_RECHECK_MS - 1;
+    expect(await cache.get()).toEqual({ ok: false, status: 502, message: "agent unreachable" });
+    expect(src.calls.length).toBe(1);
+    now += 1;
+    const up = await cache.get();
+    expect(up.ok && !up.stale).toBe(true);
+    expect(src.calls.length).toBe(2);
+  });
+
   it("passes 404 and 503 through until there is a copy", async () => {
     const off = new MapCache(source([{ status: 404, etag: null, body: null }]).fetchMap, false);
     expect(await off.get()).toEqual({ ok: false, status: 404, message: "world map off" });

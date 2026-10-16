@@ -23,6 +23,9 @@ above them.
 ### Fixed
 
 - A malformed `PANEL_PASSWORD_HASH` or `ADMIN_PASSWORD_HASH` (for example one whose `$` signs were expanded by the shell or Compose) used to start fine and then turn every login into "wrong password". The web server now refuses to start and says which variable is wrong, without printing its value.
+- While the agent is down or not answering, the map opens at once with the last copy it had instead of waiting up to 30 seconds on every open, and the server asks the agent again in the background at most every 15 seconds.
+- An address under `/api/` that does not exist answers with a JSON 404 instead of the dashboard page.
+- A malformed session cookie on the live connection is turned away as signed out (401) instead of failing with a server error (500).
 
 ## [2026.10.4] - 2026-10-16
 
