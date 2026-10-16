@@ -165,7 +165,7 @@ func TestAccessBansThroughTheBridge(t *testing.T) {
 		}
 	}))
 	defer plugin.Close()
-	h.s.opt.Bridge = bridge.New(bridge.Options{URL: plugin.URL, Token: "0123456789abcdef", Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	h.s.opt.Bridge = bridge.New(bridge.Options{URL: plugin.URL, Token: "0123456789abcdef", Hub: h.hub, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	srv := httptest.NewServer(h.s.Handler())
 	defer srv.Close()
 
@@ -190,9 +190,13 @@ func TestAccessBansThroughTheBridge(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(h.dir, "bannedlist.txt")); err == nil {
 		t.Fatal("the file was written while the bridge was live")
 	}
-	// The plugin's audit line is the event; the agent adds none of its own.
-	if evs := adminEvents(h.hub); len(evs) != 0 {
+	// One event per bridge command, from the bridge client; none for a file.
+	evs := adminEvents(h.hub)
+	if len(evs) != 2 || evs[0].Data["command"] != "ban" || evs[1].Data["command"] != "unban" || evs[0].Data["result"] != "ok" || evs[0].Data["via"] != nil {
 		t.Fatalf("events = %v", evs)
+	}
+	if b, _ := json.Marshal(evs); strings.Contains(string(b), "1234500000000009") || strings.Contains(string(b), fixtureSteam) {
+		t.Fatalf("events leak an id: %s", b)
 	}
 }
 

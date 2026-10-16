@@ -189,7 +189,7 @@ func (s *Server) accessChange(w http.ResponseWriter, r *http.Request) {
 	name := d.names[access.Key(id)]
 
 	// A running game keeps its ban list in memory and writes it back on the
-	// next ban: change it through the bridge, whose audit line is the event.
+	// next ban: change it through the bridge, whose client publishes the event.
 	if list == access.Bans && s.bansLive(ctx) {
 		if op == "add" {
 			current, err := s.opt.Bridge.BanEntries(ctx)
