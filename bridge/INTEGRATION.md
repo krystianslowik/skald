@@ -232,6 +232,23 @@ smooth curves between samples. Tiles are painted 1:1 below 1 px/m, at 2x
 closer in, and the top level at 4x when zoomed far in. Without a worker, `OffscreenCanvas` or
 `DecompressionStream` the map keeps `/terrain.png`.
 
+With WebGL2 (`lib/mapgl.ts`) the same plan is drawn on the GPU instead and
+nothing is painted: 2-3 workers (`lib/terraindata.worker.ts`) only ungzip and
+decode, and each tile goes up as raw data, one RGBA8 integer texel per sample
+(biome, forest, height high and low byte, `packTile`), into one fixed
+`TEXTURE_2D_ARRAY`, at most three uploads a frame. The fragment shader is
+`paintTile` per screen pixel, reading the 4 x 4 samples round it with
+`texelFetch`, so colours match the painted path at every zoom; paper, fog (a
+signed distance field of the explored outline, `lib/fogfield.ts`) and the
+world's edge are full-screen passes. A tile on the GPU but not yet faded in
+counts as missing for `planView`, so its relatives stay under it while it
+fades in over 250 ms, on arrival and when the drawn level changes (held 0.15
+of a level past each boundary). Woods and floor plans are rasterized by
+Canvas2D in 256 px world-anchored chunks, a few per frame, and composited from a
+second texture array, so no frame redraws a whole layer. The marks stay on
+a Canvas2D layer above, redrawn only when they or the view change. Without
+WebGL2, or while a lost context is away, the painted path above is used.
+
 ## 4. Deploy changes to the game pod (`deploy/kubernetes/valheim.yaml` and the homelab manifest)
 
 Roll these out deliberately, in a window with no players online. Every change to

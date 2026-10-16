@@ -9,6 +9,14 @@ above them.
 
 ## [Unreleased]
 
+### Changed
+
+- The map draws its terrain on the graphics chip where the browser supports WebGL2 (every current phone and desktop browser), so panning, pinching and flinging stay smooth while terrain streams in: arriving tiles no longer redraw anything, and a sharper tile fades in over the blurry one in about a quarter of a second instead of popping in. The map looks the same as before, with the same colours at every zoom. Woods and floor plans are drawn a small piece at a time instead of all at once when you leave the area they cover. Browsers without WebGL2 keep the previous drawing.
+
+### Fixed
+
+- Count badges on clustered marks were drawn again on every frame on some pages, which made the map stutter with long pauses while it moved.
+
 ## [2026.10.3] - 2026-10-16
 
 ### Changed

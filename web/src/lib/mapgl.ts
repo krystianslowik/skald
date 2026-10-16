@@ -389,19 +389,22 @@ function compile(gl: WebGL2RenderingContext, vs: string, fs: string): WebGLProgr
 
 const deviceMemory = () => (globalThis.navigator as { deviceMemory?: number } | undefined)?.deviceMemory ?? 8;
 
-/** How many tiles the GPU keeps: about two screens of them plus the pinned levels, within the device's limits. */
+/** Tiles (or chunks) that can be on a screen of pxW x pxH device px at once: samples are at least 0.7 px, so one is at least 180 px across. */
+const perScreen = (pxW: number, pxH: number) => (Math.ceil(pxW / 180) + 2) * (Math.ceil(pxH / 180) + 2);
+
+/**
+ * How many tiles the GPU keeps (270 KB each): a screen and a half of them
+ * plus the pinned levels, within the device's limits. iOS Safari reports no
+ * memory size, so a phone's pool is bounded by its screen: about 42 MB.
+ */
 export function poolCapacity(pxW: number, pxH: number, maxLayers: number, mem = 8): number {
-  // Samples are at least 0.7 device px, so a tile is at least 180 px across.
-  const screen = (Math.ceil(pxW / 180) + 2) * (Math.ceil(pxH / 180) + 2);
-  const want = 2 * screen + 21 + 8;
-  const cap = mem <= 4 ? 128 : 256;
-  return Math.max(64, Math.min(maxLayers, cap, want));
+  const want = Math.ceil(1.6 * perScreen(pxW, pxH)) + 21 + 8;
+  return Math.max(64, Math.min(maxLayers, mem <= 4 ? 128 : 256, want));
 }
 
-/** Chunks of woods and floor plans the GPU keeps (256 KB each): the two layers over a screen and some. */
+/** Chunks of woods and floor plans the GPU keeps (256 KB each): both layers over a screen, about 40 MB on a phone, and only once one is shown. */
 export function chunkCapacity(pxW: number, pxH: number, maxLayers: number, mem = 8): number {
-  const screen = (Math.ceil(pxW / 180) + 2) * (Math.ceil(pxH / 180) + 2);
-  return Math.max(32, Math.min(maxLayers, mem <= 4 ? 128 : 192, 3 * screen));
+  return Math.max(32, Math.min(maxLayers, mem <= 4 ? 112 : 160, 2 * perScreen(pxW, pxH)));
 }
 
 const chunkKey = (i: number, t: TileRef) => `${i}:${tileKey(t)}`;

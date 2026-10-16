@@ -30,7 +30,7 @@ import {
 import { ICONS } from "./mapicons";
 import { TerrainTiles, tilesSupported, type Box as WorldBox, type TilesDoc } from "./terraintiles";
 import { TileFeed } from "./terraindata";
-import { GLMap, type GLStats } from "./mapgl";
+import { GLMap, TILE_EDGE, type GLStats } from "./mapgl";
 import { fogField, seaMask, type FogField, type SeaMask } from "./fogfield";
 import { CLOUD_TILE, COAST, PAPER, PAPER_DARK, PAPER_TILE, textures as paperTextures, VOID, type Textures } from "./paper";
 import { natureTint, wobble, type NatureItem } from "./nature";
@@ -127,10 +127,13 @@ let fontLoaded = false;
  */
 function fontReady(): boolean {
   if (fontLoaded || typeof document === "undefined" || !document.fonts) return (fontLoaded = true);
-  const faces = [...document.fonts].filter((f) => f.family.replace(/["']/g, "") === "Averia Serif Libre");
-  // No such face, or none that will ever load: the fallback is what stays.
-  fontLoaded = !faces.length || faces.some((f) => f.status === "loaded" && (f.weight === "700" || f.weight === "bold")) || faces.every((f) => f.status === "error");
-  return fontLoaded;
+  return (fontLoaded = boldFaceReady(document.fonts));
+}
+
+/** Whether the map font's bold face is loaded, or will never be (none declared, or all failed), among `faces`. */
+export function boldFaceReady(faces: Iterable<Pick<FontFace, "family" | "weight" | "status">>): boolean {
+  const ours = [...faces].filter((f) => f.family.replace(/["']/g, "") === "Averia Serif Libre");
+  return !ours.length || ours.some((f) => f.status === "loaded" && (f.weight === "700" || f.weight === "bold")) || ours.every((f) => f.status === "error");
 }
 
 /** The paper and cloud tiles, made once per page (in the map worker, the first time); `raw` for the WebGL map. */
@@ -448,12 +451,14 @@ export class MapRenderer {
     this.feed = null;
     this.tiles?.dispose();
     this.tiles = null;
-    if (doc && this.glCanvas && !this.glFailed && !this.gl) {
+    // The GPU path is built for the agent's 260-sample tiles; anything else is painted.
+    const glTiles = !!doc && doc.tileSize + 2 * doc.apron === TILE_EDGE;
+    if (glTiles && this.glCanvas && !this.glFailed && !this.gl) {
       this.gl = GLMap.create(this.glCanvas);
       if (this.gl) this.handGL(this.gl);
       else this.glFailed = true;
     }
-    if (doc && this.gl) {
+    if (doc && glTiles && this.gl) {
       try {
         this.feed = new TileFeed(doc);
         // A tile that arrives only needs a frame: nothing else is redrawn for it.
@@ -462,7 +467,7 @@ export class MapRenderer {
         // no worker here
       }
       this.gl.setTiles(doc, this.feed);
-      if (!this.gl.ready) this.paintTiles();
+      if (!this.gl.ready || !this.feed) this.paintTiles();
     } else this.paintTiles();
     this.version++;
   }
