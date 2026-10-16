@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { deriveHistory } from "../src/history";
+import { capRecent, deriveHistory } from "../src/history";
 import type { AgentEvent, AgentEventType } from "../src/types";
 
 const T0 = Date.parse("2026-10-09T18:00:00Z");
@@ -37,5 +37,32 @@ describe("deriveHistory", () => {
     expect(h.events[0]!.type).toBe("player_join");
     expect(h.events.some((e) => e.type === "player_count")).toBe(false);
     expect(h.online7d.at(-1)![1]).toBe(1);
+  });
+});
+
+describe("recent events cap", () => {
+  it("keeps 200 real events however many saves sit between them", () => {
+    const events: AgentEvent[] = [];
+    for (let i = 0; i < 300; i++) {
+      events.push(ev(i * 30, "death", { name: "Freya" }));
+      events.push(ev(i * 30 + 10, "world_saved", { ms: 90 }));
+      events.push(ev(i * 30 + 20, "world_saved", { ms: 90 }));
+    }
+    const now = T0 + 300 * 30 * 60_000;
+    const h = deriveHistory(events, now);
+    const real = h.events.filter((e) => e.type === "death");
+    expect(real).toHaveLength(200);
+    const oldestReal = Date.parse(real.at(-1)!.ts);
+    const saves = h.events.filter((e) => e.type === "world_saved");
+    expect(saves.length).toBeGreaterThan(0);
+    expect(saves.every((e) => Date.parse(e.ts) >= oldestReal)).toBe(true);
+    expect(saves.every((e) => Date.parse(e.ts) >= now - 7 * 24 * 60 * 60_000)).toBe(true);
+  });
+
+  it("drops saves older than a week on a quiet server", () => {
+    const now = T0 + 10 * 24 * 60 * 60_000;
+    const events = [ev(0, "player_join", { name: "Ragnar" }), ev(5, "world_saved", { ms: 80 }), ev(6, "world_backup"), ev(9 * 24 * 60, "world_saved", { ms: 80 })];
+    const recent = capRecent([...events].reverse(), now);
+    expect(recent.map((e) => e.type)).toEqual(["world_saved", "player_join"]);
   });
 });

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { capRecent } from "@server/history";
 import { UNSTORED_EVENTS, type AgentEvent, type ApiState, type LiveMessage, type LogLine } from "../types";
 import { getLogs, getState, Unauthorized } from "./api";
 import { applyEvent } from "./apply";
@@ -123,7 +124,7 @@ export function useValheim(onUnauthorized: () => void): Valheim {
         if (!s) return s;
         const next = applyEvent(s, ev);
         if (ev.type === "player_count" || UNSTORED_EVENTS.includes(ev.type)) return next;
-        return { ...next, history: { ...next.history, events: [ev, ...next.history.events].slice(0, 200) } };
+        return { ...next, history: { ...next.history, events: capRecent([ev, ...next.history.events]) } };
       });
       if (ev.type !== "player_count" && !UNSTORED_EVENTS.includes(ev.type)) refreshSoon();
     };

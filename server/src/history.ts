@@ -1,7 +1,28 @@
-import { UNSTORED_EVENTS, type AgentEvent, type History, type PlayerStats, type SeriesPoint } from "./types";
+import { UNSTORED_EVENTS, type AgentEvent, type AgentEventType, type History, type PlayerStats, type SeriesPoint } from "./types";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const RECENT_LIMIT = 200;
+/** Routine bookkeeping: a save every 30 min and a backup every 2 h, ~60 lines a day. */
+export const ROUTINE_EVENTS: readonly AgentEventType[] = ["world_saved", "world_backup"];
+
+/**
+ * Caps a newest-first recent list so routine saves can never push real events
+ * out: the newest `limit` non-routine events are kept, and routine ones only
+ * inside the span those cover and at most a week back from `now`.
+ */
+export function capRecent(newestFirst: AgentEvent[], now = Date.now(), limit = RECENT_LIMIT): AgentEvent[] {
+  let kept = 0;
+  let cutoff = now - WEEK_MS;
+  for (const e of newestFirst) {
+    if (ROUTINE_EVENTS.includes(e.type)) continue;
+    if (++kept === limit) {
+      cutoff = Math.max(cutoff, Date.parse(e.ts));
+      break;
+    }
+  }
+  kept = 0;
+  return newestFirst.filter((e) => (ROUTINE_EVENTS.includes(e.type) ? Date.parse(e.ts) >= cutoff : ++kept <= limit));
+}
 
 /**
  * Folds the stored notable events (ascending) into per-player sessions,
@@ -87,7 +108,7 @@ export function deriveHistory(events: AgentEvent[], now = Date.now()): History {
   }
 
   const online7d: SeriesPoint[] = [[seriesStart, valueAtStart], ...series, [now, current]];
-  const recent = events.filter((e) => e.type !== "player_count" && !UNSTORED_EVENTS.includes(e.type)).slice(-RECENT_LIMIT).reverse();
+  const recent = capRecent(events.filter((e) => e.type !== "player_count" && !UNSTORED_EVENTS.includes(e.type)).reverse(), now);
   const players = [...stats.values()].sort((a, b) => b.playtimeMs - a.playtimeMs);
   return { players, events: recent, online7d };
 }
