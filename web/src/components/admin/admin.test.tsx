@@ -217,6 +217,20 @@ describe("admin", () => {
     expect(within(restore).getByText(/will be gone/)).toBeInTheDocument();
   });
 
+  it("shows each backup's full date and time, never clipped", async () => {
+    api(status());
+    renderDashboard();
+    const sheet = await openAdmin();
+    await within(sheet).findByText("safety copy");
+    const i = makeI18n("en");
+    for (const b of RESTORE.backups) {
+      const stamp = sheet.querySelector(`time[datetime="${b.modifiedAt}"]`);
+      expect(stamp).not.toBeNull();
+      expect(stamp).not.toHaveClass("truncate");
+      expect(stamp!.textContent).toBe(`${i.date(b.modifiedAt)} ${i.clock(b.modifiedAt)}`);
+    }
+  });
+
   it("broadcasts as the narrator, signed with this device's name", async () => {
     const store = new Map([["skald.admin.name", "Łukasz"]]);
     vi.stubGlobal("localStorage", { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) });

@@ -14,6 +14,7 @@ above them.
 - Polish process names in Settings now agree with their state ("harmonogram kopii zatrzymany", "aktualizator działa" instead of "kopie działa"), and the item-locations and map-layers sheets' close buttons say what they close ("Close item locations", "Close layers") instead of "Close map".
 - On a tablet (about 640 to 1023 px wide) the header no longer squeezes the server name and status into a sliver beside the version and buttons: the name and status keep their own row, with the facts and buttons below them, until the screen is wide enough for one row.
 - On a phone, the Terrain tab's note about the external site now runs across the full width under the credit and the "Open in a new tab" link, instead of a column one word wide that took a third of the screen.
+- On narrow phones the Treasury cut off the time of each backup and its file name, so backups from the same day looked alike. The date and time now wrap onto a second line when space is short, and the full file name is always shown. The restore list in the admin sheet keeps the time the same way.
 
 ## [2026.10.1] - 2026-10-16
 

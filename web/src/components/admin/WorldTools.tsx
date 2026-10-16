@@ -188,7 +188,7 @@ const REASON: Record<NonNullable<RestoreInfo["reason"]>, TextKey> = {
 
 /** The backups a restore can use, newest first, each opening the restore sheet. */
 export function RestoreSection() {
-  const { t, fullDate, bytes } = useI18n();
+  const { t, fullDate, date, clock, bytes } = useI18n();
   const admin = useAdmin()!;
   const [info, setInfo] = useState<RestoreInfo | null>(null);
   const canRead = admin.unlocked;
@@ -221,7 +221,10 @@ export function RestoreSection() {
               {info.backups.map((b) => (
                 <li key={`${b.source}/${b.name}`} className="flex items-center gap-3 rounded-[3px] px-1.5 py-1.5">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-bold text-bone">{fullDate(b.modifiedAt)}</p>
+                    {/* Date and time wrap as whole pieces, never clipped: backups of one day differ only by the time. */}
+                    <time dateTime={b.modifiedAt} title={fullDate(b.modifiedAt)} className="block text-sm font-bold text-bone">
+                      <span className="inline-block">{date(b.modifiedAt)}</span> <span className="inline-block">{clock(b.modifiedAt)}</span>
+                    </time>
                     <p className="truncate text-[0.6875rem] text-ash">
                       {bytes(b.sizeBytes)}
                       {b.source === "skald" && <span className="ml-2 text-flame">{t("admin.restore.skald")}</span>}
