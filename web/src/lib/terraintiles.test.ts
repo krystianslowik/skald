@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mockTerrainTile, packHeights } from "@server/mocktiles";
-import { ByteLRU, levelFor, paintFactor, TileScheduler, tileMpp, tilesIn } from "./terraintiles";
+import { ByteLRU, levelFor, paintFactor, pinnedTiles, planView, TerrainTiles, tileBox, tileKey, TileScheduler, tileMpp, tilesIn, type Box, type TileRef, type TilesDoc } from "./terraintiles";
 import { decodeTile, paintTile, paletteOf, TUNED } from "./terrainpaint";
 
 const R = 10500;
@@ -23,6 +23,17 @@ describe("levels", () => {
     expect(paintFactor(5, 7, 24)).toBe(2);
   });
 
+  it("paints a sample to about one pixel below 1 px/m", () => {
+    // 0.3 px/m on a phone (base canvas at 2x): level 6, painted 1:1, a sample about 0.8 px.
+    const z = levelFor(0.3, 2, 7, R);
+    expect(z).toBe(6);
+    expect(paintFactor(z, 7, 0.3)).toBe(1);
+    expect(tileMpp(z, R) * 0.3 * 2).toBeGreaterThan(0.7);
+    expect(tileMpp(z, R) * 0.3 * 2).toBeLessThan(1.42);
+    expect(paintFactor(7, 7, 0.6)).toBe(1);
+    expect(paintFactor(7, 7, 1)).toBe(2);
+  });
+
   it("lists the tiles over a box inside the world, nearest the centre first", () => {
     const all = tilesIn({ x0: -R, z0: -R, x1: R, z1: R }, 3, R);
     // 64 tiles, but the corner ones lie wholly outside the disc.
@@ -35,6 +46,99 @@ describe("levels", () => {
     expect(near.map((t) => `${t.x},${t.y}`)).toEqual(expect.arrayContaining(["15,15", "16,15", "17,15", "15,16", "16,16", "17,16"]));
     // Out of range boxes clamp.
     expect(tilesIn({ x0: 20000, z0: 20000, x1: 30000, z1: 30000 }, 3, R)).toEqual([]);
+  });
+});
+
+/** A phone's view (390 x 844 CSS px) at `scale`, and the 1.5x box a cached base draws. */
+function phone(scale: number, cx = -3609, cz = 328): { view: Box; box: Box } {
+  const hw = 390 / 2 / scale;
+  const hh = 844 / 2 / scale;
+  return { view: { x0: cx - hw, z0: cz - hh, x1: cx + hw, z1: cz + hh }, box: { x0: cx - hw * 1.5, z0: cz - hh * 1.5, x1: cx + hw * 1.5, z1: cz + hh * 1.5 } };
+}
+const keys = (ts: readonly TileRef[]) => ts.map(tileKey);
+const children = (t: TileRef): TileRef[] => [0, 1, 2, 3].map((i) => ({ z: t.z + 1, x: 2 * t.x + (i & 1), y: 2 * t.y + (i >> 1) }));
+
+describe("planView", () => {
+  const plan = (scale: number, loaded: Iterable<string>) => {
+    const have = new Set(loaded);
+    return planView({ ...phone(scale), scale, dpr: 2, maxLevel: 7, radius: R, has: (t) => have.has(tileKey(t)) });
+  };
+
+  it("keeps levels 0-3 of the whole disc, coarsest first", () => {
+    const p = pinnedTiles(7, R);
+    expect(p[0]).toEqual({ z: 0, x: 0, y: 0 });
+    expect(p.map((t) => t.z)).toEqual([...p.map((t) => t.z)].sort((a, b) => a - b));
+    expect(p.filter((t) => t.z === 3)).toHaveLength(60);
+    expect(p.every((t) => t.z <= 3)).toBe(true);
+    // A grid-only pyramid that stops at level 2 keeps what it has.
+    expect(Math.max(...pinnedTiles(2, R).map((t) => t.z))).toBe(2);
+  });
+
+  it("asks for level 0 first, then the visible tiles, then a ring and the rest of levels 0-3 at low priority", () => {
+    const p = plan(0.3, []);
+    expect(p.z).toBe(6);
+    expect(tileKey(p.want[0]!)).toBe("0/0/0");
+    const { view } = phone(0.3);
+    const visible = keys(tilesIn(view, 6, R));
+    expect(keys(p.want.slice(1, p.low))).toEqual(visible);
+    const low = p.want.slice(p.low);
+    // The ring: level 6 tiles next to the view, none of them visible.
+    const ring = low.filter((t) => t.z === 6);
+    expect(ring.length).toBeGreaterThan(0);
+    expect(ring.every((t) => !visible.includes(tileKey(t)))).toBe(true);
+    const span = tileMpp(6, R) * 256;
+    for (const t of ring) {
+      const b = tileBox(t, R);
+      expect(b.x1 > view.x0 - span && b.x0 < view.x1 + span && b.z1 > view.z0 - span && b.z0 < view.z1 + span).toBe(true);
+    }
+    // The rest of levels 0-3, once each.
+    expect(low.filter((t) => t.z <= 3)).toHaveLength(pinnedTiles(7, R).length - 1);
+    expect(new Set(keys(p.want)).size).toBe(p.want.length);
+    // Nothing loaded: every slot is blank.
+    expect(p.slots.every((s) => s.blank)).toBe(true);
+  });
+
+  it("needs a quarter of the old working set at 0.3 px/m", () => {
+    // Before: 84 tiles of 1 MiB over the 1.5x base. Now: the visible tiles plus a ring, 256 KiB each.
+    const p = plan(0.3, ["0/0/0"]);
+    const ringAndVisible = p.want.filter((t) => t.z === p.z).length;
+    expect(p.low).toBeLessThanOrEqual(45);
+    expect((ringAndVisible * 256 * 256 * 4) / 2 ** 20).toBeLessThan(21);
+  });
+
+  it("never leaves a slot blank once level 0 is in, and asks only for what is missing", () => {
+    const p = plan(0.3, ["0/0/0"]);
+    expect(p.slots.every((s) => !s.blank && s.ancestor && tileKey(s.ancestor) === "0/0/0")).toBe(true);
+    expect(keys(p.want)).not.toContain("0/0/0");
+    // The nearest loaded ancestor wins.
+    const t = p.slots[0]!.tile;
+    const parent = { z: t.z - 1, x: t.x >> 1, y: t.y >> 1 };
+    const q = plan(0.3, ["0/0/0", tileKey(parent), tileKey(t)]);
+    expect(q.slots[0]!.own).toBe(true);
+    const sib = q.slots.find((s) => !s.own && s.tile.x >> 1 === parent.x && s.tile.y >> 1 === parent.y)!;
+    expect(sib.ancestor).toEqual(parent);
+  });
+
+  it("draws loaded children (two levels down) over the ancestor when zooming out", () => {
+    const t = plan(0.15, ["0/0/0"]).slots[0]!.tile;
+    expect(t.z).toBe(5);
+    const [c0, c1, c2, c3] = children(t) as [TileRef, TileRef, TileRef, TileRef];
+    // All four children: they cover the slot, no ancestor needed.
+    let s = plan(0.15, ["0/0/0", ...keys([c0, c1, c2, c3])]).slots[0]!;
+    expect(s.own).toBe(false);
+    expect(keys(s.descendants).sort()).toEqual(keys([c0, c1, c2, c3]).sort());
+    expect(s.ancestor).toBeNull();
+    expect(s.blank).toBe(false);
+    // Three children and the fourth's own four children cover it too.
+    s = plan(0.15, ["0/0/0", ...keys([c0, c1, c2, ...children(c3)])]).slots[0]!;
+    expect(s.descendants).toHaveLength(7);
+    expect(s.ancestor).toBeNull();
+    // Part of it: the ancestor under, the children over.
+    s = plan(0.15, ["0/0/0", tileKey(c0), tileKey(children(c1)[0]!)]).slots[0]!;
+    expect(keys(s.descendants)).toEqual([tileKey(c0), tileKey(children(c1)[0]!)]);
+    expect(tileKey(s.ancestor!)).toBe("0/0/0");
+    // Without level 0, a part covered by children is still blank.
+    expect(plan(0.15, [tileKey(c0)]).slots[0]!.blank).toBe(true);
   });
 });
 
@@ -98,12 +202,99 @@ describe("TileScheduler", () => {
     expect(s.inflight.size).toBe(0);
   });
 
+  it("runs one low-priority key at a time, after the others", () => {
+    const started: [string, boolean][] = [];
+    const s = new TileScheduler(4, (k, low) => {
+      started.push([k, low]);
+      return () => {};
+    });
+    s.update(["a", "b", "x", "y", "z"], 2);
+    expect(started).toEqual([
+      ["a", false],
+      ["b", false],
+      ["x", true],
+    ]);
+    s.finish("x");
+    expect(started.at(-1)).toEqual(["y", true]);
+    // A key that matters arrives: it takes a free slot at once, ahead of the next low one.
+    s.update(["c", "y", "z"], 1);
+    expect(started.at(-1)).toEqual(["c", false]);
+    expect([...s.inflight].sort()).toEqual(["c", "y"]);
+  });
+
   it("does not restart a finished tile unless asked again", () => {
     const start = vi.fn(() => () => {});
     const s = new TileScheduler(4, start);
     s.update(["a"]);
     s.finish("a");
     expect(start).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("TerrainTiles", () => {
+  /** A stand-in for the tile worker: records loads, and answers when told. */
+  class FakeWorker {
+    static last: FakeWorker;
+    loads: { key: string; low: boolean }[] = [];
+    onmessage: ((e: { data: unknown }) => void) | null = null;
+    constructor() {
+      FakeWorker.last = this;
+    }
+    postMessage(m: { type: string; key: string; low?: boolean }) {
+      if (m.type === "load") this.loads.push({ key: m.key, low: !!m.low });
+    }
+    terminate() {}
+    arrive(key: string, px = 256) {
+      this.onmessage?.({ data: { key, bitmap: { width: px, height: px, close() {} } } });
+    }
+  }
+  const doc: TilesDoc = { build: "b1", tileSize: 256, apron: 2, maxLevel: 7, gridLevel: 3, radius: R, source: "bridge", stale: false, waterLevel: 30, biomes: [], forest: "mask" };
+  const g = () => {
+    const drawn: number[][] = [];
+    const ctx = { save() {}, restore() {}, scale() {}, drawImage: (...a: number[]) => drawn.push(a.slice(5)), imageSmoothingEnabled: true, imageSmoothingQuality: "high" };
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, drawn };
+  };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("asks for level 0 at once, waits for it, then redraws only what an arriving tile changes", () => {
+    vi.stubGlobal("Worker", FakeWorker);
+    const tiles = new TerrainTiles(doc);
+    const w = FakeWorker.last;
+    expect(w.loads[0]).toEqual({ key: "0/0/0@1", low: false });
+    expect(w.loads.slice(1).every((l) => l.low)).toBe(true);
+    expect(tiles.ready).toBe(false);
+    w.arrive("0/0/0@1");
+    expect(tiles.ready).toBe(true);
+    const { view, box } = phone(0.3);
+    const { ctx, drawn } = g();
+    tiles.draw(ctx, box, view, 0.3, 2);
+    expect(drawn.length).toBe(tilesIn(box, 6, R).length);
+    expect(tiles.changed()).toEqual([]);
+    // The visible level 6 tiles are asked for, painted 1:1, ahead of everything else.
+    const first = tilesIn(view, 6, R)[0]!;
+    expect(w.loads.some((l) => l.key === `${tileKey(first)}@1` && !l.low)).toBe(true);
+    w.arrive(`${tileKey(first)}@1`);
+    expect(tiles.changed()).toEqual([tileBox(first, R)]);
+    // Drawing just that box brings the base up to date.
+    drawn.length = 0;
+    tiles.draw(ctx, box, view, 0.3, 2, [tileBox(first, R)]);
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(drawn.length).toBeLessThan(10);
+    expect(tiles.changed()).toEqual([]);
+    tiles.dispose();
+  });
+
+  it("keeps levels 0-3 for good, outside the cache budget", () => {
+    vi.stubGlobal("Worker", FakeWorker);
+    const tiles = new TerrainTiles(doc, 1024 * 1024);
+    const w = FakeWorker.last;
+    for (const t of pinnedTiles(7, R)) w.arrive(`${tileKey(t)}@1`);
+    // Fine tiles past the 1 MiB budget push each other out; the pinned ones stay.
+    for (let x = 0; x < 8; x++) w.arrive(`6/${30 + x}/30@1`);
+    const h = tiles.held;
+    expect(h.pinnedTiles).toBe(pinnedTiles(7, R).length);
+    expect(h.bytes - h.pinnedBytes).toBeLessThanOrEqual(1024 * 1024);
+    tiles.dispose();
   });
 });
 

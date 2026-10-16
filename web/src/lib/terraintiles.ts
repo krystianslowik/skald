@@ -1,8 +1,9 @@
-// The terrain tile pyramid on the map: which tiles a view needs, fetching
-// them in priority order (nearest the view first, at most four at a time,
-// cancelled when they leave it), a byte-bounded LRU of the painted bitmaps,
-// and drawing them with the nearest loaded ancestor standing in until a tile
-// arrives. Fetch, decode and paint happen in terraintile.worker.ts.
+// The terrain tile pyramid on the map. The planning half (planView,
+// TileScheduler) knows nothing of how tiles are drawn: which level a view
+// needs, which loaded relatives stand in for a missing tile, and what to load
+// in which order. Levels 0-3 stay on the client once loaded, so nothing is
+// ever blank. TerrainTiles is the Canvas2D side: fetch, decode and paint
+// happen in terraintile.worker.ts, and it draws the bitmaps.
 
 import { useEffect, useState } from "react";
 import { paletteOf, type Palette } from "./terrainpaint";
@@ -39,15 +40,37 @@ export interface TileRef {
 /** Metres per tile pixel at level z. */
 export const tileMpp = (z: number, radius: number, size = 256) => (2 * radius) / (size * 2 ** z);
 
-/** The coarsest level whose pixels are at most ~1.5 device px at this zoom. */
+/**
+ * The level whose samples are about one pixel of the canvas they are drawn
+ * into (`dpr` pixels per CSS px, capped at 2): the nearest level in log
+ * scale, so a sample is between 0.7 and 1.4 px.
+ */
 export function levelFor(scale: number, dpr: number, maxLevel: number, radius: number, size = 256): number {
-  const want = 1.5 / (scale * Math.min(dpr, 2));
+  const want = Math.SQRT2 / (scale * Math.min(dpr, 2));
   for (let z = 0; z < maxLevel; z++) if (tileMpp(z, radius, size) <= want) return z;
   return maxLevel;
 }
 
-/** Output pixels per tile pixel: finer at the top level when zoomed far in. */
-export const paintFactor = (z: number, maxLevel: number, scale: number) => (z === maxLevel && scale >= 6 ? 4 : 2);
+/**
+ * Output pixels per tile pixel. One below 1 px/m, where a sample is already
+ * about a pixel; 2 closer in, and 4 at the top level when zoomed far in, so
+ * the close-up stays crisp.
+ */
+export const paintFactor = (z: number, maxLevel: number, scale: number) => (scale < 1 ? 1 : z === maxLevel && scale >= 6 ? 4 : 2);
+
+/** The coarsest levels, kept on the client for good once loaded: the whole world at 10 m per pixel and coarser. */
+export const PINNED_LEVELS = 3;
+
+/** "z/x/y". */
+export const tileKey = (t: TileRef) => `${t.z}/${t.x}/${t.y}`;
+
+/** A tile's square in world metres (z up). */
+export function tileBox(t: TileRef, radius: number): Box {
+  const span = (2 * radius) / 2 ** t.z;
+  const x0 = -radius + t.x * span;
+  const z1 = radius - t.y * span;
+  return { x0, z0: z1 - span, x1: x0 + span, z1 };
+}
 
 /** Tiles of level z over `box`, inside the world disc, nearest the box's centre first. */
 export function tilesIn(box: Box, z: number, radius: number): TileRef[] {
@@ -75,6 +98,122 @@ export function tilesIn(box: Box, z: number, radius: number): TileRef[] {
   }
   out.sort((a, b) => a.d - b.d);
   return out.map((o) => o.t);
+}
+
+/** Levels 0..3 (or the pyramid's top, if lower) inside the world disc, coarsest first, each nearest `near`'s centre first. */
+export function pinnedTiles(maxLevel: number, radius: number, near?: Box): TileRef[] {
+  const world = { x0: -radius, z0: -radius, x1: radius, z1: radius };
+  const out: TileRef[] = [];
+  for (let z = 0; z <= Math.min(PINNED_LEVELS, maxLevel); z++) {
+    const all = tilesIn(world, z, radius);
+    if (near) {
+      const cx = (near.x0 + near.x1) / 2;
+      const cz = (near.z0 + near.z1) / 2;
+      const d = (t: TileRef) => {
+        const b = tileBox(t, radius);
+        return ((b.x0 + b.x1) / 2 - cx) ** 2 + ((b.z0 + b.z1) / 2 - cz) ** 2;
+      };
+      all.sort((a, b) => d(a) - d(b));
+    }
+    out.push(...all);
+  }
+  return out;
+}
+
+/** One slot of the view's level and what stands in for it while its own tile is missing. */
+export interface Slot {
+  tile: TileRef;
+  /** Its own tile is loaded. */
+  own: boolean;
+  /** Without its own tile: the nearest loaded ancestor, drawn first, unless descendants cover the slot. */
+  ancestor: TileRef | null;
+  /** Without its own tile: loaded tiles one or two levels finer, drawn over the ancestor. */
+  descendants: TileRef[];
+  /** Some of the slot has nothing loaded to show. */
+  blank: boolean;
+}
+
+export interface ViewPlan {
+  /** The level drawn. */
+  z: number;
+  /** Every tile of level z over the drawn box, nearest the view's centre first. */
+  slots: Slot[];
+  /** What to load, most important first: level 0, then the visible tiles. */
+  want: TileRef[];
+  /** `want` from this index on is low priority: one ring of tiles round the view, then the rest of levels 0..3. */
+  low: number;
+}
+
+export interface PlanInput {
+  /** What is drawn (a cached canvas may cover more than the screen). */
+  box: Box;
+  /** What is on screen. */
+  view: Box;
+  scale: number;
+  dpr: number;
+  maxLevel: number;
+  radius: number;
+  size?: number;
+  /** A tile is loaded and can be drawn. */
+  has: (t: TileRef) => boolean;
+}
+
+/**
+ * What a view needs from the pyramid: the level, every slot over the drawn
+ * box with its stand-ins, and the load order. A missing tile shows its loaded
+ * descendants (two levels down) over its nearest loaded ancestor, so with
+ * level 0 in, no slot is ever blank.
+ */
+export function planView(p: PlanInput): ViewPlan {
+  const { maxLevel, radius, has } = p;
+  const z = levelFor(p.scale, p.dpr, maxLevel, radius, p.size);
+  const slots: Slot[] = [];
+  for (const t of tilesIn(p.box, z, radius)) {
+    if (has(t)) {
+      slots.push({ tile: t, own: true, ancestor: null, descendants: [], blank: false });
+      continue;
+    }
+    const descendants: TileRef[] = [];
+    let covered = z < maxLevel;
+    for (let i = 0; i < 4 && z < maxLevel; i++) {
+      const c = { z: z + 1, x: 2 * t.x + (i & 1), y: 2 * t.y + (i >> 1) };
+      if (has(c)) {
+        descendants.push(c);
+        continue;
+      }
+      let all = z + 1 < maxLevel;
+      for (let j = 0; j < 4 && z + 1 < maxLevel; j++) {
+        const gc = { z: z + 2, x: 2 * c.x + (j & 1), y: 2 * c.y + (j >> 1) };
+        if (has(gc)) descendants.push(gc);
+        else all = false;
+      }
+      if (!all) covered = false;
+    }
+    let ancestor: TileRef | null = null;
+    for (let up = 1; up <= z && !covered; up++) {
+      const a = { z: z - up, x: t.x >> up, y: t.y >> up };
+      if (has(a)) {
+        ancestor = a;
+        break;
+      }
+    }
+    slots.push({ tile: t, own: false, ancestor, descendants, blank: !covered && !ancestor });
+  }
+  const want: TileRef[] = [];
+  const seen = new Set<string>();
+  const add = (t: TileRef) => {
+    const k = tileKey(t);
+    if (seen.has(k)) return;
+    seen.add(k);
+    if (!has(t)) want.push(t);
+  };
+  add({ z: 0, x: 0, y: 0 });
+  for (const t of tilesIn(p.view, z, radius)) add(t);
+  const low = want.length;
+  const span = (2 * radius) / 2 ** z;
+  for (const t of tilesIn({ x0: p.view.x0 - span, z0: p.view.z0 - span, x1: p.view.x1 + span, z1: p.view.z1 + span }, z, radius)) add(t);
+  for (const t of pinnedTiles(maxLevel, radius, p.view)) add(t);
+  return { z, slots, want, low };
 }
 
 /** A map from key to value bounded by total bytes, least recently used out first. */
@@ -134,28 +273,35 @@ export class ByteLRU<V> {
 
 /**
  * Starts loads in the order asked, at most `concurrency` at once; a new
- * wish list cancels what is no longer on it. `start` begins a load and
- * returns its cancel; the owner calls `finish` when it ends either way.
+ * wish list cancels what is no longer on it. Keys from index `low` on are
+ * low priority: one of them runs at a time, so they trickle in behind the
+ * keys that matter (a server that works one tile at a time never has more
+ * than one of them ahead of those). `start` begins a load and returns its
+ * cancel; the owner calls `finish` when it ends either way.
  */
 export class TileScheduler {
   private running = new Map<string, () => void>();
+  private lows = new Set<string>();
   private wanted: string[] = [];
+  private low = 0;
   constructor(
     private readonly concurrency: number,
-    private readonly start: (key: string) => () => void,
+    private readonly start: (key: string, low: boolean) => () => void,
   ) {}
 
   get inflight(): ReadonlySet<string> {
     return new Set(this.running.keys());
   }
 
-  /** The keys still needed, most important first. */
-  update(wanted: readonly string[]): void {
+  /** The keys still needed, most important first; from `low` on, low priority. */
+  update(wanted: readonly string[], low = wanted.length): void {
     this.wanted = [...wanted];
+    this.low = low;
     const keep = new Set(wanted);
     for (const [k, cancel] of this.running) {
       if (!keep.has(k)) {
         this.running.delete(k);
+        this.lows.delete(k);
         cancel();
       }
     }
@@ -164,33 +310,59 @@ export class TileScheduler {
 
   finish(key: string): void {
     this.running.delete(key);
-    this.wanted = this.wanted.filter((k) => k !== key);
+    this.lows.delete(key);
+    const i = this.wanted.indexOf(key);
+    if (i >= 0) {
+      this.wanted.splice(i, 1);
+      if (i < this.low) this.low--;
+    }
     this.pump();
   }
 
   private pump() {
-    for (const k of this.wanted) {
-      if (this.running.size >= this.concurrency) return;
+    for (let i = 0; i < this.wanted.length; i++) {
+      const k = this.wanted[i]!;
       if (this.running.has(k)) continue;
-      this.running.set(k, this.start(k));
+      if (this.running.size >= this.concurrency) return;
+      const low = i >= this.low;
+      if (low && this.lows.size > 0) return;
+      if (low) this.lows.add(k);
+      this.running.set(k, this.start(k, low));
     }
   }
 }
 
 const RETRY_MS = 5000;
 
-/** The tile pyramid for one tiles.json: owns the worker, the cache and the schedule. */
+/** Last full draw's inputs, and what each slot showed, by tile key. */
+interface Drawn {
+  box: Box;
+  view: Box;
+  scale: number;
+  dpr: number;
+  shown: Map<string, string>;
+}
+
+/**
+ * The tile pyramid for one tiles.json, drawn with Canvas2D: owns the worker,
+ * the painted bitmaps and the schedule. Levels 0..3 are asked for as soon as
+ * it exists and kept for good; the rest live in a byte-bounded LRU.
+ */
 export class TerrainTiles {
   private worker: Worker;
   private cache: ByteLRU<ImageBitmap>;
+  /** Levels 0..3 at paint factor 1, never evicted. */
+  private pinned = new Map<string, ImageBitmap>();
+  private pinnedBytes = 0;
   private sched: TileScheduler;
   /** Tiles that answered 404 (outside or not served): never asked again. */
   private missing = new Set<string>();
   /** Tiles that failed for now, by when they may be asked again. */
   private failed = new Map<string, number>();
   private drawn = new Set<string>();
+  private last: Drawn | null = null;
   private readonly palette: Palette;
-  /** Called when a tile arrives and the map should redraw. */
+  /** Called when a tile arrives (or fails); `changed()` says what to redraw. */
   onTile: (() => void) | null = null;
 
   constructor(
@@ -202,107 +374,176 @@ export class TerrainTiles {
     this.worker = new Worker(new URL("./terraintile.worker.ts", import.meta.url), { type: "module" });
     this.worker.onmessage = (e: MessageEvent<{ key: string; bitmap?: ImageBitmap; status?: number }>) => {
       const { key, bitmap, status } = e.data;
-      if (bitmap) {
-        this.cache.set(key, bitmap, bitmap.width * bitmap.height * 4, this.drawn);
-        this.onTile?.();
-      } else if (status === 404) this.missing.add(key);
+      if (bitmap) this.store(key, bitmap);
+      else if (status === 404) this.missing.add(key);
       else this.failed.set(key, Date.now() + RETRY_MS);
       this.sched.finish(key);
+      this.onTile?.();
     };
-    this.sched = new TileScheduler(4, (key) => {
+    this.sched = new TileScheduler(4, (key, low) => {
       const [zxy, f] = key.split("@") as [string, string];
       const [z, x, y] = zxy.split("/").map(Number) as [number, number, number];
       const url = `/api/terrain/tile?z=${z}&x=${x}&y=${y}&v=${encodeURIComponent(this.doc.build)}`;
-      this.worker.postMessage({ type: "load", key, url, factor: Number(f), palette: this.palette, waterLevel: this.doc.waterLevel, radius: this.doc.radius, apron: this.doc.apron });
+      this.worker.postMessage({ type: "load", key, url, low, factor: Number(f), palette: this.palette, waterLevel: this.doc.waterLevel, radius: this.doc.radius, apron: this.doc.apron });
       return () => this.worker.postMessage({ type: "cancel", key });
     });
+    this.prime();
   }
 
   dispose(): void {
     this.sched.update([]);
     this.worker.terminate();
     this.cache.clear();
+    for (const b of this.pinned.values()) b.close();
+    this.pinned.clear();
+    this.pinnedBytes = 0;
   }
 
-  /** Bytes of painted tiles held, and how many. */
-  get held(): { bytes: number; tiles: number } {
-    return { bytes: this.cache.bytes, tiles: this.cache.size };
+  /** Bytes of painted tiles held and how many, and the share of levels 0..3 kept for good. */
+  get held(): { bytes: number; tiles: number; pinnedBytes: number; pinnedTiles: number } {
+    return { bytes: this.cache.bytes + this.pinnedBytes, tiles: this.cache.size + this.pinned.size, pinnedBytes: this.pinnedBytes, pinnedTiles: this.pinned.size };
   }
 
-  private span(z: number) {
-    return (2 * this.doc.radius) / 2 ** z;
+  /** Level 0 is in (or will never be): from here on no slot is blank. Until then the map draws without tiles. */
+  get ready(): boolean {
+    return this.pinned.has("0/0/0@1") || this.missing.has("0/0/0@1");
   }
 
-  /** A loaded bitmap for z/x/y at any paint factor, preferring `f`. */
-  private loaded(z: number, x: number, y: number, f: number): { key: string; bmp: ImageBitmap } | null {
-    for (const ff of [f, 4, 2]) {
-      const key = `${z}/${x}/${y}@${ff}`;
-      const bmp = this.cache.get(key);
+  /**
+   * Asks for what a view needs without drawing it, while the map is drawn
+   * without tiles (not ready yet). Without a view, levels 0..3, level 0 first.
+   */
+  prime(view?: Box, scale = 0, dpr = 1): void {
+    if (view) return this.ask(this.plan(view, view, scale, dpr), view, scale);
+    const keys = this.askable(pinnedTiles(this.doc.maxLevel, this.doc.radius).map((t) => `${tileKey(t)}@1`));
+    this.sched.update(keys, keys[0] === "0/0/0@1" ? 1 : 0);
+  }
+
+  /** The plan's wish list to the scheduler; own tiles in view at another paint factor are asked for again at this one. */
+  private ask(p: ViewPlan, view: Box, scale: number): void {
+    const { maxLevel, radius } = this.doc;
+    const f = paintFactor(p.z, maxLevel, scale);
+    const keyOf = (t: TileRef) => `${tileKey(t)}@${t.z === p.z ? f : 1}`;
+    const redo = p.slots.filter((s) => s.own && this.loaded(s.tile, f)?.key !== `${tileKey(s.tile)}@${f}` && inBox(tileBox(s.tile, radius), view)).map((s) => `${tileKey(s.tile)}@${f}`);
+    const high = this.askable([...p.want.slice(0, p.low).map(keyOf), ...redo]);
+    this.sched.update([...high, ...this.askable(p.want.slice(p.low).map(keyOf))], high.length);
+  }
+
+  private askable(keys: string[]): string[] {
+    const now = Date.now();
+    return keys.filter((k) => !this.missing.has(k) && (this.failed.get(k) ?? 0) <= now);
+  }
+
+  private store(key: string, bmp: ImageBitmap) {
+    const [zxy, f] = key.split("@") as [string, string];
+    if (f === "1" && Number(zxy.split("/")[0]) <= PINNED_LEVELS) {
+      const old = this.pinned.get(key);
+      if (old) {
+        this.pinnedBytes -= old.width * old.height * 4;
+        old.close();
+      }
+      this.pinned.set(key, bmp);
+      this.pinnedBytes += bmp.width * bmp.height * 4;
+    } else this.cache.set(key, bmp, bmp.width * bmp.height * 4, this.drawn);
+  }
+
+  /** A loaded bitmap for a tile at any paint factor, preferring `f`. `touch` marks it recently used. */
+  private loaded(t: TileRef, f: number, touch = false): { key: string; bmp: ImageBitmap } | null {
+    const zxy = tileKey(t);
+    for (const ff of [f, 1, 2, 4]) {
+      const key = `${zxy}@${ff}`;
+      const bmp = this.pinned.get(key) ?? (touch ? this.cache.get(key) : this.cache.peek(key));
       if (bmp) return { key, bmp };
     }
     return null;
   }
 
+  private plan(box: Box, view: Box, scale: number, dpr: number): ViewPlan {
+    const { maxLevel, radius, tileSize } = this.doc;
+    const f = paintFactor(levelFor(scale, dpr, maxLevel, radius, tileSize), maxLevel, scale);
+    return planView({ box, view, scale, dpr, maxLevel, radius, size: tileSize, has: (t) => this.loaded(t, f) !== null });
+  }
+
+  /** What each slot shows: its own tile (at which factor) or its stand-ins. */
+  private shown(s: Slot, f: number): string {
+    if (s.own) return this.loaded(s.tile, f)?.key ?? "";
+    return `${s.ancestor ? tileKey(s.ancestor) : ""}|${s.descendants.map(tileKey).join(",")}`;
+  }
+
+  /**
+   * The world boxes of slots that would draw differently now than in the
+   * last draw, after tiles arrived: only these need drawing again.
+   */
+  changed(): Box[] {
+    const d = this.last;
+    if (!d) return [];
+    const p = this.plan(d.box, d.view, d.scale, d.dpr);
+    const f = paintFactor(p.z, this.doc.maxLevel, d.scale);
+    const out: Box[] = [];
+    for (const s of p.slots) if (d.shown.get(tileKey(s.tile)) !== this.shown(s, f)) out.push(tileBox(s.tile, this.doc.radius));
+    return out;
+  }
+
   /**
    * Draws the tiles over `box` into `g`, whose transform is the map's world
-   * transform (y up). Missing tiles show their nearest loaded ancestor,
-   * scaled; the wish list for the box replaces the last one.
+   * transform (y up), and asks for what `view` (the part on screen) needs.
+   * A missing tile shows its loaded descendants over its nearest loaded
+   * ancestor. With `only`, it draws just the slots touching those boxes, for
+   * the same box and view as the last draw, and leaves the wish list alone.
    */
-  draw(g: CanvasRenderingContext2D, box: Box, scale: number, dpr: number): void {
+  draw(g: CanvasRenderingContext2D, box: Box, view: Box, scale: number, dpr: number, only?: readonly Box[]): void {
     const { maxLevel, radius } = this.doc;
-    const z = levelFor(scale, dpr, maxLevel, radius, this.doc.tileSize);
-    const f = paintFactor(z, maxLevel, scale);
-    const now = Date.now();
-    const want: string[] = [];
-    const parents: string[] = [];
+    const p = this.plan(box, view, scale, dpr);
+    const f = paintFactor(p.z, maxLevel, scale);
+    const shown = only && this.last ? this.last.shown : new Map<string, string>();
     const drawn = new Set<string>();
     // Half a device pixel of overlap hides seams between neighbours.
     const pad = 0.5 / (scale * dpr);
-    const put = (bmp: ImageBitmap, sx: number, sy: number, sw: number, west: number, north: number, span: number) => {
-      g.drawImage(bmp, sx, sy, sw, sw, west - pad, -north - pad, span + 2 * pad, span + 2 * pad);
+    const put = (bmp: ImageBitmap, sx: number, sy: number, sw: number, b: Box) => {
+      g.drawImage(bmp, sx, sy, sw, sw, b.x0 - pad, -b.z1 - pad, b.x1 - b.x0 + 2 * pad, b.z1 - b.z0 + 2 * pad);
     };
-    const ask = (key: string, list: string[]) => {
-      if (this.missing.has(key) || (this.failed.get(key) ?? 0) > now) return;
-      list.push(key);
-    };
+    const touches = (b: Box) => !only || only.some((o) => inBox(o, b));
     g.save();
     // Tiles are north up; the world transform flips rows, so flip them back.
     g.scale(1, -1);
     g.imageSmoothingEnabled = true;
     g.imageSmoothingQuality = "high";
-    for (const t of tilesIn(box, z, radius)) {
-      const span = this.span(z);
-      const west = -radius + t.x * span;
-      const north = radius - t.y * span;
-      const own = this.loaded(z, t.x, t.y, f);
+    for (const s of p.slots) {
+      const b = tileBox(s.tile, radius);
+      const use = (t: TileRef) => {
+        const l = this.loaded(t, f, true);
+        if (l) drawn.add(l.key);
+        return l;
+      };
+      const own = s.own ? use(s.tile) : null;
+      const a = s.ancestor ? use(s.ancestor) : null;
+      const kids = s.descendants.map((t) => ({ t, l: use(t) }));
+      if (!touches(b)) continue;
+      shown.set(tileKey(s.tile), this.shown(s, f));
       if (own) {
-        drawn.add(own.key);
-        put(own.bmp, 0, 0, own.bmp.width, west, north, span);
-        if (!own.key.endsWith(`@${f}`)) ask(`${z}/${t.x}/${t.y}@${f}`, want);
+        put(own.bmp, 0, 0, own.bmp.width, b);
         continue;
       }
-      ask(`${z}/${t.x}/${t.y}@${f}`, want);
-      // The nearest loaded ancestor, cut to this tile.
-      for (let up = 1; up <= z; up++) {
-        const az = z - up;
-        const ax = t.x >> up;
-        const ay = t.y >> up;
-        const a = this.loaded(az, ax, ay, 2);
-        if (!a) {
-          if (up === 1) ask(`${az}/${ax}/${ay}@2`, parents);
-          continue;
-        }
-        drawn.add(a.key);
+      if (a && s.ancestor) {
+        // The ancestor, cut to this slot.
+        const up = s.tile.z - s.ancestor.z;
         const sub = a.bmp.width / 2 ** up;
-        put(a.bmp, (t.x - (ax << up)) * sub, (t.y - (ay << up)) * sub, sub, west, north, span);
-        break;
+        put(a.bmp, (s.tile.x - (s.ancestor.x << up)) * sub, (s.tile.y - (s.ancestor.y << up)) * sub, sub, b);
       }
+      for (const { t, l } of kids) if (l) put(l.bmp, 0, 0, l.bmp.width, tileBox(t, radius));
     }
     g.restore();
+    if (only && this.last) {
+      for (const k of drawn) this.drawn.add(k);
+      return;
+    }
     this.drawn = drawn;
-    this.sched.update([...want, ...parents.filter((k, i) => parents.indexOf(k) === i)]);
+    this.last = { box, view, scale, dpr, shown };
+    this.ask(p, view, scale);
   }
 }
+
+const inBox = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.z0 < b.z1 && b.z0 < a.z1;
 
 /** Painted tiles to keep: less on small-memory phones. */
 function defaultBudget(): number {

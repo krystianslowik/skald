@@ -28,7 +28,7 @@ import {
   type View,
 } from "./mapgeo";
 import { ICONS } from "./mapicons";
-import { TerrainTiles, type TilesDoc } from "./terraintiles";
+import { TerrainTiles, type Box as WorldBox, type TilesDoc } from "./terraintiles";
 import { CLOUD_TILE, PAPER_TILE, textures as paperTextures, type Textures } from "./paper";
 import { natureTint, wobble, type NatureItem } from "./nature";
 import { NatureLayer, natureAlpha } from "./naturerender";
@@ -229,7 +229,24 @@ export class MapRenderer {
   /** The land and explored mask the shapes are (being) built from, and the newest request. */
   private shapesKey = "";
   private shapesReq = 0;
-  private base: { canvas: HTMLCanvasElement | OffscreenCanvas; key: string; cx: number; cz: number; scale: number; w: number; h: number; rough: boolean } | null = null;
+  private base: {
+    canvas: HTMLCanvasElement | OffscreenCanvas;
+    key: string;
+    cx: number;
+    cz: number;
+    scale: number;
+    w: number;
+    h: number;
+    rough: boolean;
+    /** What it was drawn with, so arriving tiles can be drawn into it in place. */
+    dpr: number;
+    layers: Record<LayerId, boolean>;
+    storey: StoreyPick | null;
+    /** The part of it on screen when it was drawn. */
+    seen: WorldBox;
+  } | null = null;
+  /** Terrain tiles arrived since the base was drawn. */
+  private tilesArrived = false;
   /** Markers drawn in the last frame, in screen space, for picking. */
   visible: ScreenMarker[] = [];
   /** Clusters for one zoom level, layer set and marker list; a pan reuses them. */
@@ -337,8 +354,9 @@ export class MapRenderer {
     if (doc) {
       try {
         this.tiles = new TerrainTiles(doc);
+        // An arriving tile redraws only the slots it changes, not the whole base.
         this.tiles.onTile = () => {
-          this.version++;
+          this.tilesArrived = true;
           this.onChange?.();
         };
       } catch {
@@ -509,7 +527,7 @@ export class MapRenderer {
     }
     const plan = f.layers.buildings && this.plan ? `${this.planVersion}:${f.storey ? `${f.storey.base}/${f.storey.level}` : ""}:${this.storeys(v, f.layers)?.base ?? ""}` : "";
     const nature = f.layers.nature || f.layers.resources ? `${f.layers.nature ? 1 : 0}${f.layers.resources ? 1 : 0}:${this.nature.version}` : "";
-    const key = `${f.layers.fog ? 1 : 0}${f.layers.terrain ? 1 : 0}${f.layers.relief ? 1 : 0}:${this.version}:${v.w}x${v.h}:${this.dpr}:${plan}:${nature}`;
+    const key = `${f.layers.fog ? 1 : 0}${f.layers.terrain ? 1 : 0}${f.layers.relief ? 1 : 0}:${this.version}:${this.tiles?.ready ? 1 : 0}:${v.w}x${v.h}:${this.dpr}:${plan}:${nature}`;
     let b = this.base;
     const covers = (c: NonNullable<typeof b>) => {
       const k = v.scale / c.scale;
@@ -524,6 +542,8 @@ export class MapRenderer {
     // Only a base whose woods were drawn rough needs a redraw at rest.
     const rough = quality === "fast" && f.layers.nature && natureAlpha(v.scale) > 0 && !this.nature.empty;
     if (!b || b.key !== key || !covers(b)) b = this.renderBase(f, key, rough);
+    else if (this.tilesArrived) this.patchBase(b);
+    this.tilesArrived = false;
     this.screen(g);
     g.fillStyle = VOID;
     g.fillRect(0, 0, v.w, v.h);
@@ -555,13 +575,56 @@ export class MapRenderer {
     g.clearRect(0, 0, canvas.width, canvas.height);
     this.activeBase = this.storeys(v, f.layers)?.base ?? null;
     this.roughNature = rough;
-    this.drawWorld(g, { ...v, w, h }, f.layers, dpr, f.storey ?? null);
-    this.base = { canvas, key, cx: v.cx, cz: v.cz, scale: v.scale, w, h, rough };
+    const [x0, z0, x1, z1] = viewBox(v);
+    const seen = { x0, z0, x1, z1 };
+    const storey = f.storey ?? null;
+    this.drawWorld(g, { ...v, w, h }, f.layers, dpr, storey, seen);
+    this.base = { canvas, key, cx: v.cx, cz: v.cz, scale: v.scale, w, h, rough, dpr, layers: f.layers, storey, seen };
     return this.base;
   }
 
-  /** Paper, sea, land, terrain heat, fog and the world's edge, for view `v` at `dpr`. */
-  private drawWorld(g: CanvasRenderingContext2D, v: View, layers: Record<LayerId, boolean>, dpr: number, storey: StoreyPick | null) {
+  /**
+   * Redraws, in place, only the parts of the base where arrived tiles change
+   * what shows: everything over the tiles is drawn again inside a clip, at
+   * the base's own view.
+   */
+  private patchBase(b: NonNullable<MapRenderer["base"]>) {
+    if (!b.layers.relief || !this.tiles?.ready) return;
+    const boxes = this.tiles.changed();
+    if (!boxes.length) return;
+    const g = ctx2d(b.canvas) as CanvasRenderingContext2D | null;
+    if (!g) return;
+    const s = b.scale * b.dpr;
+    const ox = (b.w / 2 - b.cx * b.scale) * b.dpr;
+    const oy = (b.h / 2 + b.cz * b.scale) * b.dpr;
+    const clip = new Path2D();
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    // Whole pixels, a little wider than the tiles, so their smoothed edges are redrawn too.
+    for (const r of boxes) {
+      const px0 = Math.max(0, Math.floor(r.x0 * s + ox) - 2);
+      const px1 = Math.min(b.canvas.width, Math.ceil(r.x1 * s + ox) + 2);
+      const py0 = Math.max(0, Math.floor(oy - r.z1 * s) - 2);
+      const py1 = Math.min(b.canvas.height, Math.ceil(oy - r.z0 * s) + 2);
+      if (px1 <= px0 || py1 <= py0) continue;
+      clip.rect(px0, py0, px1 - px0, py1 - py0);
+      g.clearRect(px0, py0, px1 - px0, py1 - py0);
+    }
+    g.clip(clip);
+    this.roughNature = b.rough;
+    // The tiles drawn are those touching the clip, margin included, so neighbours fill it too.
+    const m = 3 / s;
+    const grown = boxes.map((r) => ({ x0: r.x0 - m, z0: r.z0 - m, x1: r.x1 + m, z1: r.z1 + m }));
+    this.drawWorld(g, { cx: b.cx, cz: b.cz, scale: b.scale, w: b.w, h: b.h }, b.layers, b.dpr, b.storey, b.seen, grown);
+    g.restore();
+  }
+
+  /**
+   * Paper, sea, land, terrain heat, fog and the world's edge, for view `v` at
+   * `dpr`. `seen` is the part on screen, which the terrain tiles load for;
+   * `only` limits the tiles drawn to those boxes (the rest is clipped away).
+   */
+  private drawWorld(g: CanvasRenderingContext2D, v: View, layers: Record<LayerId, boolean>, dpr: number, storey: StoreyPick | null, seen: WorldBox, only?: readonly WorldBox[]) {
     const p = this.prep;
     const s = v.scale * dpr;
     g.setTransform(s, 0, 0, -s, (v.w / 2 - v.cx * v.scale) * dpr, (v.h / 2 + v.cz * v.scale) * dpr);
@@ -574,13 +637,15 @@ export class MapRenderer {
     this.drawPaper(g, v);
     const relief = layers.relief ? this.relief : null;
     const tiles = layers.relief ? this.tiles : null;
-    if (p && tiles) {
+    // Until the whole world's coarsest tile is in, the map is inked from the save, never blank paper.
+    if (tiles && !tiles.ready) tiles.prime(seen, v.scale, dpr);
+    if (p && tiles?.ready) {
       // Tiles painted in the game's map colours, the same at every zoom: no
       // fades between levels, no traced coast (the tiles carry the water).
       g.save();
       if (!this.spoilers) g.clip(p.sea);
       const [x0, z0, x1, z1] = viewBox(v);
-      tiles.draw(g, { x0, z0, x1, z1 }, v.scale, dpr);
+      tiles.draw(g, { x0, z0, x1, z1 }, seen, v.scale, dpr, only);
       this.drawPaper(g, v, 0.28);
       g.restore();
       if (layers.terrain) this.drawTerrain(g, v, p);

@@ -4,7 +4,7 @@
 
 import { decodeTile, paintTile, type Palette } from "./terrainpaint";
 
-type Load = { type: "load"; key: string; url: string; factor: number; palette: Palette; waterLevel: number; radius: number; apron: number };
+type Load = { type: "load"; key: string; url: string; low?: boolean; factor: number; palette: Palette; waterLevel: number; radius: number; apron: number };
 type Cancel = { type: "cancel"; key: string };
 
 const inflight = new Map<string, AbortController>();
@@ -18,7 +18,7 @@ async function load(m: Load) {
   const ac = new AbortController();
   inflight.set(m.key, ac);
   try {
-    const res = await fetch(m.url, { credentials: "same-origin", signal: ac.signal });
+    const res = await fetch(m.url, { credentials: "same-origin", signal: ac.signal, priority: m.low ? "low" : "auto" });
     if (!res.ok || !res.body) {
       await res.body?.cancel();
       postMessage({ key: m.key, status: res.status });
