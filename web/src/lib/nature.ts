@@ -64,12 +64,53 @@ const TREE_TINT: Record<string, string> = {
   birch: "#a7ad4e",
   pine: "#55744a",
   fir: "#466847",
-  swamp: "#71703f",
+  // Dark and muted: the swamp's old trees are mostly bark and moss.
+  swamp: "#5c5a3b",
   yggashoot: "#7f93a4",
   ashwood: "#7d4f3c",
   snowpine: "#7a948f",
   snowfir: "#6c8a86",
 };
+
+/**
+ * How a crown is drawn seen from above, by species: `lobes` round bumps
+ * (or, `spiky`, as many points of a star, for conifers), `rough` how much
+ * each one varies, `bulge` how round a lobe is, `crown` the share of the
+ * tree's reach its foliage covers (below 1 leaves gaps: a sparse wood).
+ */
+export interface TreeStyle {
+  lobes: number;
+  rough: number;
+  bulge: number;
+  spiky: boolean;
+  crown: number;
+}
+
+const BROADLEAF: TreeStyle = { lobes: 7, rough: 0.1, bulge: 0.12, spiky: false, crown: 1 };
+const CONIFER: TreeStyle = { lobes: 9, rough: 0.06, bulge: 0, spiky: true, crown: 0.92 };
+
+const TREE_STYLE: Record<string, TreeStyle> = {
+  beech: BROADLEAF,
+  // Broad and billowing.
+  oak: { ...BROADLEAF, lobes: 9, bulge: 0.16, rough: 0.08 },
+  // Small, neat and light.
+  birch: { ...BROADLEAF, lobes: 6, rough: 0.06, bulge: 0.1, crown: 0.85 },
+  pine: CONIFER,
+  fir: { ...CONIFER, lobes: 10 },
+  snowpine: CONIFER,
+  snowfir: { ...CONIFER, lobes: 10 },
+  // Ancient and gnarled: few, ragged lobes, small crowns with the water showing between.
+  swamp: { lobes: 5, rough: 0.32, bulge: 0.2, spiky: false, crown: 0.72 },
+  // Mistlands: wide, flat, soft-edged canopies.
+  yggashoot: { ...BROADLEAF, lobes: 6, rough: 0.12, bulge: 0.22, crown: 1.05 },
+  // Ashlands: charred and sparse, a few sharp points.
+  ashwood: { lobes: 7, rough: 0.25, bulge: 0, spiky: true, crown: 0.8 },
+};
+
+/** The crown style of a tree species; broadleaf for anything not listed. */
+export function treeStyle(species: string): TreeStyle {
+  return TREE_STYLE[species] ?? BROADLEAF;
+}
 
 /** Rock fills by species; cliffs are outlined rather than filled. */
 const ROCK_TINT: Record<string, string> = {

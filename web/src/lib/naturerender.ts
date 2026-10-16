@@ -9,7 +9,7 @@
 import type { ChunkKey } from "./pieces";
 import { closeRing } from "./mapgeo";
 import { chunkBox } from "./pieces";
-import { NATURE_CHUNK, NATURE_FADE_FROM, NATURE_FADE_FULL, natureTint, PICKABLE_SCALE, TREE_DETAIL_SCALE, wobble, type NatureItem } from "./nature";
+import { NATURE_CHUNK, NATURE_FADE_FROM, NATURE_FADE_FULL, natureTint, PICKABLE_SCALE, TREE_DETAIL_SCALE, treeStyle, wobble, type NatureItem, type TreeStyle } from "./nature";
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
@@ -39,8 +39,8 @@ const bucket = (m: Map<string, Path2D>, k: string) => {
 };
 
 /** A crown for mid zoom, where a few pixels across cannot show lobes: a plain polygon, far cheaper to fill. */
-function crownCoarse(path: Path2D, it: NatureItem) {
-  const r = (it.size / 2) * (1 + 0.07 * wobble(it, 99));
+function crownCoarse(path: Path2D, it: NatureItem, style: TreeStyle) {
+  const r = (it.size / 2) * style.crown * (1 + 0.07 * wobble(it, 99));
   const a0 = (it.yaw * Math.PI) / 180;
   for (let i = 0; i < 11; i++) {
     const a = a0 + (i / 11) * Math.PI * 2;
@@ -51,15 +51,38 @@ function crownCoarse(path: Path2D, it: NatureItem) {
   // Only ever filled, and a fill closes the ring (see closeRing for why not closePath).
 }
 
-/** A crown: a soft lobed ring, each lobe a little in or out, turned by the tree's yaw. */
-function crown(path: Path2D, it: NatureItem) {
-  const r = (it.size / 2) * (1 + 0.07 * wobble(it, 99));
-  const n = 7;
+/**
+ * A crown in its species' style, turned by the tree's yaw: a soft lobed ring,
+ * each lobe a little in or out, or for a conifer a low star of points.
+ */
+function crown(path: Path2D, it: NatureItem, style: TreeStyle) {
+  const r = (it.size / 2) * style.crown * (1 + 0.07 * wobble(it, 99));
+  const n = style.lobes;
   const a0 = (it.yaw * Math.PI) / 180;
+  if (style.spiky) {
+    // Points and notches in turn; closed as stones are (see closeRing).
+    let x0 = 0;
+    let z0 = 0;
+    let x1 = 0;
+    let z1 = 0;
+    for (let i = 0; i < n * 2; i++) {
+      const a = a0 + (i / (n * 2)) * Math.PI * 2;
+      const ri = r * (i % 2 ? 0.8 : 1) * (1 + style.rough * wobble(it, i));
+      const x = it.x + Math.cos(a) * ri;
+      const z = it.z + Math.sin(a) * ri;
+      if (i === 0) {
+        path.moveTo(x, z);
+        [x0, z0] = [x, z];
+      } else path.lineTo(x, z);
+      if (i === 1) [x1, z1] = [x, z];
+    }
+    closeRing(path, x0, z0, x1, z1);
+    return;
+  }
   const pts: [number, number][] = [];
   for (let i = 0; i < n; i++) {
     const a = a0 + (i / n) * Math.PI * 2;
-    const ri = r * (1 + 0.1 * wobble(it, i));
+    const ri = r * (1 + style.rough * wobble(it, i));
     pts.push([it.x + Math.cos(a) * ri, it.z + Math.sin(a) * ri]);
   }
   const mid = (i: number) => {
@@ -73,7 +96,7 @@ function crown(path: Path2D, it: NatureItem) {
   for (let i = 1; i <= n; i++) {
     const p = pts[i % n]!;
     const m = mid(i);
-    path.quadraticCurveTo(p[0] + (p[0] - it.x) * 0.12, p[1] + (p[1] - it.z) * 0.12, m[0], m[1]);
+    path.quadraticCurveTo(p[0] + (p[0] - it.x) * style.bulge, p[1] + (p[1] - it.z) * style.bulge, m[0], m[1]);
   }
   // The ring ends where it began, on a lobe's round middle, and is stroked with round caps: no closePath (see closeRing).
 }
@@ -110,8 +133,10 @@ function build(key: ChunkKey, items: readonly NatureItem[]): ChunkPaths {
   // The big crowns first, so smaller trees sit on top of them.
   const trees = items.filter((it) => it.category === "tree").sort((a, b) => b.size - a.size);
   for (const it of trees) {
-    crown(bucket(out.crowns, natureTint("tree", it.species)), it);
-    crownCoarse(bucket(out.coarse, natureTint("tree", it.species)), it);
+    const tint = natureTint("tree", it.species);
+    const style = treeStyle(it.species);
+    crown(bucket(out.crowns, tint), it, style);
+    crownCoarse(bucket(out.coarse, tint), it, style);
     dot(out.trunks, it.x, it.z);
   }
   out.trees = trees.length;
@@ -307,12 +332,7 @@ export class NatureLayer {
       }
       this.drawWoods(g, list, scale, alpha, rough);
       if (detail) {
-        // Close in, every tree its own: a faint rim round each crown and its trunk.
-        const near = Math.min(1, (scale - TREE_DETAIL_SCALE) / 4);
-        g.globalAlpha = alpha * (0.15 + 0.2 * near);
-        g.strokeStyle = "#2f3a1c";
-        g.lineWidth = 0.8 * px;
-        for (const c of list) for (const path of c.crowns.values()) g.stroke(path);
+        // Close in, every tree its own trunk; the rim is the wood's outline, drawn with the woods.
         g.globalAlpha = alpha * 0.85;
         g.strokeStyle = "#4a3320";
         g.lineWidth = Math.max(2.2 * px, 0.4);
@@ -338,10 +358,9 @@ export class NatureLayer {
   }
 
   /**
-   * The woods: each tint's crowns filled in ink a pixel or two down and
-   * right, then in their tint over it, on a layer of their own; laid on the
-   * map as one wash, only a wood's outer edge keeps the ink, so a forest
-   * reads as one mass rather than a heap of circles.
+   * The woods, on a layer of their own laid on the map as one wash: each
+   * tint's crowns as one shape (see paintWoods), so a forest reads as one
+   * mass rather than a heap of circles.
    */
   private drawWoods(g: Ctx, list: readonly ChunkPaths[], scale: number, alpha: number, rough: boolean) {
     if (!list.some((c) => c.trees > 0)) return;
@@ -361,31 +380,66 @@ export class NatureLayer {
     s.clearRect(0, 0, W, H);
     const t = g.getTransform();
     const m = new DOMMatrix([t.a * k, t.b * k, t.c * k, t.d * k, t.e * k, t.f * k]);
-    // The rim is the wood's own shape a little down and right, in ink: a
-    // shadow on the far side, as a woodland is shaded on a drawn map. A fill
-    // costs far less than stroking every crown.
+    // The shadow is the wood's own shape a little down and right, in ink, as
+    // a woodland is shaded on a drawn map.
     const off = (1.5 * m.a) / scale;
+    const detail = scale >= TREE_DETAIL_SCALE;
     const tints = new Set<string>();
     for (const c of list) for (const tint of c.crowns.keys()) tints.add(tint);
-    const shape = (c: ChunkPaths) => (scale < TREE_DETAIL_SCALE ? c.coarse : c.crowns);
+    const groups: WoodGroup[] = [];
     for (const tint of tints) {
-      s.setTransform(m.a, m.b, m.c, m.d, m.e + off, m.f + off);
-      s.fillStyle = darker(tint, 0.4);
+      const paths: Path2D[] = [];
       for (const c of list) {
-        const p = shape(c).get(tint);
-        if (p) s.fill(p);
+        const p = (detail ? c.crowns : c.coarse).get(tint);
+        if (p) paths.push(p);
       }
-      s.setTransform(m);
-      s.fillStyle = tint;
-      for (const c of list) {
-        const p = shape(c).get(tint);
-        if (p) s.fill(p);
-      }
+      groups.push({ tint, paths });
     }
+    // Close in, the outline of each wood: about a pixel, darker as the trees come closer.
+    const near = Math.min(1, Math.max(0, (scale - TREE_DETAIL_SCALE) / 4));
+    const rim = detail ? { width: 0.9 / scale, alpha: 0.45 + 0.35 * near } : null;
+    // Lobed rings are left open at a lobe's middle: round caps close them.
+    s.lineJoin = "round";
+    s.lineCap = "round";
+    paintWoods(s, groups, rim, (shadow) => (shadow ? s.setTransform(m.a, m.b, m.c, m.d, m.e + off, m.f + off) : s.setTransform(m)));
     g.save();
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.globalAlpha = alpha * 0.62;
     g.drawImage(this.scratch as CanvasImageSource, 0, 0, W, H, 0, 0, FW, FH);
     g.restore();
+  }
+}
+
+/** One colour of woods: every crown of that tint in the view, chunk by chunk. */
+export interface WoodGroup {
+  tint: string;
+  paths: readonly Path2D[];
+}
+
+type Paint = Pick<CanvasRenderingContext2D, "fill" | "stroke" | "fillStyle" | "strokeStyle" | "lineWidth" | "globalAlpha">;
+
+/**
+ * Each group of woods as one shape: its shadow (placed by `place(true)`),
+ * then, close in, every crown stroked at twice the rim's width and every
+ * crown filled over it. The fills cover the inner half of every stroke and
+ * all of the strokes where crowns overlap, so only the outer edge of the
+ * wood keeps a line: one outline round a forest, not one round each tree.
+ * Strokes and fills of a group never interleave.
+ */
+export function paintWoods(s: Paint, groups: readonly WoodGroup[], rim: { width: number; alpha: number } | null, place: (shadow: boolean) => void): void {
+  for (const { tint, paths } of groups) {
+    place(true);
+    s.fillStyle = darker(tint, 0.4);
+    for (const p of paths) s.fill(p);
+    place(false);
+    if (rim) {
+      s.globalAlpha = rim.alpha;
+      s.strokeStyle = darker(tint, 0.3);
+      s.lineWidth = rim.width * 2;
+      for (const p of paths) s.stroke(p);
+      s.globalAlpha = 1;
+    }
+    s.fillStyle = tint;
+    for (const p of paths) s.fill(p);
   }
 }
