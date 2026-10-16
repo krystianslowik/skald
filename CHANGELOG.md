@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- Joins, leaves, deaths, saves and other notable events are no longer lost when the dashboard reconnects to the agent after a burst of server log lines. The agent now keeps the last 5000 notable events apart from the last 2000 log lines, so a chatty server can no longer push them out before the dashboard records them. If the dashboard was away so long that notable events did drop out anyway, the agent's log now says so with a warning. Log lines replayed on reconnect are capped at the newest 2000.
+- The agent no longer burns a CPU core and floods its own log when reading game log lines keeps failing. It now waits between retries, from 50 ms up to 5 seconds, and exits so the container restarts if the log socket is closed under it.
+
 ## [2026.10.4] - 2026-10-16
 
 ### Changed

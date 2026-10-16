@@ -85,8 +85,9 @@ func main() {
 
 	go tracker.WatchStatusFile(ctx, cfg.StatusFile, 2*time.Second)
 	go func() {
-		// A bind failure means the game's logs are lost for the pod's
-		// lifetime; exit so the container runtime restarts the sidecar.
+		// A bind failure or a socket closed under us means the game's logs
+		// are lost for the pod's lifetime; exit so the container runtime
+		// restarts the sidecar.
 		if err := syslog.Listen(ctx, cfg.SyslogAddr, logger, handleLine); err != nil {
 			fail(fmt.Errorf("syslog listen %s: %w", cfg.SyslogAddr, err))
 		}
