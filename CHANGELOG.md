@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format follows
 
 - Game build `l-1.0.20` is a tested build for the admin bridge, so admin commands run on it without a confirmation from the panel.
 
+### Fixed
+
+- Rocks and logs on the seabed no longer draw inside lakes and the sea. Anything more than 4 m under the water is left out of the map's nature; beach stones, swamp trees and ore deposits stay.
+
 ## [0.10.2] - 2026-10-16
 
 ### Changed

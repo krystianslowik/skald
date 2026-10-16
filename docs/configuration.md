@@ -185,7 +185,10 @@ placed (a creator), creatures, spawners, dropped items, location and
 dungeon pieces never show; a cut tree or a mined rock is gone from the save
 and so from the answer. Dungeon interiors are left out whole, so the muddy
 scrap piles inside sunken crypts do not show either; iron on the map is the
-buried piles a wishbone finds and any lying in the open.
+buried piles a wishbone finds and any lying in the open. Rocks, logs and
+pickables more than 4 m under the sea (world y below 26 m; the water is at
+30 m) are left out too, so seabed rocks and sunken logs no longer draw inside
+lakes; ore deposits are kept wherever they lie.
 
 ```json
 {"generation":12,"bbox":[100,-220,140,-180],"spoilers":false,

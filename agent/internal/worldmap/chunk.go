@@ -223,7 +223,7 @@ func parseChunk(b []byte) (cd *chunkData, err error) {
 			}
 		}
 		if !f.creator && y <= maxNatureY {
-			if kind, ok := natureByHash[prefab]; ok {
+			if kind, ok := natureByHash[prefab]; ok && (flags&flagShortPos != 0 || !underwater(kind, y)) {
 				yaw, _ := rotation(flags&flagRotation != 0, rot)
 				cd.nature = append(cd.nature, newNatureItem(kind, x, z, yaw, f.scale))
 			}

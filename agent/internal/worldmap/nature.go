@@ -14,7 +14,7 @@ import (
 // Nature: the trees, stumps, logs, rocks, bushes, ore deposits and pickables
 // the world generated, for drawing the land at close zoom. Only objects
 // without a creator count (a player never placed them), only prefabs of the
-// table below, and only outside dungeon interiors. A tree that was cut or a
+// table below, and only outside dungeon interiors and above the seabed. A tree that was cut or a
 // rock that was mined is gone from the save, so this is the world as it is
 // now. Nothing here names a player.
 
@@ -194,6 +194,24 @@ func natureKindOf(name string) (natureKind, bool) {
 // maxNatureY drops dungeon and cave interiors: the game builds them about
 // 5,000 m above the world, out of sight.
 const maxNatureY = 1000
+
+// waterLevel is the sea in world y. minNatureY drops what lies clearly under
+// it: seabed rocks and sunken logs, which otherwise draw inside lakes and the
+// sea. In a played world nothing but rocks and logs sits below 26 m, while
+// beach stones, swamp trees, flint and tin start at 26 to 28 m, so 4 m of
+// tolerance keeps the shoreline. Ore is exempt: a Leviathan rests in open sea
+// with its pivot under the surface and its back above it. Positions saved in
+// the short form carry no height and are kept.
+const (
+	waterLevel = 30
+	minNatureY = waterLevel - 4
+)
+
+// underwater says whether a nature object of kind at height y lies clearly
+// below the sea.
+func underwater(kind uint16, y float32) bool {
+	return y < minNatureY && natureKinds[kind].category != NatureOre
+}
 
 // MaxNature caps one /nature answer.
 const MaxNature = 30000
