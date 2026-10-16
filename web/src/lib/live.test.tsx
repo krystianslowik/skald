@@ -110,4 +110,23 @@ describe("live positions subscription", () => {
       vi.useRealTimers();
     }
   });
+
+  it("subscribes on the socket that replaces one after waking, and the old one sends nothing", () => {
+    const { page, sock } = connect();
+    const map = renderHook(() => useLivePositions());
+    expect(sock.sent).toEqual([SUB]);
+    // Back online: a socket that still looks open is not trusted.
+    act(() => {
+      window.dispatchEvent(new Event("online"));
+    });
+    const next = RecordingSocket.all.at(-1)!;
+    expect(next).not.toBe(sock);
+    expect(new URL(next.url, "http://x").searchParams.get("history")).toBe("1");
+    act(() => next.open());
+    expect(next.sent).toEqual([SUB]);
+    map.unmount();
+    expect(next.sent).toEqual([SUB, UNSUB]);
+    expect(sock.sent).toEqual([SUB]);
+    page.unmount();
+  });
 });
