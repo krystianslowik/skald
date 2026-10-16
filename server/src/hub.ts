@@ -1,7 +1,7 @@
 import type { AgentSource } from "./agent";
 import { applyEvent } from "./apply";
 import type { HistoryStore } from "./db";
-import { deriveHistory, WEEK_MS } from "./history";
+import { deriveHistory, RANKING_EVENTS, WEEK_MS } from "./history";
 import { cause, log as defaultLog, type Logger } from "./log";
 import { deriveProfiles } from "./profiles";
 import { emptyAgentState, isBridgeRead, UNSTORED_EVENTS, type AgentEvent, type AgentEventType, type AgentState, type History, type LiveMessage, type LivePlayer, type PlayerProfile } from "./types";
@@ -10,6 +10,8 @@ import { emptyAgentState, isBridgeRead, UNSTORED_EVENTS, type AgentEvent, type A
 const POSITIONS_EVERY_MS = 2_000;
 /** How often the agent's positions lease is renewed while someone watches; the agent holds it 30 s. */
 const POSITIONS_RENEW_MS = 10_000;
+/** Stored events within this window share one history delta (a replay can store hundreds at once). */
+const HISTORY_DELTA_MS = 1_000;
 
 /** A boot prune that frees at least this many rows also shrinks the file. */
 const VACUUM_AFTER_ROWS = 1_000;
@@ -29,6 +31,8 @@ export interface HubOptions {
   historyCacheMs?: number;
   /** How often the history is pruned while running (see `HistoryStore.prune`). */
   pruneEveryMs?: number;
+  /** How long stored events are gathered before one history delta goes out. */
+  historyDeltaMs?: number;
   /** IANA zone for profile calendar days. */
   timeZone?: string;
   clock?: () => number;
@@ -50,7 +54,8 @@ export class Hub {
   private lastSeq = 0;
   private epoch = "";
   private lastValue = new Map<AgentEventType, string>();
-  private listeners = new Set<(m: LiveMessage) => void>();
+  /** Each listener, and whether it takes "history" messages (browsers that asked; the notifier does not). */
+  private listeners = new Map<(m: LiveMessage) => void, boolean>();
   private abort: AbortController | null = null;
   private stopped = false;
   private timers: ReturnType<typeof setInterval>[] = [];
@@ -66,6 +71,7 @@ export class Hub {
   private profilesCache: { at: number; value: PlayerProfile[] } | null = null;
   /** The agent connection failed and has not come back yet: the next success is logged. */
   private down = false;
+  private historyTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly opts: Required<HubOptions>;
 
   constructor(
@@ -78,6 +84,7 @@ export class Hub {
       maxBackoffMs: opts.maxBackoffMs ?? 30_000,
       historyCacheMs: opts.historyCacheMs ?? 5_000,
       pruneEveryMs: opts.pruneEveryMs ?? 3_600_000,
+      historyDeltaMs: opts.historyDeltaMs ?? HISTORY_DELTA_MS,
       timeZone: opts.timeZone ?? "UTC",
       clock: opts.clock ?? Date.now,
       log: opts.log ?? defaultLog,
@@ -98,9 +105,12 @@ export class Hub {
     return this.state;
   }
 
-  /** Everything but live positions: state, events. */
-  subscribe(fn: (m: LiveMessage) => void): () => void {
-    this.listeners.add(fn);
+  /**
+   * Everything but live positions: state, events, and with `history` the
+   * rankings deltas.
+   */
+  subscribe(fn: (m: LiveMessage) => void, opts: { history?: boolean } = {}): () => void {
+    this.listeners.set(fn, opts.history === true);
     return () => this.listeners.delete(fn);
   }
 
@@ -195,6 +205,21 @@ export class Hub {
     for (const t of this.timers) clearInterval(t);
     if (this.positionsTimer) clearTimeout(this.positionsTimer);
     if (this.watchTimer) clearInterval(this.watchTimer);
+    if (this.historyTimer) clearTimeout(this.historyTimer);
+  }
+
+  /**
+   * Sends the rankings and the 7-day series once stored events settle, so the
+   * clients never refetch /api/state for them: one derive for everyone.
+   */
+  private historySoon(): void {
+    if (this.historyTimer || this.stopped) return;
+    this.historyTimer = setTimeout(() => {
+      this.historyTimer = null;
+      if (![...this.listeners.values()].includes(true)) return;
+      const { players, online7d } = this.history();
+      this.emit({ type: "history", players, online7d });
+    }, this.opts.historyDeltaMs);
   }
 
   /**
@@ -240,6 +265,7 @@ export class Hub {
       this.state = applyEvent(this.state, ev);
       if (ev.type === "log") this.state = { ...this.state, agent: { ...this.state.agent, lastLogAt: ev.ts } };
     }
+    let stored = false;
     if (!UNSTORED_EVENTS.includes(ev.type)) {
       const key = ON_CHANGE[ev.type]?.(ev.data);
       const changed = key === undefined || this.lastValue.get(ev.type) !== key;
@@ -249,29 +275,32 @@ export class Hub {
         this.eventsCache = null;
         this.historyCache = null;
         this.profilesCache = null;
+        stored = true;
       }
     }
-    this.emit({ type: "event", event: ev });
+    this.emit({ type: "event", event: ev, stored });
+    if (stored && RANKING_EVENTS.includes(ev.type)) this.historySoon();
     // A restart with new settings renames the server; fetch it now, not at the next poll.
     if (ev.type === "settings_apply" && ev.data.state === "applied" && !this.stopped) void this.pollState();
   }
 
   private emit(m: LiveMessage): void {
-    this.fanOut(this.listeners, m);
+    for (const [fn, history] of this.listeners) {
+      if (m.type === "history" && !history) continue;
+      this.deliver(fn, m);
+    }
   }
 
   private emitPositions(m: LiveMessage): void {
-    this.fanOut(this.positionsWatchers, m);
+    for (const fn of this.positionsWatchers) this.deliver(fn, m);
   }
 
-  private fanOut(to: Set<(m: LiveMessage) => void>, m: LiveMessage): void {
-    for (const fn of to) {
-      try {
-        fn(m);
-      } catch (e) {
-        // a broken listener must not stop the others
-        this.opts.log.error("live listener failed", { cause: cause(e) });
-      }
+  private deliver(fn: (m: LiveMessage) => void, m: LiveMessage): void {
+    try {
+      fn(m);
+    } catch (e) {
+      // a broken listener must not stop the others
+      this.opts.log.error("live listener failed", { cause: cause(e) });
     }
   }
 

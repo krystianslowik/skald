@@ -356,7 +356,10 @@ export interface PublicConfig {
 }
 
 export type LiveMessage =
-  | { type: "event"; event: AgentEvent }
+  /** `stored`: the event went into the history (repeats of an unchanged value do not), so the saga shows it. */
+  | { type: "event"; event: AgentEvent; stored?: boolean }
+  /** The derived rankings and 7-day series after stored events; the saga is kept from the events themselves. */
+  | { type: "history"; players: History["players"]; online7d: History["online7d"] }
   | { type: "state"; state: AgentState; online: boolean }
   | { type: "positions"; t: number; players: LivePlayer[] };
 

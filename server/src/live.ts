@@ -10,9 +10,13 @@ import type { LiveMessage } from "./types";
  *   subscribes from the start.
  * - `/live` with no `topics` (a web build from before this): positions all
  *   along, as it always had.
+ *
+ * `history=1`: the page applies "history" deltas (the rankings after stored
+ * events); a page without it refetches /api/state instead.
  */
 export interface LiveSocketData {
   positions: boolean;
+  history: boolean;
   unsubscribe?: () => void;
   unwatch?: () => void;
   send?: (m: LiveMessage) => void;
@@ -30,8 +34,9 @@ const MAX_MESSAGE = 256;
 
 export function liveSocketData(url: URL): LiveSocketData {
   const topics = url.searchParams.get("topics");
-  if (topics === null) return { positions: true };
-  return { positions: topics.split(",").includes("positions") };
+  const history = url.searchParams.get("history") === "1";
+  if (topics === null) return { positions: true, history };
+  return { positions: topics.split(",").includes("positions"), history };
 }
 
 export function liveSocket(hub: Hub) {
@@ -47,7 +52,7 @@ export function liveSocket(hub: Hub) {
       const send = (m: LiveMessage) => ws.send(JSON.stringify(m));
       ws.data.send = send;
       send({ type: "state", state: hub.getState(), online: hub.online });
-      ws.data.unsubscribe = hub.subscribe(send);
+      ws.data.unsubscribe = hub.subscribe(send, { history: ws.data.history });
       watch(ws, ws.data.positions);
     },
     message(ws: LiveSocket, raw: string | Buffer): void {

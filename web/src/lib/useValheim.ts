@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { capRecent } from "@server/history";
-import { UNSTORED_EVENTS, type AgentEvent, type ApiState, type LiveMessage, type LogLine } from "../types";
+import type { AgentEvent, ApiState, LiveMessage, LogLine } from "../types";
 import { getLogs, getState, Unauthorized } from "./api";
 import { applyEvent } from "./apply";
 import { getLivePositions, setLivePositions, setPositionsSink, watchingPositions } from "./live";
@@ -51,6 +51,13 @@ export function share(prev: ApiState, next: ApiState): ApiState {
   return changed ? (out as unknown as ApiState) : prev;
 }
 
+/** Adds a stored event to the newest-first saga where its time puts it (a late or replayed one lands lower). */
+export function addEvent(events: AgentEvent[], ev: AgentEvent): AgentEvent[] {
+  const at = Date.parse(ev.ts);
+  const i = events.findIndex((e) => Date.parse(e.ts) <= at);
+  return capRecent(i < 0 ? [...events, ev] : [...events.slice(0, i), ev, ...events.slice(i)]);
+}
+
 export interface Valheim {
   state: ApiState | null;
   logs: LogStore;
@@ -67,15 +74,19 @@ export function useValheim(onUnauthorized: () => void): Valheim {
   const [ws, setWs] = useState<"connecting" | "up" | "down">("connecting");
   const [agentUp, setAgentUp] = useState(true);
   const [lastAction, setLastAction] = useState<AgentEvent | null>(null);
-  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unauth = useRef(onUnauthorized);
   unauth.current = onUnauthorized;
 
-  const refresh = useCallback(async () => {
+  /** Bumped by every stored event and history delta from the socket. */
+  const liveGen = useRef(0);
+  const refresh = useCallback(async function read(again = true): Promise<void> {
+    const gen = liveGen.current;
     try {
       const s = await getState();
       setState((prev) => (prev ? share(prev, s) : s));
       setAgentUp(s.online);
+      // Derived before a delta that arrived meanwhile, so it just undid that delta: read once more.
+      if (again && gen !== liveGen.current) await read(false);
     } catch (e) {
       if (e instanceof Unauthorized) unauth.current();
     }
@@ -92,12 +103,6 @@ export function useValheim(onUnauthorized: () => void): Valheim {
     else void refresh();
   }, [refresh]);
 
-  /** History (rankings, saga) is derived server-side; re-read it shortly after notable events. */
-  const refreshSoon = useCallback(() => {
-    if (refreshTimer.current) clearTimeout(refreshTimer.current);
-    refreshTimer.current = setTimeout(refreshIfShown, 1500);
-  }, [refreshIfShown]);
-
   useEffect(() => {
     void refresh();
     getLogs(500).then((l) => logs.set(() => l)).catch(() => undefined);
@@ -111,7 +116,6 @@ export function useValheim(onUnauthorized: () => void): Valheim {
     return () => {
       clearInterval(poll);
       document.removeEventListener("visibilitychange", onVisible);
-      if (refreshTimer.current) clearTimeout(refreshTimer.current);
     };
   }, [refresh, refreshIfShown, logs]);
 
@@ -121,7 +125,8 @@ export function useValheim(onUnauthorized: () => void): Valheim {
     let sock: WebSocket | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const onEvent = (ev: AgentEvent) => {
+    /** `stored`: the server kept it in the history, so the saga gains a line; rankings follow as a "history" message. */
+    const onEvent = (ev: AgentEvent, stored: boolean) => {
       if (ev.type === "log") {
         const line = String(ev.data.line ?? "");
         logs.set((l) => {
@@ -141,19 +146,21 @@ export function useValheim(onUnauthorized: () => void): Valheim {
       setState((s) => {
         if (!s) return s;
         const next = applyEvent(s, ev);
-        if (ev.type === "player_count" || UNSTORED_EVENTS.includes(ev.type)) return next;
-        return { ...next, history: { ...next.history, events: capRecent([ev, ...next.history.events]) } };
+        if (!stored || ev.type === "player_count") return next;
+        return { ...next, history: { ...next.history, events: addEvent(next.history.events, ev) } };
       });
-      if (ev.type !== "player_count" && !UNSTORED_EVENTS.includes(ev.type)) refreshSoon();
     };
 
     const connect = () => {
       if (typeof WebSocket === "undefined") return;
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
       // topics=: positions only after a subscribe; a server older than that sends them anyway.
-      const s = new WebSocket(`${proto}//${location.host}/live?topics=`);
+      // history=1: this page applies "history" deltas, so the server sends them.
+      const s = new WebSocket(`${proto}//${location.host}/live?topics=&history=1`);
       sock = s;
       s.onopen = () => {
+        // Events that passed while the socket was down are only in /api/state.
+        if (attempt > 0) void refresh();
         attempt = 0;
         if (cancelled) return;
         setWs("up");
@@ -167,12 +174,17 @@ export function useValheim(onUnauthorized: () => void): Valheim {
         } catch {
           return;
         }
-        if (msg.type === "event") onEvent(msg.event);
-        else if (msg.type === "positions") {
+        if (msg.type === "event") {
+          if (msg.stored) liveGen.current += 1;
+          onEvent(msg.event, msg.stored === true);
+        } else if (msg.type === "history") {
+          liveGen.current += 1;
+          const { players, online7d } = msg;
+          setState((s) => (s ? share(s, { ...s, history: { ...s.history, players, online7d } }) : s));
+        } else if (msg.type === "positions") {
           // One still on its way after the last watcher left must not bring the markers back.
           if (watchingPositions()) setLivePositions({ t: msg.t, players: msg.players });
-        }
-        else {
+        } else if (msg.type === "state") {
           setAgentUp(msg.online);
           setState((s) => (s ? share(s, { ...s, ...msg.state, online: msg.online }) : s));
         }
@@ -201,7 +213,7 @@ export function useValheim(onUnauthorized: () => void): Valheim {
       if (timer) clearTimeout(timer);
       sock?.close();
     };
-  }, [refresh, refreshSoon, logs]);
+  }, [refresh, logs]);
 
   return { state, logs, online: ws !== "down" && agentUp, lastAction };
 }
