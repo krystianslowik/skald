@@ -8,6 +8,7 @@ import { preloadSettingsSheet, SettingsGlyph } from "./SettingsGlyph";
 import { WorldClock } from "./WorldClock";
 import { preloadAdmin, useAdmin } from "./admin/AdminContext";
 import { AdminGlyph } from "./admin/glyphs";
+import { preload } from "../lib/chunks";
 import type { WorldClock as Clock } from "../types";
 
 export function flameLevel(s: ApiState["server"] | null, online: boolean): FlameLevel {
@@ -235,7 +236,7 @@ export function SoundToggle() {
 }
 
 /** Warms the map's chunk before the click lands. */
-export const preloadMap = () => void import("./map/MapView");
+export const preloadMap = () => preload(() => import("./map/MapView"));
 
 export function OfflineBanner() {
   const { t } = useI18n();

@@ -1,12 +1,13 @@
 import { createContext, useContext } from "react";
 import { useI18n } from "../i18n";
+import { preload } from "../lib/chunks";
 
 /** Opens a warrior's profile; null where names should stay plain text. */
 const OpenProfile = createContext<((name: string, opener: HTMLElement) => void) | null>(null);
 export const ProfileProvider = OpenProfile.Provider;
 
 /** Starts fetching the profile sheet's code before the click lands. */
-export const preloadProfileSheet = () => import("./ProfileSheet");
+export const preloadProfileSheet = () => preload(() => import("./ProfileSheet"));
 
 /** A player's name that opens their profile sheet. */
 export function PlayerName({ name, className = "" }: { name: string; className?: string }) {
