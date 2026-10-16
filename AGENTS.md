@@ -99,7 +99,7 @@ drift between docs and code. It files issues, or advisories for security, the
 same way recon does, with the `review` label.
 
 **Integrator.** Merges finished branches into a release branch
-(`release-X.Y`), one at a time.
+(`release-YYYY.M.N`), one at a time.
 
 - Resolve conflicts so both sides keep working. Never drop a feature or delete
   a test to make a merge pass.
@@ -111,7 +111,7 @@ same way recon does, with the `review` label.
 **Releaser.** Follows "Releases" in CONTRIBUTING.md:
 
 - release from the release branch merged into `main`;
-- then a signed tag `vX.Y.Z`;
+- then a signed tag `vYYYY.M.N` (calendar versioning, see CONTRIBUTING.md);
 - then wait for the Release workflow to go green.
 
 Fixed issues close through `Fixes #N` once the release is on `main`.

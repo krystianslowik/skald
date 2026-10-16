@@ -74,15 +74,25 @@ first run (about 2 MB, into the gitignored `bridge/refs/`); see
 
 ## Releases
 
+Versions are calendar versions, `YYYY.M.N`: year, month without a leading
+zero, and a counter from 0 within the month (`2026.10.0`, `2026.10.1`,
+`2026.11.0`). They are valid semver, so tools that sort versions keep working,
+and every one sorts above the old `0.x` releases.
+
 1. Move the `[Unreleased]` entries in `CHANGELOG.md` under a new dated version
    heading.
 2. Pin the image tags in `deploy/kubernetes` to the new version and commit both
-   as `release X.Y.Z: pin example images, date changelog`.
-3. Push a tag `vX.Y.Z`. The Release workflow builds and pushes `skald-agent`,
+   as `release YYYY.M.N: pin example images, date changelog`.
+3. Push a tag `vYYYY.M.N`. The Release workflow builds and pushes `skald-agent`,
    `skald-web`, `skald-icons`, `skald-terrain` and `skald-bridge` for amd64 and
-   arm64 to `ghcr.io/krystianslowik/`, tagged `X.Y.Z`, `X.Y` and `latest`
+   arm64 to `ghcr.io/krystianslowik/`, tagged `YYYY.M.N`, `YYYY.M` (the newest release of
+   that month) and `latest`
    (no `latest` for a tag with a `-` in it). When all five are pushed, it
    publishes the GitHub release with the matching changelog section as notes.
+
+The BepInEx plugins (`bridge/`, `terrain/`) keep their own plugin version in
+their source; it changes only when the plugin itself changes and is independent
+of the release number.
 
 Dependabot opens monthly update PRs for GitHub Actions, Go, npm, Bun, pip and
 the Dockerfiles.

@@ -34,4 +34,4 @@ body:
     id: version
     attributes:
       label: Skald version and game build
-      placeholder: "0.11.0, l-1.0.20"
+      placeholder: "2026.10.0, l-1.0.20"

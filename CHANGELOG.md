@@ -1,8 +1,11 @@
 # Changelog
 
 All notable changes to this project are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
-[Semantic Versioning](https://semver.org/).
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). From 2026.10.0 on, the project
+uses calendar versioning, `YYYY.M.N`: the year, the month without a leading zero,
+and a counter that starts at 0 each month (2026.10.0, 2026.10.1, 2026.11.0).
+Releases up to 0.10.2 used semantic versioning. A calendar version always sorts
+above them.
 
 ## [Unreleased]
 
