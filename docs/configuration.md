@@ -488,8 +488,9 @@ the writes on, the agent needs to create and rename files in `/config` and
 is to run the game as the agent's user, so both own everything they write:
 
 - the game container: `PUID=65532` and `PGID=65532` (the image chowns
-  `/config` to them at every start; use an image with the non-root
-  permissions fix, 1.3.0 or newer);
+  `/config` to them at every start; use an image with the fix for non-root
+  world directories, whose version the image README does not name, and check
+  the log for `UnauthorizedAccessException` after the first start);
 - the agent: drop `readOnly: true` from its `/config` mount (`:ro` in
   Compose).
 
