@@ -67,8 +67,8 @@ export const Header = memo(function Header({
   const level = flameLevel(s, online);
   const up = s?.serverStartedAt && s.status === "running" ? duration(now - Date.parse(s.serverStartedAt)) : null;
   return (
-    <header className={compact ? "flex flex-col gap-3" : "flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6"}>
-      <div className={`flex min-w-0 items-center sm:flex-1 ${compact ? "gap-3" : "gap-4"}`}>
+    <header className={compact ? "flex flex-col gap-3" : "flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-6"}>
+      <div className={`flex min-w-0 items-center lg:flex-1 ${compact ? "gap-3" : "gap-4"}`}>
         <Flame level={level} size={compact ? 34 : 44} className="shrink-0 drop-shadow-[0_0_14px_rgba(214,96,24,0.45)]" />
         <div className="min-w-0">
           <p aria-hidden className="truncate font-rune text-xs tracking-[0.3em] text-flame/45">{toRunes(s?.name || "Valheim")}</p>
@@ -91,7 +91,7 @@ export const Header = memo(function Header({
       </div>
       <dl
         className={`on-world flex items-center text-sm ${
-          compact ? "flex-nowrap justify-between gap-x-3 border-t border-iron/30 pt-2.5" : "flex-wrap gap-x-5 gap-y-3 border-t border-iron/30 pt-3 sm:flex-nowrap sm:gap-6 sm:border-0 sm:pt-0"
+          compact ? "flex-nowrap justify-between gap-x-3 border-t border-iron/30 pt-2.5" : "flex-wrap gap-x-5 gap-y-3 border-t border-iron/30 pt-3 lg:flex-nowrap lg:gap-6 lg:border-0 lg:pt-0"
         }`}
       >
         <div>
@@ -104,7 +104,7 @@ export const Header = memo(function Header({
         </div>
         <WorldClock clock={clock} day={day} />
         {!compact && (
-          <div className="ml-auto flex items-center gap-2 sm:ml-0 sm:gap-3">
+          <div className="ml-auto flex items-center gap-2 sm:gap-3 lg:ml-0">
             {onMap && (
               <button
                 type="button"

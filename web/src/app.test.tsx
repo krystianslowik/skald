@@ -159,6 +159,18 @@ describe("Dashboard", () => {
     expect(screen.queryByRole("img", { name: "Unknown platform" })).not.toBeInTheDocument();
   });
 
+  it("keeps the header stacked on a tablet and lays it out in a row only from the lg breakpoint", () => {
+    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    const header = screen.getByRole("heading", { level: 1, name: "My Valheim" }).closest("header")!;
+    const facts = header.querySelector("dl")!;
+    // At 640-1023 px the row squeezed the title to a few pixels (#57).
+    for (const el of [header, ...header.querySelectorAll("*")]) {
+      expect([...el.classList].filter((c) => /^(sm|md):(flex-row|flex-1|flex-nowrap|border-0)$/.test(c))).toEqual([]);
+    }
+    expect(header).toHaveClass("flex-col", "lg:flex-row");
+    expect(facts).toHaveClass("flex-wrap", "lg:flex-nowrap");
+  });
+
   it("shows the outage banner and sleeps the runes when offline", () => {
     render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: false, lastAction: null }} onLogout={() => {}} />);
     expect(screen.getByText("The fire has dimmed.")).toBeInTheDocument();
