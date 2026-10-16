@@ -75,6 +75,11 @@ export interface AgentSource {
   bridge(req: BridgeRequest): Promise<Proxied>;
   /** Access lists and restore; 404 from agents older than this feature. */
   tools(req: ToolsRequest): Promise<Proxied>;
+  /**
+   * Starts or renews (true) or ends (false) the agent's live positions
+   * lease: it polls the game for positions only while one is held.
+   */
+  watchPositions?(on: boolean): Promise<void>;
 }
 
 const SETTINGS_ROUTE: Record<SettingsRequest["op"], [method: string, path: string]> = {
@@ -88,6 +93,9 @@ const SETTINGS_ROUTE: Record<SettingsRequest["op"], [method: string, path: strin
 const TIMEOUT_MS = 10_000;
 
 export class HttpAgent implements AgentSource {
+  /** Names this web tier's positions lease, so another one sharing the agent keeps its own. */
+  private readonly holder = crypto.randomUUID();
+
   constructor(
     private readonly baseUrl: string,
     private readonly token: string,
@@ -109,6 +117,17 @@ export class HttpAgent implements AgentSource {
 
   getState(): Promise<AgentState> {
     return this.getJson<AgentState>("/state");
+  }
+
+  async watchPositions(on: boolean): Promise<void> {
+    const res = await this.fetchImpl(`${this.baseUrl}/positions/watch?holder=${this.holder}`, {
+      method: on ? "POST" : "DELETE",
+      headers: this.headers(),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    await res.body?.cancel();
+    // 404 from an agent older than the lease: it polls whenever someone plays.
+    if (!res.ok && res.status !== 404) throw new Error(`agent /positions/watch: HTTP ${res.status}`);
   }
 
   async getLogs(limit: number): Promise<LogLine[]> {
@@ -237,7 +256,8 @@ export class HttpAgent implements AgentSource {
   }
 
   async stream(since: number, onEvent: (e: AgentEvent) => void, signal: AbortSignal): Promise<void> {
-    const res = await this.fetchImpl(`${this.baseUrl}/events?since=${since}`, {
+    // positions=lease: positions only while watchPositions holds the lease.
+    const res = await this.fetchImpl(`${this.baseUrl}/events?since=${since}&positions=lease`, {
       headers: { ...this.headers(), Accept: "text/event-stream" },
       signal,
     });
