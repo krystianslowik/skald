@@ -227,8 +227,9 @@ func (t *Tracker) Snapshot() Snapshot {
 // dropPeer forgets one peer id and takes its name off the list once no other
 // peer is online under it. lost means the peer disconnected: it then also
 // comes off the reported count, which the lagging connection-lost line
-// leaves one too high. The count stays at least the number of names listed
-// and of peers still online. Caller holds mu.
+// leaves one too high. The count stays at least the number of names listed.
+// Not the number of peer ids: a reconnect's old id lingers until its
+// abandoned lines come. Caller holds mu.
 func (t *Tracker) dropPeer(uid string, lost bool) {
 	name, ok := t.uids[uid]
 	if !ok {
@@ -244,7 +245,7 @@ func (t *Tracker) dropPeer(uid string, lost bool) {
 	if !lost {
 		return
 	}
-	if n := max(t.s.PlayersReported-1, len(t.s.Players), len(t.uids)); n < t.s.PlayersReported {
+	if n := max(t.s.PlayersReported-1, len(t.s.Players)); n < t.s.PlayersReported {
 		t.s.PlayersReported = n
 		t.hub.Publish("player_count", map[string]any{"count": n})
 	}
