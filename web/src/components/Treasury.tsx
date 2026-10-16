@@ -5,7 +5,7 @@ import { useI18n } from "../i18n";
 
 /** Treasury: world backups, newest first, each downloadable. */
 export const Treasury = memo(function Treasury({ backups, now }: { backups: Backup[]; now: number }) {
-  const { t, ago, bytes, fullDate } = useI18n();
+  const { t, ago, bytes, fullDate, date, clock } = useI18n();
   if (backups.length === 0) return <p className="text-sm text-ash">{t("treasury.empty")}</p>;
   return (
     <ul className="scroll-quiet max-h-75 space-y-1 overflow-y-auto pr-1">
@@ -22,10 +22,13 @@ export const Treasury = memo(function Treasury({ backups, now }: { backups: Back
             </svg>
           </span>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-bold text-bone" title={b.name}>
-              {fullDate(b.modifiedAt)}
+            {/* Date and time wrap as whole pieces, never clipped: backups of one day differ only by the time. */}
+            <time dateTime={b.modifiedAt} title={fullDate(b.modifiedAt)} className="block text-sm font-bold text-bone">
+              <span className="inline-block">{date(b.modifiedAt)}</span> <span className="inline-block">{clock(b.modifiedAt)}</span>
+            </time>
+            <div className="break-words text-[0.6875rem] text-ash" title={b.name}>
+              {b.name}
             </div>
-            <div className="truncate text-[0.6875rem] text-ash">{b.name}</div>
           </div>
           <div className="text-right text-xs tabular-nums">
             <div className="font-bold text-bone">{bytes(b.sizeBytes)}</div>

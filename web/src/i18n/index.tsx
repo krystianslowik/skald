@@ -37,6 +37,8 @@ export interface I18n {
   clock(t: string | number): string;
   clockSec(t: string | number): string;
   fullDate(t: string | number): string;
+  /** Date without the time, to pair with `clock`. */
+  date(t: string | number): string;
   /** "Today" / "Yesterday" / a long weekday date, in the viewer's own time zone. */
   dayLabel(iso: string, now?: number): string;
   /** `-crossplay -modifier raids less -preset hard` -> readable chips. */
@@ -111,6 +113,7 @@ export function makeI18n(locale: Locale): I18n {
     clock: (v) => new Date(v).toLocaleTimeString(intl, { hour: "2-digit", minute: "2-digit" }),
     clockSec: (v) => new Date(v).toLocaleTimeString(intl, { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
     fullDate: (v) => new Date(v).toLocaleString(intl, { dateStyle: "medium", timeStyle: "short" }),
+    date: (v) => new Date(v).toLocaleDateString(intl, { dateStyle: "medium" }),
     dayLabel(iso, now = Date.now()) {
       const d = new Date(iso);
       const today = new Date(now);

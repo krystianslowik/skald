@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- On narrow phones the Treasury cut off the time of each backup and its file name, so backups from the same day looked alike. The date and time now wrap onto a second line when space is short, and the full file name is always shown.
+
 ## [2026.10.0] - 2026-10-16
 
 The first calendar-versioned release (it follows 0.10.2). When upgrading:
