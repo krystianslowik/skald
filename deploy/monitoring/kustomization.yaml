@@ -1,0 +1,20 @@
+# The Grafana dashboard as a ConfigMap for the Grafana sidecar
+# (kube-prometheus-stack picks up ConfigMaps labelled grafana_dashboard),
+# generated from grafana-dashboard.json so there is only one copy to edit:
+#
+#   kubectl apply -k deploy/monitoring
+#
+# Set `namespace` to the namespace your Grafana sidecar watches.
+# prometheusrule.yaml is applied on its own (kubectl apply -f), since it needs
+# the prometheus-operator CRDs.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+configMapGenerator:
+  - name: skald-dashboard
+    namespace: monitoring
+    files:
+      - skald-valheim.json=grafana-dashboard.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"

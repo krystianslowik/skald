@@ -8,7 +8,7 @@ definition of done) is in [AGENTS.md](AGENTS.md).
 
 ## Development setup
 
-You need Go 1.26+, Bun 1.3+ and Node 22+. The bridge and the terrain plugin also
+You need Go 1.27+, Bun 1.4.3+ and Node 24+. The bridge and the terrain plugin also
 need the .NET SDK (8 or later; CI uses 9), and the icon extractor needs Python
 3.13.
 
@@ -44,6 +44,7 @@ cd web     && npm run typecheck && npm test && npm run build
 cd icons   && pip install --no-deps -r requirements.txt && python -m unittest discover -s tests -v
 cd terrain && dotnet build plugin -c Release -o out
 cd bridge  && dotnet test tests && sh build.sh
+kubectl kustomize deploy/monitoring   # after editing the Grafana dashboard
 ```
 
 `bridge/build.sh` fetches the game's reference assemblies anonymously on its

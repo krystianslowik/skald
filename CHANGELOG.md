@@ -9,6 +9,15 @@ above them.
 
 ## [Unreleased]
 
+### Added
+
+- Docs on what the game image's backups hold: every world in `worlds_local`, but not the game's own auto-backups, and which `BACKUPS_*` settings Skald needs (docs/configuration.md). The docs also name the two image internals the start hook depends on, to check before moving to a newer game image.
+
+### Changed
+
+- **Operators:** the Grafana dashboard ConfigMap is now generated from `grafana-dashboard.json` with `kubectl apply -k deploy/monitoring`; `deploy/monitoring/grafana-dashboard-configmap.yaml` is gone, and the alert rules are applied with `kubectl apply -f deploy/monitoring/prometheusrule.yaml` (applying the whole directory with `-f` no longer works). The ConfigMap keeps its name, namespace and label, so nothing changes in Grafana.
+- The skald-web image is smaller: it runs on plain Alpine instead of a second copy of Bun, and Bun is pinned to 1.4.3 for the image, CI and the docs.
+
 ## [2026.10.4] - 2026-10-16
 
 ### Changed

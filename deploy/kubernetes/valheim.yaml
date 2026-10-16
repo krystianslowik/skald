@@ -158,7 +158,10 @@ spec:
             - name: RESTART_CRON
               value: ""
             # Hourly zips kept 3 days would be up to 72; cap the count so they
-            # cannot fill the config volume.
+            # cannot fill the config volume. Each zip holds every world in
+            # worlds_local (not the game's auto-backups); keep BACKUPS_ZIP and
+            # BACKUPS_DIRECTORY at their defaults, Skald reads those zips. See
+            # docs/configuration.md, "What the image's backups hold".
             - name: BACKUPS_MAX_COUNT
               value: "48"
             # Feed the agent sidecar: busybox syslogd forwards every line to
@@ -178,7 +181,8 @@ spec:
                 secretKeyRef: {name: skald-agent, key: SUPERVISOR_HTTP_PASS}
             # Server settings saved from the dashboard override SERVER_NAME,
             # SERVER_PASS(_FILE), SERVER_PUBLIC and SERVER_ARGS above on every
-            # start (deploy/settings/pre-server-run-hook.sh, verbatim). The
+            # start. A verbatim copy of deploy/settings/pre-server-run-hook.sh
+            # (edit that file; the agent's tests fail if this copy drifts). The
             # file is parsed with an allow-list, never sourced.
             - name: PRE_SERVER_RUN_HOOK
               value: >-
