@@ -106,6 +106,56 @@ agent's syslog feed sees those lines. Two pieces of work:
     have the agent drop non-public players unless an admin toggle is on.
 - The `/metrics` listener must not get positions.
 
+### Terrain tiles
+
+`internal/terrain/tiles.go` turns the plugin's terrain routes into a tile
+pyramid, `GET /terrain/tiles.json` and `GET /terrain/tile?z=&x=&y=&v=`.
+
+- Level `z` cuts the square `[-10500, 10500]^2` into `2^z x 2^z` tiles of
+  256 px: level 3 is 2048 px across, the Job's grid one to one; level 7 (the
+  top) is 0.64 m per pixel. Each tile is asked for with a two-sample apron on
+  every side (`n = 260`), so the web computes slopes at the edge exactly as the
+  neighbouring tile does and tiles meet without seams.
+- The cache key (and the `build` in every tile URL) is the seed hash, world
+  generator version and game build **as the plugin reports them** from the
+  running world, plus the tile format. A game update is a new build: old URLs
+  404, new tiles are sampled. Tiles are `immutable` with an ETag.
+- Disk cache under `TERRAIN_CACHE_DIR` (default `$SETTINGS_DIR/terrain-tiles`),
+  bounded by `TERRAIN_CACHE_MB` (256), least recently used out first (recency
+  is the file mtime, so it survives restarts). An unwritable directory falls
+  back to a 64 MB memory cache.
+- One plugin call at a time; concurrent viewers of the same tile share it; a
+  viewer who goes away does not cancel a tile someone else will want. 429s are
+  retried with back-off.
+- Levels 0..3 of a new build are pre-warmed in the background (85 tiles), so
+  the whole-world view paints from the cache.
+- The Job's grid is used for levels 0..3 only when it is from the same seed,
+  generator and game build and the plugin has no forest channel (grid tiles have
+  none, and mixing them with forest-shaded tiles would change a place's colour
+  between zoom levels), or when the plugin is unreachable (then the pyramid
+  stops at level 3 and `source` is `grid`). Without either, `/terrain/tiles.json`
+  is 404 and the web uses `/terrain.png` as before.
+- Tiles are served gzipped in the plugin's format, with heights packed for
+  gzip first: flag 4 (never set by the plugin) means each row is stored as
+  west-to-east differences, low bytes of the whole grid then high bytes. About
+  half the size on real terrain.
+- `/metrics`: `valheim_terrain_tiles_total{result}`,
+  `valheim_terrain_bridge_sample_seconds_total`, `valheim_terrain_cache_bytes`.
+
+Why sampling off the main thread is safe, from the game's own structure (read
+by reflection, not from its code): `HeightmapBuilder` starts its own thread
+(`m_builder`) whose `Build` calls `WorldGenerator.GetBiome` and
+`GetBiomeHeight` while the main thread uses the same generator; the river
+cache those reach is guarded by `m_riverCacheLock` (a `ReaderWriterLockSlim`).
+`GetBiome(Vector2s)` and `GetBiomeArea`, which fill unsynchronised static
+dictionaries, are deliberately not used. The forest value is the minimap's own
+mask, `Minimap.GetMaskColor(x, z, height, biome).r`, which reads only statics
+and the world generator, so it is called on an uninitialised `Minimap` object
+(a dedicated server has no live minimap); failing that, the static
+`WorldGenerator.GetForestFactor`. The minimap's biome colours are instance
+fields of the client's prefab; on a dedicated server they are usually not
+there, and the web uses its own tuned colours (`palette.source` says which).
+
 ## 2. BFF (`server/src`)
 
 - Add `agent.bridge(command, body)` and `agent.bridgePlayers()` to
@@ -117,6 +167,12 @@ agent's syslog feed sees those lines. Two pieces of work:
   event names, global keys and location aliases, cached for 60 s.
 - Re-broadcast `positions` from the agent SSE to the WebSocket hub. Rate limit
   to one message every 2 s per socket.
+
+The terrain routes are proxied as `/api/terrain/tiles.json` (no-cache) and
+`/api/terrain/tile` (the gzipped body passed through untouched, private,
+immutable; 404 and busy answers are `no-store`). `bun run dev` serves mock
+tiles from the mock's noise (`src/mocktiles.ts`); `MOCK_TILE_DELAY_MS` adds a
+delay per tile and `MOCK_TILES=off` hides them.
 
 ## 3. Web UI (`web/src`)
 
@@ -154,6 +210,21 @@ A new **Admin** sheet, opened from the header next to Settings. Show it only whe
     one-tap confirm with the consequence spelled out
 - Feedback: read the plugin's 501 messages verbatim. They already explain why
   something cannot be done server-side.
+
+### Terrain tiles
+
+`lib/terraintiles.ts` picks the level for the zoom (tile pixels at most about
+1.5 device pixels), lists the tiles over the view nearest the centre first,
+fetches at most four at a time and cancels those that leave the view, keeps
+the painted bitmaps in a byte-bounded LRU (40 MB on phones with 4 GB or less,
+96 MB otherwise) and draws the nearest loaded ancestor until a tile arrives.
+`lib/terraintile.worker.ts` fetches, ungzips, decodes and paints in a worker
+and hands back an `ImageBitmap`; `lib/terrainpaint.ts` is the one paint model
+for every level: biome colour, forest darkening, hillshade from centred
+slopes, water by depth (swamp pools keep some mud), with biome borders as
+smooth curves between samples. Tiles are painted at 2x, the top level at 4x
+when zoomed far in. Without a worker, `OffscreenCanvas` or
+`DecompressionStream` the map keeps `/terrain.png`.
 
 ## 4. Deploy changes to the game pod (`deploy/kubernetes/valheim.yaml` and the homelab manifest)
 

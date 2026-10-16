@@ -27,6 +27,9 @@ The agent serves the Prometheus text format on `:9464/metrics`:
 | `valheim_agent_last_log_timestamp_seconds` | gauge | | Last log line the agent received |
 | `valheim_map_build_seconds` | gauge | | How long the last world map build took. Only once a map was built |
 | `valheim_map_generation` | gauge | | Save generation the world map was last built from |
+| `valheim_terrain_tiles_total` | counter | `result` | Terrain tiles answered since agent start: `cache`, `bridge` (sampled by the bridge), `grid` (cut from the Job's grid), `error` |
+| `valheim_terrain_bridge_sample_seconds_total` | counter | | Time the bridge plugin spent sampling terrain tiles (its own measurement, without rests) |
+| `valheim_terrain_cache_bytes` | gauge | | Bytes of terrain tiles in the agent's cache |
 
 [`deploy/monitoring`](../deploy/monitoring) has:
 

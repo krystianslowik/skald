@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The map's terrain can now come from the running server: with the admin bridge installed, the agent samples the live world generator in tiles, from the whole world down to 0.64 m per pixel near the view, so biome borders and coasts are right to the metre around bases. Tiles are always for the running game build, so a game update no longer needs a new terrain run or a 2 GB download, and they are cached on disk per seed, generator and build (`TERRAIN_CACHE_DIR`, `TERRAIN_CACHE_MB`).
+- Bridge 0.2.0: read-only `GET /v1/terrain/info` and `GET /v1/terrain/tile`, sampled off the game's main thread, one tile at a time, rate-limited and capped to half a core (`SKALD_BRIDGE_TERRAIN`, `SKALD_BRIDGE_TERRAIN_RATE`, `SKALD_BRIDGE_TERRAIN_DUTY`). It also reads the game's own minimap colours and forest mask when it can.
+- Metrics: `valheim_terrain_tiles_total`, `valheim_terrain_bridge_sample_seconds_total`, `valheim_terrain_cache_bytes`.
+
+### Changed
+
+- The terrain looks like the game's map: biome colours, darker forest, relief and water by depth, painted the same way at every zoom, so a place keeps its colour as you zoom in. Swamps are dark mud with water pools instead of beige patches with outlines, and biome borders are smooth curves instead of blocks. Tiles are painted in a background worker, at most four load at once, nearest the view first, and tiles that leave the view are cancelled.
+- The terrain Job stays as a fallback: when the bridge is not reachable, its grid serves the low zoom levels and the terrain image as before.
+
+### Fixed
+
+- The development mock's terrain now has swamps, forests and mist lands; its noise was faded out far from the centre, so they never appeared.
+
 ## [0.10.2] - 2026-10-16
 
 ### Changed

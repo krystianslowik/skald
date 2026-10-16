@@ -22,6 +22,8 @@
 | `MAP_SHOW_NAMES` | `true` | Put grave and bed owners' names, portal tags and pin names on the world map. Platform ids (tag and pin authors, owner ids) are never sent either way. The map is behind the panel password, so this is on by default |
 | `ICONS_DIR` | (empty) | Where the opt-in `skald-icons` sidecar writes the item icon sheet (`/config/skald-icons` in Kubernetes, `/icons` in Compose). Empty turns the icon routes off; see [Item icons](#item-icons) |
 | `TERRAIN_DIR` | (empty) | Where terrain runs leave the world generator's grids (`/terrain`); empty turns the terrain image off. See [Terrain](#terrain) |
+| `TERRAIN_CACHE_DIR` | `$SETTINGS_DIR/terrain-tiles` | Where terrain tiles sampled through the bridge are cached across restarts. Unwritable: a 64 MB memory cache. See [Terrain tiles](#terrain-tiles) |
+| `TERRAIN_CACHE_MB` | `256` | Size bound of that cache; least recently used tiles go first |
 | `BRIDGE_URL` | `http://127.0.0.1:9010` | The Skald bridge plugin inside the game process; the agent shares the pod's (or container's) network namespace, so loopback reaches it. See [Admin bridge](#admin-bridge) |
 | `BRIDGE_TOKEN` | (empty) | Same value as the game container's `SKALD_BRIDGE_TOKEN` (16+ characters). Empty leaves the `/bridge` routes unregistered and the admin UI hidden |
 | `BRIDGE_TESTED_BUILDS` | `l-1.0.17` | Game builds admin commands may run on without a confirmation from the panel, comma-separated; `*` allows any |
@@ -351,6 +353,32 @@ agent changes the game pod, so enabling the component restarts the server once.
 
 **Compose**: `docker compose --profile terrain run --rm terrain`. The agent
 mounts the `skald-terrain` volume read-only with `TERRAIN_DIR=/terrain`.
+
+### Terrain tiles
+
+With the [admin bridge](#admin-bridge) installed, the map's terrain comes from
+the **running server** instead: tiles sampled from the live world generator
+on demand, from the whole world at about 82 m per pixel down to 0.64 m per
+pixel near the view, so biome borders are right to the metre around bases.
+They are always for the running game build (no Job to re-run after an update,
+no 2 GB download) and cached by the agent per seed, generator and game build.
+The look is the game's map: its own minimap colours when the bridge can read
+them, otherwise tuned colours close to it, with forest darkening, relief and
+water depth, the same at every zoom.
+
+- Agent: `TERRAIN_CACHE_DIR` and `TERRAIN_CACHE_MB` (above). In Kubernetes the
+  default cache sits on the config volume under `skald/terrain-tiles`; 256 MB
+  holds well over the tiles a group explores. Point it at an `emptyDir` to keep
+  it off that volume (tiles are then sampled again after a restart).
+- Game container: `SKALD_BRIDGE_TERRAIN=off` switches the terrain routes off;
+  `SKALD_BRIDGE_TERRAIN_RATE` (4 tiles per second) and
+  `SKALD_BRIDGE_TERRAIN_DUTY` (50 % of one core) bound what sampling may cost.
+  See [bridge/README.md](../bridge/README.md#terrain-read-only).
+- The Job above stays useful: with the bridge down, its grid serves the four
+  lowest levels (and `/terrain.png` as before). With the bridge up, the agent
+  samples those levels itself once per game build, in the background.
+- Same visibility rules as the image: signed-in viewers only, drawn under the
+  fog and cut to generated zones unless `MAP_SPOILERS=true`.
 
 ## Admin bridge
 
