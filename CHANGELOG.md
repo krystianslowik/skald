@@ -9,6 +9,12 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.1] - 2026-10-16
+
+### Fixed
+
+- The Saga filled with "Admin: GET /v1/terrain/tile failed (too many terrain requests)" while someone browsed the map. Reads such as the map's terrain tiles came back through the bridge's audit trail as failed admin commands. They are no longer stored, shown or sent to Discord, and lines already stored are hidden.
+
 ## [2026.10.0] - 2026-10-16
 
 The first calendar-versioned release (it follows 0.10.2). When upgrading:
