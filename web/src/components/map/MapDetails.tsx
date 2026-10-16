@@ -205,6 +205,25 @@ function StackList({ chests, level, names }: { chests: readonly MapContainer[]; 
   );
 }
 
+/** The same spot on valheim-map.world, in a new tab. */
+function FullMapLink({ seedName, marker, roomy }: { seedName: string; marker: Marker; roomy: boolean }) {
+  const { t } = useI18n();
+  return (
+    <a
+      href={mapUrlAt(seedName, marker.x, marker.z)}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={t("map.openFullHint")}
+      className={`inline-flex items-center gap-1 font-bold text-flame underline decoration-flame/40 underline-offset-4 hover:text-gold ${roomy ? "min-h-11 text-sm" : "text-xs"}`}
+    >
+      {t("map.openFull")}
+      <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+        <path d="M4 2h6v6M10 2L3 9" />
+      </svg>
+    </a>
+  );
+}
+
 /**
  * The facts the save holds about a mark, "Go to the other end" for a portal
  * and a link to the same spot on valheim-map.world; for a pile of marks too
@@ -231,7 +250,17 @@ export function DetailsBody({
 }) {
   const { t, tn, lookup, number } = useI18n();
   if (group) return <ClusterList group={group} onPick={onPick} />;
-  if (marker.data.type === "storage" && marker.data.stack) return <StackList chests={marker.data.stack} level={level} names={roomy} />;
+  if (marker.data.type === "storage" && marker.data.stack)
+    return (
+      <>
+        <StackList chests={marker.data.stack} level={level} names={roomy} />
+        {seedName && (
+          <div className="mt-3">
+            <FullMapLink seedName={seedName} marker={marker} roomy={roomy} />
+          </div>
+        )}
+      </>
+    );
   const lines = marksLines(marker, t, tn, lookup);
   const d = marker.data;
   const items = markerItems(marker);
@@ -260,20 +289,7 @@ export function DetailsBody({
             {t("map.portal.goOther")}
           </button>
         )}
-        {seedName && (
-          <a
-            href={mapUrlAt(seedName, marker.x, marker.z)}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={t("map.openFullHint")}
-            className={`inline-flex items-center gap-1 font-bold text-flame underline decoration-flame/40 underline-offset-4 hover:text-gold ${roomy ? "min-h-11 text-sm" : "text-xs"}`}
-          >
-            {t("map.openFull")}
-            <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
-              <path d="M4 2h6v6M10 2L3 9" />
-            </svg>
-          </a>
-        )}
+        {seedName && <FullMapLink seedName={seedName} marker={marker} roomy={roomy} />}
       </div>
     </>
   );

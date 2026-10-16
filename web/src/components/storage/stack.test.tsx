@@ -64,6 +64,8 @@ describe("a stack on the map", () => {
     expect(within(rows[2]!).getByText("3rd from the bottom of 3")).toBeInTheDocument();
     // Each chest's own slots.
     expect(screen.getAllByRole("list", { name: "Contents" })).toHaveLength(3);
+    // Like every other mark, the stack opens on the full map.
+    expect(screen.getByRole("link", { name: /Open on full map/ })).toHaveAttribute("href", expect.stringContaining(`offset=${stackOf3.x},${stackOf3.z}`));
   });
 
   it("names the level in the stores' where sheet", async () => {
