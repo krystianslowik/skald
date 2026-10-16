@@ -240,7 +240,7 @@ namespace Skald.Bridge
             foreach (var prefab in ZNetScene.instance.m_prefabs)
             {
                 var sm = prefab != null ? prefab.GetComponent<Smelter>() : null;
-                if (sm == null) continue;
+                if (sm == null || string.IsNullOrEmpty(prefab.name)) continue;
                 try
                 {
                     var conv = (sm.m_conversion ?? new List<Smelter.ItemConversion>()).Where(c => c != null && c.m_from != null).ToList();
@@ -261,8 +261,10 @@ namespace Skald.Bridge
             }
             var kinds = FillPlan.Classify(list);
             var byName = new Dictionary<string, (Station station, StationKind kind)>();
-            foreach (var s in list) byName[s.Prefab] = (s, kinds[s.Prefab]);
-            return stations = byName;
+            foreach (var s in list) byName[s.Prefab] = (s, kinds.TryGetValue(s.Prefab, out var k) ? k : StationKind.Other);
+            // An empty list is not kept, so a too-early call does not stick.
+            if (byName.Count > 0) stations = byName;
+            return byName;
         }
 
         // GET /v1/build/stations: what the fill commands can put where.
@@ -286,7 +288,7 @@ namespace Skald.Bridge
             var pos = Target(a, out string near);
             float r = Radius(a, 20f);
             var known = Stations();
-            int kilns = 0, full = 0, unloaded = 0;
+            int kilns = 0, skipped = 0, full = 0, unloaded = 0;
             var added = new Dictionary<string, int>();
             foreach (var z in ZdosAround(pos, r))
             {
@@ -294,14 +296,15 @@ namespace Skald.Bridge
                 long owner = LoadedBy(z);
                 if (owner == 0) { unloaded++; continue; }
                 var step = FillPlan.Kiln(st.station, z.GetInt(ZDOVars.s_queued));
-                if (step.Skip != null) { full++; continue; }
+                if (step.Skip == FillSkip.Full) { full++; continue; }
+                if (step.Skip != FillSkip.None) { skipped++; continue; }
                 // The owner checks capacity again and ignores the excess.
                 for (int i = 0; i < step.OreCount; i++)
                     ZRoutedRpc.instance.InvokeRoutedRPC(owner, z.m_uid, "RPC_AddOre", step.Ore, false);
                 Count(added, step.Ore);
                 kilns++;
             }
-            return Ok(new { kilns, full, unloaded, added, near, radius = r });
+            return Ok(new { kilns, skipped, full, unloaded, added, near, radius = r });
         }
 
         // POST /v1/build/fill-smelters: smelters and furnaces get the chosen
@@ -327,8 +330,8 @@ namespace Skald.Bridge
                 long owner = LoadedBy(z);
                 if (owner == 0) { unloaded++; continue; }
                 var step = FillPlan.Smelter(st.station, what, ore, z.GetString(ZDOVars.s_item0), z.GetInt(ZDOVars.s_queued), z.GetFloat(ZDOVars.s_fuel));
-                if (step.Skip == "full") { full++; continue; }
-                if (step.Skip != null) { skipped++; continue; }
+                if (step.Skip == FillSkip.Full) { full++; continue; }
+                if (step.Skip != FillSkip.None) { skipped++; continue; }
                 for (int i = 0; i < step.OreCount; i++)
                     ZRoutedRpc.instance.InvokeRoutedRPC(owner, z.m_uid, "RPC_AddOre", step.Ore, false);
                 for (int i = 0; i < step.FuelCount; i++)

@@ -37,14 +37,14 @@ public class FillPlanTests
         Assert.Equal("Wood", s.Ore);
         Assert.Equal(20, s.OreCount);
         Assert.Equal(0, s.FuelCount);
-        Assert.Equal("full", FillPlan.Kiln(Kiln, 25).Skip);
+        Assert.Equal(FillSkip.Full, FillPlan.Kiln(Kiln, 25).Skip);
     }
 
     [Fact]
     public void SmeltersGetTheChosenOreNotTheFirstOne()
     {
         var s = FillPlan.Smelter(Smelter, FillWhat.Both, "IronScrap", null, 3, 4.5f);
-        Assert.Null(s.Skip);
+        Assert.Equal(FillSkip.None, s.Skip);
         Assert.Equal("IronScrap", s.Ore);
         Assert.Equal(7, s.OreCount);
         Assert.Equal(15, s.FuelCount);
@@ -54,7 +54,7 @@ public class FillPlanTests
     public void AStationThatRejectsTheOreGetsNothing()
     {
         var s = FillPlan.Smelter(Furnace, FillWhat.Both, "CopperOre", null, 0, 0f);
-        Assert.Equal("rejects", s.Skip);
+        Assert.Equal(FillSkip.Rejects, s.Skip);
         Assert.Null(s.Ore);
         Assert.Equal(0, s.FuelCount);
     }
@@ -70,17 +70,21 @@ public class FillPlanTests
         Assert.Null(coal.Ore);
         Assert.Equal(0, coal.OreCount);
         Assert.Equal(1, coal.FuelCount);
-        Assert.Equal("full", FillPlan.Smelter(Furnace, FillWhat.Fuel, null, null, 0, 20f).Skip);
+        Assert.Equal(FillSkip.Full, FillPlan.Smelter(Furnace, FillWhat.Fuel, null, null, 0, 20f).Skip);
     }
 
     [Fact]
-    public void KeepCurrentTopsUpTheQueuedOreAndSkipsEmptyStations()
+    public void KeepCurrentTopsUpTheQueuedOreAndGivesEmptyStationsOnlyCoal()
     {
         var s = FillPlan.Smelter(Smelter, FillWhat.Ore, FillPlan.KeepCurrent, "IronScrap", 4, 0f);
         Assert.Equal("IronScrap", s.Ore);
         Assert.Equal(6, s.OreCount);
-        Assert.Equal("empty", FillPlan.Smelter(Smelter, FillWhat.Both, FillPlan.KeepCurrent, "", 0, 0f).Skip);
-        Assert.Equal("empty", FillPlan.Smelter(Smelter, FillWhat.Both, FillPlan.KeepCurrent, null, 0, 0f).Skip);
+        Assert.Equal(FillSkip.Empty, FillPlan.Smelter(Smelter, FillWhat.Ore, FillPlan.KeepCurrent, "", 0, 0f).Skip);
+        var empty = FillPlan.Smelter(Smelter, FillWhat.Both, FillPlan.KeepCurrent, null, 0, 5f);
+        Assert.Equal(FillSkip.None, empty.Skip);
+        Assert.Null(empty.Ore);
+        Assert.Equal(0, empty.OreCount);
+        Assert.Equal(15, empty.FuelCount);
     }
 
     [Fact]

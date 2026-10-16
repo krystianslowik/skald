@@ -23,15 +23,17 @@ namespace Skald.Bridge
 
     enum FillWhat { Ore, Both, Fuel }
 
+    // Why a station gets nothing: it does not take the chosen ore, it holds
+    // no ore to keep, or it is full.
+    enum FillSkip { None, Rejects, Empty, Full }
+
     // What to add to one station, or why it gets nothing.
     struct FillStep
     {
         public string Ore;
         public int OreCount;
         public int FuelCount;
-        // "rejects" (does not take the chosen ore), "empty" (nothing to keep),
-        // "full", or null.
-        public string Skip;
+        public FillSkip Skip;
     }
 
     // The game-independent half of the fill commands, unit-tested in
@@ -77,29 +79,36 @@ namespace Skald.Bridge
         // A kiln gets its first input (wood) up to capacity. It has no fuel.
         public static FillStep Kiln(Station s, int queued)
         {
-            if (s.Inputs.Length == 0) return new FillStep { Skip = "rejects" };
+            if (s.Inputs.Length == 0) return new FillStep { Skip = FillSkip.Rejects };
             int n = Math.Max(0, s.MaxOre - queued);
-            return n == 0 ? new FillStep { Skip = "full" } : new FillStep { Ore = s.Inputs[0], OreCount = n };
+            return n == 0 ? new FillStep { Skip = FillSkip.Full } : new FillStep { Ore = s.Inputs[0], OreCount = n };
         }
 
         // A smelter gets the chosen ore (or the one at the head of its queue
         // for "current") and/or fuel, each up to capacity. A station that does
         // not take the ore gets nothing at all, not even fuel, so a blast
-        // furnace is left alone when the admin picks copper.
+        // furnace is left alone when the admin picks copper. With "current", a
+        // station holding no ore gets no ore, but still its fuel when asked.
         public static FillStep Smelter(Station s, FillWhat what, string ore, string queuedOre, int queued, float fuel)
         {
             var step = new FillStep();
             if (what != FillWhat.Fuel)
             {
                 string pick = ore == KeepCurrent ? queuedOre : ore;
-                if (ore == KeepCurrent && string.IsNullOrEmpty(pick)) return new FillStep { Skip = "empty" };
-                if (string.IsNullOrEmpty(pick) || !s.Inputs.Contains(pick)) return new FillStep { Skip = "rejects" };
-                step.Ore = pick;
-                step.OreCount = Math.Max(0, s.MaxOre - queued);
+                if (ore == KeepCurrent && string.IsNullOrEmpty(pick))
+                {
+                    if (what == FillWhat.Ore) return new FillStep { Skip = FillSkip.Empty };
+                }
+                else
+                {
+                    if (string.IsNullOrEmpty(pick) || !s.Inputs.Contains(pick)) return new FillStep { Skip = FillSkip.Rejects };
+                    step.Ore = pick;
+                    step.OreCount = Math.Max(0, s.MaxOre - queued);
+                }
             }
             if (what != FillWhat.Ore && !string.IsNullOrEmpty(s.Fuel))
                 step.FuelCount = Math.Max(0, (int)Math.Floor(s.MaxFuel - fuel));
-            if (step.OreCount == 0 && step.FuelCount == 0) return new FillStep { Skip = "full" };
+            if (step.OreCount == 0 && step.FuelCount == 0) return new FillStep { Skip = FillSkip.Full };
             return step;
         }
     }
