@@ -15,6 +15,7 @@ import type {
   AgentState,
   ApplyMode,
   BridgeStatus,
+  FillStations,
   LogLine,
   MapSnapshot,
   Metrics,
@@ -72,6 +73,14 @@ const SPOTS: Record<string, [number, number]> = {
   bogwitch: [-2600, 2200],
 };
 const MOCK_EVENTS = ["army_bonemass", "army_eikthyr", "army_goblin", "army_moder", "army_theelder", "blobs", "bats", "foresttrolls", "skeletons", "surtlings", "wolves"];
+/** The fill commands' stations, as the plugin reads them from the game's prefabs. */
+const MOCK_STATIONS: FillStations = {
+  kilns: [{ prefab: "charcoal_kiln", inputs: ["Wood", "FineWood", "RoundLog"] }],
+  smelters: [
+    { prefab: "smelter", fuel: "Coal", inputs: ["CopperOre", "TinOre", "IronScrap", "SilverOre"] },
+    { prefab: "blastfurnace", fuel: "Coal", inputs: ["BlackMetalScrap", "FlametalOreNew"] },
+  ],
+};
 /** What the mock's "plugin" says it was tested on. */
 const MOCK_BUILD = "l-1.0.17";
 
@@ -641,6 +650,8 @@ export class MockAgent implements AgentSource {
             return ok({ aliases: Object.keys(SPOTS), locations: ["Eikthyrnir", "GDKing", "Vendor_BlackForest", "StartTemple"] });
           case "bans":
             return ok(this.bans);
+          case "stations":
+            return ok(MOCK_STATIONS);
         }
         return fail(404, "unknown read");
       case "run":
@@ -888,6 +899,44 @@ export class MockAgent implements AgentSource {
       case "fill":
         data = { smelters: 1 + Math.floor(Math.random() * 3), fermenters: Math.floor(Math.random() * 2), unloaded: 0, near };
         break;
+      case "fill-kilns": {
+        const kilns = 1 + Math.floor(Math.random() * 2);
+        data = { kilns, full: 0, unloaded: 0, added: { [MOCK_STATIONS.kilns[0]!.inputs[0]!]: kilns }, near, radius: Number(body.radius ?? 20) };
+        break;
+      }
+      case "fill-smelters": {
+        // The plugin's rules (bridge/plugin/FillPlan.cs) on a base with a smelter
+        // holding iron scrap, an empty one, and a blast furnace.
+        const what = body.what ?? "both";
+        if (what !== "ore" && what !== "both" && what !== "coal") return fail(400, "'what' must be ore, both or coal");
+        const ore = what === "coal" ? null : typeof body.ore === "string" && body.ore ? body.ore : null;
+        if (what !== "coal" && !ore) return fail(400, "missing 'ore'");
+        if (ore && ore !== "current" && !MOCK_STATIONS.smelters.some((s) => s.inputs.includes(ore))) return fail(400, `no smelter takes '${ore}'; GET /v1/build/stations lists what each one takes`);
+        const base = [
+          { station: MOCK_STATIONS.smelters[0]!, queued: "IronScrap" },
+          { station: MOCK_STATIONS.smelters[0]!, queued: "" },
+          { station: MOCK_STATIONS.smelters[1]!, queued: "" },
+        ];
+        const added: Record<string, number> = {};
+        let smelters = 0;
+        let skipped = 0;
+        for (const { station, queued } of base) {
+          const pick = ore === "current" ? queued : ore;
+          // Holding no ore to keep: coal only, if coal was asked for.
+          if (ore === "current" && !pick && what === "both") {
+            smelters++;
+            continue;
+          }
+          if (ore && (!pick || !station.inputs.includes(pick))) {
+            skipped++;
+            continue;
+          }
+          if (pick) added[pick] = (added[pick] ?? 0) + 1;
+          smelters++;
+        }
+        data = { smelters, skipped, full: 0, unloaded: 0, added, ...(what !== "ore" && smelters > 0 ? { fuel: "Coal" } : {}), near, radius: Number(body.radius ?? 20) };
+        break;
+      }
       case "grow":
         data = { plants: Math.floor(Math.random() * 30), near };
         break;
@@ -901,7 +950,9 @@ export class MockAgent implements AgentSource {
     this.log(`[Info   :Skald Bridge] [SkaldBridge] audit actor=${actor} cmd=POST /v1/${command} result=ok ${JSON.stringify({ ok: true, data })}`);
     const counts: Record<string, unknown> = {};
     if (!Array.isArray(data)) {
-      for (const k of ["killed", "tamed", "repaired", "smelters", "fermenters", "plants", "sentTo", "stopped", "started", "label", "stacks", "day"]) if (k in data) counts[k] = data[k];
+      for (const k of ["killed", "tamed", "repaired", "smelters", "kilns", "skipped", "full", "fermenters", "plants", "sentTo", "stopped", "started", "label", "stacks", "day"]) if (k in data) counts[k] = data[k];
+      if (data.added && typeof data.added === "object") counts.added = data.added;
+      if (typeof data.fuel === "string") counts.fuel = data.fuel;
       if (Array.isArray(data.tables)) counts.tables = data.tables.length;
       for (const k of ["near", "kicked", "player", "name"]) if (typeof data[k] === "string" && data[k] !== "position") counts.player = data[k];
     }
@@ -1276,7 +1327,7 @@ export class MockAgent implements AgentSource {
 /** The agent's argument summary for an admin event: names, never ids. */
 function mockSummary(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const k of ["type", "item", "amount", "quality", "prefab", "count", "level", "tamed", "includeBosses", "name", "key", "effect", "dayFraction", "toSpot", "radius", "player", "toPlayer"]) {
+  for (const k of ["type", "item", "amount", "quality", "prefab", "count", "level", "tamed", "includeBosses", "name", "key", "effect", "dayFraction", "toSpot", "radius", "what", "ore", "player", "toPlayer"]) {
     if (body[k] !== undefined) out[k] = body[k];
   }
   if (typeof body.text === "string") out.text = body.text.slice(0, 120);

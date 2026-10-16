@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { AgentSource, BridgeRequest, ToolsRequest } from "../src/agent";
-import { createApp, foldActor } from "../src/app";
+import { createApp, fillStations, foldActor } from "../src/app";
 import { ADMIN_IDLE_MS, RateLimiter } from "../src/auth";
 import { HistoryStore } from "../src/db";
 import { Hub } from "../src/hub";
@@ -57,6 +57,8 @@ function fakeAgent(calls: BridgeRequest[], status = 200, toolCalls: ToolsRequest
       if (req.op === "read" && req.name === "events") return { status: 200, body: { ok: true, data: { current: null, available: ["wolves"] } } };
       if (req.op === "read" && req.name === "globalkeys") return { status: 200, body: { ok: true, data: ["defeated_eikthyr"] } };
       if (req.op === "read" && req.name === "locations") return { status: 200, body: { ok: true, data: { aliases: ["spawn"], locations: ["x"] } } };
+      // A bridge older than 0.3.0 has no station list.
+      if (req.op === "read" && req.name === "stations") return { status: 404, body: { ok: false, error: "no route GET /v1/build/stations" } };
       return { status: 200, body: { ok: true, data: { near: "Ragnar" } } };
     },
   };
@@ -139,7 +141,24 @@ describe("admin without an admin password", () => {
     const { app } = await setup();
     const cookie = await signIn(app);
     const cat = await (await app.request("/api/admin/catalog", { headers: { Cookie: cookie } })).json();
-    expect(cat).toEqual({ events: ["wolves"], currentEvent: null, globalKeys: ["defeated_eikthyr"], spots: ["spawn"] });
+    // The bridge is older than 0.3.0: the catalog still answers, with no stations.
+    expect(cat).toEqual({ events: ["wolves"], currentEvent: null, globalKeys: ["defeated_eikthyr"], spots: ["spawn"], stations: { kilns: [], smelters: [] } });
+  });
+
+  it("keeps only well-formed fill stations", () => {
+    expect(
+      fillStations({
+        kilns: [{ prefab: "charcoal_kiln", inputs: ["Wood", 7] }, { inputs: ["Wood"] }],
+        smelters: [{ prefab: "blastfurnace", fuel: "Coal", inputs: ["BlackMetalScrap"] }, { prefab: "odd", inputs: "x" }, null],
+      }),
+    ).toEqual({
+      kilns: [{ prefab: "charcoal_kiln", inputs: ["Wood"] }],
+      smelters: [
+        { prefab: "blastfurnace", fuel: "Coal", inputs: ["BlackMetalScrap"] },
+        { prefab: "odd", fuel: null, inputs: [] },
+      ],
+    });
+    expect(fillStations(undefined)).toEqual({ kilns: [], smelters: [] });
   });
 });
 
@@ -300,6 +319,36 @@ describe("mock bridge", () => {
     expect((await mock.bridge({ op: "run", command: "broadcast", body: { text: "hi", type: "chat" }, actor: "t" })).status).toBe(501);
     const bans = (await mock.bridge({ op: "read", name: "bans" })).body as { data: { id: string }[] };
     expect((await mock.bridge({ op: "run", command: "unban", body: { id: bans.data[0]!.id }, actor: "t" })).status).toBe(200);
+    abort.abort();
+    mock.stop();
+  });
+
+  it("fills kilns with wood and smelters with the chosen ore", async () => {
+    const mock = new MockAgent(Date.now, "UTC");
+    const evs: AgentEvent[] = [];
+    const abort = new AbortController();
+    void mock.stream(1_000_000, (e) => evs.push(e), abort.signal);
+    const st = (await mock.bridge({ op: "read", name: "stations" })).body as { data: { smelters: { inputs: string[] }[] } };
+    expect(st.data.smelters.flatMap((s) => s.inputs)).toContain("IronScrap");
+    const run = (body: Record<string, unknown>, command: "fill-kilns" | "fill-smelters" = "fill-smelters") => mock.bridge({ op: "run", command, body: { player: "Ragnar", ...body }, actor: "t" });
+    expect((await run({}, "fill-kilns")).status).toBe(200);
+    expect((await run({ what: "both", ore: "IronScrap" })).status).toBe(200);
+    expect((await run({ what: "coal" })).status).toBe(200);
+    expect((await run({ what: "ore", ore: "current" })).status).toBe(200);
+    expect((await run({ what: "both", ore: "current" })).status).toBe(200);
+    expect((await run({ what: "ore" })).status).toBe(400);
+    expect((await run({ what: "everything", ore: "IronScrap" })).status).toBe(400);
+    expect((await run({ ore: "Barley" })).status).toBe(400);
+    const fills = evs.filter((e) => e.type === "admin").map((e) => e.data);
+    expect(fills[0]).toMatchObject({ command: "fill-kilns", added: { Wood: expect.any(Number) }, player: "Ragnar" });
+    expect(fills[0]).not.toHaveProperty("fuel");
+    // A blast furnace does not take iron: two smelters filled, one skipped.
+    expect(fills[1]).toMatchObject({ command: "fill-smelters", what: "both", ore: "IronScrap", smelters: 2, skipped: 1, added: { IronScrap: 2 }, fuel: "Coal" });
+    expect(fills[2]).toMatchObject({ command: "fill-smelters", what: "coal", smelters: 3, added: {}, fuel: "Coal" });
+    // Keep the current ore: only the smelter holding iron gets ore; with coal the empty ones get coal.
+    expect(fills[3]).toMatchObject({ what: "ore", ore: "current", smelters: 1, skipped: 2, added: { IronScrap: 1 } });
+    expect(fills[3]).not.toHaveProperty("fuel");
+    expect(fills[4]).toMatchObject({ what: "both", ore: "current", smelters: 3, skipped: 0, added: { IronScrap: 1 }, fuel: "Coal" });
     abort.abort();
     mock.stop();
   });

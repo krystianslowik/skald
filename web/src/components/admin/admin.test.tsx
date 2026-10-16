@@ -57,6 +57,14 @@ const RESTORE: RestoreInfo = {
   ],
 };
 
+const STATIONS = {
+  kilns: [{ prefab: "charcoal_kiln", inputs: ["Wood"] }],
+  smelters: [
+    { prefab: "smelter", fuel: "Coal", inputs: ["CopperOre", "IronScrap"] },
+    { prefab: "blastfurnace", fuel: "Coal", inputs: ["BlackMetalScrap"] },
+  ],
+};
+
 /** The panel's API as far as these tests need it; everything else 404s. */
 function api(st: AdminStatus, commands: (url: string, n: number) => Response = () => Response.json({ ok: true, data: {} })) {
   const calls: Call[] = [];
@@ -66,7 +74,7 @@ function api(st: AdminStatus, commands: (url: string, n: number) => Response = (
     const method = init?.method ?? "GET";
     calls.push({ url: u, method, body: init?.body ? JSON.parse(String(init.body)) : undefined, headers: (init?.headers ?? {}) as Record<string, string> });
     if (u === "/api/admin/status") return Response.json(st);
-    if (u === "/api/admin/catalog") return Response.json({ events: ["wolves"], currentEvent: null, globalKeys: ["defeated_eikthyr"], spots: ["spawn"] });
+    if (u === "/api/admin/catalog") return Response.json({ events: ["wolves"], currentEvent: null, globalKeys: ["defeated_eikthyr"], spots: ["spawn"], stations: STATIONS });
     if (u === "/api/admin/read/bans") return Response.json({ ok: true, data: [] });
     if (u === "/api/admin/access" && method === "GET") return Response.json({ ok: true, data: ACCESS });
     if (u === "/api/admin/restore" && method === "GET") return Response.json({ ok: true, data: RESTORE });
@@ -294,6 +302,30 @@ describe("admin", () => {
     expect(await screen.findByText("Message sent.")).toBeInTheDocument();
   });
 
+  it("fills kilns with wood and smelters with the ore the admin picks", async () => {
+    const calls = api(status());
+    renderDashboard();
+    const sheet = await openAdmin();
+    fireEvent.click(within(sheet).getByRole("button", { name: "Fill kilns with wood" }));
+    await waitFor(() => expect(calls.find((c) => c.url === "/api/admin/fill-kilns")).toBeTruthy());
+    expect(calls.find((c) => c.url === "/api/admin/fill-kilns")!.body).toMatchObject({ radius: 50 });
+    // Ores come from the bridge, under the station that takes them.
+    const iron = await within(sheet).findByRole("button", { name: "Scrap iron" });
+    expect(within(sheet).getByText("Blast furnace")).toBeInTheDocument();
+    expect(within(sheet).getByRole("button", { name: "Black metal scrap" })).toBeInTheDocument();
+    fireEvent.click(iron);
+    fireEvent.click(within(sheet).getByRole("button", { name: "Fill smelters" }));
+    await waitFor(() => expect(calls.find((c) => c.url === "/api/admin/fill-smelters")).toBeTruthy());
+    expect(calls.find((c) => c.url === "/api/admin/fill-smelters")!.body).toMatchObject({ radius: 50, what: "both", ore: "IronScrap" });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Coal only" }));
+    expect(within(sheet).queryByRole("button", { name: "Scrap iron" })).not.toBeInTheDocument();
+    fireEvent.click(within(sheet).getByRole("button", { name: "Fill smelters" }));
+    await waitFor(() => expect(calls.filter((c) => c.url === "/api/admin/fill-smelters")).toHaveLength(2));
+    const coal = calls.filter((c) => c.url === "/api/admin/fill-smelters")[1]!.body as Record<string, unknown>;
+    expect(coal).toMatchObject({ what: "coal" });
+    expect(coal).not.toHaveProperty("ore");
+  });
+
   it("gives items found by their Polish name to a player", async () => {
     const calls = api(status());
     renderDashboard();
@@ -424,6 +456,29 @@ describe("admin lines in the saga", () => {
     expect(describeAdmin(en, { actor: "k", command: "ban", result: "error", error: "no connected player 'X'" })).toBe("k: a ban failed (no connected player 'X')");
     expect(describeAdmin(pl, { actor: "Sigrun", command: "spawn", result: "ok", item: "Wood", amount: 20, player: "Ragnar" })).toBe("Sigrun przywołał 20 Drewno dla: Ragnar");
     expect(describeAdmin(pl, { actor: "k", command: "event-start", result: "ok", name: "wolves" })).toMatch(/^k sprowadził najazd: /);
+  });
+
+  it("says what a fill put in", () => {
+    const smelters = { actor: "k", command: "fill-smelters", result: "ok", what: "both", ore: "IronScrap", smelters: 3, skipped: 1, added: { IronScrap: 3 }, fuel: "Coal", player: "Ragnar" };
+    expect(describeAdmin(en, smelters)).toBe("k filled 3 smelters with scrap iron and coal near Ragnar");
+    expect(describeAdmin(pl, smelters)).toBe("k napełnił odlewnie (3, złom żelaza i węgiel) obok: Ragnar");
+    // Keep the current ore: whatever each one held.
+    const current = { actor: "k", command: "fill-smelters", result: "ok", smelters: 2, added: { CopperOre: 1, TinOre: 1 } };
+    expect(describeAdmin(en, current)).toBe("k filled 2 smelters with copper and tin");
+    expect(describeAdmin(pl, current)).toBe("k napełnił odlewnie (2, miedź i cyna)");
+    expect(describeAdmin(en, { actor: "k", command: "fill-smelters", result: "ok", smelters: 2, added: {}, fuel: "Coal" })).toBe("k filled 2 smelters with coal");
+    // An ore the game names but the panel does not still reads as words.
+    expect(describeAdmin(en, { actor: "k", command: "fill-smelters", result: "ok", smelters: 1, added: { MysteryOre: 1 } })).toBe("k filled 1 smelter with mystery ore");
+    expect(describeAdmin(en, { actor: "k", command: "fill-smelters", result: "ok", smelters: 0, skipped: 2, added: {}, player: "Freya" })).toBe("k added nothing to the smelters near Freya: they are full or do not take that ore");
+    expect(describeAdmin(en, { actor: "k", command: "fill-smelters", result: "ok", smelters: 0, skipped: 0, full: 0, added: {}, player: "Freya" })).toBe("k found no smelters to fill near Freya");
+    expect(describeAdmin(pl, { actor: "k", command: "fill-kilns", result: "ok", kilns: 0, full: 2, added: {} })).toBe("k nie dosypał nic do mielerzy (są już pełne)");
+    const kilns = { actor: "k", command: "fill-kilns", result: "ok", kilns: 2, added: { Wood: 2 }, player: "Ragnar" };
+    expect(describeAdmin(en, kilns)).toBe("k filled 2 kilns with wood near Ragnar");
+    expect(describeAdmin(pl, kilns)).toBe("k napełnił mielerze (2, drewno) obok: Ragnar");
+    expect(describeAdmin(pl, { actor: "k", command: "fill-kilns", result: "ok", kilns: 0, added: {} })).toBe("k nie znalazł mielerzy do napełnienia");
+    expect(describeAdmin(en, { actor: "k", command: "fill-kilns", result: "timeout" })).toBe("k: filling kilns took too long");
+    // Lines stored before the split still read as before.
+    expect(describeAdmin(en, { actor: "k", command: "fill", result: "ok", smelters: 2, fermenters: 1 })).toBe("k filled 3 kilns and smelters");
   });
 });
 

@@ -45,7 +45,7 @@ export function actionTitle(i: Pick<I18n, "t">, name: string): string {
 type Tone = "join" | "leave" | "death" | "save" | "slow" | "server" | "action" | "raid" | "settings" | "admin";
 
 /** Commands whose saga line names a player when there was one ("for X", "near X"). */
-const WITH_PLAYER = new Set(["spawn", "creature-spawn", "creature-kill", "creature-tame", "repair", "fill", "grow", "map-reveal", "map-pins", "event-start"]);
+const WITH_PLAYER = new Set(["spawn", "creature-spawn", "creature-kill", "creature-tame", "repair", "fill", "fill-kilns", "fill-smelters", "grow", "map-reveal", "map-pins", "event-start"]);
 
 /** "20 Wood, Iron sword ★3 and 2 more": what a spawn dropped. */
 function itemsText(i: Pick<I18n, "lookup" | "t">, d: Record<string, unknown>): string {
@@ -57,6 +57,14 @@ function itemsText(i: Pick<I18n, "lookup" | "t">, d: Record<string, unknown>): s
   });
   const more = lines.length - parts.length;
   return more > 0 ? i.t("saga.admin.more", { list: parts.join(", "), n: more }) : parts.join(", ");
+}
+
+/** "scrap iron and coal": what a fill command put in, by the items the bridge reported. */
+export function fillText(i: Pick<I18n, "lookup" | "intl">, d: Record<string, unknown>): string {
+  const added = d.added && typeof d.added === "object" ? Object.keys(d.added) : [];
+  const names = [...added, ...(typeof d.fuel === "string" && d.fuel ? [d.fuel] : [])];
+  const labels = names.map((n) => (i.lookup(`admin.fill.item.${n}`) ?? itemLabel(n, i.lookup)).toLocaleLowerCase(i.intl));
+  return new Intl.ListFormat(i.intl, { type: "conjunction" }).format(labels);
 }
 
 const PLATFORMS: readonly Platform[] = ["xbox", "steam", "playstation", "nintendo"];
@@ -129,6 +137,9 @@ export function describeAdmin(i: I18n, d: Record<string, unknown>): string {
     case "fill":
       vars.n = Number(d.smelters ?? 0) + Number(d.fermenters ?? 0);
       break;
+    case "fill-kilns":
+    case "fill-smelters":
+      return describeFill(i, command, d, actor, player);
     case "grow":
       vars.n = Number(d.plants ?? 0);
       break;
@@ -145,6 +156,22 @@ export function describeAdmin(i: I18n, d: Record<string, unknown>): string {
   }
   const key = WITH_PLAYER.has(command) && !player ? `saga.admin.${command}.at` : `saga.admin.${command}`;
   return lookup(key, vars) ?? t("saga.admin.generic", { actor, what: lookup(`saga.admin.cmd.${command}`) ?? command });
+}
+
+/**
+ * "filled 3 smelters with scrap iron and coal near Ragnar"; or that the
+ * stations there were full or refused the ore; or that there were none.
+ */
+function describeFill(i: I18n, command: "fill-kilns" | "fill-smelters", d: Record<string, unknown>, actor: string, player: string): string {
+  const n = Number((command === "fill-kilns" ? d.kilns : d.smelters) ?? 0) || 0;
+  const vars = { actor, player, what: fillText(i, d) };
+  if (n > 0) {
+    if (command === "fill-kilns") return player ? i.tn("saga.admin.fill-kilns", n, vars) : i.tn("saga.admin.fill-kilns.at", n, vars);
+    return player ? i.tn("saga.admin.fill-smelters", n, vars) : i.tn("saga.admin.fill-smelters.at", n, vars);
+  }
+  const untouched = (Number(d.skipped ?? 0) || 0) + (Number(d.full ?? 0) || 0) > 0;
+  const key = `saga.admin.${command}${untouched ? ".unchanged" : ".none"}${player ? "" : ".at"}`;
+  return i.lookup(key, vars) ?? i.t("saga.admin.generic", { actor, what: i.t(`saga.admin.cmd.${command}`) });
 }
 
 const SETTINGS_APPLY: Record<string, TextKey> = {

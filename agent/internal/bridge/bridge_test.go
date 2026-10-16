@@ -92,6 +92,10 @@ func (f *fakePlugin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ok(map[string]any{"items": []any{}, "stacks": 3, "near": "Ragnar", "position": map[string]any{"x": 1, "y": 2, "z": 3}})
 	case "/v1/time":
 		ok(map[string]any{"day": 12, "dayFraction": 0.5})
+	case "/v1/build/fill-smelters":
+		ok(map[string]any{"smelters": 3, "skipped": 1, "full": 0, "unloaded": 0, "added": map[string]any{"IronScrap": 3}, "fuel": "Coal", "near": "Ragnar", "radius": 50})
+	case "/v1/build/fill-kilns":
+		ok(map[string]any{"kilns": 2, "full": 1, "unloaded": 0, "added": map[string]any{"Wood": 2}, "near": "position", "radius": 50})
 	default:
 		ok(map[string]any{"near": "Ragnar"})
 	}
@@ -445,6 +449,47 @@ func TestConcurrentCommandsKeepTheirArguments(t *testing.T) {
 	}
 	if len(evs) != n || len(seen) != n {
 		t.Fatalf("want %d distinct events, got %d events, %d distinct: %+v", n, len(evs), len(seen), evs)
+	}
+}
+
+func TestFillAuditSaysWhatWentIn(t *testing.T) {
+	if Commands["fill-kilns"].Path != "/v1/build/fill-kilns" || Commands["fill-smelters"].Path != "/v1/build/fill-smelters" || Reads["stations"] != "/v1/build/stations" {
+		t.Fatalf("fill routes missing from the allow-lists")
+	}
+	hub := events.New(100, 10)
+	c := newClient(t, &fakePlugin{build: "l-1.0.17"}, hub, "")
+	ctx := context.Background()
+	if _, err := c.Run(ctx, "fill-smelters", map[string]any{"what": "both", "ore": "IronScrap", "radius": 50, "player": "Ragnar"}, "k"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Run(ctx, "fill-kilns", map[string]any{"radius": 50, "at": map[string]any{"x": 10.4, "z": -3}}, "k"); err != nil {
+		t.Fatal(err)
+	}
+	// Choosing the ore reads the stations first; a read is never audited.
+	if _, err := c.Read(ctx, "stations"); err != nil {
+		t.Fatal(err)
+	}
+	evs := adminEvents(t, hub)
+	if len(evs) != 2 {
+		t.Fatalf("want 2 admin events, got %+v", evs)
+	}
+	b, _ := json.Marshal(evs)
+	if strings.Contains(string(b), "1234567890123456789") {
+		t.Fatalf("leaked a uid: %s", b)
+	}
+	sm := evs[0]
+	if sm["command"] != "fill-smelters" || sm["what"] != "both" || sm["ore"] != "IronScrap" || sm["smelters"] != float64(3) || sm["skipped"] != float64(1) || sm["fuel"] != "Coal" || sm["player"] != "Ragnar" {
+		t.Fatalf("fill-smelters %+v", sm)
+	}
+	if added, _ := sm["added"].(map[string]any); added["IronScrap"] != float64(3) {
+		t.Fatalf("fill-smelters added %+v", sm["added"])
+	}
+	k := evs[1]
+	if k["command"] != "fill-kilns" || k["kilns"] != float64(2) || k["full"] != float64(1) || k["player"] != nil || k["fuel"] != nil {
+		t.Fatalf("fill-kilns %+v", k)
+	}
+	if added, _ := k["added"].(map[string]any); added["Wood"] != float64(2) {
+		t.Fatalf("fill-kilns added %+v", k["added"])
 	}
 }
 

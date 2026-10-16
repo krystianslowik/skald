@@ -16,7 +16,7 @@ namespace Skald.Bridge
     public class SkaldBridgePlugin : BaseUnityPlugin
     {
         public const string Guid = "dev.skald.bridge";
-        public const string Version = "0.2.1";
+        public const string Version = "0.3.0";
         public const string Prefix = "[SkaldBridge]";
 
         internal static ManualLogSource Log;

@@ -174,7 +174,10 @@ loaded are counted as `unloaded` and skipped. `radius` is at most 100 m.
 | `POST /v1/player/heal` | `player`, `amount` (default full) | `RPC_Heal` on the player's character |
 | `POST /v1/player/status` | `player`, `effect` (e.g. `Rested`) | `RPC_AddStatusEffect` on the player's character |
 | `POST /v1/build/repair` | `player` or `at`, `radius` | `RPC_Repair` on damaged pieces |
-| `POST /v1/build/fill` | `player` or `at`, `radius`, optional `item` | `RPC_AddOre` up to capacity plus `RPC_AddFuel` for smelters, kilns and furnaces; `RPC_AddItem` for fermenters |
+| `POST /v1/build/fill` | `player` or `at`, `radius`, optional `item` | The pre-0.3.0 command, kept for older panels: every station gets its first (or the requested) input plus fuel, fermenters get mead base |
+| `POST /v1/build/fill-kilns` | `player` or `at`, `radius` | Charcoal kilns get their first input (wood) up to capacity with `RPC_AddOre`. Answers `kilns`, `skipped`, `full`, `unloaded` and `added` (item: stations) |
+| `POST /v1/build/fill-smelters` | `player` or `at`, `radius`, `what` (`ore`, `both` (default) or `coal`), `ore` (an item `GET /v1/build/stations` lists, or `current`; not needed for `coal`) | `RPC_AddOre` with that ore and/or `RPC_AddFuel`, up to capacity. A station that does not take the ore gets nothing (`skipped`); with `current` each station gets the ore at the head of its queue, and one holding no ore gets only fuel (`both`) or nothing (`ore`). Answers `smelters`, `skipped`, `full`, `unloaded`, `added` and `fuel` |
+| `GET /v1/build/stations` | | Every kiln and smelter prefab with the items it takes, in the game's order, read from the prefabs' `Smelter` components: `{kilns:[{prefab, inputs}], smelters:[{prefab, fuel, inputs}]}`. A kiln burns nothing and makes what a smelter burns; a smelter burns what a kiln makes. Windmills, spinning wheels and the eitr refinery are neither |
 | `POST /v1/build/grow` | `player` or `at`, `radius` | Back-dates the plant time of crops and saplings |
 | `GET /v1/tombstones` | | `id, owner, position, loaded` |
 | `POST /v1/tombstones/move` | `id`, `player` or `at` | Moves a tombstone that no player has loaded |
@@ -363,3 +366,13 @@ uninitialised `Minimap` and the palette lookup have not run against a loaded
 world yet. Check after deploying: `GET /v1/terrain/info` answers, its `forest`
 is `mask` and `palette.source` says whether the colours came from the game;
 `X-Skald-Sample-Ms` on a 260 x 260 tile shows the real cost per tile.
+
+**New in v0.3.0, not yet verified on a live server:** `build/fill-kilns`,
+`build/fill-smelters` and `build/stations` compile against the 1.0 reference
+assemblies, and the station rules (what counts as a kiln or a smelter, which
+ore a station takes, keep-current, capacity) are unit-tested in
+`tests/FillPlanTests.cs`. Not yet seen in a loaded world: the kiln and smelter
+split from the real prefabs (check `GET /v1/build/stations`), the head of the
+ore queue read from the ZDO for `ore: current`, and the fuel top-up from
+`s_fuel`. `RPC_AddOre` and `RPC_AddFuel` are sent as in the verified 0.1.x
+`build/fill`.

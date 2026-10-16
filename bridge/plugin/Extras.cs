@@ -227,8 +227,125 @@ namespace Skald.Bridge
             return Ok(new { repaired = sent, unloaded, near, radius = r });
         }
 
-        // Fills smelters, furnaces, kilns, blast furnaces etc. with their first
-        // (or the requested) input and fuel, and empty fermenters with mead base.
+        // Every prefab with a Smelter component, read from the game once the
+        // scene is up: inputs, outputs, fuel and capacity, and whether it is a
+        // kiln or a smelter (FillPlan.Classify). Nothing here names an item.
+        static Dictionary<string, (Station station, StationKind kind)> stations;
+
+        static Dictionary<string, (Station station, StationKind kind)> Stations()
+        {
+            if (stations != null) return stations;
+            if (ZNetScene.instance == null) throw new CommandError(503, "world not loaded yet");
+            var list = new List<Station>();
+            foreach (var prefab in ZNetScene.instance.m_prefabs)
+            {
+                var sm = prefab != null ? prefab.GetComponent<Smelter>() : null;
+                if (sm == null || string.IsNullOrEmpty(prefab.name)) continue;
+                try
+                {
+                    var conv = (sm.m_conversion ?? new List<Smelter.ItemConversion>()).Where(c => c != null && c.m_from != null).ToList();
+                    list.Add(new Station
+                    {
+                        Prefab = prefab.name,
+                        Fuel = sm.m_fuelItem != null ? sm.m_fuelItem.name : null,
+                        Inputs = conv.Select(c => c.m_from.name).ToArray(),
+                        Outputs = conv.Where(c => c.m_to != null).Select(c => c.m_to.name).ToArray(),
+                        MaxOre = sm.m_maxOre,
+                        MaxFuel = sm.m_maxFuel,
+                    });
+                }
+                catch (Exception e)
+                {
+                    SkaldBridgePlugin.Warn("fill: skipping station prefab " + prefab.name + ": " + e.Message);
+                }
+            }
+            var kinds = FillPlan.Classify(list);
+            var byName = new Dictionary<string, (Station station, StationKind kind)>();
+            foreach (var s in list) byName[s.Prefab] = (s, kinds.TryGetValue(s.Prefab, out var k) ? k : StationKind.Other);
+            // An empty list is not kept, so a too-early call does not stick.
+            if (byName.Count > 0) stations = byName;
+            return byName;
+        }
+
+        // GET /v1/build/stations: what the fill commands can put where.
+        public static object FillStations(JObject a)
+        {
+            Net();
+            var all = Stations().Values;
+            return Ok(new
+            {
+                kilns = all.Where(s => s.kind == StationKind.Kiln).Select(s => new { prefab = s.station.Prefab, inputs = s.station.Inputs }).ToList(),
+                smelters = all.Where(s => s.kind == StationKind.Smelter).Select(s => new { prefab = s.station.Prefab, fuel = s.station.Fuel, inputs = s.station.Inputs }).ToList(),
+            });
+        }
+
+        static void Count(Dictionary<string, int> d, string k) => d[k] = d.TryGetValue(k, out int n) ? n + 1 : 1;
+
+        // POST /v1/build/fill-kilns: charcoal kilns get wood, nothing else.
+        public static object FillKilns(JObject a)
+        {
+            Net();
+            var pos = Target(a, out string near);
+            float r = Radius(a, 20f);
+            var known = Stations();
+            int kilns = 0, skipped = 0, full = 0, unloaded = 0;
+            var added = new Dictionary<string, int>();
+            foreach (var z in ZdosAround(pos, r))
+            {
+                if (!known.TryGetValue(PrefabName(z), out var st) || st.kind != StationKind.Kiln) continue;
+                long owner = LoadedBy(z);
+                if (owner == 0) { unloaded++; continue; }
+                var step = FillPlan.Kiln(st.station, z.GetInt(ZDOVars.s_queued));
+                if (step.Skip == FillSkip.Full) { full++; continue; }
+                if (step.Skip != FillSkip.None) { skipped++; continue; }
+                // The owner checks capacity again and ignores the excess.
+                for (int i = 0; i < step.OreCount; i++)
+                    ZRoutedRpc.instance.InvokeRoutedRPC(owner, z.m_uid, "RPC_AddOre", step.Ore, false);
+                Count(added, step.Ore);
+                kilns++;
+            }
+            return Ok(new { kilns, skipped, full, unloaded, added, near, radius = r });
+        }
+
+        // POST /v1/build/fill-smelters: smelters and furnaces get the chosen
+        // ore ("current" keeps the one each already holds) and/or their fuel.
+        public static object FillSmelters(JObject a)
+        {
+            Net();
+            var pos = Target(a, out string near);
+            float r = Radius(a, 20f);
+            FillWhat what;
+            try { what = FillPlan.ParseWhat(Str(a, "what", required: false, max: 16)); }
+            catch (ArgumentException e) { throw new CommandError(400, e.Message); }
+            string ore = what == FillWhat.Fuel ? null : Str(a, "ore", max: 64);
+            var known = Stations();
+            if (ore != null && ore != FillPlan.KeepCurrent && !known.Values.Any(s => s.kind == StationKind.Smelter && s.station.Inputs.Contains(ore)))
+                throw new CommandError(400, "no smelter takes '" + ore + "'; GET /v1/build/stations lists what each one takes");
+            int smelters = 0, skipped = 0, full = 0, unloaded = 0;
+            var added = new Dictionary<string, int>();
+            string fuelAdded = null;
+            foreach (var z in ZdosAround(pos, r))
+            {
+                if (!known.TryGetValue(PrefabName(z), out var st) || st.kind != StationKind.Smelter) continue;
+                long owner = LoadedBy(z);
+                if (owner == 0) { unloaded++; continue; }
+                var step = FillPlan.Smelter(st.station, what, ore, z.GetString(ZDOVars.s_item0), z.GetInt(ZDOVars.s_queued), z.GetFloat(ZDOVars.s_fuel));
+                if (step.Skip == FillSkip.Full) { full++; continue; }
+                if (step.Skip != FillSkip.None) { skipped++; continue; }
+                for (int i = 0; i < step.OreCount; i++)
+                    ZRoutedRpc.instance.InvokeRoutedRPC(owner, z.m_uid, "RPC_AddOre", step.Ore, false);
+                for (int i = 0; i < step.FuelCount; i++)
+                    ZRoutedRpc.instance.InvokeRoutedRPC(owner, z.m_uid, "RPC_AddFuel");
+                if (step.OreCount > 0) Count(added, step.Ore);
+                if (step.FuelCount > 0) fuelAdded = st.station.Fuel;
+                smelters++;
+            }
+            return Ok(new { smelters, skipped, full, unloaded, added, fuel = fuelAdded, near, radius = r });
+        }
+
+        // The 0.1/0.2 command, kept for older panels: every Smelter gets its
+        // first (or the requested) input and fuel, fermenters get mead base.
+        // The panel now uses fill-kilns and fill-smelters.
         public static object Fill(JObject a)
         {
             Net();
