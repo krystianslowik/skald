@@ -1758,6 +1758,7 @@ export const en = {
   "admin.you.open": "Anyone with the panel password can use these. Set ADMIN_PASSWORD_HASH to require a separate admin password.",
   "admin.you.unlocked": "Admin session open. It ends after {min} min without an admin action.",
   "admin.you.locked": "View only",
+  "admin.you.lockedBody": "Commands, the admin and ban lists and backups need the admin password. Unlock now, or the first action asks for it.",
   "admin.you.lock": "Lock",
   "admin.you.unlock": "Unlock",
   "admin.unlock.title": "Admin password",

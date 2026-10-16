@@ -19,8 +19,9 @@ const PRESETS = ["admin.preset.restart5", "admin.preset.boss21", "admin.preset.s
 /**
  * The admin sheet: everything the bridge can do to the world, in the order
  * an evening needs it, then the game's admin and ban lists and world
- * restore, which need no bridge. Bridge controls are off (with the reason on
- * top) while it cannot take commands.
+ * restore, which need no bridge. A view-only session says so first, with
+ * the unlock. Bridge controls are off (with the reason on top) while it
+ * cannot take commands.
  */
 export function AdminPanel({ picked, onClose }: { picked?: { x: number; z: number }; onClose: () => void }) {
   const { t } = useI18n();
@@ -57,6 +58,17 @@ export function AdminPanel({ picked, onClose }: { picked?: { x: number; z: numbe
       )}
     >
       <div className="pb-6">
+        {st?.required && !st.unlocked && (
+          <div role="status" className="mb-4 flex flex-wrap items-center gap-3 rounded-[3px] border border-ember/50 bg-black/35 px-4 py-3 text-sm">
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-flame">{t("admin.you.locked")}</p>
+              <p className="mt-1 text-xs text-ash">{t("admin.you.lockedBody")}</p>
+            </div>
+            <Btn primary onClick={() => void admin.unlock()}>
+              {t("admin.you.unlock")}
+            </Btn>
+          </div>
+        )}
         {admin.bridgeOn ? <BridgeTools catalog={catalog} picked={pickedTarget} reload={reload} /> : <p className="mt-2 text-sm text-ash">{t("admin.noBridge")}</p>}
 
         <Notify />
@@ -77,23 +89,14 @@ export function AdminPanel({ picked, onClose }: { picked?: { x: number; z: numbe
             className="field mt-1.5 w-full"
             autoComplete="nickname"
           />
-          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-            {!st?.required ? (
-              <p className="text-ash">{t("admin.you.open")}</p>
-            ) : st.unlocked ? (
-              <>
-                <p className="flex-1 text-flame">{t("admin.you.unlocked", { min: Math.round(st.idleMs / 60000) })}</p>
-                <Btn onClick={() => void lockAdmin().then(admin.refresh)}>{t("admin.you.lock")}</Btn>
-              </>
-            ) : (
-              <>
-                <p className="flex-1 text-ash">{t("admin.you.locked")}</p>
-                <Btn primary onClick={() => void admin.unlock()}>
-                  {t("admin.you.unlock")}
-                </Btn>
-              </>
-            )}
-          </div>
+          {!st?.required ? (
+            <p className="mt-3 text-sm text-ash">{t("admin.you.open")}</p>
+          ) : st.unlocked ? (
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+              <p className="flex-1 text-flame">{t("admin.you.unlocked", { min: Math.round(st.idleMs / 60000) })}</p>
+              <Btn onClick={() => void lockAdmin().then(admin.refresh)}>{t("admin.you.lock")}</Btn>
+            </div>
+          ) : null}
         </Section>
         <SkaldVersion web={admin.versions.web} agent={admin.versions.agent} update={st?.update} className="mt-6 border-t border-iron/25 pt-3" />
       </div>

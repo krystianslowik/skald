@@ -207,6 +207,35 @@ describe("admin", () => {
     expect(calls.some((c) => c.url === "/api/admin/access" || c.url === "/api/admin/restore")).toBe(false);
   });
 
+  it("says a session is view-only, with the unlock, before any control", async () => {
+    api(status({ required: true, unlocked: false }));
+    renderDashboard();
+    const sheet = await openAdmin();
+    const unlock = within(sheet).getByRole("button", { name: "Unlock" });
+    const close = within(sheet).getByRole("button", { name: "Close" });
+    const first = within(sheet).getAllByRole("button").find((b) => b !== close && !close.contains(b));
+    expect(first).toBe(unlock);
+    expect(within(sheet).getByText("View only").compareDocumentPosition(within(sheet).getByRole("textbox", { name: "Broadcast" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(sheet).getByText(/the first action asks for it/)).toBeInTheDocument();
+    fireEvent.click(unlock);
+    expect(await screen.findByRole("dialog", { name: "Admin password" })).toBeInTheDocument();
+  });
+
+  it("says view-only first without the bridge too", async () => {
+    api(status({ required: true, unlocked: false }, { reason: "off", available: false }));
+    renderDashboard();
+    const sheet = await openAdmin();
+    expect(within(sheet).getByText("View only").compareDocumentPosition(within(sheet).getByText(/Without the bridge/)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("shows no view-only banner when the session may command", async () => {
+    api(status({ required: true, unlocked: true }));
+    renderDashboard();
+    const sheet = await openAdmin();
+    expect(within(sheet).queryByText("View only")).not.toBeInTheDocument();
+    expect(within(sheet).getByRole("button", { name: "Lock" })).toBeInTheDocument();
+  });
+
   it("lists backups with the safety copies marked and opens the restore sheet", async () => {
     api(status());
     renderDashboard();
