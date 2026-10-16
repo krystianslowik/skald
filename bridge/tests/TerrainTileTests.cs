@@ -41,6 +41,8 @@ public class TerrainTileTests
     public void RejectsMismatchedGrids()
     {
         Assert.Throws<ArgumentException>(() => TerrainTile.Encode(2, 0, 0, 1, 0, new byte[3], new ushort[4], null));
+        // Longer (pooled) grids are fine: only the first n*n are written.
+        Assert.Equal(TerrainTile.HeaderSize + 3, TerrainTile.Encode(1, 0, 0, 1, 0, new byte[9], new ushort[9], null).Length);
         Assert.Throws<ArgumentException>(() => TerrainTile.Encode(1, 0, 0, 1, TerrainTile.Forest, new byte[1], new ushort[1], null));
     }
 

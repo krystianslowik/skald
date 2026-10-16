@@ -163,12 +163,19 @@ namespace Skald.Bridge
             }
         }
 
+        static readonly byte[] PoolBiomes = new byte[TerrainTile.MaxEdge * TerrainTile.MaxEdge];
+        static readonly ushort[] PoolHeights = new ushort[TerrainTile.MaxEdge * TerrainTile.MaxEdge];
+        static readonly byte[] PoolForest = new byte[TerrainTile.MaxEdge * TerrainTile.MaxEdge];
+
+        // Only ever called with Gate held.
         static RawBody Sample(Sampler s, int n, float x0, float z0, float step)
         {
             int nn = n * n;
-            var biomes = new byte[nn];
-            var heights = new ushort[nn];
-            var forest = s.HasMask || s.HasFactor ? new byte[nn] : null;
+            // Pooled: one sampler at a time (Gate), and the game's Mono
+            // collector should not see half a megabyte of garbage per tile.
+            var biomes = PoolBiomes;
+            var heights = PoolHeights;
+            var forest = s.HasMask || s.HasFactor ? PoolForest : null;
             var duty = new DutyCycle(Duty);
             var row = new Stopwatch();
             duty.Start();

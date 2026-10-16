@@ -68,8 +68,9 @@ namespace Skald.Bridge
         public static byte[] Encode(int n, float x0, float z0, float step, ushort flags, byte[] biomes, ushort[] heights, byte[] forest)
         {
             int nn = n * n;
-            if (biomes.Length != nn || heights.Length != nn || ((flags & Forest) != 0 && (forest == null || forest.Length != nn)))
-                throw new ArgumentException("grid sizes do not match n");
+            // The grids may be longer than n*n (pooled buffers); only the first n*n count.
+            if (biomes.Length < nn || heights.Length < nn || ((flags & Forest) != 0 && (forest == null || forest.Length < nn)))
+                throw new ArgumentException("grids smaller than n*n");
             var buf = new byte[Size(n, flags)];
             using (var w = new BinaryWriter(new MemoryStream(buf)))
             {
@@ -80,10 +81,10 @@ namespace Skald.Bridge
                 w.Write(x0);
                 w.Write(z0);
                 w.Write(step);
-                w.Write(biomes);
+                w.Write(biomes, 0, nn);
                 // BinaryWriter writes little-endian on every platform.
-                foreach (var h in heights) w.Write(h);
-                if ((flags & Forest) != 0) w.Write(forest);
+                for (int i = 0; i < nn; i++) w.Write(heights[i]);
+                if ((flags & Forest) != 0) w.Write(forest, 0, nn);
             }
             return buf;
         }
