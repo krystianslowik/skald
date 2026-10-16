@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Changed
+
+- The dashboard no longer downloads the whole server state again after every join, leave, death, save or backup. The panel now sends the updated rankings and players-online chart to every open page over the live connection, once for everyone, and the Saga grows from the events themselves. A busy evening costs a phone a few small messages instead of dozens of full reloads; the once-a-minute refresh stays as a safety net, and a page that loses its live connection catches up once when it comes back.
+
 ## [2026.10.4] - 2026-10-16
 
 ### Changed
