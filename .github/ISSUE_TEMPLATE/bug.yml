@@ -1,0 +1,37 @@
+name: Bug
+description: Something does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Public tracker. Leave out player names, gamertags, platform ids, join codes, world names, seeds and server addresses. Security problems go to a private advisory instead (see SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What is wrong
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Steps, a command, or a failing test. Redacted log lines welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+    validations:
+      required: true
+  - type: textarea
+    id: cause
+    attributes:
+      label: Root cause and suggested fix
+      description: file:line if known, and an effort estimate (S/M/L).
+  - type: input
+    id: version
+    attributes:
+      label: Skald version and game build
+      placeholder: "0.11.0, l-1.0.20"

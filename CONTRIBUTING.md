@@ -3,6 +3,9 @@
 Thanks for helping. Skald is small on purpose; changes that keep it that way
 are the easiest to merge.
 
+How work is planned and shipped (the issue backlog, labels, roles and the
+definition of done) is in [AGENTS.md](AGENTS.md).
+
 ## Development setup
 
 You need Go 1.26+, Bun 1.3+ and Node 22+. The bridge and the terrain plugin also
