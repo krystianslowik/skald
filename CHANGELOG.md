@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The Saga keeps the last 200 real events (joins, deaths, raids, admin commands) however often the world saves. Routine saves and backups are kept only for the span those events cover, and at most a week, so they can no longer push everything else out after a few days.
+- Routine saves and the game's backups fold into one quiet line per stretch, such as "World saved 47×, 12 backups · last 16:09"; tap it to see each one. A save that took 2 seconds or more stays on its own line, in gold.
+- A visit reads as one line, "Freya 18:35–19:39 · 1 h 4 min", or "Freya playing since 18:35" while she is still in. Deaths and raids during it keep their own lines.
+- A new game version after an older one reads "Game updated to 1.0.20".
+
+### Fixed
+
+- A stack of chests on the map now has the "Open on full map" link like every other mark.
+
 ## [0.10.1] - 2026-10-11
 
 ### Changed

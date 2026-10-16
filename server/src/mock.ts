@@ -1061,6 +1061,15 @@ export class MockAgent implements AgentSource {
     }
     raw.push({ at: at(2, 12, 0), type: "server_state", data: { status: "stopped" } });
     raw.push({ at: at(2, 12, 0) + 40_000, type: "server_state", data: { status: "running" } });
+    // The update that restart brought, after the version an earlier boot reported.
+    raw.push({ at: at(6, 9, 0), type: "version", data: { version: "l-1.0.16", networkVersion: 39 } });
+    raw.push({ at: at(2, 12, 0) + 50_000, type: "version", data: { version: "l-1.0.17", networkVersion: 40 } });
+    // The game's own routine: a save every 30 min, a backup every 2 h, now and then a slow save.
+    let n = 0;
+    for (let t = now - 8 * 24 * HOUR - (now % (30 * MIN)); t < now; t += 30 * MIN, n++) {
+      raw.push({ at: t, type: "world_saved", data: { ms: n % 97 === 50 ? Math.round(2100 + rand() * 900) : Math.round(40 + rand() * 160) } });
+      if (n % 4 === 0) raw.push({ at: t + 2000, type: "world_backup", data: { ms: Math.round(20 + rand() * 40) } });
+    }
     raw.sort((a, b) => a.at - b.at);
     const online = new Set<string>();
     for (const r of raw) {
