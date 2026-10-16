@@ -13,6 +13,7 @@ above them.
 
 - Docs on what the game image's backups hold: every world in `worlds_local`, but not the game's own auto-backups, and which `BACKUPS_*` settings Skald needs (docs/configuration.md). The docs also name the two image internals the start hook depends on, to check before moving to a newer game image.
 - **Operators:** the web server now logs its failures, one JSON line each (like the agent's log), with the route, the status and the cause: an unreachable or failing agent, a lost agent connection and its recovery, an unreachable Prometheus, a failed Discord test, wrong passwords and lockouts with the client address, and a password check that errors. A repeated failure is printed at most once a minute with a count of the ones skipped, so a dead agent does not flood the log. Passwords, cookies, tokens, the webhook URL, request bodies and player ids never go in.
+- An Embers switch in the phone's Settings tab, next to the campfire crackle, turns off the sparks rising behind the page to save battery. Your choice is remembered in this browser. Until you choose, the embers are off when your system asks for reduced motion.
 
 ### Changed
 
@@ -24,6 +25,7 @@ above them.
 - Live player positions are only fetched from the game while someone has the map or a player list open, and only sent to the browsers showing them. Phones on the other tabs no longer receive a position update every 2 seconds, and the game is not asked for positions when nobody looks. Older agents and older open dashboards keep working as before until they are updated.
 - The dashboard no longer downloads the whole server state again after every join, leave, death, save or backup. The panel now sends the updated rankings and players-online chart to every open page over the live connection, once for everyone, and the Saga grows from the events themselves. A busy evening costs a phone a few small messages instead of dozens of full reloads; the once-a-minute refresh stays as a safety net, and a page that loses its live connection catches up once when it comes back.
 - The dashboard loads only the language you read it in, about 25-30 KB less to download before the first screen on a phone. The page already names the server's default language (`SKALD_LOCALE`) or your own choice, so that language arrives together with the app and the first screen does not wait for it. Switching language in the header fetches the other one then; the old language stays on screen until it is in. Item search still finds names in both languages: the other language is fetched the first time you search.
+- The dashboard costs less while it sits open: "5 min ago" labels and running times now update on their own every 15 seconds instead of redrawing the whole page.
 
 ### Fixed
 

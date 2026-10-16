@@ -2,10 +2,11 @@ import { memo } from "react";
 import type { Backup } from "../types";
 import { backupHref } from "../lib/api";
 import { useI18n } from "../i18n";
+import { RelativeTime } from "./RelativeTime";
 
 /** Treasury: world backups, newest first, each downloadable. */
-export const Treasury = memo(function Treasury({ backups, now }: { backups: Backup[]; now: number }) {
-  const { t, ago, bytes, fullDate, date, clock } = useI18n();
+export const Treasury = memo(function Treasury({ backups }: { backups: Backup[] }) {
+  const { t, bytes, fullDate, date, clock } = useI18n();
   if (backups.length === 0) return <p className="text-sm text-ash">{t("treasury.empty")}</p>;
   return (
     <ul className="scroll-quiet max-h-75 space-y-1 overflow-y-auto pr-1">
@@ -32,7 +33,7 @@ export const Treasury = memo(function Treasury({ backups, now }: { backups: Back
           </div>
           <div className="text-right text-xs tabular-nums">
             <div className="font-bold text-bone">{bytes(b.sizeBytes)}</div>
-            <div className="text-ash">{ago(b.modifiedAt, now)}</div>
+            <div className="text-ash"><RelativeTime iso={b.modifiedAt} /></div>
           </div>
           <a
             href={backupHref(b.name)}

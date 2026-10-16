@@ -7,6 +7,7 @@ import { markerKind, markerTitle } from "./MapDetails";
 import { ItemIcon } from "../storage/ItemIcon";
 import { StackLevel } from "../storage/StackLevel";
 import { MapIcon } from "./MapIcon";
+import { RelativeTime } from "../RelativeTime";
 
 /** The mark each layer row shows; the fog and grid get small drawn swatches instead. */
 const LAYER_ICON: Partial<Record<LayerId, IconId>> = {
@@ -108,7 +109,6 @@ export function MapLayers({
   relief = "none",
   onToggle,
   onPick,
-  now,
 }: {
   map: ApiMap;
   markers: readonly Marker[];
@@ -119,9 +119,8 @@ export function MapLayers({
   onToggle: (l: LayerId) => void;
   /** `level`: the chest of a stack that holds what was searched for. */
   onPick: (m: Marker, level?: number) => void;
-  now: number;
 }) {
-  const { t, tn, lookup, number, ago } = useI18n();
+  const { t, tn, lookup, number } = useI18n();
   const [query, setQuery] = useState("");
   const searchId = useId();
   // Item names in every language match; the other dictionaries load once a query is typed.
@@ -241,7 +240,7 @@ export function MapLayers({
         {relief !== "none" && layers.relief && !map.spoilers && <p>{t("map.relief.spoilers")}</p>}
         <p>{map.spoilers ? t("map.spoilersOn") : tn("map.spoilersOff", map.hiddenLocations)}</p>
         {!map.meta.showNames && <p>{t("map.namesHidden")}</p>}
-        <p>{t("map.builtFrom", { gen: map.meta.generation, ago: ago(map.meta.savedAt, now) })}</p>
+        <p><RelativeTime iso={map.meta.savedAt} format={(ago) => t("map.builtFrom", { gen: map.meta.generation, ago })} /></p>
       </div>
     </div>
   );

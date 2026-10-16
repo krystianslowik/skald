@@ -64,7 +64,6 @@ describe("MapLayers", () => {
         counts={layerCounts(markers, snap)}
         onToggle={(l) => toggles.push(l)}
         onPick={(m) => picks.push(m)}
-        now={Date.parse("2026-10-10T20:00:00Z")}
       />,
     );
     return { toggles, picks };
@@ -127,7 +126,7 @@ describe("MapView", () => {
   it("loads the map and closes on Escape", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(snap)));
     const onClose = vi.fn();
-    inLocale(<MapView seedName="ZbzIWkK5KK" saveKey="a" now={Date.now()} onClose={onClose} />);
+    inLocale(<MapView seedName="ZbzIWkK5KK" saveKey="a" onClose={onClose} />);
     expect(screen.getByRole("dialog", { name: "World map" })).toBeInTheDocument();
     expect(await screen.findAllByRole("button", { name: "Portals: shown" })).not.toHaveLength(0);
     expect(screen.getByRole("img", { name: /World map. Drag to move/ })).toBeInTheDocument();
@@ -143,7 +142,7 @@ describe("MapView", () => {
 
   it("names the layers sheet's close button after the sheet, not the map", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(snap)));
-    inLocale(<MapView seedName="ZbzIWkK5KK" saveKey="a" now={Date.now()} onClose={vi.fn()} />, "pl");
+    inLocale(<MapView seedName="ZbzIWkK5KK" saveKey="a" onClose={vi.fn()} />, "pl");
     await screen.findAllByRole("button", { name: /Portale/ });
     fireEvent.click(screen.getByRole("button", { name: "Warstwy" }));
     const sheet = await screen.findByRole("dialog", { name: "Warstwy" });
@@ -153,7 +152,7 @@ describe("MapView", () => {
 
   it("explains a missing map", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })));
-    inLocale(<MapView seedName="" saveKey="b" now={Date.now()} onClose={() => {}} />);
+    inLocale(<MapView seedName="" saveKey="b" onClose={() => {}} />);
     expect(await screen.findByText(/No world map/)).toBeInTheDocument();
   });
 });

@@ -36,18 +36,8 @@ const SettingsSheet = lazyChunk(() => import("./SettingsSheet"));
 const MapView = lazyChunk(() => import("./map/MapView"));
 const MapPreview = lazyChunk(() => import("./map/MapPreview"));
 
-function useNow(ms = 15_000): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), ms);
-    return () => clearInterval(t);
-  }, [ms]);
-  return now;
-}
-
 export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live: Valheim; onLogout: () => void; onUnauthorized?: () => void }) {
   const { t, tn, dayLabel, clock, intl } = useI18n();
-  const now = useNow();
   const { state, online, logs, lastAction } = live;
   const [profile, setProfile] = useState<string | null>(null);
   const opener = useRef<HTMLElement | null>(null);
@@ -120,7 +110,8 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
     }),
     [online7d, t, intl],
   );
-  const onlineTime = useCallback((v: number) => `${dayLabel(new Date(v).toISOString(), now)}, ${clock(v)}`, [dayLabel, clock, now]);
+  // Read when the chart asks (hover), so the dashboard needs no clock of its own.
+  const onlineTime = useCallback((v: number) => `${dayLabel(new Date(v).toISOString())}, ${clock(v)}`, [dayLabel, clock]);
 
   const serverName = state?.server.name;
   useEffect(() => {
@@ -143,7 +134,6 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
     <Header
       server={state.server}
       online={online}
-      now={now}
       onLogout={onLogout}
       settings={state.settings}
       onSettings={openSettings}
@@ -161,7 +151,6 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
         code={state.server.joinCode}
         codeAt={state.server.joinCodeAt}
         status={state.server.status}
-        now={now}
         serverName={state.server.name}
         hasPassword={!!(state.settings?.enabled && state.settings.passwordSet)}
         stamp={state.settings}
@@ -171,12 +160,12 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
   );
   const hearth = (
     <Plank title={t("plank.hearth")} id="hearth" aside={tn("plank.hearth.aside", players.length)} className="lg:col-span-5">
-      <Hearth players={players} now={now} />
+      <Hearth players={players} />
     </Plank>
   );
   const world = (
     <Plank title={t("plank.world")} id="world" aside={state.world.meta?.name || state.server.world || undefined} className="lg:col-span-7">
-      <World meta={state.world.meta} now={now} />
+      <World meta={state.world.meta} />
     </Plank>
   );
   const progress = (
@@ -200,12 +189,12 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
   );
   const saga = (
     <Plank title={t("plank.saga")} id="saga" aside={t("plank.saga.aside")} className="lg:col-span-7">
-      <Saga events={state.history.events} now={now} online={players} />
+      <Saga events={state.history.events} online={players} />
     </Plank>
   );
   const ranking = (
     <Plank title={t("plank.ranking")} id="ranking">
-      <Ranking players={state.history.players} now={now} />
+      <Ranking players={state.history.players} />
     </Plank>
   );
   const onlineBoard = (
@@ -215,12 +204,12 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
   );
   const forge = (
     <Plank title={t("plank.forge")} id="forge" aside={state.metricsConfigured === false ? undefined : t("plank.forge.aside")}>
-      <Forge metrics={state.metrics} metricsConfigured={state.metricsConfigured} server={state.server} world={state.world} now={now} />
+      <Forge metrics={state.metrics} metricsConfigured={state.metricsConfigured} server={state.server} world={state.world} />
     </Plank>
   );
   const treasury = (
     <Plank title={t("plank.treasury")} id="treasury" aside={tn("plank.treasury.aside", state.backups.length)} className="lg:col-span-7">
-      <Treasury backups={state.backups} now={now} />
+      <Treasury backups={state.backups} />
     </Plank>
   );
   const runes = (
@@ -315,14 +304,14 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
         {profile && (
           <ChunkBoundary overlay onClose={closeProfile}>
             <Suspense fallback={null}>
-              <ProfileSheet key={profile} name={profile} now={now} onClose={closeProfile} />
+              <ProfileSheet key={profile} name={profile} onClose={closeProfile} />
             </Suspense>
           </ChunkBoundary>
         )}
         {mapOpen && (
           <ChunkBoundary overlay onClose={closeMap}>
             <Suspense fallback={null}>
-              <MapView seedName={state.world.meta?.seedName ?? ""} saveKey={saveKey} now={now} onClose={closeMap} asTab={phone} focus={mapFocus} onFocusClear={clearFocus} />
+              <MapView seedName={state.world.meta?.seedName ?? ""} saveKey={saveKey} onClose={closeMap} asTab={phone} focus={mapFocus} onFocusClear={clearFocus} />
             </Suspense>
           </ChunkBoundary>
         )}

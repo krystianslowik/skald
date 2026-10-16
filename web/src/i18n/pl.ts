@@ -46,6 +46,9 @@ export const pl: Dict = {
   "sound.label": "Trzask ogniska",
   "sound.on": "Trzask ogniska: włączony",
   "sound.off": "Trzask ogniska: wyłączony",
+  "embers.label": "Iskry",
+  "embers.on": "Iskry: włączone",
+  "embers.off": "Iskry: wyłączone",
   "offline.title": "Ogień przygasł.",
   "offline.body": "Nie mam łączności z serwerem. Pokazuję ostatni znany stan i próbuję połączyć się ponownie. Akcje są wstrzymane.",
 

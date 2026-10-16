@@ -2,6 +2,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { memo, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { COARSE, useMedia } from "../lib/useMedia";
+import { RelativeTime } from "./RelativeTime";
 
 interface Spark {
   id: number;
@@ -40,8 +41,8 @@ function Digit({ ch, index, reduced }: { ch: string; index: number; reduced: boo
   );
 }
 
-export const JoinCode = memo(function JoinCode({ code, codeAt, status, now }: { code: string; codeAt: string | null; status: string; now: number }) {
-  const { t, ago } = useI18n();
+export const JoinCode = memo(function JoinCode({ code, codeAt, status }: { code: string; codeAt: string | null; status: string }) {
+  const { t } = useI18n();
   const reduced = useReducedMotion() ?? false;
   // A finger taps; a mouse clicks.
   const coarse = useMedia(COARSE);
@@ -125,7 +126,7 @@ export const JoinCode = memo(function JoinCode({ code, codeAt, status, now }: { 
             </motion.span>
           ) : (
             <motion.span key="h" className="text-ash" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              {ready ? t(coarse ? "joinCode.hintTouch" : "joinCode.hint", { ago: ago(codeAt, now) }) : status === "running" ? t("joinCode.waitPlayfab") : t("joinCode.starting")}
+              {ready ? <RelativeTime iso={codeAt} format={(ago) => t(coarse ? "joinCode.hintTouch" : "joinCode.hint", { ago })} /> : status === "running" ? t("joinCode.waitPlayfab") : t("joinCode.starting")}
             </motion.span>
           )}
         </AnimatePresence>

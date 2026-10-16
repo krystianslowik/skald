@@ -4,6 +4,7 @@ import { SoundToggle } from "./Header";
 import { Plank } from "./Plank";
 import { preloadSettingsSheet, SettingsGlyph } from "./SettingsGlyph";
 import { SkaldVersion } from "./SkaldVersion";
+import { useEmbers } from "../lib/embers";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -14,9 +15,29 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+/** The rising embers behind the page: pretty, but they cost battery. */
+function EmbersSwitch() {
+  const { t } = useI18n();
+  const { on, toggle } = useEmbers();
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={t("embers.label")}
+      title={on ? t("embers.on") : t("embers.off")}
+      onClick={toggle}
+      className={`press relative h-8 w-14 shrink-0 rounded-full border transition-colors coarse:h-11 coarse:w-18 ${on ? "border-select-hi/70 bg-select/50" : "border-iron/60 bg-black/40"}`}
+    >
+      <span className={`absolute top-1/2 h-6 w-6 -translate-y-1/2 rounded-full bg-bone shadow-sm transition-[left] coarse:h-8 coarse:w-8 ${on ? "left-[calc(100%-1.75rem)] coarse:left-[calc(100%-2.25rem)]" : "left-1"}`} />
+    </button>
+  );
+}
+
 /**
  * The phone's Settings tab opens with what the desktop header carries: the
- * server settings, language, the campfire sound and logging out.
+ * server settings, language, the campfire sound and logging out, plus the
+ * embers switch.
  */
 export const Preferences = memo(function Preferences({
   onServerSettings,
@@ -52,6 +73,9 @@ export const Preferences = memo(function Preferences({
       </Row>
       <Row label={t("sound.label")}>
         <SoundToggle />
+      </Row>
+      <Row label={t("embers.label")}>
+        <EmbersSwitch />
       </Row>
       <button type="button" onClick={onLogout} className="plaque press mt-3 min-h-12 w-full font-bold">
         {t("header.logout")}

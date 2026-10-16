@@ -32,7 +32,6 @@ export const JoinPanel = memo(function JoinPanel({
   code,
   codeAt,
   status,
-  now,
   serverName,
   hasPassword,
   stamp,
@@ -41,7 +40,6 @@ export const JoinPanel = memo(function JoinPanel({
   code: string;
   codeAt: string | null;
   status: string;
-  now: number;
   serverName: string;
   /** The agent manages settings and a password is set. */
   hasPassword: boolean;
@@ -136,7 +134,7 @@ export const JoinPanel = memo(function JoinPanel({
   return (
     <>
       <div ref={codeBox}>
-        <JoinCode code={code} codeAt={codeAt} status={status} now={now} />
+        <JoinCode code={code} codeAt={codeAt} status={status} />
       </div>
       {hasPassword && <ServerPassword pw={pw} />}
       {ready && (

@@ -7,6 +7,7 @@ import { gameClock } from "../lib/admin";
 import { itemLabel } from "../lib/storage";
 import { useI18n, type I18n, type TextKey } from "../i18n";
 import { PlayerName } from "./PlayerName";
+import { DayLabel } from "./RelativeTime";
 
 const SERVER_STATE: Record<string, TextKey> = {
   starting: "saga.server.starting",
@@ -319,9 +320,9 @@ function FeedLine({ d, time, quiet = false }: { d: Line; time?: ReactNode; quiet
 }
 
 /** The event scroll: newest first, grouped by day; routine saves fold away, a visit is one line. */
-export const Saga = memo(function Saga({ events, now, online }: { events: AgentEvent[]; now: number; online?: readonly { name: string }[] }) {
+export const Saga = memo(function Saga({ events, online }: { events: AgentEvent[]; online?: readonly { name: string }[] }) {
   const i18n = useI18n();
-  const { t, dayLabel, clock, fullDate } = i18n;
+  const { t, clock, fullDate } = i18n;
   const reduced = useReducedMotion();
   const foldId = useId();
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
@@ -352,8 +353,9 @@ export const Saga = memo(function Saga({ events, now, online }: { events: AgentE
         <AnimatePresence initial={false}>
           {rows.map(({ row, d }) => {
             const e = row.e;
-            const day = dayLabel(e.ts, now);
-            const header = day !== lastDay ? day : null;
+            // Grouped by calendar day; only the label ("Today") follows the clock.
+            const day = new Date(e.ts).toDateString();
+            const header = day !== lastDay;
             lastDay = day;
             const expanded = row.kind === "fold" && open.has(row.key);
             const listId = `${foldId}-${row.key}`;
@@ -367,7 +369,9 @@ export const Saga = memo(function Saga({ events, now, online }: { events: AgentE
               >
                 {header && (
                   <div className="mb-1 mt-3 flex items-center gap-3 first:mt-0">
-                    <span className="label-caps shrink-0">{header}</span>
+                    <span className="label-caps shrink-0">
+                      <DayLabel iso={e.ts} />
+                    </span>
                     <span aria-hidden className="h-px flex-1 bg-linear-to-r from-iron/60 to-transparent" />
                   </div>
                 )}

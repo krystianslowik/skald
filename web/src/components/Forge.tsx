@@ -3,6 +3,7 @@ import type { ApiState, SeriesPoint } from "../types";
 import { useI18n } from "../i18n";
 import { processRows, type ProcessTone } from "../lib/processes";
 import { Chart } from "./Chart";
+import { RelativeTime } from "./RelativeTime";
 
 const DOCS_METRICS = "https://github.com/krystianslowik/skald#metrics-and-alerts";
 
@@ -120,15 +121,13 @@ export const Forge = memo(function Forge({
   metricsConfigured,
   server,
   world,
-  now,
 }: {
   metrics: ApiState["metrics"];
   metricsConfigured: ApiState["metricsConfigured"];
   server: ApiState["server"];
   world: ApiState["world"];
-  now: number;
 }) {
-  const { t, tn, lookup, number, ago, bytes, rate, clock, modifiers } = useI18n();
+  const { t, tn, lookup, number, bytes, rate, clock, modifiers } = useI18n();
   const empty = t("forge.promDown");
   // Stable chart inputs: the charts only redraw when their own series change.
   const charts = useMemo(
@@ -202,7 +201,7 @@ export const Forge = memo(function Forge({
           <div>
             <dt className="text-xs text-ash">{t("forge.lastSave")}</dt>
             <dd className="font-bold text-bone">
-              {ago(world.lastSaveAt ?? world.meta?.savedAt, now)}
+              <RelativeTime iso={world.lastSaveAt ?? world.meta?.savedAt} />
               {world.lastSaveMs > 0 && <span className="text-ash">, {world.lastSaveMs} ms</span>}
             </dd>
           </div>
