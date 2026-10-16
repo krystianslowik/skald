@@ -48,6 +48,7 @@
 | `PROM_POD_REGEX` | `valheim-[a-z0-9]+-[a-z0-9]+` | Pod regex for the network series (anchored by PromQL) |
 | `DB_PATH` | `/data/skald.db` | SQLite file for the event history |
 | `BIND` | `0.0.0.0:8080` | Listen address |
+| `METRICS_BIND` | (empty = off) | Prometheus listener, e.g. `0.0.0.0:9465`, serving `GET /metrics` with `skald_build_info`. No session, like the agent's `METRICS_ADDR`: restrict it with a NetworkPolicy or firewall. The panel port never serves `/metrics` |
 | `WEB_ROOT` | `../web/dist` | Built SPA, relative to the working directory |
 | `DISCORD_WEBHOOK_URL` | (empty) | A Discord channel webhook for notifications. Empty turns them off at no cost. A secret: it is never logged or sent to the browser. See [Discord notifications](#discord-notifications) |
 | `DISCORD_NOTIFY` | all | Which notifications to send, comma-separated: `join`, `leave`, `death`, `raid`, `server`, `join_code`, `version`, `failure`. An unknown name stops skald-web at startup |

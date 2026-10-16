@@ -34,6 +34,11 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+            # skald_build_info for Prometheus (METRICS_BIND); no session, so
+            # the NetworkPolicy keeps it to the monitoring namespace.
+            - name: metrics
+              containerPort: 9465
+              protocol: TCP
           env:
             - name: AGENT_URL
               value: http://skald-agent.valheim.svc.cluster.local:8080
@@ -79,6 +84,9 @@ spec:
               value: "true"
             - name: DB_PATH
               value: /data/skald.db
+            # Empty turns the metrics listener off.
+            - name: METRICS_BIND
+              value: 0.0.0.0:9465
           resources:
             requests:
               cpu: 20m
@@ -123,4 +131,8 @@ spec:
     - name: http
       port: 8080
       targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9465
+      targetPort: metrics
       protocol: TCP

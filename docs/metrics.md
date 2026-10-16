@@ -32,17 +32,19 @@ The agent serves the Prometheus text format on `:9464/metrics`:
 | `valheim_terrain_bridge_sample_seconds_total` | counter | | Time the bridge plugin spent sampling terrain tiles (its own measurement, without rests) |
 | `valheim_terrain_cache_bytes` | gauge | | Bytes of terrain tiles in the agent's cache |
 
-skald-web answers `GET /metrics` on its own port (`8080`) with one metric,
-`skald_build_info{component="web",version="..."} 1`, so Prometheus can tell
-when the agent and the panel run different releases:
+skald-web has one metric, `skald_build_info{component="web",version="..."} 1`,
+on a separate listener that is off unless `METRICS_BIND` is set (the
+Kubernetes example uses `0.0.0.0:9465`). Like the agent's, it needs no
+session, so keep that port to Prometheus; the panel port (`8080`) has no
+`/metrics`. With both scraped, Prometheus can tell when the agent and the
+panel run different releases:
 
 ```promql
 count(count by (version) (skald_build_info)) > 1
 ```
 
-That endpoint needs no session, like `/healthz`. It only tells which release
-runs; if that should not be public, keep `/metrics` away from your ingress or
-tunnel.
+[`deploy/kubernetes/servicemonitor.yaml`](../deploy/kubernetes/servicemonitor.yaml)
+scrapes both.
 
 [`deploy/monitoring`](../deploy/monitoring) has:
 
