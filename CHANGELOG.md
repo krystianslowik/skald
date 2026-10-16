@@ -9,6 +9,12 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- While the agent is down or not answering, the map opens at once with the last copy it had instead of waiting up to 30 seconds on every open, and the server asks the agent again in the background at most every 15 seconds.
+- An address under `/api/` that does not exist answers with a JSON 404 instead of the dashboard page.
+- A malformed session cookie on the live connection is turned away as signed out (401) instead of failing with a server error (500).
+
 ## [2026.10.4] - 2026-10-16
 
 ### Changed

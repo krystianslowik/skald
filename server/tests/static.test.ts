@@ -37,6 +37,18 @@ describe("mountStatic", () => {
     expect((await app.request("/api/x")).headers.get("cache-control")).toBeNull();
   });
 
+  it("answers an unknown /api path with a JSON 404, not the app shell", async () => {
+    for (const [method, path] of [["GET", "/api/nope"], ["GET", "/api/x/y"], ["POST", "/api/nope"], ["GET", "/api/"]] as const) {
+      const res = await app.request(path, { method });
+      expect(res.status).toBe(404);
+      expect(res.headers.get("content-type")).toContain("application/json");
+      expect(await res.json()).toEqual({ error: "not found" });
+    }
+    expect((await app.request("/api/x")).status).toBe(200);
+    // Only the /api prefix: a page path that starts with "api" is still the app.
+    expect((await app.request("/apiary")).headers.get("content-type")).toContain("text/html");
+  });
+
   it("caches hashed assets for good, but not the shell served for a missing one", async () => {
     const js = await app.request("/assets/index-AbC123.js");
     expect(js.headers.get("content-type")).toContain("javascript");

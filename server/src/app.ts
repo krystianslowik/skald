@@ -100,6 +100,9 @@ export function parsePiecesBox(query: (k: string) => string | undefined): Pieces
   return [x0, z0, x1, z1];
 }
 
+/** The admin routes a signed-in non-admin may call. */
+const ADMIN_OPEN = new Set(["GET /api/admin/status", "POST /api/admin/unlock", "POST /api/admin/lock"]);
+
 export function createApp(deps: AppDeps): Hono {
   const app = new Hono();
   const limiter = deps.limiter ?? new RateLimiter();
@@ -513,6 +516,17 @@ export function createApp(deps: AppDeps): Hono {
     }
   };
 
+  // Everything under /api/admin is for admins only, reads included, except
+  // what a locked panel needs to show the lock and unlock it. Listed here, so
+  // the order the routes are registered in does not decide who may call them.
+  app.use("/api/admin/*", async (c, next) => {
+    const method = c.req.method === "HEAD" ? "GET" : c.req.method;
+    if (ADMIN_OPEN.has(`${method} ${c.req.path}`)) return next();
+    const denied = needAdmin(c);
+    if (denied) return denied;
+    await next();
+  });
+
   app.get("/api/admin/status", async (c) => {
     c.header("Cache-Control", "no-store");
     const body: AdminStatus = { bridge: await bridgeStatus(), required: adminRequired, unlocked: isAdmin(c), idleMs: ADMIN_IDLE_MS, notifyConfigured: Boolean(deps.notifyTest) };
@@ -552,13 +566,6 @@ export function createApp(deps: AppDeps): Hono {
   app.post("/api/admin/lock", (c) => {
     deleteCookie(c, ADMIN_COOKIE, { path: "/", secure: deps.secureCookie });
     return c.json({ ok: true });
-  });
-
-  // Everything else under /api/admin is for admins only, reads included.
-  app.use("/api/admin/*", async (c, next) => {
-    const denied = needAdmin(c);
-    if (denied) return denied;
-    await next();
   });
 
   app.get("/api/admin/players", (c) => passBridge(c, { op: "players" }));

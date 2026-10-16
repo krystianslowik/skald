@@ -6,9 +6,13 @@ import { serveStatic } from "hono/bun";
  * manifest and `sw.js` revalidate on every load so a deploy (and a new service
  * worker) is picked up. Vite's `/assets/*` carry a content hash in their names,
  * so they are cached for good: without a service worker (plain http) nothing
- * else keeps a phone from downloading the whole app on every visit.
+ * else keeps a phone from downloading the whole app on every visit. Mount it
+ * last, after the API routes.
  */
 export function mountStatic(app: Hono, webRoot: string): void {
+  // Registered after every API route: an /api path none of them took is a
+  // JSON 404, not the app shell with a 200.
+  app.all("/api/*", (c) => c.json({ error: "not found" }, 404));
   app.use("/*", async (c, next) => {
     await next();
     const path = c.req.path;

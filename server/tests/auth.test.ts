@@ -18,6 +18,10 @@ describe("session", () => {
   it("reads a cookie from a header", () => {
     expect(readCookie("a=1; skald_session=abc.def; b=2", "skald_session")).toBe("abc.def");
     expect(readCookie(null, "skald_session")).toBeUndefined();
+    // A broken %-escape is no cookie at all, not an exception.
+    expect(readCookie("skald_session=%E0%A4%A; b=2", "skald_session")).toBeUndefined();
+    expect(readCookie("a=%zz; skald_session=ok", "skald_session")).toBe("ok");
+    expect(readCookie("skald_session=%zz; skald_session=ok", "skald_session")).toBe("ok");
   });
 });
 

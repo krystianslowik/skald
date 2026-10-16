@@ -1,6 +1,6 @@
 import { HttpAgent, type AgentSource } from "./agent";
 import { createApp } from "./app";
-import { readCookie, SESSION_COOKIE, verifySession } from "./auth";
+import { upgradeLive } from "./auth";
 import { loadConfig } from "./config";
 import { HistoryStore } from "./db";
 import { hashPassword } from "./hash";
@@ -94,14 +94,7 @@ const server = Bun.serve<WsData>({
   hostname: host || "0.0.0.0",
   port: Number.parseInt(portStr ?? "8080", 10),
   fetch(req, srv) {
-    if (new URL(req.url).pathname === "/live") {
-      // Authenticate before the upgrade, never after.
-      if (!verifySession(cfg.sessionSecret, readCookie(req.headers.get("cookie"), SESSION_COOKIE))) {
-        return new Response("unauthorized", { status: 401 });
-      }
-      if (srv.upgrade(req, { data: {} })) return undefined;
-      return new Response("ws upgrade failed", { status: 400 });
-    }
+    if (new URL(req.url).pathname === "/live") return upgradeLive(req, cfg.sessionSecret, () => srv.upgrade(req, { data: {} }));
     return app.fetch(req, { server: srv });
   },
   websocket: {

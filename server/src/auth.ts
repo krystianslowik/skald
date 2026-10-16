@@ -70,9 +70,26 @@ export function readCookie(header: string | null, name: string): string | undefi
   for (const part of header.split(";")) {
     const i = part.indexOf("=");
     if (i < 0) continue;
-    if (part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
+    if (part.slice(0, i).trim() !== name) continue;
+    try {
+      return decodeURIComponent(part.slice(i + 1).trim());
+    } catch {
+      // A broken %-escape is no cookie, not a 500; a later one may still be good.
+    }
   }
   return undefined;
+}
+
+/**
+ * The `/live` WebSocket upgrade: authenticated before the upgrade, never
+ * after. Returns the response to send, or undefined once `upgrade` took over.
+ */
+export function upgradeLive(req: Request, secret: string, upgrade: () => boolean, now = Date.now()): Response | undefined {
+  if (!verifySession(secret, readCookie(req.headers.get("cookie"), SESSION_COOKIE), now)) {
+    return new Response("unauthorized", { status: 401 });
+  }
+  if (upgrade()) return undefined;
+  return new Response("ws upgrade failed", { status: 400 });
 }
 
 interface Bucket {

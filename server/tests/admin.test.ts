@@ -207,6 +207,24 @@ describe("admin with an admin password", () => {
     expect(locked.headers.get("set-cookie")).toContain("skald_admin=;");
   });
 
+  it("leaves only status, unlock and lock open to a signed-in non-admin", async () => {
+    const { app } = await setup({ admin: true });
+    const cookie = await signIn(app);
+    const get = (path: string) => app.request(path, { headers: { Cookie: cookie } });
+    expect((await get("/api/admin/status")).status).toBe(200);
+    expect((await post(app, "/api/admin/unlock", cookie, { password: "nope" })).status).toBe(401);
+    expect((await post(app, "/api/admin/lock", cookie)).status).toBe(200);
+    for (const path of ["/api/admin/players", "/api/admin/catalog", "/api/admin/access", "/api/admin/restore", "/api/admin/read/time", "/api/admin/status/", "/api/admin/statusx"]) {
+      expect([path, (await get(path)).status]).toEqual([path, 403]);
+    }
+    for (const path of ["/api/admin/save", "/api/admin/status", "/api/admin/restore", "/api/admin/access/admins/add"]) {
+      expect([path, (await post(app, path, cookie, {})).status]).toEqual([path, 403]);
+    }
+    // The open three are open for their own method only.
+    expect((await get("/api/admin/unlock")).status).toBe(403);
+    expect((await get("/api/admin/lock")).status).toBe(403);
+  });
+
   it("rate-limits unlock attempts like logins", async () => {
     const { app } = await setup({ admin: true });
     const cookie = await signIn(app);
