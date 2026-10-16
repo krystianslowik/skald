@@ -332,6 +332,8 @@ export const MapCanvas = forwardRef<
   useEffect(() => {
     renderer.current?.setTiles(tiles);
     schedule();
+    // The tile worker and its bitmaps go with the map.
+    return () => renderer.current?.setTiles(null);
   }, [tiles, schedule]);
 
   // Floor plans and nature: fetched as the view settles close in. Chunks

@@ -495,7 +495,7 @@ function SaveMap({
         layers={layers}
         selected={selected}
         highlighted={highlighted}
-        relief={relief}
+        relief={tiles ? null : relief}
         tiles={tiles}
         storey={storey}
         onStoreys={onStoreys}
