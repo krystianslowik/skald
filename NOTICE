@@ -6,3 +6,7 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 Skald is an independent project. It is not affiliated with, endorsed by, or
 sponsored by Iron Gate Studio or Coffee Stain. Valheim is a trademark
 of its respective owners.
+
+The web dashboard bundles the fonts Averia Serif Libre (Copyright 2011 Dan
+Sayers) and Noto Sans Runic (Copyright 2022 The Noto Project Authors), both
+under the SIL Open Font License 1.1; the licence texts are in web/src/fonts/.

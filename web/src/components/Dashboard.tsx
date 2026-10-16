@@ -235,7 +235,7 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
     <AdminProvider state={state} online={online} onUnauthorized={onUnauthorized} onShowMap={showMap}>
     <ProfileProvider value={openProfile}>
       <div className="relative min-h-dvh">
-        <Atmosphere dim={!online} />
+        <Atmosphere dim={!online} paused={mapOpen} />
         {!online && <OfflineBanner />}
         {phone ? (
           <main className="relative z-10 mx-auto max-w-xl pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pb-[calc(var(--tabbar-h)+1.5rem)] pt-[max(1.25rem,env(safe-area-inset-top))]">

@@ -81,21 +81,39 @@ export function useValheim(onUnauthorized: () => void): Valheim {
     }
   }, []);
 
+  /**
+   * A hidden tab (a phone with the app in the background) does not refetch:
+   * the socket keeps the live parts current, and the first look back catches
+   * up on the rest with one request.
+   */
+  const missed = useRef(false);
+  const refreshIfShown = useCallback(() => {
+    if (document.hidden) missed.current = true;
+    else void refresh();
+  }, [refresh]);
+
   /** History (rankings, saga) is derived server-side; re-read it shortly after notable events. */
   const refreshSoon = useCallback(() => {
     if (refreshTimer.current) clearTimeout(refreshTimer.current);
-    refreshTimer.current = setTimeout(() => void refresh(), 1500);
-  }, [refresh]);
+    refreshTimer.current = setTimeout(refreshIfShown, 1500);
+  }, [refreshIfShown]);
 
   useEffect(() => {
     void refresh();
     getLogs(500).then((l) => logs.set(() => l)).catch(() => undefined);
-    const poll = setInterval(() => void refresh(), 60_000);
+    const poll = setInterval(refreshIfShown, 60_000);
+    const onVisible = () => {
+      if (document.hidden || !missed.current) return;
+      missed.current = false;
+      void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       clearInterval(poll);
+      document.removeEventListener("visibilitychange", onVisible);
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
     };
-  }, [refresh, logs]);
+  }, [refresh, refreshIfShown, logs]);
 
   useEffect(() => {
     let cancelled = false;

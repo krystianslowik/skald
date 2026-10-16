@@ -12,6 +12,9 @@ above them.
 ### Changed
 
 - The admin sheet says first when your session is view-only, with the Unlock button at the top, instead of at the bottom after all the controls.
+- The panel loads faster on phones: skald-web now sends pages, scripts and data gzipped (about a third of the bytes on first load), and the fonts come with the panel instead of from Google Fonts, so no third-party request is made and the viewer's address is not shared with Google. The page no longer shifts when the fonts arrive.
+- The rising embers draw at 30 frames a second and stop while the map is open, which roughly halves the panel's idle CPU use on a phone.
+- A panel left open in a background tab no longer refetches the dashboard and admin status; it catches up once when you look at it again.
 
 ### Fixed
 

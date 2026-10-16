@@ -432,3 +432,28 @@ describe("version", () => {
     expect(((await (await off.app.request("/api/admin/status", { headers: { Cookie: c2 } })).json()) as { update: unknown }).update).toBeNull();
   });
 });
+
+describe("compression", () => {
+  it("gzips large JSON for clients that accept it, and leaves ETag answers alone", async () => {
+    const big = JSON.stringify({ rows: Array.from({ length: 200 }, (_, i) => ({ name: "Ragnar", i })) });
+    const s = setup({
+      asset: async (path) =>
+        new Response(big, { headers: { "Content-Type": "application/json", ...(path === "terrain.json" ? {} : { ETag: '"b1"' }) } }),
+    });
+    const cookie = await sessionCookie(s.app);
+
+    const gz = await s.app.request("/api/terrain.json", { headers: { cookie, "Accept-Encoding": "gzip" } });
+    expect(gz.headers.get("content-encoding")).toBe("gzip");
+    expect(gz.headers.get("vary")).toContain("Accept-Encoding");
+    expect(new TextDecoder().decode(Bun.gunzipSync(new Uint8Array(await gz.arrayBuffer())))).toBe(big);
+
+    const plain = await s.app.request("/api/terrain.json", { headers: { cookie } });
+    expect(plain.headers.get("content-encoding")).toBeNull();
+    expect(await plain.text()).toBe(big);
+
+    const tagged = await s.app.request("/api/icons/map.json", { headers: { cookie, "Accept-Encoding": "gzip" } });
+    expect(tagged.headers.get("content-encoding")).toBeNull();
+    expect(tagged.headers.get("etag")).toBe('"b1"');
+    expect(await tagged.text()).toBe(big);
+  });
+});

@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import { getConnInfo } from "hono/bun";
+import { compress, COMPRESSIBLE_CONTENT_TYPE_REGEX } from "hono/compress";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { AgentAsset, AgentSource, PiecesBox, ToolsRequest } from "./agent";
 import { ADMIN_COOKIE, ADMIN_IDLE_MS, createAdminSession, createSession, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS, sessionHash, verifyAdminSession, verifySession } from "./auth";
@@ -105,6 +106,13 @@ export function createApp(deps: AppDeps): Hono {
   const clock = deps.clock ?? Date.now;
   const verify = deps.verifyPassword ?? ((p: string, h: string) => Bun.password.verify(p, h));
   const authed = (c: Context) => verifySession(deps.sessionSecret, getCookie(c, SESSION_COOKIE), clock());
+
+  // Gzip JSON and the built app (scripts, styles, HTML) for clients that take it.
+  // Answers with an ETag are left as they are: compress() would weaken the tag,
+  // and the map routes already send their own gzip.
+  app.use("*", (c, next) =>
+    compress({ contentTypeFilter: (type) => !c.res.headers.has("ETag") && COMPRESSIBLE_CONTENT_TYPE_REGEX.test(type) })(c, next),
+  );
 
   app.get("/healthz", (c) => c.text("ok"));
 
