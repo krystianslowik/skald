@@ -12,12 +12,17 @@ above them.
 ### Added
 
 - Docs on what the game image's backups hold: every world in `worlds_local`, but not the game's own auto-backups, and which `BACKUPS_*` settings Skald needs (docs/configuration.md). The docs also name the two image internals the start hook depends on, to check before moving to a newer game image.
+- **Operators:** the web server now logs its failures, one JSON line each (like the agent's log), with the route, the status and the cause: an unreachable or failing agent, a lost agent connection and its recovery, an unreachable Prometheus, a failed Discord test, wrong passwords and lockouts with the client address, and a password check that errors. A repeated failure is printed at most once a minute with a count of the ones skipped, so a dead agent does not flood the log. Passwords, cookies, tokens, the webhook URL, request bodies and player ids never go in.
 
 ### Changed
 
 - **Operators:** the Grafana dashboard ConfigMap is now generated from `grafana-dashboard.json` with `kubectl apply -k deploy/monitoring`; `deploy/monitoring/grafana-dashboard-configmap.yaml` is gone, and the alert rules are applied with `kubectl apply -f deploy/monitoring/prometheusrule.yaml` (applying the whole directory with `-f` no longer works). The ConfigMap keeps its name, namespace and label, so nothing changes in Grafana.
 - The skald-web image is smaller: it runs on plain Alpine instead of a second copy of Bun, and Bun is pinned to 1.4.3 for the image, CI and the docs.
 - **Operators:** the `skald-web` image no longer carries the development mock agent, so its binary is a little smaller. `MOCK_AGENT=1` on a release image now stops at startup with a clear message instead of starting a fake server; the mock stays available through `bun run dev` in a source checkout.
+
+### Fixed
+
+- A malformed `PANEL_PASSWORD_HASH` or `ADMIN_PASSWORD_HASH` (for example one whose `$` signs were expanded by the shell or Compose) used to start fine and then turn every login into "wrong password". The web server now refuses to start and says which variable is wrong, without printing its value.
 
 ## [2026.10.4] - 2026-10-16
 

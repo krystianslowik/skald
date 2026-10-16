@@ -54,6 +54,35 @@ export function validTimeZone(tz: string): string {
   return tz;
 }
 
+/** What Bun.password.verify takes: argon2id/argon2i/argon2d or bcrypt. */
+const HASH_FORMAT = /^\$(argon2(id|i|d)|2[abxy]?)\$/i;
+
+/**
+ * Throws when a set password hash can never match, so a hash mangled by `$`
+ * expansion fails at startup instead of turning every login into "wrong
+ * password". The error names the variable, never the value.
+ */
+export async function checkPasswordHash(
+  name: string,
+  hash: string,
+  verify: (password: string, hash: string) => Promise<boolean> = (p, h) => Bun.password.verify(p, h),
+): Promise<void> {
+  if (!hash) return;
+  let ok = HASH_FORMAT.test(hash);
+  if (ok) {
+    try {
+      await verify("skald-startup-check", hash);
+    } catch {
+      ok = false;
+    }
+  }
+  if (!ok) {
+    throw new Error(
+      `${name} is not a valid argon2 or bcrypt hash. Make one with "skald-web hash-password" and check that its $ signs survive your .env file or shell (in a Compose .env, keep it in single quotes).`,
+    );
+  }
+}
+
 export function loadConfig(env: Env = process.env): Config {
   const mock = env.MOCK_AGENT === "1";
   const opt = (k: string, def: string): string => env[k] || def;
