@@ -55,8 +55,8 @@ public class TerrainTileTests
 
     [Theory]
     [InlineData(256, 0f, 0f, 1f, true)]
-    [InlineData(258, -100f, 100f, 0.25f, true)]
-    [InlineData(259, 0f, 0f, 1f, false)]
+    [InlineData(260, -100f, 100f, 0.25f, true)]
+    [InlineData(261, 0f, 0f, 1f, false)]
     [InlineData(0, 0f, 0f, 1f, false)]
     [InlineData(256, 0f, 0f, 0.1f, false)]
     [InlineData(256, 0f, 0f, 200f, false)]

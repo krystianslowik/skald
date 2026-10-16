@@ -28,8 +28,9 @@ namespace Skald.Bridge
         // red channel), not the raw WorldGenerator.GetForestFactor.
         public const ushort ForestIsMask = 2;
 
-        // 256 px tiles plus a one-sample apron on every side for shading.
-        public const int MaxEdge = 258;
+        // 256 px tiles plus a two-sample apron on every side, so a slope at
+        // the edge is a centred difference in both neighbouring tiles.
+        public const int MaxEdge = 260;
         public const float MinStep = 0.25f, MaxStep = 128f;
         public const float MaxCoord = 12000f;
 
