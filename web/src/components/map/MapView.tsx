@@ -674,8 +674,9 @@ export function TerrainFrame({ seedName }: { seedName: string }) {
     <div className="flex h-full flex-col">
       <div className="material z-10 flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 text-xs">
         <span className="font-bold text-flame">{t("map.terrain.attribution")}</span>
-        <span className="min-w-0 flex-1 text-ash">{t("map.terrain.note")}</span>
-        <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-bold text-flame underline decoration-flame/40 underline-offset-4 hover:text-gold">
+        {/* On a phone the note takes a full line under the credit and the link; side by side it would wrap a word per line. */}
+        <span className="order-last min-w-0 basis-full text-ash sm:order-none sm:flex-1 sm:basis-0">{t("map.terrain.note")}</span>
+        <a href={url} target="_blank" rel="noopener noreferrer" className="ml-auto inline-flex items-center gap-1 font-bold text-flame underline decoration-flame/40 underline-offset-4 hover:text-gold sm:ml-0">
           {t("map.terrain.openNew")}
           <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
             <path d="M4 2h6v6M10 2L3 9" />

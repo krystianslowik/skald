@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- On a phone, the Terrain tab's note about the external site now runs across the full width under the credit and the "Open in a new tab" link, instead of a column one word wide that took a third of the screen.
+
 ## [2026.10.0] - 2026-10-16
 
 The first calendar-versioned release (it follows 0.10.2). When upgrading:
