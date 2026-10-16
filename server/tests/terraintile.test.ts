@@ -61,8 +61,8 @@ describe("terrain tiles", () => {
     const raw = Bun.gunzipSync(body);
     const dv = new DataView(raw.buffer, raw.byteOffset);
     expect(dv.getUint32(0, true)).toBe(0x31544b53);
-    expect(dv.getInt32(8, true)).toBe(258);
-    expect(raw.length).toBe(24 + 258 * 258 * 4);
+    expect(dv.getInt32(8, true)).toBe(260);
+    expect(raw.length).toBe(24 + 260 * 260 * 4);
     const etag = res.headers.get("etag")!;
     expect((await s.app.request(url, { headers: { cookie, "If-None-Match": etag } })).status).toBe(304);
   });
@@ -82,11 +82,12 @@ describe("terrain tiles", () => {
   it("the mock's tiles abut: a tile's east apron is its neighbour's first column", () => {
     const a = mockTile(4, 7, 7);
     const b = mockTile(4, 8, 7);
-    const n = 258;
+    const n = 260;
     for (const row of [1, 100, 256]) {
-      // a's column n-2 is its last pixel, b's column 0 its west apron: the same place.
-      expect(Math.abs(a.height(row, n - 2) - b.height(row, 0))).toBeLessThanOrEqual(1);
-      expect(Math.abs(a.height(row, n - 1) - b.height(row, 1))).toBeLessThanOrEqual(1);
+      // Two-sample aprons: a's last pixel (column n-3) is b's column 1, a's
+      // east apron (n-2) is b's first pixel (column 2).
+      expect(Math.abs(a.height(row, n - 3) - b.height(row, 1))).toBeLessThanOrEqual(1);
+      expect(Math.abs(a.height(row, n - 2) - b.height(row, 2))).toBeLessThanOrEqual(1);
     }
   });
 });

@@ -3,7 +3,7 @@ import { mockMap } from "./mapmock";
 import { mockNature, natureIn } from "./mocknature";
 import { mockPieces, piecesIn } from "./mockpieces";
 import { mockIcons, type MockIcons } from "./mockicons";
-import { MOCK_TERRAIN_RADIUS, MOCK_TILE_BUILD, mockTerrain, mockTerrainTile, mockTilesDoc } from "./mockterrain";
+import { MOCK_TERRAIN_RADIUS, MOCK_TILE_BUILD, mockTerrain, mockTerrainTile, mockTilesDoc, packHeights } from "./mockterrain";
 import { addDays, calendar } from "./profiles";
 import { buildArgs, changedKeys, normalize, parseArgs, validateSettings } from "./settings";
 import type {
@@ -360,7 +360,7 @@ export class MockAgent implements AgentSource {
     if (!body) {
       const raw = mockTerrainTile(t.z, t.x, t.y);
       if (!raw) return new Response('{"ok":false}', { status: 404 });
-      body = Bun.gzipSync(raw as Uint8Array<ArrayBuffer>);
+      body = Bun.gzipSync(packHeights(raw) as Uint8Array<ArrayBuffer>, { level: 9 });
       if (this.tiles.size > 256) this.tiles.delete(this.tiles.keys().next().value!);
       this.tiles.set(key, body);
     }
