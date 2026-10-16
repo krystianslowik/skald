@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../plugin/MapData.cs" Link="MapData.cs" />
+    <Compile Include="../plugin/TerrainTile.cs" Link="TerrainTile.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="xunit.v3" Version="4.0.2" />
