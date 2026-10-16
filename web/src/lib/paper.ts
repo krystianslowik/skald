@@ -3,6 +3,14 @@
 // a few hundred thousand noise samples are too many for a phone's main thread
 // when the map opens.
 
+/** The parchment, its darker rim, the ink and the night around the world: both map renderers draw with these. */
+export const PAPER = "#d9c7a0";
+export const PAPER_DARK = "#c2aa7c";
+export const COAST = "#3a2a1a";
+export const VOID = "#16110c";
+/** The paper tile's ink colour; its alpha carries the grain. */
+export const PAPER_INK: readonly [number, number, number] = [92, 64, 32];
+
 export const PAPER_TILE = 256;
 export const CLOUD_TILE = 512;
 
@@ -71,9 +79,9 @@ export function paperPixels(size = PAPER_TILE): Uint8ClampedArray<ArrayBuffer> {
       let a = Math.max(0, blot - 0.45) * 0.55 + Math.max(0, fibre - 0.55) * 0.35;
       if (noise(x * 13.1, y * 7.7, 5) > 0.985) a += 0.25;
       const i = (y * size + x) * 4;
-      data[i] = 92;
-      data[i + 1] = 64;
-      data[i + 2] = 32;
+      data[i] = PAPER_INK[0];
+      data[i + 1] = PAPER_INK[1];
+      data[i + 2] = PAPER_INK[2];
       data[i + 3] = Math.min(255, a * 255);
     }
   }

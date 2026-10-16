@@ -127,6 +127,8 @@ export const MapCanvas = forwardRef<
   const coarse = useMedia(COARSE);
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
+  /** The WebGL terrain under the marks (maprender.ts decides whether to use it). */
+  const glCanvas = useRef<HTMLCanvasElement>(null);
   const renderer = useRef<MapRenderer | null>(null);
   const view = useRef<View>({ cx: 0, cz: 0, scale: 0.02, w: 1, h: 1 });
   const fitted = useRef(false);
@@ -318,7 +320,7 @@ export const MapCanvas = forwardRef<
   // Renderer and data.
   useEffect(() => {
     if (!canvas.current) return;
-    renderer.current ??= new MapRenderer(canvas.current);
+    renderer.current ??= new MapRenderer(canvas.current, glCanvas.current);
     renderer.current.onChange = schedule;
     renderer.current.setData(map);
     schedule();
@@ -427,6 +429,7 @@ export const MapCanvas = forwardRef<
       if (arrival.current) clearTimeout(arrival.current);
       // Woods still being built, or a coast still being traced, must not draw a closed map.
       if (renderer.current) renderer.current.onChange = null;
+      renderer.current?.dispose();
     },
     [],
   );
@@ -723,6 +726,7 @@ export const MapCanvas = forwardRef<
 
   return (
     <div ref={wrap} className={`overflow-hidden ${className}`}>
+      {interactive && <canvas ref={glCanvas} aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full" />}
       <canvas
         ref={canvas}
         role="img"

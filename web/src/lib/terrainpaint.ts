@@ -79,18 +79,18 @@ export const TUNED: Record<(typeof BIOMES)[number], RGB> = {
   Ocean: [64, 94, 112],
   Mistlands: [104, 96, 112],
 };
-const WATER_SHALLOW: RGB = [84, 120, 124];
-const WATER_DEEP: RGB = [30, 52, 74];
+export const WATER_SHALLOW: RGB = [84, 120, 124];
+export const WATER_DEEP: RGB = [30, 52, 74];
 /**
  * How much of a biome is forest on average, for tiles without a forest
  * channel (levels from the terrain Job's grid), so their colour matches the
  * bridge's tiles of the same place.
  */
 const MEAN_FOREST: Partial<Record<(typeof BIOMES)[number], number>> = { Meadows: 0.25, BlackForest: 0.85, Swamp: 0.35, Plains: 0.15, Mistlands: 0.4 };
-const FOREST_DARKEN = 0.32;
-const SWAMP = BIOMES.indexOf("Swamp");
+export const FOREST_DARKEN = 0.32;
+export const SWAMP = BIOMES.indexOf("Swamp");
 /** Relief exaggeration: the same at every level, so shading does not change with zoom. */
-const RELIEF = 2.2;
+export const RELIEF = 2.2;
 
 export interface Palette {
   /** RGB per biome index. */
@@ -313,6 +313,27 @@ export function paintTile(t: DecodedTile, o: PaintOptions): Uint8ClampedArray<Ar
       out[p + 2] = B;
       out[p + 3] = 255;
     }
+  }
+  return out;
+}
+
+/**
+ * A decoded tile as the WebGL map's texture data: one RGBA texel per sample,
+ * apron included, rows north first. R is the biome index, G the forest
+ * (0..255; a tile without a forest channel gets its biome's mean, as
+ * paintTile uses), B and A the height's high and low byte. The GPU shades
+ * from this exactly as paintTile does on the CPU.
+ */
+export function packTile(t: DecodedTile, meanForest: readonly number[]): Uint8Array<ArrayBuffer> {
+  const nn = t.n * t.n;
+  const out = new Uint8Array(nn * 4);
+  for (let i = 0; i < nn; i++) {
+    const b = t.biomes[i]!;
+    const h = t.heights[i]!;
+    out[4 * i] = b;
+    out[4 * i + 1] = t.forest ? t.forest[i]! : Math.round((meanForest[b] ?? 0) * 255);
+    out[4 * i + 2] = h >> 8;
+    out[4 * i + 3] = h & 255;
   }
   return out;
 }

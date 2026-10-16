@@ -28,19 +28,18 @@ import {
   type View,
 } from "./mapgeo";
 import { ICONS } from "./mapicons";
-import { TerrainTiles, type Box as WorldBox, type TilesDoc } from "./terraintiles";
-import { CLOUD_TILE, PAPER_TILE, textures as paperTextures, type Textures } from "./paper";
+import { TerrainTiles, tilesSupported, type Box as WorldBox, type TilesDoc } from "./terraintiles";
+import { TileFeed } from "./terraindata";
+import { GLMap, type GLStats } from "./mapgl";
+import { fogField, seaMask, type FogField, type SeaMask } from "./fogfield";
+import { CLOUD_TILE, COAST, PAPER, PAPER_DARK, PAPER_TILE, textures as paperTextures, VOID, type Textures } from "./paper";
 import { natureTint, wobble, type NatureItem } from "./nature";
 import { NatureLayer, natureAlpha } from "./naturerender";
 import type { ChunkKey, Piece } from "./pieces";
 import { FloorPlan, PLAN_FULL_SCALE, PLAN_MIN_SCALE, planAlpha, STOREY_SCALE, viewBox, type StoreyInfo, type StoreyPick } from "./planrender";
 
-const PAPER = "#d9c7a0";
-const PAPER_DARK = "#c2aa7c";
 const LAND = "#b79b69";
-const COAST = "#3a2a1a";
 const SEA = "rgba(58, 82, 92, 0.62)";
-const VOID = "#16110c";
 const FONT = "'Averia Serif Libre', Georgia, serif";
 const ICON_PX = 22;
 /** The cached base covers this many times the view, so pans reuse it. */
@@ -67,6 +66,46 @@ function makeCanvas(w: number, h: number): HTMLCanvasElement | OffscreenCanvas {
 }
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+/** A sprite's place in the atlas, in device px. */
+type Sprite = { x: number; y: number; w: number; h: number };
+
+const ATLAS = 1024;
+
+/**
+ * Every mark and badge sprite on one canvas, stamped from there. Small
+ * canvases are kept in memory by the browser and uploaded to the GPU again
+ * each time one is drawn on the (GPU) map canvas: dozens of uploads a frame
+ * while the marks follow a gesture. One atlas is big enough to live on the
+ * GPU itself and changes only when a new sprite is first drawn.
+ */
+class SpriteAtlas {
+  readonly canvas = makeCanvas(ATLAS, ATLAS);
+  private readonly g = ctx2d(this.canvas);
+  private x = 0;
+  private y = 0;
+  private row = 0;
+
+  /** Copies `c` in and returns where; null when it is full (then reset and try again) or has no 2D context. */
+  add(c: HTMLCanvasElement | OffscreenCanvas): Sprite | null {
+    if (!this.g || c.width > ATLAS || c.height > ATLAS) return null;
+    if (this.x + c.width > ATLAS) {
+      this.x = 0;
+      this.y += this.row + 1;
+      this.row = 0;
+    }
+    if (this.y + c.height > ATLAS) return null;
+    const sp = { x: this.x, y: this.y, w: c.width, h: c.height };
+    this.g.drawImage(c as CanvasImageSource, sp.x, sp.y);
+    this.x += c.width + 1;
+    this.row = Math.max(this.row, c.height);
+    return sp;
+  }
+
+  reset(): void {
+    this.g?.clearRect(0, 0, ATLAS, ATLAS);
+    this.x = this.y = this.row = 0;
+  }
+}
 const ctx2d = (c: HTMLCanvasElement | OffscreenCanvas): Ctx2D | null => c.getContext("2d") as Ctx2D | null;
 
 /** A tile from its pixels, or null without a 2D context. */
@@ -79,15 +118,25 @@ function tileOf(px: Uint8ClampedArray<ArrayBuffer>, size: number): HTMLCanvasEle
 }
 
 let fontLoaded = false;
-/** Whether the map's font is in, for what is drawn once and kept. */
+/**
+ * Whether the map's bold face is in, for what is drawn once and kept (the
+ * marks' count badges). Not document.fonts.check: with the stylesheet's
+ * faces registered twice, one copy is never used and stays "unloaded", so
+ * check() answers false for good, and every badge was drawn on a new canvas
+ * every frame of a gesture, a pile of garbage that ended in long pauses.
+ */
 function fontReady(): boolean {
-  fontLoaded ||= typeof document === "undefined" || !document.fonts || document.fonts.check(`700 10px ${FONT}`);
+  if (fontLoaded || typeof document === "undefined" || !document.fonts) return (fontLoaded = true);
+  const faces = [...document.fonts].filter((f) => f.family.replace(/["']/g, "") === "Averia Serif Libre");
+  // No such face, or none that will ever load: the fallback is what stays.
+  fontLoaded = !faces.length || faces.some((f) => f.status === "loaded" && (f.weight === "700" || f.weight === "bold")) || faces.every((f) => f.status === "error");
   return fontLoaded;
 }
 
-/** The paper and cloud tiles, made once per page (in the map worker, the first time). */
-let textures: { paper: HTMLCanvasElement | OffscreenCanvas | null; clouds: HTMLCanvasElement | OffscreenCanvas | null } | null = null;
-const setTextures = (t: Textures) => (textures ??= { paper: tileOf(t.paper, PAPER_TILE), clouds: tileOf(t.clouds, CLOUD_TILE) });
+/** The paper and cloud tiles, made once per page (in the map worker, the first time); `raw` for the WebGL map. */
+let textures: { paper: HTMLCanvasElement | OffscreenCanvas | null; clouds: HTMLCanvasElement | OffscreenCanvas | null; raw: Textures } | null = null;
+const setTextures = (t: Textures) => (textures ??= { paper: tileOf(t.paper, PAPER_TILE), clouds: tileOf(t.clouds, CLOUD_TILE), raw: t });
+
 
 interface Prepared {
   land: Path2D;
@@ -201,6 +250,22 @@ function ramp(x: number, a: number, b: number): number {
   return t * t * (3 - 2 * t);
 }
 
+/**
+ * Whether a cached picture (the Canvas2D base, a WebGL layer) can stand for
+ * view `v`: during motion ("fast") while the zoom stays within [0.6, 1.8] of
+ * it and the view inside it; at rest only at the exact zoom, and not rough.
+ */
+function covers(c: { cx: number; cz: number; scale: number; w: number; h: number; rough: boolean }, v: View, quality: "fast" | "full"): boolean {
+  const k = v.scale / c.scale;
+  if (quality === "full" ? Math.abs(k - 1) > 1e-6 || c.rough : k < 0.6 || k > 1.8) return false;
+  // The view's corners must fall inside the cached area.
+  const halfW = v.w / 2 / v.scale;
+  const halfH = v.h / 2 / v.scale;
+  const cw = c.w / 2 / c.scale;
+  const ch = c.h / 2 / c.scale;
+  return Math.abs(v.cx - c.cx) + halfW <= cw + 0.5 / v.scale && Math.abs(v.cz - c.cz) + halfH <= ch + 0.5 / v.scale;
+}
+
 /** How long a mark takes to leave its cluster when the map zooms in. */
 const SPLIT_MS = 280;
 /** Zoomed in this far (px per metre), a container shows what it holds most of. */
@@ -222,7 +287,8 @@ export class MapRenderer {
   private ctx: CanvasRenderingContext2D | null;
   private dpr = 1;
   private prep: Prepared | null = null;
-  private sprites = new Map<string, HTMLCanvasElement | OffscreenCanvas>();
+  private sprites = new Map<string, Sprite>();
+  private atlas: SpriteAtlas | null = null;
   private measureCache = new Map<string, number>();
   /** Bumped on new data, so the cached base is re-rendered. */
   private version = 0;
@@ -282,8 +348,25 @@ export class MapRenderer {
   private roughNature = false;
   /** Ore deposits drawn in the last frame, in screen space, for tapping. */
   visibleOre: { item: NatureItem; sx: number; sy: number; r: number }[] = [];
+  /**
+   * The WebGL terrain under this canvas, once there are tiles and the
+   * browser has WebGL2: it draws paper, terrain and fog, and this canvas
+   * only the marks over it. Without it (or while its context is lost) the
+   * Canvas2D path draws everything, as before.
+   */
+  private gl: GLMap | null = null;
+  private glFailed = false;
+  private feed: TileFeed | null = null;
+  private tilesDoc: TilesDoc | null = null;
+  /** The fog's distance field and the generated zones, for the WebGL map; `all`: explored is known and nothing is. */
+  private fields: { fog: FogField | null; all: boolean; sea: SeaMask } | null = null;
+  /** What the marks were last drawn for: they are drawn again only when it changes. */
+  private overlay: unknown[] = [];
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
+  constructor(
+    private readonly canvas: HTMLCanvasElement,
+    private readonly glCanvas: HTMLCanvasElement | null = null,
+  ) {
     this.ctx = canvas.getContext("2d");
     this.nature.onBuilt = () => this.onChange?.();
   }
@@ -309,14 +392,21 @@ export class MapRenderer {
     if (key === this.shapesKey) return;
     this.shapesKey = key;
     const req = ++this.shapesReq;
-    const done = (shapes: MapShapes, tex?: Textures) => {
+    const wantFields = this.glCanvas !== null;
+    const done = (shapes: MapShapes, tex?: Textures, fields?: { fog: FogField | null; sea: SeaMask }) => {
       if (tex) setTextures(tex);
+      if (textures) this.gl?.setPaper(textures.raw);
       if (req !== this.shapesReq) return;
       this.prep = prepare(shapes, map);
+      if (fields) this.setFields({ ...fields, all: shapes.fog !== null && !fields.fog });
       this.version++;
       this.onChange?.();
     };
-    const here = () => done(mapShapes(map.land, map.explored), textures ? undefined : paperTextures());
+    const here = () => {
+      const shapes = mapShapes(map.land, map.explored);
+      const fields = wantFields ? { fog: shapes.fog ? fogField(shapes.fog, shapes.fogStep) : null, sea: seaMask(map.land) } : undefined;
+      done(shapes, textures ? undefined : paperTextures(), fields);
+    };
     if (typeof Worker === "undefined") return here();
     let worker: Worker;
     try {
@@ -324,16 +414,16 @@ export class MapRenderer {
     } catch {
       return here();
     }
-    worker.onmessage = (e: MessageEvent<{ shapes?: MapShapes; textures?: Textures; error?: string }>) => {
+    worker.onmessage = (e: MessageEvent<{ shapes?: MapShapes; textures?: Textures; fields?: { fog: FogField | null; sea: SeaMask }; error?: string }>) => {
       worker.terminate();
-      if (e.data.shapes) done(e.data.shapes, e.data.textures);
+      if (e.data.shapes) done(e.data.shapes, e.data.textures, e.data.fields);
       else if (req === this.shapesReq) here();
     };
     worker.onerror = () => {
       worker.terminate();
       if (req === this.shapesReq) here();
     };
-    worker.postMessage({ land: map.land, explored: map.explored, textures: !textures });
+    worker.postMessage({ land: map.land, explored: map.explored, textures: !textures, gl: wantFields });
   }
 
   /** The decoded terrain image, or null for the land inked from the save. */
@@ -346,24 +436,88 @@ export class MapRenderer {
     }
   }
 
-  /** The terrain tile pyramid, or null; one per build, its tiles cached until the build changes. */
+  /**
+   * The terrain tile pyramid, or null; one per build, its tiles cached until
+   * the build changes. Drawn by WebGL where the browser has it, else (and
+   * while a lost WebGL context is away) painted into bitmaps for Canvas2D.
+   */
   setTiles(doc: TilesDoc | null): void {
-    if (!this.ctx || doc?.build === this.tiles?.doc.build) return;
+    if (!this.ctx || doc?.build === this.tilesDoc?.build) return;
+    this.tilesDoc = doc;
+    this.feed?.dispose();
+    this.feed = null;
     this.tiles?.dispose();
     this.tiles = null;
-    if (doc) {
-      try {
-        this.tiles = new TerrainTiles(doc);
-        // An arriving tile redraws only the slots it changes, not the whole base.
-        this.tiles.onTile = () => {
-          this.tilesArrived = true;
-          this.onChange?.();
-        };
-      } catch {
-        // no worker here: the relief image, if any, stands in
-      }
+    if (doc && this.glCanvas && !this.glFailed && !this.gl) {
+      this.gl = GLMap.create(this.glCanvas);
+      if (this.gl) this.handGL(this.gl);
+      else this.glFailed = true;
     }
+    if (doc && this.gl) {
+      try {
+        this.feed = new TileFeed(doc);
+        // A tile that arrives only needs a frame: nothing else is redrawn for it.
+        this.feed.onTile = () => this.onChange?.();
+      } catch {
+        // no worker here
+      }
+      this.gl.setTiles(doc, this.feed);
+      if (!this.gl.ready) this.paintTiles();
+    } else this.paintTiles();
     this.version++;
+  }
+
+  /** The Canvas2D tile painter for the current doc (no WebGL, or its context is lost). */
+  private paintTiles() {
+    const doc = this.tilesDoc;
+    if (!doc || this.tiles || !tilesSupported()) return;
+    try {
+      this.tiles = new TerrainTiles(doc);
+      // An arriving tile redraws only the slots it changes, not the whole base.
+      this.tiles.onTile = () => {
+        this.tilesArrived = true;
+        this.onChange?.();
+      };
+    } catch {
+      // no worker here: the relief image, if any, stands in
+    }
+  }
+
+  /** Hands the WebGL map what it draws from, and keeps the Canvas2D path standing in while its context is lost. */
+  private handGL(gl: GLMap) {
+    if (textures) gl.setPaper(textures.raw);
+    if (this.fields) this.setFields(this.fields);
+    gl.resize(this.canvas.width / this.dpr, this.canvas.height / this.dpr, this.dpr);
+    gl.onLost = () => {
+      this.paintTiles();
+      this.version++;
+      this.onChange?.();
+    };
+    gl.onRestored = () => {
+      this.tiles?.dispose();
+      this.tiles = null;
+      if (textures) gl.setPaper(textures.raw);
+      this.overlay = [];
+      this.onChange?.();
+    };
+  }
+
+  private setFields(f: { fog: FogField | null; all: boolean; sea: SeaMask }) {
+    this.fields = f;
+    this.gl?.setFog(f.fog, f.all);
+    this.gl?.setSea(f.sea);
+  }
+
+  /** What the WebGL map drew last frame, or null when it is not drawing. */
+  get glStats(): GLStats | null {
+    return this.gl?.ready && this.feed ? this.gl.stats : null;
+  }
+
+  /** Frees the WebGL context and the tile workers (the map is going away). */
+  dispose(): void {
+    this.setTiles(null);
+    this.gl?.dispose();
+    this.gl = null;
   }
 
   /** Traces the relief's coast in a worker, once per image; no worker, no coast line. */
@@ -452,14 +606,17 @@ export class MapRenderer {
       this.canvas.width = W;
       this.canvas.height = H;
       this.sprites.clear();
+      this.atlas?.reset();
+      this.overlay = [];
     }
+    this.gl?.resize(w, h, dpr);
   }
 
   private screen(g: CanvasRenderingContext2D) {
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
   }
 
-  private sprite(icon: IconId, px: number, dim: boolean): HTMLCanvasElement | OffscreenCanvas | null {
+  private sprite(icon: IconId, px: number, dim: boolean): Sprite | null {
     const key = `${icon}:${px}:${dim ? 1 : 0}`;
     const hit = this.sprites.get(key);
     if (hit) return hit;
@@ -490,8 +647,26 @@ export class MapRenderer {
     g.lineCap = "round";
     g.lineJoin = "round";
     g.stroke(new Path2D(def.d));
-    this.sprites.set(key, c);
-    return c;
+    const sp = this.pack(c);
+    if (sp) this.sprites.set(key, sp);
+    return sp;
+  }
+
+  /** A finished sprite into the atlas; a full atlas starts over (sprites are drawn again as they are wanted). */
+  private pack(c: HTMLCanvasElement | OffscreenCanvas): Sprite | null {
+    this.atlas ??= new SpriteAtlas();
+    let sp = this.atlas.add(c);
+    if (!sp) {
+      this.sprites.clear();
+      this.atlas.reset();
+      sp = this.atlas.add(c);
+    }
+    return sp;
+  }
+
+  /** Stamps a sprite at (x, y), w x h CSS px. */
+  private stamp(g: CanvasRenderingContext2D, sp: Sprite, x: number, y: number, w: number, h: number) {
+    g.drawImage(this.atlas!.canvas as CanvasImageSource, sp.x, sp.y, sp.w, sp.h, x, y, w, h);
   }
 
   /** Text width under the current font, cached by `key` (which must include the font size). */
@@ -523,25 +698,18 @@ export class MapRenderer {
       g.fillRect(0, 0, v.w, v.h);
       this.visible = [];
       this.visibleOre = [];
+      this.overlay = [];
       return false;
     }
+    if (this.gl?.ready && this.feed && f.layers.relief) return this.drawGL(f);
+    this.overlay = [];
     const plan = f.layers.buildings && this.plan ? `${this.planVersion}:${f.storey ? `${f.storey.base}/${f.storey.level}` : ""}:${this.storeys(v, f.layers)?.base ?? ""}` : "";
     const nature = f.layers.nature || f.layers.resources ? `${f.layers.nature ? 1 : 0}${f.layers.resources ? 1 : 0}:${this.nature.version}` : "";
     const key = `${f.layers.fog ? 1 : 0}${f.layers.terrain ? 1 : 0}${f.layers.relief ? 1 : 0}:${this.version}:${this.tiles?.ready ? 1 : 0}:${v.w}x${v.h}:${this.dpr}:${plan}:${nature}`;
     let b = this.base;
-    const covers = (c: NonNullable<typeof b>) => {
-      const k = v.scale / c.scale;
-      if (quality === "full" ? Math.abs(k - 1) > 1e-6 || c.rough : k < 0.6 || k > 1.8) return false;
-      // The view's corners must fall inside the cached area.
-      const halfW = v.w / 2 / v.scale;
-      const halfH = v.h / 2 / v.scale;
-      const cw = c.w / 2 / c.scale;
-      const ch = c.h / 2 / c.scale;
-      return Math.abs(v.cx - c.cx) + halfW <= cw + 0.5 / v.scale && Math.abs(v.cz - c.cz) + halfH <= ch + 0.5 / v.scale;
-    };
     // Only a base whose woods were drawn rough needs a redraw at rest.
     const rough = quality === "fast" && f.layers.nature && natureAlpha(v.scale) > 0 && !this.nature.empty;
-    if (!b || b.key !== key || !covers(b)) b = this.renderBase(f, key, rough);
+    if (!b || b.key !== key || !covers(b, v, quality)) b = this.renderBase(f, key, rough);
     else if (this.tilesArrived) this.patchBase(b);
     this.tilesArrived = false;
     this.screen(g);
@@ -559,6 +727,70 @@ export class MapRenderer {
     this.drawOres(g, f);
     if (this.prep && f.layers.portals) this.drawLinks(g, v, this.prep);
     return this.drawMarkers(g, f);
+  }
+
+  /**
+   * A frame on the WebGL map: it draws paper, terrain and fog, with the
+   * woods and floor plans composited from their own pictures; this canvas
+   * keeps only the marks, redrawn when they or the view change, not when
+   * a tile arrives or fades in.
+   */
+  private drawGL(f: FrameState): boolean {
+    const g = this.ctx!;
+    const p = this.prep!;
+    const v = f.view;
+    this.activeBase = this.storeys(v, f.layers)?.base ?? null;
+    this.setRasters(f);
+    const busy = this.gl!.draw({ view: v, fog: f.layers.fog && p.fog !== null, spoilers: this.spoilers, now: performance.now() });
+    const inputs = [v.cx, v.cz, v.scale, v.w, v.h, this.dpr, f.layers, f.markers, f.selected, f.hovered, f.highlighted, f.cluster, f.labels?.max, f.labels?.px, f.storey?.base, f.storey?.level, this.nature.version, this.planVersion, this.icons, p];
+    if (this.splits.size === 0 && inputs.length === this.overlay.length && inputs.every((x, i) => x === this.overlay[i])) return busy;
+    this.overlay = inputs;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    this.screen(g);
+    if (f.layers.grid) this.drawGrid(g, v);
+    this.drawOres(g, f);
+    if (f.layers.portals) this.drawLinks(g, v, p);
+    return this.drawMarkers(g, f) || busy;
+  }
+
+  /**
+   * What the WebGL map rasterizes in chunks over its terrain: terrain edits
+   * and woods under the fog (0), floor plans over it (1). A chunk is drawn
+   * at its own zoom, once per change of what it shows, a few per frame.
+   */
+  private setRasters(f: FrameState) {
+    const gl = this.gl!;
+    const p = this.prep!;
+    const L = f.layers;
+    const heat = L.terrain && p.terrain.length > 0;
+    const woods = (L.nature || L.resources) && !this.nature.empty && natureAlpha(f.view.scale) > 0;
+    gl.setRaster(
+      0,
+      heat || woods
+        ? {
+            kind: `${heat ? 1 : 0}${woods && L.nature ? 1 : 0}${woods && L.resources ? 1 : 0}`,
+            gen: `${this.nature.version}:${this.version}`,
+            draw: (g, box, scale) => {
+              const c = g as CanvasRenderingContext2D;
+              if (heat) this.drawTerrain(c, f.view, p);
+              if (woods) this.nature.draw(c, [box[0] - 4, box[1] - 4, box[2] + 4, box[3] + 4], scale, { nature: L.nature, pickables: L.resources }, false);
+            },
+          }
+        : null,
+    );
+    const storey = f.storey ?? null;
+    const active = this.activeBase;
+    gl.setRaster(
+      1,
+      this.plan && L.buildings && planAlpha(f.view.scale) > 0
+        ? {
+            kind: "plan",
+            gen: `${this.planVersion}:${storey ? `${storey.base}/${storey.level}` : ""}:${active ?? ""}`,
+            draw: (g, box, scale) => this.plan?.draw(g as CanvasRenderingContext2D, [box[0] - 4, box[1] - 4, box[2] + 4, box[3] + 4], scale, planAlpha(scale), storey, active),
+          }
+        : null,
+    );
   }
 
   /** `rough`: mid-gesture, the woods may be drawn at half resolution; a full frame redraws them. */
@@ -1031,7 +1263,7 @@ export class MapRenderer {
         g.stroke();
       }
       g.globalAlpha = alpha;
-      g.drawImage(sp as CanvasImageSource, sx - size / 2, sy - size / 2, size, size);
+      this.stamp(g, sp, sx - size / 2, sy - size / 2, size, size);
       g.globalAlpha = 1;
       if (m.id === f.selected || m.id === f.hovered) {
         g.strokeStyle = m.id === f.selected ? "#c2812f" : "rgba(43, 29, 18, 0.55)";
@@ -1158,13 +1390,19 @@ export class MapRenderer {
       b.textAlign = "center";
       b.textBaseline = "middle";
       b.fillText(text, w / 2, h / 2 + 0.5);
-      sp = c;
       // Kept only once the map's font has loaded, or a fallback face would stay for good.
-      if (fontReady()) this.sprites.set(key, c);
+      if (fontReady()) {
+        sp = this.pack(c) ?? undefined;
+        if (sp) this.sprites.set(key, sp);
+      } else {
+        g.drawImage(c as CanvasImageSource, Math.round((x - w / 2 - 1) * this.dpr) / this.dpr, Math.round((y - h / 2 - 1) * this.dpr) / this.dpr, c.width / this.dpr, c.height / this.dpr);
+        return { x: x - w / 2, y: y - h / 2, w, h };
+      }
+      if (!sp) return { x: x - w / 2, y: y - h / 2, w, h };
     }
     // On a device pixel, so the stamped text stays as sharp as drawn text.
     const px = (u: number) => Math.round(u * this.dpr) / this.dpr;
-    g.drawImage(sp as CanvasImageSource, px(x - w / 2 - 1), px(y - h / 2 - 1), sp.width / this.dpr, sp.height / this.dpr);
+    this.stamp(g, sp, px(x - w / 2 - 1), px(y - h / 2 - 1), sp.w / this.dpr, sp.h / this.dpr);
     return { x: x - w / 2, y: y - h / 2, w, h };
   }
 }

@@ -156,6 +156,8 @@ export interface PlanInput {
   size?: number;
   /** A tile is loaded and can be drawn. */
   has: (t: TileRef) => boolean;
+  /** The level to draw, when the caller picks it (the WebGL map holds a level a little past the boundary); levelFor otherwise. */
+  level?: number;
 }
 
 /**
@@ -166,7 +168,7 @@ export interface PlanInput {
  */
 export function planView(p: PlanInput): ViewPlan {
   const { maxLevel, radius, has } = p;
-  const z = levelFor(p.scale, p.dpr, maxLevel, radius, p.size);
+  const z = p.level ?? levelFor(p.scale, p.dpr, maxLevel, radius, p.size);
   const slots: Slot[] = [];
   for (const t of tilesIn(p.box, z, radius)) {
     if (has(t)) {
