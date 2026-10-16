@@ -98,6 +98,15 @@ describe("TerrainFrame", () => {
     expect(screen.getByRole("link", { name: /Open in a new tab/ })).toHaveAttribute("href", "https://valheim-map.world/?seed=ZbzIWkK5KK&ver=1.0.7");
     expect(screen.getByTitle("Terrain by valheim-map.world").tagName).toBe("IFRAME");
   });
+
+  it("gives the note a full line of its own on a phone", () => {
+    // jsdom has no layout, so this pins the classes: below `sm` the note takes the whole width under the
+    // credit and the link instead of a word-per-line column between them (#58).
+    inLocale(<TerrainFrame seedName="s" />, "pl");
+    const note = screen.getByText(/^Zewnętrzna strona/);
+    expect(note).toHaveClass("basis-full", "order-last", "sm:basis-0", "sm:flex-1", "sm:order-none");
+    expect(note).not.toHaveClass("flex-1");
+  });
 });
 
 describe("WorldClock", () => {
