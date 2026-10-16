@@ -35,6 +35,9 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test-setup.ts"],
+    // The integration-style files mount the whole Dashboard; under heavy CPU load one test can take well over 5 s.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
   build: {
     outDir: "dist",

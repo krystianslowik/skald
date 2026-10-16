@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createLogStore } from "../lib/useValheim";
+import { preloadLazyChunks } from "../test-preload";
 import { emptyAgentState, type AdminStatus, type ApiState } from "../types";
 import { Dashboard } from "./Dashboard";
 
@@ -41,6 +42,8 @@ function api(unlocked: boolean) {
 }
 
 const renderDashboard = () => render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+
+beforeAll(preloadLazyChunks);
 
 afterEach(() => {
   vi.unstubAllGlobals();

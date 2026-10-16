@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { Dashboard } from "./components/Dashboard";
 import { en } from "./i18n/en";
@@ -10,6 +10,7 @@ import { applyEvent } from "./lib/apply";
 import { stripValheimStamp } from "./lib/format";
 import { createLogStore } from "./lib/useValheim";
 import { COARSE, PHONE } from "./lib/useMedia";
+import { preloadLazyChunks } from "./test-preload";
 import { emptyAgentState, type ApiState, type PlayerProfile, type SettingsView } from "./types";
 
 const inPolish = (ui: ReactElement) => render(<I18nProvider locale="pl">{ui}</I18nProvider>);
@@ -48,6 +49,7 @@ function fixture(): ApiState {
   };
 }
 
+beforeAll(preloadLazyChunks);
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Dashboard", () => {
@@ -227,7 +229,7 @@ describe("Profile sheet", () => {
     expect(dialog.contains(document.activeElement)).toBe(true);
     fireEvent.keyDown(document, { key: "Escape" });
     // The sheet leaves along its own edge before it unmounts.
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(opener).toHaveFocus();
   });
 });
@@ -440,19 +442,24 @@ describe("App", () => {
     memoryStorage();
     vi.stubGlobal("fetch", api("en"));
     render(<App />);
-    await waitFor(() => expect(screen.getByPlaceholderText("Speak the word")).toBeInTheDocument());
+    // The title and lang are set in effects, so wait for them too: an earlier Dashboard test left its own title.
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Speak the word")).toBeInTheDocument();
+      expect(document.title).toBe("Skald");
+      expect(document.documentElement.lang).toBe("en");
+    });
     expect(screen.getByRole("button", { name: "Kindle" })).toBeInTheDocument();
-    expect(document.title).toBe("Skald");
-    expect(document.documentElement.lang).toBe("en");
   });
 
   it("starts in Polish when SKALD_LOCALE=pl and the viewer has no choice stored", async () => {
     memoryStorage();
     vi.stubGlobal("fetch", api("pl"));
     render(<App />);
-    await waitFor(() => expect(screen.getByPlaceholderText("Wypowiedz słowo")).toBeInTheDocument());
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Wypowiedz słowo")).toBeInTheDocument();
+      expect(document.documentElement.lang).toBe("pl");
+    });
     expect(screen.getByRole("button", { name: "Rozpal" })).toBeInTheDocument();
-    expect(document.documentElement.lang).toBe("pl");
   });
 
   it("lets the viewer switch language and remembers it over the server default", async () => {
