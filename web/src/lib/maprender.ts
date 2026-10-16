@@ -66,6 +66,23 @@ function makeCanvas(w: number, h: number): HTMLCanvasElement | OffscreenCanvas {
 }
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+/** localStorage key that picks the map's renderer: "canvas" keeps it on Canvas2D. */
+export const RENDERER_KEY = "skald.map.renderer";
+
+/**
+ * Whether the WebGL map is switched off by hand: `?map=canvas` in the page's
+ * address, or localStorage `skald.map.renderer` set to "canvas". A way out
+ * when a browser's WebGL draws the map wrong.
+ */
+export function canvasForced(search = globalThis.location?.search ?? ""): boolean {
+  if (new URLSearchParams(search).get("map") === "canvas") return true;
+  try {
+    return globalThis.localStorage?.getItem(RENDERER_KEY) === "canvas";
+  } catch {
+    return false;
+  }
+}
+
 /** A sprite's place in the atlas, in device px. */
 type Sprite = { x: number; y: number; w: number; h: number };
 
@@ -453,7 +470,7 @@ export class MapRenderer {
     this.tiles = null;
     // The GPU path is built for the agent's 260-sample tiles; anything else is painted.
     const glTiles = !!doc && doc.tileSize + 2 * doc.apron === TILE_EDGE;
-    if (glTiles && this.glCanvas && !this.glFailed && !this.gl) {
+    if (glTiles && this.glCanvas && !this.glFailed && !this.gl && !canvasForced()) {
       this.gl = GLMap.create(this.glCanvas);
       if (this.gl) this.handGL(this.gl);
       else this.glFailed = true;
@@ -770,16 +787,22 @@ export class MapRenderer {
     const L = f.layers;
     const heat = L.terrain && p.terrain.length > 0;
     const woods = (L.nature || L.resources) && !this.nature.empty && natureAlpha(f.view.scale) > 0;
+    // Chunks draw at the view's zoom, not their own level's: what shows from
+    // which zoom (pickables from 8 px/m, tree detail, the woods' and floor
+    // plans' fade) then switches where the Canvas2D map switches it. A chunk
+    // is drawn again, a few a frame, once the zoom has moved a quarter octave.
+    const zoom = f.view.scale;
+    const step = Math.round(Math.log2(zoom) * 4);
     gl.setRaster(
       0,
       heat || woods
         ? {
             kind: `${heat ? 1 : 0}${woods && L.nature ? 1 : 0}${woods && L.resources ? 1 : 0}`,
-            gen: `${this.nature.version}:${this.version}`,
-            draw: (g, box, scale) => {
+            gen: `${this.nature.version}:${this.version}:${step}`,
+            draw: (g, box) => {
               const c = g as CanvasRenderingContext2D;
               if (heat) this.drawTerrain(c, f.view, p);
-              if (woods) this.nature.draw(c, [box[0] - 4, box[1] - 4, box[2] + 4, box[3] + 4], scale, { nature: L.nature, pickables: L.resources }, false);
+              if (woods) this.nature.draw(c, [box[0] - 4, box[1] - 4, box[2] + 4, box[3] + 4], zoom, { nature: L.nature, pickables: L.resources }, false);
             },
           }
         : null,
@@ -791,8 +814,8 @@ export class MapRenderer {
       this.plan && L.buildings && planAlpha(f.view.scale) > 0
         ? {
             kind: "plan",
-            gen: `${this.planVersion}:${storey ? `${storey.base}/${storey.level}` : ""}:${active ?? ""}`,
-            draw: (g, box, scale) => this.plan?.draw(g as CanvasRenderingContext2D, [box[0] - 4, box[1] - 4, box[2] + 4, box[3] + 4], scale, planAlpha(scale), storey, active),
+            gen: `${this.planVersion}:${storey ? `${storey.base}/${storey.level}` : ""}:${active ?? ""}:${step}`,
+            draw: (g, box) => this.plan?.draw(g as CanvasRenderingContext2D, [box[0] - 4, box[1] - 4, box[2] + 4, box[3] + 4], zoom, planAlpha(zoom), storey, active),
           }
         : null,
     );

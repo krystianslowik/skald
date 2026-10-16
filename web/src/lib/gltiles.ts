@@ -233,3 +233,64 @@ export function subRect(src: TileRef, dst: TileRef): [number, number, number, nu
   const j = dst.y - src.y * n;
   return [i / n, j / n, (i + 1) / n, (j + 1) / n];
 }
+
+/** The self-test's tile: one biome, flat ground `height` (raw u16) everywhere, no forest, `edge` samples a side. */
+export function selfTestTile(edge: number, biome: number, height: number): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(edge * edge * 4);
+  for (let i = 0; i < edge * edge; i++) {
+    out[4 * i] = biome;
+    out[4 * i + 1] = 0;
+    out[4 * i + 2] = height >> 8;
+    out[4 * i + 3] = height & 255;
+  }
+  return out;
+}
+
+/** What paintTile makes of flat dry ground of a biome with colour `rgb`: lit evenly, no forest, no water. */
+export const flatColour = (rgb: readonly [number, number, number]): [number, number, number] => [rgb[0] * 0.94, rgb[1], rgb[2] * 0.9];
+
+/** Whether a read-back pixel is within `tol` of the expected colour on every channel. */
+export function closeColour(got: ArrayLike<number>, want: ArrayLike<number>, tol = 4): boolean {
+  for (let c = 0; c < want.length; c++) if (Math.abs(got[c]! - want[c]!) > tol) return false;
+  return true;
+}
+
+/**
+ * When to give up on the GPU path while it runs: tiles that arrived but
+ * cannot get onto the GPU for `ms` on end, or only decode errors and no tile
+ * at all. Fed once a frame; `failed` names why, once.
+ */
+export class Watchdog {
+  private since: number | null = null;
+  failed: string | null = null;
+  constructor(
+    readonly ms = 5000,
+    readonly maxErrors = 8,
+  ) {}
+
+  /** `stuck`: tiles wait on the CPU side and none went up this frame. */
+  frame(now: number, stuck: boolean, feed: { ok: number; errors: number }): string | null {
+    if (this.failed) return null;
+    if (!stuck) this.since = null;
+    else if (this.since === null) this.since = now;
+    else if (now - this.since > this.ms) this.failed = "tiles arrived but could not be put on the GPU";
+    if (!this.failed && feed.ok === 0 && feed.errors >= this.maxErrors) this.failed = "terrain tiles fail to decode";
+    return this.failed;
+  }
+}
+
+/**
+ * Straight-alpha pixels (getImageData) to premultiplied, in place: WebGL
+ * refuses UNPACK_PREMULTIPLY_ALPHA for pixel arrays going into an array
+ * texture, and blending and filtering want premultiplied colour.
+ */
+export function premultiply<T extends Uint8ClampedArray | Uint8Array>(px: T): T {
+  for (let i = 0; i < px.length; i += 4) {
+    const a = px[i + 3]!;
+    if (a === 255) continue;
+    px[i] = Math.round((px[i]! * a) / 255);
+    px[i + 1] = Math.round((px[i + 1]! * a) / 255);
+    px[i + 2] = Math.round((px[i + 2]! * a) / 255);
+  }
+  return px;
+}

@@ -13,7 +13,7 @@
 // few pieces and draws. maprender.ts falls back to its Canvas2D renderer
 // without WebGL2 or while the context is lost.
 
-import { Fades, FADE_MS, GPU_PIN_LEVEL, heldLevel, slotQuads, subRect, TexturePool, UploadBudget, type Quad } from "./gltiles";
+import { closeColour, Fades, FADE_MS, flatColour, GPU_PIN_LEVEL, heldLevel, premultiply, selfTestTile, slotQuads, subRect, TexturePool, UploadBudget, Watchdog, type Quad } from "./gltiles";
 import type { FogField, SeaMask } from "./fogfield";
 import { COAST, PAPER, PAPER_DARK, PAPER_INK, VOID, type Textures } from "./paper";
 import type { TileFeed } from "./terraindata";
@@ -450,6 +450,10 @@ export class GLMap {
   onRestored: (() => void) | null = null;
   onLost: (() => void) | null = null;
 
+  /** Why the GPU path was given up for good (a failed self-test or watchdog), or null. */
+  private broken: string | null = null;
+  private readonly watchdog = new Watchdog();
+
   private constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly gl: WebGL2RenderingContext,
@@ -470,8 +474,10 @@ export class GLMap {
     const m = new GLMap(canvas, gl);
     try {
       m.init();
+      const why = m.selfTest();
+      if (why) throw new Error(why);
     } catch (err) {
-      console.error(err);
+      console.warn(`map: WebGL self-test failed, drawing with Canvas2D: ${err instanceof Error ? err.message : String(err)}`);
       m.dispose();
       return null;
     }
@@ -480,7 +486,104 @@ export class GLMap {
 
   /** Whether frames can be drawn now (not lost, not disposed). */
   get ready(): boolean {
-    return !this.lost && !this.disposed && this.res !== null;
+    return !this.lost && !this.disposed && !this.broken && this.res !== null;
+  }
+
+  /** Gives up on the GPU path for good: the owner falls back to Canvas2D as for a lost context. */
+  private fail(why: string) {
+    if (this.broken) return;
+    this.broken = why;
+    console.warn(`map: WebGL map stopped, drawing with Canvas2D: ${why}`);
+    this.onLost?.();
+  }
+
+  /**
+   * Draws a known tile through the tile shader, from the last layer of a
+   * texture array, and a known chunk through the chunk path, into a small
+   * framebuffer, and reads them back. A browser whose WebGL gets either
+   * wrong (integer textures, array layers, uploads) answers why, and the
+   * map is drawn with Canvas2D instead of drawn wrong.
+   */
+  private selfTest(): string | null {
+    const r = this.res;
+    if (!r) return "no context";
+    const gl = this.gl;
+    const N = 4;
+    const LAYERS = 64;
+    const target = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, target);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, N, N);
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, target, 0);
+    const tiles = gl.createTexture();
+    const chunks = gl.createTexture();
+    const out = new Uint8Array(4 * N * N);
+    const centre = (px: Uint8Array) => Array.from(px.subarray(4 * (N * (N / 2) + N / 2), 4 * (N * (N / 2) + N / 2) + 4));
+    const one = (layer: number, sample: [number, number, number, number], step: number) => {
+      // One quad over the whole framebuffer, in the world near the centre (inside the disc).
+      const d = new Float32Array([-1, 1, 1, -1, 0, 10, 10, 0, ...sample, layer, 1, step, 0]);
+      gl.bindBuffer(gl.ARRAY_BUFFER, r.inst);
+      gl.bufferData(gl.ARRAY_BUFFER, d, gl.DYNAMIC_DRAW);
+      gl.bindVertexArray(r.vao);
+      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, 1);
+      gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, out);
+      return centre(out);
+    };
+    try {
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) return "framebuffer incomplete";
+      gl.viewport(0, 0, N, N);
+      gl.disable(gl.BLEND);
+      gl.clearColor(0, 0, 0, 0);
+      // Terrain: Meadows on flat dry ground, from the last layer.
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, tiles);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8UI, TILE_EDGE, TILE_EDGE, LAYERS);
+      gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, LAYERS - 1, TILE_EDGE, TILE_EDGE, 1, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, selfTestTile(TILE_EDGE, 1, (600 + 30) * 50));
+      const pal = paletteOf(null).biome;
+      const flat = new Float32Array(48);
+      pal.slice(0, 16).forEach((c, i) => flat.set([c[0] / 255, c[1] / 255, c[2] / 255], i * 3));
+      gl.useProgram(r.p.tile);
+      const { u } = r.p;
+      gl.uniform1i(u["t.uTiles"]!, 0);
+      gl.uniform3fv(u["t.uPal"]!, flat);
+      gl.uniform1i(u["t.uPalN"]!, Math.min(16, pal.length));
+      gl.uniform1f(u["t.uWater"]!, 30);
+      gl.uniform1f(u["t.uPxPerM"]!, 1);
+      gl.uniform1f(u["t.uRadius"]!, 10_500);
+      gl.uniform1i(u["t.uSeaOn"]!, 0);
+      gl.uniform1i(u["t.uSeaTex"]!, 4);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, tiles);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      const tile = one(LAYERS - 1, [40, 40, 220, 220], 0.64);
+      const want = [...flatColour(pal[1]!).map(Math.round), 255];
+      if (!closeColour(tile, want)) return `tile shader read back rgba(${tile.join(", ")}), want rgba(${want.join(", ")})`;
+      // Chunks: a known colour, uploaded from pixels as chunks are, from the last layer.
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, chunks);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, CHUNK, CHUNK, 2);
+      const px = new Uint8ClampedArray(CHUNK * CHUNK * 4);
+      for (let i = 0; i < px.length; i += 4) px.set([200, 100, 50, 255], i);
+      gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, 1, CHUNK, CHUNK, 1, gl.RGBA, gl.UNSIGNED_BYTE, premultiply(px));
+      gl.useProgram(r.p.raster);
+      gl.uniform1i(u["r.uChunks"]!, 6);
+      gl.activeTexture(gl.TEXTURE6);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, chunks);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      const chunk = one(1, [0, 0, 1, 1], 1);
+      if (!closeColour(chunk, [200, 100, 50, 255])) return `chunk read back rgba(${chunk.join(", ")}), want rgba(200, 100, 50, 255)`;
+      const err = gl.getError();
+      if (err !== gl.NO_ERROR) return `GL error 0x${err.toString(16)}`;
+      return null;
+    } finally {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.bindVertexArray(null);
+      for (const t of [target, tiles, chunks]) gl.deleteTexture(t);
+      gl.deleteFramebuffer(fb);
+    }
   }
 
   private lose = (e: Event) => {
@@ -492,7 +595,7 @@ export class GLMap {
   };
 
   private restore = () => {
-    if (this.disposed) return;
+    if (this.disposed || this.broken) return;
     try {
       this.init();
     } catch (err) {
@@ -806,6 +909,7 @@ export class GLMap {
     const wish: string[] = [];
     let low = 0;
     let pending = 0;
+    let went = 0;
     this.budget.begin(performance.now());
     plan.want.forEach((t, i) => {
       const k = tileKey(t);
@@ -817,10 +921,18 @@ export class GLMap {
         if (i < plan.low) low = wish.length;
         return;
       }
-      if (this.budget.take(performance.now()) && this.upload(k, data, keep)) this.fades.begin(k, now);
-      else pending++;
+      if (this.budget.take(performance.now()) && this.upload(k, data, keep)) {
+        this.fades.begin(k, now);
+        went++;
+      } else pending++;
     });
     feed.want(wish, low);
+    // Tiles waiting on the CPU side with none going up: the GPU path is not working.
+    const why = this.watchdog.frame(now, pending > 0 && went === 0, feed);
+    if (why) {
+      this.fail(why);
+      return false;
+    }
     const sel = slotQuads(plan.slots, (t) => {
       const key = tileKey(t);
       return pool.has(key) ? this.fades.alpha(key, now) : null;
@@ -904,11 +1016,9 @@ export class GLMap {
         this.chunkGen.delete(got.evicted);
         this.chunkFades.drop(got.evicted);
       }
-      this.rasterize(this.rasters[i]!, t, R, k);
+      const px = this.rasterize(this.rasters[i]!, t, R, k);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, r.chunks);
-      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-      gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, got.layer, CHUNK, CHUNK, 1, gl.RGBA, gl.UNSIGNED_BYTE, this.scratch as TexImageSource);
-      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+      gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, got.layer, CHUNK, CHUNK, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
       this.chunkGen.set(key, this.rasters[i]!.gen);
       if (fresh) this.chunkFades.begin(key, now);
       done++;
@@ -934,9 +1044,15 @@ export class GLMap {
   }
 
   /** Draws chunk `t` of a raster into the scratch canvas, world north-west at its top left. */
-  private rasterize(src: RasterSource, t: TileRef, R: number, k: number) {
+  /**
+   * Draws chunk `t` of a raster on a CPU canvas (world north-west at its top
+   * left) and returns its pixels. Uploading the pixels, rather than handing
+   * WebGL the canvas itself, is the one upload path that behaves the same in
+   * every browser: Safari's GPU-backed canvases are uploaded its own way.
+   */
+  private rasterize(src: RasterSource, t: TileRef, R: number, k: number): Uint8ClampedArray {
     this.scratch ??= typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(CHUNK, CHUNK) : Object.assign(document.createElement("canvas"), { width: CHUNK, height: CHUNK });
-    const g = this.scratch.getContext("2d") as OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
+    const g = this.scratch.getContext("2d", { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, CHUNK, CHUNK);
     const span = (2 * R) / 2 ** t.z;
@@ -950,6 +1066,7 @@ export class GLMap {
     g.clip();
     src.draw(g, [west, north - span, west + span, north], s / k);
     g.restore();
+    return premultiply(g.getImageData(0, 0, CHUNK, CHUNK).data);
   }
 
   private drawChunks(i: 0 | 1, quads: Quad[] | null, v: View) {

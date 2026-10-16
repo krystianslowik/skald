@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- In desktop Safari the map could stay blurry and blocky when zoomed in, with solid orange squares over it. Before drawing, the map now checks that the browser's WebGL draws a known piece of terrain correctly, and falls back to the previous drawing if it does not, or if terrain stops reaching the graphics chip while the map is open. Adding `?map=canvas` to the page's address, or setting `skald.map.renderer` to `canvas` in the browser's local storage, always uses the previous drawing.
+- Small things to gather and the fading in of woods and floor plans appear at the same zoom as before the map moved to the graphics chip; at some zooms they were missing.
+
 ## [2026.10.4] - 2026-10-16
 
 ### Changed
