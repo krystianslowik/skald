@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { Dict, Plural } from "./en";
 import { dictFor, isLocale, loadLocale, LOCALES, localesVersion, subscribeLocales, type Locale } from "./load";
+import { chunkUrl, probeChunk, reloadOnce } from "../lib/chunks";
 import { LOCALE_STORAGE_KEY } from "./locales";
 
 export { isLocale, loadLocale, LOCALES, type Locale } from "./load";
@@ -204,9 +205,12 @@ export function I18nProvider({ locale: initial, fallback = null, children }: { l
   // The language asked for last; a slower load for an earlier pick is dropped.
   const wanted = useRef(initial);
   const retry = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Bumped by every call: only the latest one's failure probes and schedules a retry.
+  const call = useRef(0);
 
   const show = useCallback((l: Locale, remember: boolean, attempt = 0) => {
     wanted.current = l;
+    const me = ++call.current;
     clearTimeout(retry.current);
     const done = () => {
       if (wanted.current !== l) return;
@@ -215,16 +219,34 @@ export function I18nProvider({ locale: initial, fallback = null, children }: { l
       setShown(l);
     };
     if (dictFor(l)) return done();
-    loadLocale(l).then(done, () => {
+    loadLocale(l).then(done, async () => {
+      const current = () => call.current === me && wanted.current === l;
+      if (!current()) return;
+      // Gone from the server: this tab predates a deploy. Reload once into the new build, in this language.
+      const url = chunkUrl(l);
+      const gone = url !== undefined && navigator.onLine !== false && (await probeChunk(url)) === "gone";
+      if (!current()) return;
+      if (gone && reloadOnce()) {
+        if (remember) storeLocale(l);
+        return;
+      }
       // Offline or a dropped request. With a language on screen it stays and the toggle tries
       // again; with none yet (first load) keep trying rather than leave the page blank.
-      if (wanted.current === l && !shownRef.current) retry.current = setTimeout(() => show(l, remember, attempt + 1), retryDelay(attempt));
+      if (!shownRef.current) retry.current = setTimeout(() => show(l, remember, attempt + 1), retryDelay(attempt));
     });
   }, []);
 
   useEffect(() => {
     show(initial, false);
-    return () => clearTimeout(retry.current);
+    // Back online with nothing on screen yet: try again now, not after the backoff.
+    const again = () => {
+      if (!shownRef.current) show(wanted.current, false);
+    };
+    window.addEventListener("online", again);
+    return () => {
+      clearTimeout(retry.current);
+      window.removeEventListener("online", again);
+    };
   }, [initial, show]);
   useEffect(() => {
     if (shown) document.documentElement.lang = shown;
@@ -243,7 +265,14 @@ export function I18nProvider({ locale: initial, fallback = null, children }: { l
 export function useEveryLocale(active: boolean): number {
   const v = useSyncExternalStore(subscribeLocales, localesVersion, localesVersion);
   useEffect(() => {
-    if (active) for (const l of LOCALES) loadLocale(l).catch(() => undefined);
+    if (!active) return;
+    const load = () => {
+      for (const l of LOCALES) loadLocale(l).catch(() => undefined);
+    };
+    load();
+    // One that failed offline comes in once the connection is back.
+    window.addEventListener("online", load);
+    return () => window.removeEventListener("online", load);
   }, [active]);
   return v;
 }

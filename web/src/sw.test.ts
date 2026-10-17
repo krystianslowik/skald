@@ -63,7 +63,13 @@ function boot(network: (url: string) => Response | Promise<Response>, source = S
     await Promise.all(pending);
     return res;
   };
-  return { stores, run, get };
+  /** Whether the worker answers a request at all; if not, the browser goes to the network itself. */
+  const answers = (path: string, init?: RequestInit) => {
+    let answered = false;
+    handlers.fetch!({ request: new Request(ORIGIN + path, init), waitUntil: () => undefined, respondWith: () => void (answered = true) });
+    return answered;
+  };
+  return { stores, run, get, answers };
 }
 
 const html = () => new Response("<!doctype html><title>Skald</title>", { headers: { "Content-Type": "text/html; charset=utf-8" } });
@@ -90,6 +96,14 @@ describe("service worker", () => {
     const keys = [...sw.stores.values()].flatMap((s) => [...s.keys()]);
     expect(keys).toContain("/assets/index-New456.js");
     expect(keys).not.toContain("/assets/gone.js");
+  });
+
+  it("lets a no-store request (the page checking the server is up) through to the network, even for a cached asset", async () => {
+    const sw = boot((url) => (url.startsWith("/assets/") ? js() : html()));
+    await sw.run("install");
+    await sw.get("/assets/MapView-New456.js");
+    expect(sw.answers("/assets/MapView-New456.js", { cache: "no-store" })).toBe(false);
+    expect(sw.answers("/assets/MapView-New456.js")).toBe(true);
   });
 
   it("drops the previous build's cache, old chunks and all, when a new build's worker activates", async () => {

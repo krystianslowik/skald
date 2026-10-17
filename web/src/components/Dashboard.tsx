@@ -31,14 +31,14 @@ import { lazyChunk } from "../lib/chunks";
 import { ChunkBoundary } from "./ErrorBoundary";
 
 // Opened on demand; the chunk is preloaded as soon as a pointer reaches a player name.
-const ProfileSheet = lazyChunk(() => import("./ProfileSheet"));
-const SettingsSheet = lazyChunk(() => import("./SettingsSheet"));
-const MapView = lazyChunk(() => import("./map/MapView"));
-const MapPreview = lazyChunk(() => import("./map/MapPreview"));
+const ProfileSheet = lazyChunk(() => import("./ProfileSheet"), "ProfileSheet");
+const SettingsSheet = lazyChunk(() => import("./SettingsSheet"), "SettingsSheet");
+const MapView = lazyChunk(() => import("./map/MapView"), "MapView");
+const MapPreview = lazyChunk(() => import("./map/MapPreview"), "MapPreview");
 
 export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live: Valheim; onLogout: () => void; onUnauthorized?: () => void }) {
   const { t, tn, dayLabel, clock, intl } = useI18n();
-  const { state, online, logs, lastAction } = live;
+  const { state, online, logs, lastAction, retry } = live;
   const [profile, setProfile] = useState<string | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const openProfile = useCallback((name: string, el: HTMLElement) => {
@@ -118,14 +118,7 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
     document.title = serverName ? `${serverName} - Skald` : "Skald";
   }, [serverName]);
 
-  if (!state) {
-    return (
-      <main className="relative grid min-h-dvh place-items-center">
-        <Atmosphere dim />
-        <p className="on-world relative z-10 text-lg font-bold uppercase tracking-[0.09em] text-flame">{t("app.loading")}</p>
-      </main>
-    );
-  }
+  if (!state) return <Booting online={online} onRetry={retry} />;
 
   const players = state.players;
   // A new save is a new map.
@@ -325,5 +318,42 @@ export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live:
       </div>
     </ProfileProvider>
     </AdminProvider>
+  );
+}
+
+/** A first state this late with the link down is an outage, not a slow load. */
+export const BOOT_GRACE_MS = 3000;
+
+/**
+ * Before the first state: the loading line, and once a few seconds passed with
+ * no link to the server (offline, skald-web down) a note saying so, with a
+ * button to try at once instead of waiting out the reconnect backoff.
+ */
+function Booting({ online, onRetry }: { online: boolean; onRetry?: () => void }) {
+  const { t } = useI18n();
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setLate(true), BOOT_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  const down = late && !online;
+  return (
+    <main className="relative grid min-h-dvh place-items-center px-4">
+      <Atmosphere dim />
+      <div className="relative z-10 text-center">
+        <p className="on-world text-lg font-bold uppercase tracking-[0.09em] text-flame">{t("app.loading")}</p>
+        {down && (
+          <div role="status" className="plank mx-auto mt-6 max-w-sm px-5 py-5">
+            <p className="plank-title text-base">{t("offline.title")}</p>
+            <p className="mt-2 text-sm text-bone/90">{t("app.unreachable")}</p>
+            {onRetry && (
+              <button type="button" onClick={onRetry} className="plaque press mt-4 w-full py-2.5 text-lg font-bold text-flame! hover:text-gold!">
+                {t("app.retry")}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </main>
   );
 }

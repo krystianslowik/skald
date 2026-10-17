@@ -59,14 +59,22 @@ const localePreload = (): Plugin => ({
     handler(_html, ctx) {
       if (!ctx.bundle) return [];
       const chunks: Partial<Record<Locale, string>> = {};
+      // Every lazy chunk by its module's name (`lazyChunk(load, "MapView")`), the dictionaries included.
+      const lazy: Record<string, string> = {};
       for (const out of Object.values(ctx.bundle)) {
-        const file = out.type === "chunk" ? (out.facadeModuleId ?? "").replace(/\\/g, "/") : "";
+        if (out.type !== "chunk") continue;
+        const file = (out.facadeModuleId ?? "").replace(/\\/g, "/");
         const l = LOCALES.find((x) => file.endsWith(`/src/i18n/${x}.ts`));
         if (l) chunks[l] = `/${out.fileName}`;
+        // Ours only: a dependency's own lazy chunks are not loaded through lazyChunk.
+        if (!out.isDynamicEntry || !file.includes("/src/")) continue;
+        const name = file.slice(file.lastIndexOf("/") + 1).replace(/\.[^.]+$/, "");
+        if (lazy[name]) throw new Error(`skald-locale-preload: two lazy chunks named ${name}`);
+        lazy[name] = `/${out.fileName}`;
       }
       const missing = LOCALES.filter((l) => !chunks[l]);
       if (missing.length) throw new Error(`skald-locale-preload: no chunk for ${missing.join(", ")}`);
-      return [{ tag: "script", children: localePreloadScript(chunks as Record<Locale, string>), injectTo: "head-prepend" as const }];
+      return [{ tag: "script", children: localePreloadScript(chunks as Record<Locale, string>, lazy), injectTo: "head-prepend" as const }];
     },
   },
 });

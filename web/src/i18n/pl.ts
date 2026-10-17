@@ -6,11 +6,14 @@ const plural = (p: Plural): Plural => p;
 /** Polish dictionary. Must match the English shape key for key (enforced by `Dict`). */
 export const pl: Dict = {
   "app.loading": "Rozdmuchuję żar...",
+  "app.unreachable": "Nie mogę połączyć się z serwerem. Próbuję dalej sam; panel otworzy się, gdy tylko odpowie.",
+  "app.retry": "Spróbuj teraz",
   "crash.title": "Coś poszło nie tak",
   "crash.body": "Część panelu przestała działać. Zwykle pomaga odświeżenie strony.",
   "crash.stale": "Skald został zaktualizowany, gdy ta strona była otwarta. Odśwież, żeby wczytać nową wersję.",
   "crash.reload": "Odśwież",
   "crash.close": "Zamknij",
+  "crash.offline": "Brak łączności, więc ta część się nie wczytała. Wczyta się sama, gdy łączność wróci.",
   "footer.unofficial": "Skald to projekt fanowski, niezwiązany z Iron Gate Studio ani Coffee Stain.",
   "version.label": "Skald {v}",
   "version.mismatch": "Agent {agent}, panel {web}. Zaktualizuj tę starszą część.",

@@ -69,6 +69,8 @@ export interface Valheim {
   online: boolean;
   /** Last agent `action` events, newest first. */
   lastAction: AgentEvent | null;
+  /** Reconnects and reads state now instead of waiting out the backoff. */
+  retry?: () => void;
 }
 
 export function useValheim(onUnauthorized: () => void): Valheim {
@@ -80,6 +82,10 @@ export function useValheim(onUnauthorized: () => void): Valheim {
   const [lastAction, setLastAction] = useState<AgentEvent | null>(null);
   const unauth = useRef(onUnauthorized);
   unauth.current = onUnauthorized;
+
+  /** Set by the socket effect: what a wake from "online" does. */
+  const kick = useRef<() => void>(() => undefined);
+  const retry = useCallback(() => kick.current(), []);
 
   /** Bumped by every stored event and history delta from the socket. */
   const liveGen = useRef(0);
@@ -281,6 +287,8 @@ export function useValheim(onUnauthorized: () => void): Valheim {
       connect();
       old?.close();
     };
+    // The new socket reads state again when it opens.
+    kick.current = () => wake(new Event("online"));
     document.addEventListener("visibilitychange", wake);
     window.addEventListener("pageshow", wake);
     window.addEventListener("online", wake);
@@ -297,5 +305,5 @@ export function useValheim(onUnauthorized: () => void): Valheim {
     };
   }, [refresh, reloadLogs, logs]);
 
-  return { state, logs, online: ws !== "down" && agentUp, lastAction };
+  return { state, logs, online: ws !== "down" && agentUp, lastAction, retry };
 }

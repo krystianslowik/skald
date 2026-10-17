@@ -173,6 +173,42 @@ describe("Dashboard", () => {
     expect(facts).toHaveClass("flex-wrap", "lg:flex-nowrap");
   });
 
+  it("says the server cannot be reached when the first state does not come, after a short grace (EN and PL)", () => {
+    vi.useFakeTimers();
+    try {
+      const retry = vi.fn();
+      const view = render(<Dashboard live={{ state: null, logs: createLogStore(), online: false, lastAction: null, retry }} onLogout={() => {}} />);
+      // A normal load does not flash the note.
+      expect(screen.getByText(en["app.loading"])).toBeInTheDocument();
+      expect(screen.queryByText(en["app.unreachable"])).toBeNull();
+      act(() => vi.advanceTimersByTime(3000));
+      expect(screen.getByRole("status")).toHaveTextContent(en["offline.title"]);
+      expect(screen.getByText(en["app.unreachable"])).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: en["app.retry"] }));
+      expect(retry).toHaveBeenCalledTimes(1);
+      view.unmount();
+
+      inPolish(<Dashboard live={{ state: null, logs: createLogStore(), online: false, lastAction: null, retry }} onLogout={() => {}} />);
+      act(() => vi.advanceTimersByTime(3000));
+      expect(screen.getByText(pl["app.unreachable"])).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: pl["app.retry"] })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps only the loading line while the link is up", () => {
+    vi.useFakeTimers();
+    try {
+      render(<Dashboard live={{ state: null, logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+      act(() => vi.advanceTimersByTime(10_000));
+      expect(screen.getByText(en["app.loading"])).toBeInTheDocument();
+      expect(screen.queryByRole("status")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows the outage banner and sleeps the runes when offline", () => {
     render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: false, lastAction: null }} onLogout={() => {}} />);
     expect(screen.getByText("The fire has dimmed.")).toBeInTheDocument();
