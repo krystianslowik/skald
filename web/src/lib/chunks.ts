@@ -27,7 +27,7 @@ const SPENT_MS = 5 * 60_000;
 export const page = {
   reload: () => window.location.reload(),
   reloading: false,
-  /** Chunks this page fetched again with an ordinary request, so WebKit dropped their failure: once is enough. */
+  /** Modules this page fetched again with an ordinary request, so WebKit dropped their failure: once is enough. */
   warmed: new Set<string>(),
 };
 
@@ -77,6 +77,19 @@ export function chunkDeps(url: string): string[] {
   return Array.isArray(deps) ? deps.filter((d): d is string => typeof d === "string") : [];
 }
 
+/** The entry module and its static imports, already named by the built HTML. */
+function entryModuleUrls(): string[] {
+  if (typeof document === "undefined") return [];
+  const hrefs = [
+    ...[...document.querySelectorAll<HTMLScriptElement>('script[type="module"][src]')].map((s) => s.src),
+    ...[...document.querySelectorAll<HTMLLinkElement>('link[rel="modulepreload"][href]')].map((l) => l.href),
+  ];
+  return [...new Set(hrefs.flatMap((href) => {
+    const url = new URL(href, location.href);
+    return url.origin === location.origin ? [`${url.pathname}${url.search}`] : [];
+  }))];
+}
+
 /** A probe that gets no answer in this time counts as the server being down. */
 export const PROBE_TIMEOUT_MS = 8000;
 
@@ -120,7 +133,8 @@ export type Recovery = "reloading" | "down" | "held" | "spent" | "stale";
  * After a chunk failed: reloads the page (once, see `reloadOnce`) if that can
  * help, that is, the device is online and the server answers. `urls`: the
  * chunks the failed import named (the lazy chunk, and the dependency the
- * browser blamed if it said); the chunks they import are fetched again too.
+ * browser blamed if it said), their imports, and this page's entry modules are
+ * fetched again too.
  */
 export async function recoverChunk(urls: readonly (string | undefined)[]): Promise<Recovery> {
   if (navigator.onLine === false) return "down";
@@ -132,15 +146,22 @@ export async function recoverChunk(urls: readonly (string | undefined)[]): Promi
   // WebKit reuses a failed module script, the entry's and each one it imports,
   // even across a reload, until an ordinary request for the same URL succeeds;
   // the no-store probe does not count. Once per page is enough.
-  const all = [...new Set([...named, ...named.flatMap(chunkDeps)])].filter((u) => !page.warmed.has(u));
-  await Promise.all(
-    all.map((u) =>
-      fetch(u, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) }).then(
-        (res) => void (res.ok && page.warmed.add(u)),
-        () => undefined,
-      ),
-    ),
+  const all = [...new Set([...named, ...named.flatMap(chunkDeps), ...entryModuleUrls()])].filter((u) => !page.warmed.has(u));
+  const warmed = await Promise.all(
+    all.map(async (u) => {
+      try {
+        const res = await fetch(u, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+        if (!res.ok) return false;
+        page.warmed.add(u);
+        return true;
+      } catch {
+        return false;
+      }
+    }),
   );
+  // Reloading while WebKit still holds a failed entry-module load leaves the
+  // whole app blank. Keep the recovery note up and retry when any warm-up fails.
+  if (warmed.some((ok) => !ok)) return "down";
   if (reloadOnce()) return "reloading";
   return reloadBlock() === "spent" ? "spent" : "held";
 }
