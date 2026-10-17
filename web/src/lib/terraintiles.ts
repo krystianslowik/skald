@@ -411,6 +411,12 @@ export class TerrainTiles {
     return { bytes: this.cache.bytes + this.pinnedBytes, tiles: this.cache.size + this.pinned.size, pinnedBytes: this.pinnedBytes, pinnedTiles: this.pinned.size };
   }
 
+  /** For the ?mapstats harness: the slots `view` needs, how many have their own tile, how many show nothing, and the loads running. */
+  coverage(view: Box, scale: number, dpr: number): { wanted: number; own: number; blank: number; inflight: number } {
+    const p = this.plan(view, view, scale, dpr);
+    return { wanted: p.slots.length, own: p.slots.filter((s) => s.own).length, blank: p.slots.filter((s) => s.blank).length, inflight: this.sched.inflight.size };
+  }
+
   /** Level 0 is in (or will never be): from here on no slot is blank. Until then the map draws without tiles. */
   get ready(): boolean {
     return this.pinned.has("0/0/0@1") || this.missing.has("0/0/0@1");

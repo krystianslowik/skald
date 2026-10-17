@@ -22,12 +22,32 @@ import {
 import { useIconSheet } from "../../lib/itemicons";
 import { COARSE, useMedia } from "../../lib/useMedia";
 import { bandCentre, flingOffset, inertiaStep, REST_SPEED, rubberBand, SampleRing, springStep, unbandCentre, ZOOM_DECELERATION, ZOOM_REST, zoomFlingOffset } from "../../lib/mapmotion";
-import { MapRenderer, type Relief } from "../../lib/maprender";
+import { MapRenderer, type MapTileStats, type Relief } from "../../lib/maprender";
+import type { GLStats } from "../../lib/mapgl";
 import type { TilesDoc } from "../../lib/terraintiles";
 import { NATURE_MIN_SCALE, natureLoader, type NatureItem } from "../../lib/nature";
 import { PieceLoader, type ChunkLoader } from "../../lib/pieceload";
 import { PLAN_MIN_SCALE, viewBox, type StoreyInfo, type StoreyPick } from "../../lib/planrender";
 import type { ApiMap } from "../../types";
+
+/** What window.__mapStats() returns under ?mapstats. */
+export interface MapStats {
+  view: View;
+  ahead: View | null;
+  gl: GLStats | null;
+  tiles: MapTileStats | null;
+}
+
+declare global {
+  interface Window {
+    __mapStats?: () => MapStats;
+  }
+}
+
+/** The perf harness hook is asked for in the address (?mapstats). */
+export function mapStatsOn(search = globalThis.location?.search ?? ""): boolean {
+  return new URLSearchParams(search).has("mapstats");
+}
 
 export interface MapCanvasHandle {
   /** Glide (or jump, with reduced motion) to a world point, zooming in to at least `minScale` and out to at most `maxScale`. */
@@ -453,6 +473,20 @@ export const MapCanvas = forwardRef<
     ro.observe(el);
     return () => ro.disconnect();
   }, [fitFor, schedule]);
+
+  // ?mapstats: a read-only window.__mapStats() for the map perf harness (#62): the view, a landing in flight and the terrain tiles' coverage. The full map's, never the dashboard preview's.
+  useEffect(() => {
+    if (!interactive || !mapStatsOn()) return;
+    const stats = (): MapStats => {
+      const r = renderer.current;
+      const a = ahead.current;
+      return { view: { ...view.current }, ahead: a ? { ...a } : null, gl: r?.glStats ? { ...r.glStats } : null, tiles: r?.tileStats(view.current) ?? null };
+    };
+    window.__mapStats = stats;
+    return () => {
+      if (window.__mapStats === stats) delete window.__mapStats;
+    };
+  }, [interactive]);
 
   useEffect(
     () => () => {
