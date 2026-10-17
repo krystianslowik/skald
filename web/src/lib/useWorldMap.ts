@@ -53,18 +53,37 @@ export function loadMap(key: string): Promise<MapLoad> {
   return promise;
 }
 
-/** The world map; `key` changes (a new save) trigger a refetch. */
+/**
+ * `key`, but a change that comes while the page is hidden is only taken up
+ * once it is shown again: a tab in the background does not download the map
+ * after every world save.
+ */
+export function useShownKey(key: string): string {
+  const [shown, setShown] = useState(key);
+  useEffect(() => {
+    if (!document.hidden) return setShown(key);
+    const show = () => {
+      if (!document.hidden) setShown(key);
+    };
+    document.addEventListener("visibilitychange", show);
+    return () => document.removeEventListener("visibilitychange", show);
+  }, [key]);
+  return shown;
+}
+
+/** The world map; `key` changes (a new save) trigger a refetch, once the page is shown. */
 export function useWorldMap(key: string): [MapLoad, () => void] {
   const [load, setLoad] = useState<MapLoad>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
+  const shownKey = useShownKey(key);
   useEffect(() => {
     let live = true;
-    void loadMap(`${key}#${attempt}`).then((r) => {
+    void loadMap(`${shownKey}#${attempt}`).then((r) => {
       if (live) setLoad((prev) => (r.status === "failed" && prev.status === "ready" ? prev : r));
     });
     return () => {
       live = false;
     };
-  }, [key, attempt]);
+  }, [shownKey, attempt]);
   return [load, () => setAttempt((a) => a + 1)];
 }

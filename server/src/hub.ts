@@ -4,7 +4,7 @@ import type { HistoryStore } from "./db";
 import { deriveHistory, RANKING_EVENTS, WEEK_MS } from "./history";
 import { cause, log as defaultLog, type Logger } from "./log";
 import { deriveProfiles } from "./profiles";
-import { emptyAgentState, isBridgeRead, UNSTORED_EVENTS, type AgentEvent, type AgentEventType, type AgentState, type History, type LiveMessage, type LivePlayer, type PlayerProfile } from "./types";
+import { emptyAgentState, isBridgeRead, UNSTORED_EVENTS, type AgentEvent, type AgentEventType, type AgentState, type History, type LiveMessage, type LivePlayer, type PlayerProfile, type StateSlice } from "./types";
 
 /** Live positions go out at most this often, whatever the agent sends. */
 const POSITIONS_EVERY_MS = 2_000;
@@ -24,6 +24,20 @@ const ON_CHANGE: Partial<Record<AgentEventType, (d: Record<string, unknown>) => 
   version: (d) => `${d.version}/${d.networkVersion}`,
   server_state: (d) => String(d.status),
 };
+
+/**
+ * Each top-level slice of the state as a comparable string. Left out: `now`
+ * (a new time on every read) and `agent.lastLogAt` (moves with every log line;
+ * the panel does not show it), so neither alone counts as a change.
+ */
+function stateKeys(s: AgentState): Record<StateSlice, string> {
+  const out = {} as Record<StateSlice, string>;
+  for (const k of Object.keys(s) as (keyof AgentState)[]) {
+    if (k === "now") continue;
+    out[k] = JSON.stringify(k === "agent" ? { ...s.agent, lastLogAt: undefined } : s[k]);
+  }
+  return out;
+}
 
 export interface HubOptions {
   statePollMs?: number;
@@ -72,6 +86,10 @@ export class Hub {
   /** The agent connection failed and has not come back yet: the next success is logged. */
   private down = false;
   private historyTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The `online` of the last state sent. */
+  private sentOnline = false;
+  /** A live event older than the state went out unapplied: the next poll sends all of the state. */
+  private replayed = false;
   private readonly opts: Required<HubOptions>;
 
   constructor(
@@ -264,7 +282,7 @@ export class Hub {
     if (Date.parse(ev.ts) >= Date.parse(this.state.now)) {
       this.state = applyEvent(this.state, ev);
       if (ev.type === "log") this.state = { ...this.state, agent: { ...this.state.agent, lastLogAt: ev.ts } };
-    }
+    } else if (applyEvent(this.state, ev) !== this.state) this.replayed = true;
     let stored = false;
     if (!UNSTORED_EVENTS.includes(ev.type)) {
       const key = ON_CHANGE[ev.type]?.(ev.data);
@@ -311,14 +329,34 @@ export class Hub {
   }
 
   private async pollState(): Promise<void> {
+    let next: AgentState | null = null;
     try {
-      this.setState(await this.agent.getState());
+      next = await this.agent.getState();
     } catch (e) {
       this.stateOk = false;
       // While the stream is down, the loop already reports the outage.
       if (this.streaming && !this.stopped) this.opts.log.warn("agent state poll failed", { cause: cause(e) });
     }
-    this.emit({ type: "state", state: this.state, online: this.online });
+    // What the pages hold now: the last state sent plus the live events since
+    // (taken after the read, so events that came in meanwhile count), which
+    // they apply as the hub does. After an event the hub did not apply (a
+    // replay older than its state) a page may hold more, so all of it goes out.
+    const before = this.replayed ? null : stateKeys(this.state);
+    this.replayed = false;
+    if (next) this.setState(next);
+    if (!before) return this.sendState(this.online);
+    const keys = stateKeys(this.state);
+    const all = new Set([...Object.keys(keys), ...Object.keys(before)] as StateSlice[]);
+    const changed = [...all].filter((k) => keys[k] !== before[k]);
+    // An idle panel gets no state at all.
+    if (changed.length === 0 && this.online === this.sentOnline) return;
+    this.sendState(this.online, changed);
+  }
+
+  /** `changed`: only these slices moved (pages are sent just those); absent, all of it is news. */
+  private sendState(online: boolean, changed?: StateSlice[]): void {
+    this.sentOnline = online;
+    this.emit({ type: "state", state: this.state, online, ...(changed ? { changed } : {}) });
   }
 
   private async loop(): Promise<void> {
@@ -342,7 +380,7 @@ export class Hub {
         if (this.positionsWatchers.size > 0) this.tellAgent(true);
         this.abort = new AbortController();
         this.streaming = true;
-        this.emit({ type: "state", state: this.state, online: this.online });
+        this.sendState(this.online);
         await this.agent.stream(since, (ev) => {
           attempt = 0;
           // The first event proves the stream works, not just /state.
@@ -362,7 +400,7 @@ export class Hub {
       // Rate-limited by the logger: a dead agent prints about once a minute.
       this.down = true;
       this.opts.log.warn("agent stream lost", { cause: cause(failure), retryMs: Math.min(this.opts.maxBackoffMs, 1000 * 2 ** attempt) });
-      if (wasOnline || this.hasState) this.emit({ type: "state", state: this.state, online: false });
+      if (wasOnline || this.hasState) this.sendState(false);
       const delay = Math.min(this.opts.maxBackoffMs, 1000 * 2 ** attempt);
       attempt += 1;
       await new Promise((r) => setTimeout(r, delay));

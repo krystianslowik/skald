@@ -3,8 +3,8 @@ import { createSession, SESSION_COOKIE, upgradeLive } from "../src/auth";
 import type { AgentSource } from "../src/agent";
 import { HistoryStore } from "../src/db";
 import { Hub } from "../src/hub";
-import { liveSocket, liveSocketData, type LiveSocketData } from "../src/live";
-import { emptyAgentState, type AgentEvent, type LiveMessage } from "../src/types";
+import { LIVE_WEBSOCKET, liveSocket, liveSocketData, wire, type LiveSocketData } from "../src/live";
+import { emptyAgentState, type AgentEvent, type LiveMessage, type LiveWireMessage } from "../src/types";
 
 const SECRET = "secret";
 
@@ -98,10 +98,15 @@ const pos = (x: number): AgentEvent => ({
 });
 
 class FakeSocket {
-  sent: LiveMessage[] = [];
+  sent: LiveWireMessage[] = [];
+  compressed: boolean[] = [];
   constructor(public data: LiveSocketData) {}
-  send(s: string) {
-    this.sent.push(JSON.parse(s) as LiveMessage);
+  send(s: string, compress?: boolean) {
+    this.sent.push(JSON.parse(s) as LiveWireMessage);
+    this.compressed.push(compress === true);
+  }
+  logs() {
+    return this.sent.filter((m) => m.type === "event" && m.event.type === "log");
   }
   positions() {
     return this.sent.filter((m) => m.type === "positions");
@@ -264,6 +269,98 @@ describe("live history deltas per socket", () => {
     expect(current.sent.filter((m) => m.type === "history")).toHaveLength(1);
     expect(old.sent.filter((m) => m.type === "history")).toHaveLength(0);
     hub.stop();
+  });
+});
+
+describe("live log lines per socket", () => {
+  const line = (seq: number): AgentEvent => ({ seq, ts: new Date(Date.parse("2026-10-09T18:00:00Z") + seq * 1000).toISOString(), type: "log", data: { line: `line ${seq}` } });
+  const LOGS_ON = JSON.stringify({ type: "subscribe", topic: "logs" });
+  const LOGS_OFF = JSON.stringify({ type: "unsubscribe", topic: "logs" });
+
+  it("keeps pages from before the logs topic on every line", () => {
+    const hub = new Hub(watchAgent([]), new HistoryStore(":memory:"));
+    const ws = liveSocket(hub);
+    const older = socket("/live?topics=&history=1");
+    const oldest = socket("/live");
+    ws.open(older);
+    ws.open(oldest);
+    hub.ingest("A", line(1));
+    expect(older.logs()).toHaveLength(1);
+    expect(oldest.logs()).toHaveLength(1);
+    hub.stop();
+  });
+
+  it("sends lines to a logtopic socket only while it is subscribed", () => {
+    const hub = new Hub(watchAgent([]), new HistoryStore(":memory:"));
+    const ws = liveSocket(hub);
+    const fire = socket("/live?topics=&history=1&logtopic=1");
+    const chronicle = socket("/live?topics=logs&history=1&logtopic=1");
+    ws.open(fire);
+    ws.open(chronicle);
+    hub.ingest("A", line(1));
+    expect(fire.logs()).toHaveLength(0);
+    expect(chronicle.logs()).toHaveLength(1);
+    ws.message(fire, LOGS_ON);
+    hub.ingest("A", line(2));
+    ws.message(fire, LOGS_OFF);
+    ws.message(chronicle, LOGS_OFF);
+    hub.ingest("A", line(3));
+    expect(fire.logs()).toHaveLength(1);
+    expect(chronicle.logs()).toHaveLength(2);
+    // Other events still reach everyone.
+    hub.ingest("A", { seq: 4, ts: "2026-10-09T18:00:04Z", type: "death", data: { name: "Bjorn" } });
+    expect(fire.sent.filter((m) => m.type === "event" && m.event.type === "death")).toHaveLength(1);
+    // The logs topic does not touch the positions lease.
+    expect(fire.data.positions).toBe(false);
+    hub.stop();
+  });
+});
+
+describe("live state on the wire", () => {
+  it("sends only the slices a poll changed, marked partial; a whole state stays whole", () => {
+    const st = emptyAgentState(new Date("2026-10-09T18:00:00Z"));
+    expect(wire({ type: "state", state: st, online: true })).toEqual({ type: "state", state: st, online: true });
+    expect(wire({ type: "state", state: st, online: false, changed: ["world", "players"] })).toEqual({
+      type: "state",
+      state: { world: st.world, players: st.players },
+      online: false,
+      partial: true,
+    });
+    expect(wire({ type: "state", state: st, online: false, changed: [] })).toEqual({ type: "state", state: {}, online: false, partial: true });
+    // A slice the agent stopped sending is cleared on the page, not kept.
+    const { terrain: _gone, ...older } = { ...st, terrain: null };
+    expect(JSON.parse(JSON.stringify(wire({ type: "state", state: older as typeof st, online: true, changed: ["terrain"] })))).toEqual({ type: "state", state: { terrain: null }, online: true, partial: true });
+  });
+
+  it("asks for every frame to be compressed, the shortest too (Safari fails on a mix)", () => {
+    const hub = new Hub(watchAgent([]), new HistoryStore(":memory:"));
+    const ws = liveSocket(hub);
+    const s = socket("/live?topics=positions");
+    ws.open(s);
+    hub.ingest("e", pos(1));
+    hub.ingest("A", { seq: 1, ts: "2026-10-09T18:00:01Z", type: "log", data: { line: "x" } });
+    expect(s.sent.length).toBeGreaterThanOrEqual(3);
+    expect(s.compressed.every(Boolean)).toBe(true);
+    hub.stop();
+  });
+
+  it("negotiates permessage-deflate with a client that offers it", async () => {
+    const srv = Bun.serve({
+      port: 0,
+      fetch(req, s) {
+        return s.upgrade(req) ? undefined : new Response("no", { status: 400 });
+      },
+      websocket: { ...LIVE_WEBSOCKET, open: (w) => void w.send(JSON.stringify({ pad: "x".repeat(2000) })), message() {} },
+    });
+    const sock = new WebSocket(`ws://localhost:${srv.port}/`);
+    const got = await new Promise<string>((resolve, reject) => {
+      sock.onmessage = (e) => resolve(String(e.data));
+      sock.onerror = () => reject(new Error("socket error"));
+    });
+    expect(sock.extensions).toContain("permessage-deflate");
+    expect(JSON.parse(got).pad).toHaveLength(2000);
+    sock.close();
+    srv.stop(true);
   });
 });
 

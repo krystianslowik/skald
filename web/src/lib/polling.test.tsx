@@ -21,8 +21,14 @@ class MockSocket {
   onopen: (() => void) | null = null;
   onmessage: ((m: { data: string }) => void) | null = null;
   onclose: (() => void) | null = null;
-  constructor() {
+  /** What the page sent: subscribes and unsubscribes. */
+  told: string[] = [];
+  constructor(public url = "") {
     MockSocket.all.push(this);
+  }
+  send(m: string) {
+    const { type, topic } = JSON.parse(m) as { type: string; topic: string };
+    this.told.push(`${type} ${topic}`);
   }
   open() {
     this.readyState = 1;
@@ -40,6 +46,12 @@ class MockSocket {
   }
 }
 const last = () => MockSocket.all[MockSocket.all.length - 1]!;
+/** A page with the Chronicle shown: it asks for log lines. */
+const renderWatching = () => {
+  const page = renderHook(() => useValheim(() => undefined));
+  act(() => void page.result.current.logs.watch!());
+  return page;
+};
 const tick = (ms = 0) =>
   act(async () => {
     await vi.advanceTimersByTimeAsync(ms);
@@ -107,11 +119,12 @@ describe("useValheim polling", () => {
 
 describe("useValheim waking up (phone unlocked)", () => {
   it("drops the grown backoff, reconnects at once and reads state and the log tail again", async () => {
-    const { result } = renderHook(() => useValheim(() => undefined));
+    const { result } = renderWatching();
     await tick();
     act(() => last().open());
     expect(stateCalls).toBe(1);
-    expect(logCalls).toBe(1);
+    // Asked before the socket opened: the tail at once and again on open.
+    expect(logCalls).toBe(2);
 
     // Locked: the socket dies and every retry fails, so the backoff climbs to 30 s.
     act(() => setHidden(true));
@@ -137,7 +150,7 @@ describe("useValheim waking up (phone unlocked)", () => {
   });
 
   it("replaces a socket that still looks open after a long sleep, coming back online or out of the page cache", async () => {
-    renderHook(() => useValheim(() => undefined));
+    renderWatching();
     await tick();
     act(() => last().open());
     await tick();
@@ -166,7 +179,7 @@ describe("useValheim waking up (phone unlocked)", () => {
   });
 
   it("does nothing extra for a quick look away or a fresh page load", async () => {
-    renderHook(() => useValheim(() => undefined));
+    renderWatching();
     await tick();
     act(() => {
       window.dispatchEvent(new Event("pageshow"));
@@ -174,7 +187,8 @@ describe("useValheim waking up (phone unlocked)", () => {
     act(() => last().open());
     await tick();
     const calls = { state: stateCalls, logs: logCalls, sockets: MockSocket.all.length };
-    expect(calls).toEqual({ state: 1, logs: 1, sockets: 1 });
+    // The Chronicle asked before the socket opened: the tail once now, once on open.
+    expect(calls).toEqual({ state: 1, logs: 2, sockets: 1 });
     act(() => setHidden(true));
     await tick(5_000);
     act(() => setHidden(false));
@@ -184,7 +198,7 @@ describe("useValheim waking up (phone unlocked)", () => {
 
   it("keeps log lines that arrived while the tail was being read again", async () => {
     let release: () => void = () => undefined;
-    const { result } = renderHook(() => useValheim(() => undefined));
+    const { result } = renderWatching();
     await tick();
     act(() => last().open());
     await tick();
@@ -352,5 +366,105 @@ describe("admin status polling", () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(statusCalls).toBe(3);
+  });
+});
+
+describe("useValheim log lines as a topic", () => {
+  it("asks for lines and reads the tail only while the Chronicle is shown", async () => {
+    const { result } = renderHook(() => useValheim(() => undefined));
+    await tick();
+    act(() => last().open());
+    await tick();
+    const sock = last();
+    expect(new URL(sock.url, "http://x").searchParams.get("logtopic")).toBe("1");
+    // The Fire tab: no tail read, no lines asked for.
+    expect(logCalls).toBe(0);
+    expect(sock.told).toEqual([]);
+
+    let stop: () => void = () => undefined;
+    act(() => void (stop = result.current.logs.watch!()));
+    await tick();
+    expect(sock.told).toEqual(["subscribe logs"]);
+    expect(logCalls).toBe(1);
+    // A second view of the same lines asks nothing more.
+    let stop2: () => void = () => undefined;
+    act(() => void (stop2 = result.current.logs.watch!()));
+    act(() => stop());
+    await tick();
+    expect(sock.told).toEqual(["subscribe logs"]);
+    act(() => stop2());
+    expect(sock.told).toEqual(["subscribe logs", "unsubscribe logs"]);
+
+    // A long sleep while nothing shows the lines: state only.
+    const calls = { state: stateCalls, logs: logCalls };
+    act(() => setHidden(true));
+    await tick(10 * 60_000);
+    act(() => setHidden(false));
+    act(() => last().open());
+    await tick();
+    expect({ state: stateCalls, logs: logCalls }).toEqual({ state: calls.state + 1, logs: calls.logs });
+    expect(last().told).toEqual([]);
+  });
+
+  it("subscribes a socket that opens after the Chronicle asked, and reads the tail again then", async () => {
+    const { result } = renderHook(() => useValheim(() => undefined));
+    await tick();
+    act(() => void result.current.logs.watch!());
+    await tick();
+    // Read at once (a socket that never opens still shows the tail) ...
+    expect(logCalls).toBe(1);
+    act(() => last().open());
+    await tick();
+    expect(last().told).toEqual(["subscribe logs"]);
+    // ... and once more for the lines before the subscribe.
+    expect(logCalls).toBe(2);
+  });
+});
+
+describe("useValheim partial state", () => {
+  it("merges a partial state over the slices it does not carry", async () => {
+    const { result } = renderHook(() => useValheim(() => undefined));
+    await tick();
+    act(() => last().open());
+    await tick();
+    const before = result.current.state!;
+    const clock = { netTime: 900, day: 0, dayFraction: 0.5, daylight: true, advancing: true, rate: 1 };
+    act(() => last().onmessage?.({ data: JSON.stringify({ type: "state", state: { world: { ...before.world, clock } }, online: true, partial: true }) }));
+    const after = result.current.state!;
+    expect(after.world.clock).toEqual(clock);
+    // Untouched slices keep their objects, so their planks do not re-render.
+    expect(after.server).toBe(before.server);
+    expect(after.history).toBe(before.history);
+    act(() => last().onmessage?.({ data: JSON.stringify({ type: "state", state: {}, online: false, partial: true }) }));
+    expect(result.current.online).toBe(false);
+    expect(result.current.state!.world.clock).toEqual(clock);
+  });
+
+  it("reads /api/state again when a partial state lands while a read is in flight", async () => {
+    let release: () => void = () => undefined;
+    const fetchMock = vi.mocked(fetch);
+    const plain = fetchMock.getMockImplementation()!;
+    const { result } = renderHook(() => useValheim(() => undefined));
+    await tick();
+    act(() => last().open());
+    await tick();
+    const before = stateCalls;
+    fetchMock.mockImplementation(async (url) => {
+      if (url === "/api/state" && stateCalls === before) {
+        stateCalls += 1;
+        await new Promise<void>((r) => (release = r));
+        return Response.json({ ...emptyAgentState(), online: true, metricsConfigured: false, metrics: null, history: { players: [], events: [], online7d: [] } });
+      }
+      return plain(url);
+    });
+    act(() => result.current.retry!());
+    act(() => last().open());
+    const clock = { netTime: 900, day: 0, dayFraction: 0.5, daylight: true, advancing: true, rate: 1 };
+    act(() => last().onmessage?.({ data: JSON.stringify({ type: "state", state: { world: { ...result.current.state!.world, clock } }, online: true, partial: true }) }));
+    await act(async () => {
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(stateCalls).toBe(before + 2);
   });
 });

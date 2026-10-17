@@ -11,7 +11,7 @@ import { metricsFetch, VERSION } from "./buildinfo";
 import { cachedMetrics, fetchMetrics } from "./prom";
 import { mountStatic } from "./static";
 import type { Metrics } from "./types";
-import { liveSocket, liveSocketData, type LiveSocketData } from "./live";
+import { LIVE_WEBSOCKET, liveSocket, liveSocketData, type LiveSocketData } from "./live";
 import { UpdateChecker } from "./update";
 import { isRelease } from "./version";
 
@@ -119,8 +119,7 @@ const server = Bun.serve<LiveSocketData>({
     return app.fetch(req, { server: srv });
   },
   websocket: {
-    // Clients only ever send a short subscribe or unsubscribe.
-    maxPayloadLength: 4096,
+    ...LIVE_WEBSOCKET,
     open: (ws) => live.open(ws),
     message: (ws, raw) => live.message(ws, raw),
     close: (ws) => live.close(ws),
