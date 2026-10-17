@@ -15,8 +15,9 @@ Every release has two tracks, run side by side:
    issues for the *next* release, not squeezed into the one in progress.
 
 The issue tracker is the backlog. There is no backlog file in the repository.
-The pinned issue **"Backlog: improvement loop"** is the entry point. It lists
-the open work by priority and the coverage of every recon round.
+The board (below) shows the open work by status, priority and release. The
+pinned issue **"Backlog: improvement loop"** keeps the coverage of every recon
+round.
 
 ## Issues
 
@@ -42,6 +43,32 @@ A good issue has:
 Before filing, search open and closed issues. Comment on a duplicate rather
 than opening a new one.
 
+## The board
+
+The public project [Skald](https://github.com/users/krystianslowik/projects/1)
+shows the same issues by state. Labels stay the source of truth for kind and
+area; the board adds four things, and every role keeps them current:
+
+| Field | Values | Who sets it |
+|---|---|---|
+| Status | Todo, In progress, In review, Done | Todo when filed. In progress when work starts on a branch. In review when the PR is open. Done happens on its own when the release closes the issue |
+| Priority | High, Medium, Low | when filed, matching the `prio:*` label |
+| Size | S, M, L | when filed, from the effort estimate |
+| Milestone | the release, e.g. `2026.10.7` | when the issue is planned for a release (a repo milestone, not a board field) |
+
+Commands (`gh` needs the `project` scope):
+
+```sh
+gh project item-add 1 --owner krystianslowik --url <issue url>
+gh project field-list 1 --owner krystianslowik --format json   # field and option ids
+gh project item-list 1 --owner krystianslowik --format json    # item ids
+gh project item-edit --project-id <project id> --id <item id> \
+  --field-id <field id> --single-select-option-id <option id>
+gh issue edit <n> --milestone <release>
+```
+
+A new release gets its milestone when the previous one ships.
+
 **Security problems never go into public issues.** File them as a draft
 security advisory (see [SECURITY.md](SECURITY.md)). That covers auth, sessions,
 CSRF, rate limits, data a role should not see, injection and path traversal.
@@ -56,6 +83,10 @@ tests, fixtures, commits, issues or pull requests:
 - platform or PlayFab ids;
 - join codes, world names, seeds;
 - IP addresses or hostnames of a real server.
+
+Nor anything that points at a real deployment: hostnames, IPs, tokens,
+secrets, cluster or network details. The project is open source and public;
+what runs it is not.
 
 Logs and screenshots from a real server must be redacted first. Use fictional
 names in tests (Ragnar, Freya, Bjorn, Astrid).
@@ -77,6 +108,11 @@ A task names one role. Stay inside it.
   operators, not for developers.
 - Commit with `Fixes #N` in the body so the release closes the issue.
 - Do not push, tag or deploy unless the task says so.
+- Move the issue on the board: In progress when you start, In review when the
+  PR is open.
+- Clean up before you report: stop every server and browser you started (by
+  process id, never by pattern), and remove your worktree once the branch is
+  pushed.
 
 **Recon.** Read-only bug hunting. Do not change code.
 
@@ -115,6 +151,9 @@ same way recon does, with the `review` label.
 - then wait for the Release workflow to go green.
 
 Fixed issues close through `Fixes #N` once the release is on `main`.
+
+After the release, clean up: delete the merged branches, local and remote,
+remove leftover worktrees, and open the next release's milestone.
 
 ## Definition of done
 
