@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.9] - 2026-10-17
+
 ### Changed
 
 - The map feels steadier under the finger. A fling now starts at the speed your finger had when you let go, worked out from every touch sample the browser records rather than the last two, so it no longer lurches or stalls at release. Panning into the edge of the world gives a little and springs back instead of stopping dead, and a pinch stretched past the closest or farthest zoom now springs back to it smoothly instead of jumping. With "reduce motion" on, the map still stops where you let go and never stretches.
