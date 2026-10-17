@@ -1895,6 +1895,7 @@ export const pl: Dict = {
   "admin.refusal.notBanned": "Tego wpisu nie ma już na liście banów. Odśwież listę.",
   "admin.refusal.worldLoading": "Świat jeszcze się wczytuje. Spróbuj za chwilę.",
   "admin.refusal.untested": "Wersja gry {build} nie jest jeszcze dozwolona. Najpierw zezwól na nią w panelu admina.",
+  "admin.refusal.busy": "Gra była zajęta i nie przyjęła polecenia, więc nic się nie stało. Spróbuj za chwilę.",
   "admin.refusal.timeout": "Mostek nie odpowiedział na czas. Mogło się jednak udać: sprawdź, zanim spróbujesz jeszcze raz.",
   "admin.refusal.agentDown": "Brak kontaktu z agentem. Spróbuj za chwilę.",
   "admin.time.title": "Czas",

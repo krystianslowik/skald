@@ -23,6 +23,7 @@ beforeEach(() => {
   reload = vi.fn<() => void>();
   page.reload = reload;
   page.reloading = false;
+  page.warmed.clear();
 });
 afterEach(() => {
   page.reload = realReload;
@@ -63,6 +64,11 @@ describe("reloadOnce", () => {
     expect(reloadOnce()).toBe(true);
     expect(reloadOnce()).toBe(true);
     expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a reload stamped ahead of the clock (the clock was set back)", () => {
+    sessionStorage.setItem("skald.chunkReload", String(Date.now() + 10 * 60_000));
+    expect(reloadOnce()).toBe(true);
   });
 
   it("does not reload offline or without sessionStorage, where it could not help or could loop", () => {
@@ -202,6 +208,35 @@ describe("a lazy chunk that fails offline or with the server down", () => {
     expect(fetchChunk.mock.calls[0]?.[0]).toBe(url);
   });
 
+  it("back online: also fetches every chunk the failed one imports, with ordinary requests, before the reload", async () => {
+    // WebKit keeps a failed dependency (a chunk shared with the admin sheets) across the reload until it is fetched for real.
+    const deps = ["/assets/chestadd-D4.js", "/assets/Sheet-E5.js"];
+    vi.stubGlobal("__skaldChunkDeps", { [url]: deps, "/assets/Other-F6.js": ["/assets/never-G7.js"] });
+    const fetched: string[] = [];
+    fetchChunk.mockImplementation(async (u: string, init?: RequestInit) => {
+      if (init?.cache !== "no-store") fetched.push(u);
+      return new Response("export default 1", { status: 200 });
+    });
+    let beforeReload: string[] = [];
+    reload.mockImplementation(() => void (beforeReload = [...fetched].sort()));
+    onLine = false;
+    Sheet("en", failing());
+    await screen.findByRole("alert");
+    onLine = true;
+    act(() => void window.dispatchEvent(new Event("online")));
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    expect(beforeReload).toEqual([url, ...deps].sort());
+  });
+
+  it("knows what each built chunk imports, and nothing outside a build", async () => {
+    const { chunkDeps } = await import("./chunks");
+    vi.stubGlobal("__skaldChunkDeps", { [url]: ["/assets/chestadd-D4.js"] });
+    expect(chunkDeps(url)).toEqual(["/assets/chestadd-D4.js"]);
+    expect(chunkDeps("/assets/Other-F6.js")).toEqual([]);
+    vi.stubGlobal("__skaldChunkDeps", undefined);
+    expect(chunkDeps(url)).toEqual([]);
+  });
+
   it("closed offline and opened again online: reloads at once", async () => {
     onLine = false;
     const Lazy = failing();
@@ -267,15 +302,83 @@ describe("a lazy chunk that fails offline or with the server down", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("back online but a reload just happened: the general note, not the update one", async () => {
+  it("back online, a reload just happened and the chunk is gone from the server: Skald was updated after all", async () => {
     afterReload();
     onLine = false;
     Sheet("en", failing());
     await screen.findByRole("alert");
+    fetchChunk.mockResolvedValue(new Response("Not found", { status: 404 }));
     onLine = true;
     act(() => void window.dispatchEvent(new Event("online")));
-    await vi.waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(en["crash.body"]));
+    await vi.waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(en["crash.stale"]));
     expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("back online but a reload just happened: the general note, not the update one, and the reload once the guard allows", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      afterReload();
+      onLine = false;
+      Sheet("en", failing());
+      await vi.waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+      onLine = true;
+      act(() => void window.dispatchEvent(new Event("online")));
+      await vi.waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(en["crash.body"]));
+      expect(reload).not.toHaveBeenCalled();
+      await act(async () => void (await vi.advanceTimersByTimeAsync(80_000)));
+      expect(reload).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps failing while the server has it: stops after two reloads in five minutes instead of reloading every minute", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      // A reload, then a second one a minute later: as many as five minutes allow.
+      afterReload();
+      vi.advanceTimersByTime(61_000);
+      afterReload();
+      Sheet("en", failing());
+      await vi.waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(en["crash.body"]));
+      const calls = fetchChunk.mock.calls.length;
+      await act(async () => void (await vi.advanceTimersByTimeAsync(10 * 60_000)));
+      expect(reload).not.toHaveBeenCalled();
+      expect(fetchChunk.mock.calls.length).toBe(calls);
+      expect(screen.getByRole("alert")).toHaveTextContent(en["crash.body"]);
+      // The card's own button still reloads.
+      fireEvent.click(screen.getByRole("button", { name: en["crash.reload"] }));
+      expect(reload).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails again right after the reload while the server has it: not called an update, reloads once the guard allows (EN and PL)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      afterReload();
+      const view = Sheet("en", failing());
+      await vi.waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(en["crash.body"]));
+      expect(screen.getByRole("alert")).not.toHaveTextContent(en["crash.stale"]);
+      expect(reload).not.toHaveBeenCalled();
+      // While the guard holds, the checks do not download the chunk again.
+      const calls = fetchChunk.mock.calls.length;
+      await act(async () => void (await vi.advanceTimersByTimeAsync(50_000)));
+      expect(fetchChunk.mock.calls.length).toBe(calls);
+      await act(async () => void (await vi.advanceTimersByTimeAsync(80_000)));
+      expect(reload).toHaveBeenCalledTimes(1);
+      view.unmount();
+
+      page.reloading = false;
+      reload.mockClear();
+      afterReload();
+      Sheet("pl", failing());
+      await vi.waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(pl["crash.body"]));
+      expect(screen.getByRole("alert")).not.toHaveTextContent(pl["crash.stale"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

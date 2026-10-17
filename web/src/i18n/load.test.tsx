@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { localePreloadScript } from "./preload";
+import { lazyChunkDeps, localePreloadScript } from "./preload";
 
 // test-setup registers both dictionaries on the shared modules. These tests
 // import fresh copies, which start with none, the way the browser does.
@@ -269,6 +269,14 @@ describe("locale preload script", () => {
     delete (window as unknown as Record<string, unknown>).__skaldChunks;
   });
 
+  it("publishes what each lazy chunk imports", () => {
+    const deps = { "/assets/MapView-C3.js": ["/assets/chestadd-D4.js"] };
+    new Function(localePreloadScript(chunks, {}, deps))();
+    expect((window as unknown as Record<string, unknown>).__skaldChunkDeps).toEqual(deps);
+    delete (window as unknown as Record<string, unknown>).__skaldChunkDeps;
+    delete (window as unknown as Record<string, unknown>).__skaldChunks;
+  });
+
   it("still works when storage throws", () => {
     vi.stubGlobal("localStorage", {
       getItem: () => {
@@ -278,5 +286,29 @@ describe("locale preload script", () => {
     document.documentElement.setAttribute("data-locale", "pl");
     run();
     expect(preloads()).toEqual(["/assets/pl-B2.js"]);
+  });
+});
+
+describe("lazy chunk dependencies", () => {
+  // The shape of the 2026.10.6 build: MapView and AdminSheets share chestadd; the entry loads i18n itself.
+  const chunk = (fileName: string, imports: string[], isEntry = false) => ({ type: "chunk", fileName, imports, isEntry });
+  const bundle = {
+    a: chunk("assets/index-A.js", ["assets/i18n-B.js"], true),
+    b: chunk("assets/i18n-B.js", []),
+    c: chunk("assets/MapView-C.js", ["assets/index-A.js", "assets/i18n-B.js", "assets/Sheet-D.js", "assets/chestadd-E.js", "assets/MapCanvas-F.js"]),
+    d: chunk("assets/Sheet-D.js", ["assets/index-A.js"]),
+    e: chunk("assets/chestadd-E.js", ["assets/Sheet-D.js"]),
+    f: chunk("assets/MapCanvas-F.js", ["assets/geo-G.js"]),
+    g: chunk("assets/geo-G.js", []),
+    h: chunk("assets/AdminSheets-H.js", ["assets/chestadd-E.js", "assets/index-A.js"]),
+    i: chunk("assets/en-I.js", []),
+    css: { type: "asset", fileName: "assets/index-A.css" },
+  };
+
+  it("lists every chunk a lazy one imports, through others too, except what the entry already loads", () => {
+    expect(lazyChunkDeps(bundle, ["assets/MapView-C.js", "assets/AdminSheets-H.js", "assets/en-I.js"])).toEqual({
+      "/assets/MapView-C.js": ["/assets/MapCanvas-F.js", "/assets/Sheet-D.js", "/assets/chestadd-E.js", "/assets/geo-G.js"],
+      "/assets/AdminSheets-H.js": ["/assets/Sheet-D.js", "/assets/chestadd-E.js"],
+    });
   });
 });

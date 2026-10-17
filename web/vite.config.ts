@@ -7,7 +7,7 @@ import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { buildId, stampServiceWorker } from "./src/lib/swversion.ts";
 import { LOCALES, type Locale } from "./src/i18n/locales.ts";
-import { localePreloadScript } from "./src/i18n/preload.ts";
+import { lazyChunkDeps, localePreloadScript } from "./src/i18n/preload.ts";
 
 // `npm run dev` talks to the Skald server on :8080 (run it with `bun run dev` for the mock agent).
 const SERVER = process.env.SERVER_URL ?? "http://127.0.0.1:8080";
@@ -61,6 +61,7 @@ const localePreload = (): Plugin => ({
       const chunks: Partial<Record<Locale, string>> = {};
       // Every lazy chunk by its module's name (`lazyChunk(load, "MapView")`), the dictionaries included.
       const lazy: Record<string, string> = {};
+      const lazyFiles: string[] = [];
       for (const out of Object.values(ctx.bundle)) {
         if (out.type !== "chunk") continue;
         const file = (out.facadeModuleId ?? "").replace(/\\/g, "/");
@@ -71,10 +72,11 @@ const localePreload = (): Plugin => ({
         const name = file.slice(file.lastIndexOf("/") + 1).replace(/\.[^.]+$/, "");
         if (lazy[name]) throw new Error(`skald-locale-preload: two lazy chunks named ${name}`);
         lazy[name] = `/${out.fileName}`;
+        lazyFiles.push(out.fileName);
       }
       const missing = LOCALES.filter((l) => !chunks[l]);
       if (missing.length) throw new Error(`skald-locale-preload: no chunk for ${missing.join(", ")}`);
-      return [{ tag: "script", children: localePreloadScript(chunks as Record<Locale, string>, lazy), injectTo: "head-prepend" as const }];
+      return [{ tag: "script", children: localePreloadScript(chunks as Record<Locale, string>, lazy, lazyChunkDeps(ctx.bundle, lazyFiles)), injectTo: "head-prepend" as const }];
     },
   },
 });

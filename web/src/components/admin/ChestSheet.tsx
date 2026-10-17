@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { MapContainer } from "../../types";
 import { stackSize } from "../../lib/admin";
 import { chestRoom, MAX_CHEST_ADD, notePending, usePendingItems, type ChestAddResult } from "../../lib/chestadd";
-import { failText } from "../../lib/refusal";
+import { failText, isNotPickedUp } from "../../lib/refusal";
 import { itemLabel } from "../../lib/storage";
 import { useI18n } from "../../i18n";
 import { Sheet } from "../Sheet";
@@ -54,7 +54,8 @@ export function ChestSheet({ chest, onClose }: { chest: MapContainer; onClose: (
     setBusy(false);
     if (res.needsAdmin) return;
     if (!res.ok) {
-      const timedOut = res.status === 504;
+      // A 504 may mean the items went in, unless the bridge says the game never took the command.
+      const timedOut = res.status === 504 && !isNotPickedUp(res.error);
       const msg = timedOut ? t("admin.chest.timeout") : failText(i18n, res);
       setUncertain(timedOut);
       setError(msg);

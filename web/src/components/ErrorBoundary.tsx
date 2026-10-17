@@ -1,6 +1,6 @@
 import { Component, type ReactNode } from "react";
 import { useI18n } from "../i18n";
-import { ChunkOffline, isChunkError, page, recoverChunk } from "../lib/chunks";
+import { ChunkOffline, isChunkError, page, recoverChunk, reloadBlock } from "../lib/chunks";
 
 type Cause = "crash" | "stale" | "offline";
 const COPY = { crash: "crash.body", stale: "crash.stale", offline: "crash.offline" } as const;
@@ -44,6 +44,10 @@ interface State {
   error: unknown;
   /** The chunk is still out of reach (offline, server down); cleared when a reload cannot help. */
   offline: boolean;
+  /** The chunk can be fetched, but a reload just happened: say something broke (not "no connection") and keep checking. */
+  held: boolean;
+  /** The chunk lost offline turned out gone from the server (a deploy) and the reload is held back. */
+  gone: boolean;
 }
 
 /**
@@ -57,14 +61,15 @@ interface State {
 const recheckDelay = (n: number) => Math.min(60_000, 5000 * 2 ** n);
 
 export class ChunkBoundary extends Component<Props, State> {
-  state: State = { error: null, offline: false };
+  state: State = { error: null, offline: false, held: false, gone: false };
   private alive = false;
   private trying = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private rechecks = 0;
 
   static getDerivedStateFromError(error: unknown): State {
-    return { error: error ?? new Error("unknown"), offline: error instanceof ChunkOffline };
+    const chunk = error instanceof ChunkOffline ? error.reason : null;
+    return { error: error ?? new Error("unknown"), offline: chunk === "net" || chunk === "held", held: chunk === "held" || chunk === "spent", gone: false };
   }
 
   componentDidMount() {
@@ -80,7 +85,7 @@ export class ChunkBoundary extends Component<Props, State> {
   }
 
   componentDidUpdate(prev: Props, before: State) {
-    if (this.state.error && prev.resetKey !== this.props.resetKey) this.setState({ error: null, offline: false });
+    if (this.state.error && prev.resetKey !== this.props.resetKey) this.setState({ error: null, offline: false, held: false, gone: false });
     else if (this.state.error !== before.error) this.retryIfOnline();
   }
 
@@ -103,31 +108,44 @@ export class ChunkBoundary extends Component<Props, State> {
     this.timer = setTimeout(this.retry, recheckDelay(this.rechecks++));
   }
 
-  /** Back online, or a periodic check: reload if the chunk can be fetched now, else keep the note (or say why a reload will not help). */
+  /**
+   * Back online, or a periodic check: reload if the chunk can be fetched now,
+   * else keep the note and keep checking. A chunk gone from the server with
+   * the reload held back, or a tab that reloaded as often as it may, ends the
+   * checks: a reload will not come by itself.
+   */
   private retry = () => {
     const err = this.state.error;
     if (!this.state.offline || !(err instanceof ChunkOffline) || this.trying) return;
     clearTimeout(this.timer);
+    // The server already had the chunk: while the guard still holds, asking again costs a download for nothing.
+    const block = this.state.held ? reloadBlock() : null;
+    if (block === "wait") return this.schedule();
+    if (block === "spent") return this.setState({ offline: false });
     this.trying = true;
-    void recoverChunk(err.url).then((r) => {
+    void recoverChunk(err.urls).then((r) => {
       this.trying = false;
       if (!this.alive || this.state.error !== err) return;
-      if (r === false) this.setState({ offline: false });
-      else if (r === "down") this.schedule();
+      if (r === "stale") this.setState({ offline: false, gone: err.urls.length > 0 });
+      else if (r === "spent") this.setState({ offline: false, held: true });
+      else if (r !== "reloading") {
+        if (this.state.held !== (r === "held")) this.setState({ held: r === "held" });
+        this.schedule();
+      }
     });
   };
 
   private close = () => {
     clearTimeout(this.timer);
-    this.setState({ error: null, offline: false });
+    this.setState({ error: null, offline: false, held: false, gone: false });
     this.props.onClose?.();
   };
 
   render() {
-    const { error, offline } = this.state;
+    const { error, offline, held, gone } = this.state;
     if (!error) return this.props.children;
-    // A chunk lost offline whose reload is held back (one just happened) is not a new build.
-    const cause: Cause = offline ? "offline" : isChunkError(error) && !(error instanceof ChunkOffline) ? "stale" : "crash";
+    // A chunk lost offline, or still on the server, whose reload is held back (one just happened) is not a new build.
+    const cause: Cause = offline && !held ? "offline" : gone || (isChunkError(error) && !(error instanceof ChunkOffline)) ? "stale" : "crash";
     return <ReloadCard overlay={this.props.overlay} cause={cause} onClose={this.props.onClose ? this.close : undefined} />;
   }
 }

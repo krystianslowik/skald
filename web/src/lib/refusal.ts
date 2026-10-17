@@ -22,6 +22,9 @@ const item = (name: string, i: Labels) => itemLabel(name, i.lookup);
 const fillItem = (name: string, i: Labels) => i.lookup(`admin.fill.item.${name}`) ?? itemLabel(name, i.lookup);
 const creature = (name: string, i: Labels) => i.lookup(`creature.${name}`) ?? name;
 
+/** The bridge's 504 for a command the game's main thread never started (bridge/plugin/Plugin.cs). */
+const NOT_PICKED_UP = /^game main thread did not pick up the command in time$/;
+
 const RULES: Rule[] = [
   // chest-add (bridge/plugin/Chests.cs)
   { re: /^a player has that chest open; /, key: "admin.refusal.chestOpen" },
@@ -63,7 +66,12 @@ const RULES: Rule[] = [
   // The game, the bridge or the agent not ready.
   { re: /^(world not loaded yet|EnvMan not available|RandEventSystem not available|ObjectDB not available)$/, key: "admin.refusal.worldLoading" },
   { re: /^untested game build (\S+): confirm it in the admin panel first$/, key: "admin.refusal.untested", vars: (m) => ({ build: m[1]! }) },
-  { re: /^the bridge did not answer in time$/, key: "admin.refusal.timeout" },
+  // The bridge waits 5 s for the game's main thread to pick a command up, less
+  // than the agent's 8 s, so "not picked up" is the usual timeout: the bridge
+  // dropped the command, nothing was done. A command that started waits 5 s
+  // more, so the agent's own timeout normally comes first; it may have worked.
+  { re: NOT_PICKED_UP, key: "admin.refusal.busy" },
+  { re: /^(the bridge did not answer|command did not finish) in time$/, key: "admin.refusal.timeout" },
   { re: /^agent unreachable$/, key: "admin.refusal.agentDown" },
 ];
 
@@ -86,6 +94,9 @@ export function refusalReason(i: Labels, error: string | null | undefined): stri
   const text = refusalText(i, error);
   return text === null ? null : text.split(/\. /)[0]!.replace(/\.$/, "");
 }
+
+/** The game was busy and the bridge dropped the command unrun: nothing was done, so trying again is safe. */
+export const isNotPickedUp = (error: string | null | undefined) => NOT_PICKED_UP.test(error?.trim() ?? "");
 
 /** What a failed admin call says: unreachable, a known refusal, the raw text, or "that did not work". */
 export function failText(i: Labels, res: { status: number; error?: string }): string {

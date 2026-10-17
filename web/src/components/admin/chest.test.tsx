@@ -170,6 +170,29 @@ describe("add item to a chest", () => {
     expect(within(sheet).getByRole("button", { name: "Add 10× Wood again" })).toBeInTheDocument();
   });
 
+  it("says nothing went in when the game never took the command (EN and PL)", async () => {
+    const calls = api(status(), () => Response.json({ ok: false, error: "game main thread did not pick up the command in time" }, { status: 504 }));
+    for (const [locale, search, item, add, said] of [
+      ["en", "wood", "Wood", "Add 10× Wood", "The game was busy and did not take the command, so nothing was done."],
+      ["pl", "drewno", "Drewno", "Dodaj 10× Drewno", "Gra była zajęta i nie przyjęła polecenia, więc nic się nie stało."],
+    ] as const) {
+      const view = wrap(<ChestSheet chest={CHEST} onClose={() => {}} />, locale);
+      const sheet = screen.getByRole("dialog");
+      fireEvent.change(within(sheet).getByRole("searchbox"), { target: { value: search } });
+      fireEvent.click(within(sheet).getByRole("button", { name: item }));
+      const go = within(sheet).getByRole("button", { name: add });
+      await waitFor(() => expect(go).toBeEnabled());
+      fireEvent.click(go);
+      const alert = await within(sheet).findByRole("alert");
+      expect(alert).toHaveTextContent(said);
+      expect(alert).not.toHaveTextContent(/may already be in the chest|mogą już być w skrzyni/);
+      // Nothing went in, so the button is the plain add, not "again".
+      expect(within(sheet).getByRole("button", { name: add })).toBeInTheDocument();
+      view.unmount();
+    }
+    expect(calls.filter((c) => c.url === "/api/admin/chest-add")).toHaveLength(2);
+  });
+
   it("speaks Polish", () => {
     api(status(), () => Response.json({ ok: true, data: {} }));
     wrap(<ChestSheet chest={CHEST} onClose={() => {}} />, "pl");

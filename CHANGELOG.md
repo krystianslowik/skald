@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- On an iPhone (Safari), opening the map without a connection and then getting the connection back now loads the map, instead of saying "Skald was updated" with a Reload button that often did not help. When the connection is back but the page just reloaded, the panel keeps trying on its own for up to a minute and never claims Skald was updated unless it really was (#112).
+- When the game is busy (a world save, a hitch) and does not take an admin command in time, the panel now says so in your language: the game was busy, nothing was done, try again. Add item no longer warns that the items may already be in the chest in that case, since nothing went in. When the game took the command but did not finish in time, the panel still says it may have worked anyway (#113).
+
 ## [2026.10.7] - 2026-10-17
 
 ### Fixed
