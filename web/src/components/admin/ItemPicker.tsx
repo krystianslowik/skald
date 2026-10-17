@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { loadKits, PRESET_KITS, saveKits, stacksOf, stackSize, type Kit, type KitLine } from "../../lib/admin";
 import { useIconSheet } from "../../lib/itemicons";
 import { fold, isUnusedItem, itemLabel, itemMatches } from "../../lib/storage";
@@ -23,37 +23,15 @@ const SHOWN = 72;
  * kit on this device, and drop it next to a player or at a point.
  */
 export function ItemPicker({ target: initial, lines: initialLines, onClose }: { target: Target; lines?: KitLine[]; onClose: () => void }) {
-  const { t, tn, lookup, locale } = useI18n();
+  const { t, tn, lookup } = useI18n();
   const admin = useAdmin();
   const reduced = useReducedMotion() ?? false;
-  const sheet = useIconSheet();
   const [target, setTarget] = useState<Target>(initial);
-  const [query, setQuery] = useState("");
   const [lines, setLines] = useState<KitLine[]>(initialLines ?? []);
   const [kits, setKits] = useState<Kit[]>(loadKits);
   const [kitName, setKitName] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
-
-  // Item names in every language are searched; the other dictionaries load once a query is typed.
-  const langs = useEveryLocale(query.trim() !== "");
-
-  const all = useMemo(() => {
-    // Items the dictionaries name (the same keys in each): offered even without an icon sheet.
-    const names = new Set(
-      Object.keys(dictFor(locale) ?? {})
-        .filter((k) => k.startsWith("item."))
-        .map((k) => k.slice(5)),
-    );
-    if (sheet) for (const n of Object.keys(sheet.items)) names.add(n);
-    return [...names].filter((name) => !isUnusedItem(name)).map((name) => ({ name, label: itemLabel(name, lookup), icon: !!sheet?.items[name] })).sort((a, b) => Number(b.icon) - Number(a.icon) || a.label.localeCompare(b.label));
-  }, [sheet, lookup, locale]);
-
-  const shown = useMemo(() => {
-    const q = fold(query.trim());
-    const list = q ? all.filter((i) => fold(i.label).includes(q) || itemMatches(i.name, q)) : all;
-    return list.slice(0, SHOWN);
-  }, [all, query, langs]);
 
   const stacks = stacksOf(lines, stackSize);
   const tooMany = stacks > MAX_STACKS;
@@ -221,43 +199,88 @@ export function ItemPicker({ target: initial, lines: initialLines, onClose }: { 
             </div>
           </div>
         ))}
-        <div>
-          <label htmlFor="item-q" className="label-caps mb-2 block">
-            {t("admin.items.search")}
-          </label>
-          <input
-            id="item-q"
-            data-autofocus
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("admin.items.searchHint")}
-            className="field w-full"
-            autoComplete="off"
-            enterKeyHint="search"
-          />
-        </div>
-        <ul aria-label={t("admin.items.results")} className="grid grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-2">
-          {shown.map((i) => {
-            const n = lines.find((l) => l.item === i.name)?.amount;
-            return (
-              <li key={i.name}>
-                <button
-                  type="button"
-                  onClick={() => add(i.name)}
-                  title={i.label}
-                  className={`press relative flex h-21 w-full flex-col items-center justify-center gap-1 rounded-[3px] px-1 ${n ? "slot-selected" : "slot"}`}
-                >
-                  <ItemIcon name={i.name} size={26} iconSize={40} className="text-label" />
-                  <span className="line-clamp-2 w-full text-center text-[0.6875rem] leading-tight text-bone">{i.label}</span>
-                  {n && <span className="absolute right-1 top-0.5 text-[0.6875rem] font-bold tabular-nums text-flame">{n}</span>}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-        {shown.length === 0 && <p className="text-sm text-ash">{t("admin.items.none")}</p>}
+        <ItemSearch
+          onPick={add}
+          badge={(name) => {
+            const n = lines.find((l) => l.item === name)?.amount;
+            return n ? <span className="absolute right-1 top-0.5 text-[0.6875rem] font-bold tabular-nums text-flame">{n}</span> : null;
+          }}
+          selected={(name) => lines.some((l) => l.item === name)}
+        />
       </div>
     </Sheet>
+  );
+}
+
+/**
+ * Every item the server's icon sheet or the dictionaries know, searchable in
+ * English and Polish: the grid of the Give items sheet and of Add item on a
+ * chest. `selected` marks picked items, `badge` draws over a tile; `single`
+ * makes the tiles a one-of choice for assistive tech.
+ */
+export function ItemSearch({ onPick, selected, badge, single = false }: { onPick: (item: string) => void; selected?: (item: string) => boolean; badge?: (item: string) => ReactNode; single?: boolean }) {
+  const { t, lookup, locale } = useI18n();
+  const sheet = useIconSheet();
+  const [query, setQuery] = useState("");
+  // Item names in every language are searched; the other dictionaries load once a query is typed.
+  const langs = useEveryLocale(query.trim() !== "");
+
+  const all = useMemo(() => {
+    // Items the dictionaries name (the same keys in each): offered even without an icon sheet.
+    const names = new Set(
+      Object.keys(dictFor(locale) ?? {})
+        .filter((k) => k.startsWith("item."))
+        .map((k) => k.slice(5)),
+    );
+    if (sheet) for (const n of Object.keys(sheet.items)) names.add(n);
+    return [...names].filter((name) => !isUnusedItem(name)).map((name) => ({ name, label: itemLabel(name, lookup), icon: !!sheet?.items[name] })).sort((a, b) => Number(b.icon) - Number(a.icon) || a.label.localeCompare(b.label));
+  }, [sheet, lookup, locale]);
+
+  const shown = useMemo(() => {
+    const q = fold(query.trim());
+    const list = q ? all.filter((i) => fold(i.label).includes(q) || itemMatches(i.name, q)) : all;
+    return list.slice(0, SHOWN);
+  }, [all, query, langs]);
+
+  return (
+    <>
+      <div>
+        <label htmlFor="item-q" className="label-caps mb-2 block">
+          {t("admin.items.search")}
+        </label>
+        <input
+          id="item-q"
+          data-autofocus
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t("admin.items.searchHint")}
+          className="field w-full"
+          autoComplete="off"
+          enterKeyHint="search"
+        />
+      </div>
+      <ul aria-label={t("admin.items.results")} className="grid grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-2">
+        {shown.map((i) => {
+          const on = selected?.(i.name) ?? false;
+          return (
+            <li key={i.name}>
+              <button
+                type="button"
+                onClick={() => onPick(i.name)}
+                aria-pressed={single ? on : undefined}
+                title={i.label}
+                className={`press relative flex h-21 w-full flex-col items-center justify-center gap-1 rounded-[3px] px-1 ${on ? "slot-selected" : "slot"}`}
+              >
+                <ItemIcon name={i.name} size={26} iconSize={40} className="text-label" />
+                <span className="line-clamp-2 w-full text-center text-[0.6875rem] leading-tight text-bone">{i.label}</span>
+                {badge?.(i.name)}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {shown.length === 0 && <p className="text-sm text-ash">{t("admin.items.none")}</p>}
+    </>
   );
 }

@@ -177,14 +177,15 @@ loaded are counted as `unloaded` and skipped. `radius` is at most 100 m.
 | `POST /v1/build/fill` | `player` or `at`, `radius`, optional `item` | The pre-0.3.0 command, kept for older panels: every station gets its first (or the requested) input plus fuel, fermenters get mead base |
 | `POST /v1/build/fill-kilns` | `player` or `at`, `radius` | Charcoal kilns get their first input (wood) up to capacity with `RPC_AddOre`. Answers `kilns`, `skipped`, `full`, `unloaded` and `added` (item: stations) |
 | `POST /v1/build/fill-smelters` | `player` or `at`, `radius`, `what` (`ore`, `both` (default) or `coal`), `ore` (an item `GET /v1/build/stations` lists, or `current`; not needed for `coal`) | `RPC_AddOre` with that ore and/or `RPC_AddFuel`, up to capacity. A station that does not take the ore gets nothing (`skipped`); with `current` each station gets the ore at the head of its queue, and one holding no ore gets only fuel (`both`) or nothing (`ore`). Answers `smelters`, `skipped`, `full`, `unloaded`, `added` and `fuel` |
-| `POST /v1/build/fill-fermenters` | `player` or `at`, `radius`, `base` (a mead base `GET /v1/build/stations` lists) | `RPC_AddItem` with that base, once, on every empty fermenter. One still fermenting or holding mead to tap is left alone (`full`). Answers `fermenters`, `skipped`, `full`, `unloaded` and `added` (0.3.1+) |
-| `GET /v1/build/stations` | | Every kiln and smelter prefab with the items it takes, in the game's order, read from the prefabs' `Smelter` components, and every fermenter with the mead bases its `Fermenter` component takes: `{kilns:[{prefab, inputs}], smelters:[{prefab, fuel, inputs}], fermenters:[{prefab, inputs}]}` (`fermenters` 0.3.1+). A kiln burns nothing and makes what a smelter burns; a smelter burns what a kiln makes. Windmills, spinning wheels and the eitr refinery are neither |
+| `POST /v1/build/fill-fermenters` | `player` or `at`, `radius`, `base` (a mead base `GET /v1/build/stations` lists) | `RPC_AddItem` with that base, once, on every empty fermenter. One still fermenting or holding mead to tap is left alone (`full`). Answers `fermenters`, `skipped`, `full`, `unloaded` and `added` (0.4.0+) |
+| `GET /v1/build/stations` | | Every kiln and smelter prefab with the items it takes, in the game's order, read from the prefabs' `Smelter` components, and every fermenter with the mead bases its `Fermenter` component takes: `{kilns:[{prefab, inputs}], smelters:[{prefab, fuel, inputs}], fermenters:[{prefab, inputs}]}` (`fermenters` 0.4.0+). A kiln burns nothing and makes what a smelter burns; a smelter burns what a kiln makes. Windmills, spinning wheels and the eitr refinery are neither |
 | `POST /v1/build/grow` | `player` or `at`, `radius` | Back-dates the plant time of crops and saplings |
 | `GET /v1/tombstones` | | `id, owner, position, loaded` |
 | `POST /v1/tombstones/move` | `id`, `player` or `at` | Moves a tombstone that no player has loaded |
 | `POST /v1/map/reveal` | `player` or `at`, `radius` | Marks the whole map explored in the shared data of every cartography table in range. It decodes the table blob, merges the change (never replaces it), re-encodes and writes it back (layout in `plugin/MapData.cs`). A table nobody has written gets a fresh blob. An unknown blob version answers 409 and leaves the table untouched |
 | `POST /v1/map/pins` | `pins: [{x, z, name, type: icon0..icon4}]`, `player` or `at`, `radius` | Merges shared pins into the tables in range. Pins carry the fixed owner id `0x534B414C44` ("SKALD") and skip duplicates (same name within 1 m) |
 | `POST /v1/nearby` | `player` or `at`, `radius` | Counts objects by prefab, and how many are loaded. Read-only diagnostics |
+| `POST /v1/containers/add` | `prefab` (e.g. `piece_chest_wood`), `at: {x, y, z}` (the chest's position in the save, within 0.5 m), `item`, `amount` (1-9999) | Puts items into one chest, through the game's own `Inventory`: tops up stacks of that item, then fills empty slots. Refuses with 409 when a player has the chest open or stands within reach of it, when there is no room (the message says how many fit), when two chests sit on the spot, or when the chest holds items the server does not know or that do not read back the same; 404 when the chest or the item is gone; 400 for carts, ships and graves. The server takes ownership and writes the `items` ZDO value, so a client that has the chest loaded reloads it within a second and gets ownership back within two; an unloaded chest just keeps the new items. Answers `slots: [{x, y, added, stack}]`, `room` (left), `loaded` and `position` |
 
 These answer `501` with the reason, because the state they touch lives only on
 the client: `POST /v1/weather`, `/v1/player/feed`, `/v1/player/godmode`,
@@ -368,12 +369,20 @@ world yet. Check after deploying: `GET /v1/terrain/info` answers, its `forest`
 is `mask` and `palette.source` says whether the colours came from the game;
 `X-Skald-Sample-Ms` on a 260 x 260 tile shows the real cost per tile.
 
-**New in v0.3.1, not yet verified on a live server:** `build/fill-fermenters`
+**New in v0.4.0, not yet verified on a live server:** `build/fill-fermenters`
 and the `fermenters` list in `build/stations` compile against the 1.0 reference
 assemblies, and the rule (one base, only into an empty fermenter, only a base it
 takes) is unit-tested in `tests/FillPlanTests.cs`. Not yet seen in a loaded
 world: the fermenter list from the real prefabs and the empty check on
 `s_content`. `RPC_AddItem` is sent as in the verified 0.1.x `build/fill`.
+
+**Also new in v0.4.0, not yet verified on a live server:** `containers/add`
+compiles against the 1.0 reference assemblies, and its room check and the
+"only ever adds" check are unit-tested in `tests/ChestPlanTests.cs`. Not yet
+seen in a loaded world: the round trip of a real chest through the game's
+`Inventory` on the server, and a client that has the chest loaded picking up
+the write (open the chest in game after adding; it should show the items
+within a second, and stay openable).
 
 **New in v0.3.0, not yet verified on a live server:** `build/fill-kilns`,
 `build/fill-smelters` and `build/stations` compile against the 1.0 reference

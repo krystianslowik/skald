@@ -12,7 +12,8 @@ above them.
 ### Added
 
 - **Fill fermenters** is back as its own admin action under Base helpers: pick the mead base from its icon, check where (near a player, around the base or a point on the map), and every empty fermenter there gets one batch of it. A fermenter that is still fermenting, or holds mead waiting to be tapped, is left alone. The Saga says what went in ("started 2 fermenters with Mead Base: Tasty near Freya").
-- **Operators:** Fill fermenters needs the bridge 0.3.1 image (`skald-bridge`); it adds `POST /v1/build/fill-fermenters` and lists the mead bases each fermenter takes in `GET /v1/build/stations`. The new plugin loads only when the game restarts. With bridge 0.3.0 the mead base list stays empty and says so; everything else works as before.
+- Admins can put items into a chest from the map: open a chest, tap **Add item**, pick the item from the same search as Give items, choose how many (up to what still fits) and confirm. The items land in that chest in the running game, the Saga records it ("added 20 Iron to a chest at 208, -352"), and the chest on the map shows them at once, marked as added just now until the next world save shows them for good. The game refuses while a player has the chest open or stands at it, and says how many fit when there is not enough room; carts, ships and graves cannot take items this way (#100).
+- **Operators:** Fill fermenters and Add item both need the bridge plugin **v0.4.0** (the `skald-bridge` image of this release), which means a game restart to deploy: the new plugin loads only when the game restarts. It adds `POST /v1/build/fill-fermenters`, lists the mead bases each fermenter takes in `GET /v1/build/stations`, and adds `POST /v1/containers/add`. With an older bridge the mead base list stays empty and says so, and the Add item button is shown greyed out; everything else works as before.
 
 ### Changed
 

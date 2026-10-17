@@ -1,5 +1,5 @@
 import { createContext, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { AdminCatalog, AdminCommand, AdminStatus, AgentEvent, ApiState, Platform, RestoreBackup } from "../../types";
+import type { AdminCatalog, AdminCommand, AdminStatus, AgentEvent, ApiState, MapContainer, Platform, RestoreBackup } from "../../types";
 import { getAdminStatus, postAdmin, runAdmin, type AdminOutcome, type KitLine } from "../../lib/admin";
 import { Unauthorized } from "../../lib/api";
 import { useWorldMap } from "../../lib/useWorldMap";
@@ -37,6 +37,7 @@ export type AdminView = (
   | { kind: "point"; x: number; z: number }
   | { kind: "restore"; backup: RestoreBackup }
   | { kind: "fill"; station: "smelters" | "fermenters"; target: Target; choice?: FillChoice; catalog?: AdminCatalog | null }
+  | { kind: "chest"; chest: MapContainer }
 ) & { picked?: { x: number; z: number } };
 
 /** A map tap someone is waiting for (teleport here, spawn here). */

@@ -681,6 +681,7 @@ export const ADMIN_COMMANDS = [
   "grow",
   "map-reveal",
   "map-pins",
+  "chest-add",
   "ack-build",
 ] as const;
 export type AdminCommand = (typeof ADMIN_COMMANDS)[number];
@@ -758,7 +759,7 @@ export interface AdminCatalog {
 export interface FillStations {
   kilns: { prefab: string; inputs: string[] }[];
   smelters: { prefab: string; fuel: string | null; inputs: string[] }[];
-  /** Mead bases each fermenter takes (bridge 0.3.1+; empty before). */
+  /** Mead bases each fermenter takes (bridge 0.4.0+; empty before). */
   fermenters: { prefab: string; inputs: string[] }[];
 }
 

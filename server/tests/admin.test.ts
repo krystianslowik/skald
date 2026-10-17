@@ -377,6 +377,39 @@ describe("mock bridge", () => {
     mock.stop();
   });
 
+  it("adds items to a chest by the plugin's rules, shown on the map after the next save", async () => {
+    const mock = new MockAgent(Date.now, "UTC");
+    const evs: AgentEvent[] = [];
+    const abort = new AbortController();
+    void mock.stream(1_000_000, (e) => evs.push(e), abort.signal);
+    const map = async () => (await mock.map(null)).body!;
+    // A full 5 x 2 wood chest: only its part stacks have room.
+    const chest = (await map()).storage!.find((c) => c.id === "piece_chest_wood@208,-352")!;
+    const at = { x: chest.x, y: chest.y, z: chest.z };
+    const run = (body: Record<string, unknown>) => mock.bridge({ op: "run", command: "chest-add", body: { prefab: chest.prefab, at, ...body }, actor: "t" });
+    const tooMany = await run({ item: "Wood", amount: 14 });
+    expect(tooMany.status).toBe(409);
+    expect(tooMany.body).toMatchObject({ ok: false, error: "only 13 Wood fit in that chest" });
+    const res = await run({ item: "Wood", amount: 13 });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, data: { item: "Wood", amount: 13, room: 0, slots: [{ x: 4, y: 0, added: 13, stack: 50 }] } });
+    expect((await run({ item: "Wood", amount: 1 })).status).toBe(409);
+    expect((await run({ item: "Amber", amount: 1 })).body).toMatchObject({ error: "that chest has no room for Amber" });
+    expect((await mock.bridge({ op: "run", command: "chest-add", body: { prefab: chest.prefab, at: { ...at, x: at.x + 1.5 }, item: "Wood", amount: 1 }, actor: "t" })).status).toBe(404);
+    expect((await run({ item: "Wood", amount: 0 })).status).toBe(400);
+    // The map shows the last save until the next one.
+    const stack = (m: Awaited<ReturnType<typeof map>>) => m.storage!.find((c) => c.id === chest.id)!.items.find((i) => i.x === 4 && i.y === 0)!.stack;
+    expect(stack(await map())).toBe(37);
+    expect((await mock.bridge({ op: "run", command: "save", body: {}, actor: "t" })).status).toBe(200);
+    await new Promise((r) => setTimeout(r, 900));
+    expect(stack(await map())).toBe(50);
+    const adds = evs.filter((e) => e.type === "admin" && e.data.command === "chest-add").map((e) => e.data);
+    expect(adds[1]).toMatchObject({ command: "chest-add", result: "ok", item: "Wood", amount: 13, prefab: "piece_chest_wood", at: { x: 208, z: -352 } });
+    expect(adds[0]).toMatchObject({ result: "error", error: "only 13 Wood fit in that chest" });
+    abort.abort();
+    mock.stop();
+  });
+
   it("can play a bridge that is off, disabled or on an untested build", async () => {
     expect((await new MockAgent(Date.now, "UTC", "off").bridge({ op: "status" })).status).toBe(404);
     expect((await new MockAgent(Date.now, "UTC", "disabled").bridge({ op: "status" })).body).toMatchObject({ available: false, reason: "disabled" });

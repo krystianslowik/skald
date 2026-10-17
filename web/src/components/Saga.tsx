@@ -109,6 +109,13 @@ export function describeAdmin(i: I18n, d: Record<string, unknown>): string {
     case "spawn":
       vars.what = itemsText(i, d);
       break;
+    case "chest-add": {
+      vars.what = itemsText(i, d);
+      const at = (d.at ?? {}) as { x?: unknown; z?: unknown };
+      vars.x = Number.isFinite(Number(at.x)) ? Math.round(Number(at.x)) : "?";
+      vars.z = Number.isFinite(Number(at.z)) ? Math.round(Number(at.z)) : "?";
+      break;
+    }
     case "broadcast":
       vars.text = String(d.text ?? "");
       break;

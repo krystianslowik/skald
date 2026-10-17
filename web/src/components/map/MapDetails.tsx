@@ -1,10 +1,13 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import { useI18n } from "../../i18n";
 import { markerItems, markerStore, type Marker } from "../../lib/mapgeo";
 import { topDown } from "../../lib/stacks";
 import { countItems } from "../../lib/storage";
 import { mapUrlAt } from "../../lib/world";
-import type { MapContainer } from "../../types";
+import type { MapContainer, MapItem } from "../../types";
+import { canAddTo, usePendingItems } from "../../lib/chestadd";
+import { compareVersions } from "@server/version";
+import { useAdmin } from "../admin/AdminContext";
 import { clusterSummary, contentsOf, sortCluster, stackText, summarize, type Summary } from "../../lib/clusterlist";
 import { InventoryGrid } from "../storage/Inventory";
 import { containerTitle } from "../storage/VillageStores";
@@ -48,7 +51,7 @@ export function markerKind(m: Marker, t: ReturnType<typeof useI18n>["t"], lookup
   }
 }
 
-function marksLines(marker: Marker, t: ReturnType<typeof useI18n>["t"], tn: ReturnType<typeof useI18n>["tn"], lookup: ReturnType<typeof useI18n>["lookup"]): string[] {
+function marksLines(marker: Marker, t: ReturnType<typeof useI18n>["t"], tn: ReturnType<typeof useI18n>["tn"], lookup: ReturnType<typeof useI18n>["lookup"], live: readonly MapItem[] | null): string[] {
   const d = marker.data;
   const lines: string[] = [];
   switch (d.type) {
@@ -75,7 +78,7 @@ function marksLines(marker: Marker, t: ReturnType<typeof useI18n>["t"], tn: Retu
     case "storage": {
       const store = markerStore(marker);
       if (!store) break;
-      const n = countItems(store.items);
+      const n = countItems(live ?? store.items);
       if (store.unreadable) lines.push(t("map.storage.unreadable"));
       else if (store.width === 0) lines.push(t("map.storage.noHold"));
       else if (n === 0) lines.push(t("map.storage.empty"));
@@ -177,7 +180,6 @@ function ClusterList({ group, onPick }: { group: readonly Marker[]; onPick?: (m:
  * out and scrolled to.
  */
 function StackList({ chests, level, names }: { chests: readonly MapContainer[]; level?: number; names: boolean }) {
-  const { t, tn, lookup } = useI18n();
   const picked = useRef<HTMLLIElement>(null);
   useEffect(() => {
     picked.current?.scrollIntoView?.({ block: "nearest" });
@@ -185,25 +187,67 @@ function StackList({ chests, level, names }: { chests: readonly MapContainer[]; 
   const ordered = chests.every((c) => typeof c.y === "number");
   return (
     <ol reversed className="mt-2 space-y-2">
-      {topDown(chests).map(({ chest: c, index: i }) => {
-        const n = countItems(c.items);
-        const on = i === level;
-        return (
-          <li key={c.id} ref={on ? picked : undefined} aria-current={on ? "true" : undefined} className={`rounded-[2px] px-2 py-1.5 ${on ? "bg-select/20 ring-1 ring-select-hi/70" : "bg-black/20"}`}>
-            <p className="flex flex-wrap items-baseline justify-between gap-x-3">
-              <span className="font-bold text-bone">{containerTitle(c, t, lookup)}</span>
-              <span className="text-xs text-ash">{c.unreadable ? t("map.storage.unreadable") : n === 0 ? t("map.storage.empty") : tn("map.storage.holds", n)}</span>
-            </p>
-            <StackLevel index={i} total={chests.length} ordered={ordered} className="mt-0.5 text-xs text-bone" />
-            {!c.unreadable && c.width > 0 && (
-              <div className="mt-1.5">
-                <InventoryGrid items={c.items} width={c.width} height={c.height} names={names} />
-              </div>
-            )}
-          </li>
-        );
-      })}
+      {topDown(chests).map(({ chest: c, index: i }) => (
+        <StackRow key={c.id} chest={c} index={i} total={chests.length} ordered={ordered} on={i === level} rowRef={i === level ? picked : undefined} names={names} />
+      ))}
     </ol>
+  );
+}
+
+/** One chest of a stack: what it holds (with items added since the save) and its slots. */
+function StackRow({ chest: c, index, total, ordered, on, rowRef, names }: { chest: MapContainer; index: number; total: number; ordered: boolean; on: boolean; rowRef?: RefObject<HTMLLIElement | null>; names: boolean }) {
+  const { t, tn, lookup } = useI18n();
+  const live = usePendingItems(c);
+  const items = live ?? c.items;
+  const n = countItems(items);
+  return (
+    <li ref={rowRef} aria-current={on ? "true" : undefined} className={`rounded-[2px] px-2 py-1.5 ${on ? "bg-select/20 ring-1 ring-select-hi/70" : "bg-black/20"}`}>
+      <p className="flex flex-wrap items-baseline justify-between gap-x-3">
+        <span className="font-bold text-bone">{containerTitle(c, t, lookup)}</span>
+        <span className="text-xs text-ash">{c.unreadable ? t("map.storage.unreadable") : n === 0 ? t("map.storage.empty") : tn("map.storage.holds", n)}</span>
+      </p>
+      <StackLevel index={index} total={total} ordered={ordered} className="mt-0.5 text-xs text-bone" />
+      {!c.unreadable && c.width > 0 && (
+        <div className="mt-1.5">
+          <InventoryGrid items={items} width={c.width} height={c.height} names={names} />
+        </div>
+      )}
+      {live && <PendingNote />}
+      <AddItemButton chest={c} roomy={names} className="mt-2" />
+    </li>
+  );
+}
+
+/** Items added from the map are in the game but not in the save the map shows. */
+function PendingNote() {
+  const { t } = useI18n();
+  return (
+    <p role="status" className="mt-1.5 text-xs text-flame">
+      {t("admin.chest.pending")}
+    </p>
+  );
+}
+
+/** "Add item" for an admin, on a chest the bridge can fill (bridge 0.4.0 and an agent that knows chest-add). */
+function AddItemButton({ chest, roomy, className = "" }: { chest: MapContainer; roomy: boolean; className?: string }) {
+  const { t } = useI18n();
+  const admin = useAdmin();
+  const bridge = admin?.status?.bridge;
+  if (!admin || !admin.bridgeOn || !bridge?.commands.includes("chest-add") || !canAddTo(chest)) return null;
+  const old = !!bridge.plugin && compareVersions(bridge.plugin, "0.4.0") === -1;
+  return (
+    <button
+      type="button"
+      onClick={() => admin.open({ kind: "chest", chest })}
+      disabled={!!admin.blocker || old}
+      title={old ? t("admin.chest.needsBridge") : undefined}
+      className={`plaque press inline-flex items-center gap-1.5 font-bold disabled:opacity-40 ${roomy ? "min-h-11 px-4 py-2.5 text-sm" : "px-2.5 py-1 text-xs"} ${className}`}
+    >
+      <svg width="11" height="11" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+        <path d="M8 3v10M3 8h10" />
+      </svg>
+      {t("admin.chest.add")}
+    </button>
   );
 }
 
@@ -251,6 +295,8 @@ export function DetailsBody({
   roomy?: boolean;
 }) {
   const { t, tn, lookup, number } = useI18n();
+  const store = markerStore(marker);
+  const live = usePendingItems(marker.data.type === "storage" ? store : undefined);
   if (group) return <ClusterList group={group} onPick={onPick} />;
   if (marker.data.type === "storage" && marker.data.stack)
     return (
@@ -263,10 +309,9 @@ export function DetailsBody({
         )}
       </>
     );
-  const lines = marksLines(marker, t, tn, lookup);
+  const lines = marksLines(marker, t, tn, lookup, live);
   const d = marker.data;
-  const items = markerItems(marker);
-  const store = markerStore(marker);
+  const items = live ?? markerItems(marker);
   // A grave is the player's own 8 x 4 inventory; a raft has no hold at all.
   const grid = d.type === "grave" ? { width: 8, height: Math.max(4, ...d.items.map((i) => i.y + 1)) } : store && store.width > 0 && !store.unreadable ? store : null;
   const partner = d.type === "portal" ? d.partner : undefined;
@@ -285,7 +330,9 @@ export function DetailsBody({
           <InventoryGrid items={items} width={grid.width} height={grid.height} names={roomy || grid.width <= 4} />
         </div>
       )}
+      {live && <PendingNote />}
       <div className={`mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 ${roomy ? "gap-x-3" : ""}`}>
+        {d.type === "storage" && store && <AddItemButton chest={store} roomy={roomy} />}
         {partner && onGo && (
           <button type="button" onClick={() => onGo(partner.x, partner.z)} className={`plaque press font-bold ${action}`}>
             {t("map.portal.goOther")}

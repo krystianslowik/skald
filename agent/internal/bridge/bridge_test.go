@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -96,6 +97,9 @@ func (f *fakePlugin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ok(map[string]any{"smelters": 3, "skipped": 1, "full": 0, "unloaded": 0, "added": map[string]any{"IronScrap": 3}, "fuel": "Coal", "near": "Ragnar", "radius": 50})
 	case "/v1/build/fill-fermenters":
 		ok(map[string]any{"fermenters": 2, "skipped": 0, "full": 1, "unloaded": 0, "added": map[string]any{"MeadBaseTasty": 2}, "near": "Freya", "radius": 50})
+	case "/v1/containers/add":
+		ok(map[string]any{"prefab": "piece_chest_wood", "item": "Iron", "amount": 20, "position": map[string]any{"x": 10.5, "y": 31.2, "z": -4}, "loaded": true, "room": 460,
+			"slots": []any{map[string]any{"x": 0, "y": 0, "added": 10, "stack": 30}, map[string]any{"x": 3, "y": 0, "added": 10, "stack": 10}}})
 	case "/v1/build/fill-kilns":
 		ok(map[string]any{"kilns": 2, "full": 1, "unloaded": 0, "added": map[string]any{"Wood": 2}, "near": "position", "radius": 50})
 	default:
@@ -502,6 +506,68 @@ func TestFillAuditSaysWhatWentIn(t *testing.T) {
 	}
 	if added, _ := f["added"].(map[string]any); added["MeadBaseTasty"] != float64(2) {
 		t.Fatalf("fill-fermenters added %+v", f["added"])
+	}
+}
+
+func TestChestAdd(t *testing.T) {
+	hub := events.New(100, 10)
+	f := &fakePlugin{build: "l-1.0.17"}
+	c := newClient(t, f, hub, "")
+	ctx := context.Background()
+	body := map[string]any{"prefab": "piece_chest_wood", "item": "Iron", "amount": 20, "at": map[string]any{"x": 10.5, "y": 31.2, "z": -4.0}}
+	res, err := c.Run(ctx, "chest-add", body, "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.last(); got.Path != "/v1/containers/add" || !strings.Contains(got.Body, `"y":31.2`) {
+		t.Fatalf("plugin got %+v", got)
+	}
+	if slots, _ := res.(map[string]any)["slots"].([]any); len(slots) != 2 {
+		t.Fatalf("answer %+v", res)
+	}
+	evs := adminEvents(t, hub)
+	if len(evs) != 1 {
+		t.Fatalf("want 1 admin event, got %+v", evs)
+	}
+	ev := evs[0]
+	at, _ := ev["at"].(map[string]any)
+	if ev["command"] != "chest-add" || ev["result"] != "ok" || ev["actor"] != "k" || ev["item"] != "Iron" || ev["amount"] != float64(20) ||
+		ev["prefab"] != "piece_chest_wood" || ev["loaded"] != true || at["x"] != float64(11) || at["z"] != float64(-4) {
+		t.Fatalf("event %+v", ev)
+	}
+
+	// Malformed bodies stop at the agent: no plugin call, but an error event each.
+	count := func() int {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return len(f.calls)
+	}
+	calls := count()
+	for name, bad := range map[string]map[string]any{
+		"no item":      {"prefab": "piece_chest_wood", "amount": 1, "at": map[string]any{"x": 1, "y": 2, "z": 3}},
+		"no y":         {"prefab": "piece_chest_wood", "item": "Iron", "amount": 1, "at": map[string]any{"x": 1, "z": 3}},
+		"zero":         {"prefab": "piece_chest_wood", "item": "Iron", "amount": 0, "at": map[string]any{"x": 1, "y": 2, "z": 3}},
+		"fraction":     {"prefab": "piece_chest_wood", "item": "Iron", "amount": 1.5, "at": map[string]any{"x": 1, "y": 2, "z": 3}},
+		"too many":     {"prefab": "piece_chest_wood", "item": "Iron", "amount": 10000, "at": map[string]any{"x": 1, "y": 2, "z": 3}},
+		"outside":      {"prefab": "piece_chest_wood", "item": "Iron", "amount": 1, "at": map[string]any{"x": 1, "y": 2, "z": 20000}},
+		"string at":    {"prefab": "piece_chest_wood", "item": "Iron", "amount": 1, "at": "here"},
+		"extra player": {"prefab": "piece_chest_wood", "item": "Iron", "amount": 1, "at": map[string]any{"x": 1, "y": 2, "z": 3}, "player": "Ragnar"},
+	} {
+		if _, err := c.Run(ctx, "chest-add", bad, "k"); StatusOf(err) != http.StatusBadRequest {
+			t.Errorf("%s: want 400, got %v", name, err)
+		}
+	}
+	if count() != calls {
+		t.Fatalf("a malformed chest-add reached the plugin")
+	}
+	evs = adminEvents(t, hub)
+	if len(evs) != 9 {
+		t.Fatalf("want 1 ok and 8 refused events, got %d", len(evs))
+	}
+	for _, ev := range evs[1:] {
+		if ev["command"] != "chest-add" || ev["result"] != "error" || ev["actor"] != "k" || ev["error"] == "" || strings.Contains(fmt.Sprint(ev["error"]), "bridge 400") {
+			t.Fatalf("refusal event %+v", ev)
+		}
 	}
 }
 
