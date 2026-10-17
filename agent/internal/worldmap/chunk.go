@@ -112,6 +112,9 @@ type chunkData struct {
 	explored []uint64 // exploredWords words, nil when the chunk holds no table
 	pins     []rawPin
 	terrain  map[zoneKey]int
+	// noPrefab is the inventory items left out for having no prefab, as
+	// the game leaves them out on load.
+	noPrefab int
 }
 
 func newChunkData() *chunkData {
@@ -236,7 +239,7 @@ func parseChunk(b []byte) (cd *chunkData, err error) {
 			cd.portals = append(cd.portals, rawPortal{kind: info.name, x: x, z: z, tag: f.tag, connType: connType, connHash: connHash, hasConn: flags&flagConn != 0})
 		case roleTombstone:
 			// A grave whose inventory does not decode is still a grave.
-			items, _ := inventoryOf(f.items)
+			items, _ := cd.inventory(f.items)
 			cd.tombs = append(cd.tombs, rawTomb{x: x, z: z, owner: f.ownerName, ticks: f.timeOfDeath, items: items})
 		case roleBed:
 			cd.beds = append(cd.beds, rawBed{x: x, z: z, owner: f.ownerName})
@@ -337,17 +340,19 @@ func readMaps(r *buf, flags uint16, keep bool, f *zdoFields) {
 	}
 }
 
-// inventoryOf decodes an "items" blob; no blob is an empty inventory. The
+// inventory decodes an "items" blob; no blob is an empty inventory. The
 // result holds no reference into the chunk file, which may be cached.
-func inventoryOf(blob []byte) ([]rawItem, error) {
+func (cd *chunkData) inventory(blob []byte) ([]rawItem, error) {
 	if len(blob) == 0 {
 		return nil, nil
 	}
-	return parseInventory(blob)
+	items, skipped, err := parseInventory(blob)
+	cd.noPrefab += skipped
+	return items, err
 }
 
 func (cd *chunkData) addStore(prefab string, x, y, z float32, blob []byte) {
-	items, err := inventoryOf(blob)
+	items, err := cd.inventory(blob)
 	cd.stores = append(cd.stores, rawStore{prefab: prefab, x: x, y: y, z: z, items: items, unreadable: err != nil})
 }
 

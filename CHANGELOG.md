@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- A chest, cart, ship or grave holding items the game no longer knows (items without a prefab) now shows the rest of its contents on the map, instead of nothing (a chest, cart or ship was marked unreadable). The game drops such items when it loads the inventory, and the map now does the same (#110).
+- **Operators:** this fix is in the agent, so deploying it restarts the game.
+
 ## [2026.10.8] - 2026-10-17
 
 ### Added

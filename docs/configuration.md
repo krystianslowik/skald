@@ -244,7 +244,8 @@ new save. It reads:
   and dungeon chests) are never read, so neither they nor their loot show
   up anywhere. Crafter names follow `MAP_SHOW_NAMES`; crafter ids are never
   read. An inventory in a layout the agent does not know is shown as
-  unreadable rather than guessed at.
+  unreadable rather than guessed at. An item without a prefab is left out
+  and the rest of the inventory is shown, as the game does when it loads it.
 
 On the real 1.0 world used to work out the format (about 376,000 objects
 in 35 chunks) a full build takes about 0.04 s and 22 MB of allocations, and

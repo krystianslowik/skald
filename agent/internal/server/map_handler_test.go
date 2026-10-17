@@ -91,7 +91,7 @@ func TestMapEndpoint(t *testing.T) {
 	if err := json.NewDecoder(r.Body).Decode(&snap); err != nil {
 		t.Fatal(err)
 	}
-	if len(snap.Portals) != 5 || len(snap.Storage) != 6 || snap.Meta.SeedName != "Yggdrasil1" || etag == "" {
+	if len(snap.Portals) != 5 || len(snap.Storage) != 7 || snap.Meta.SeedName != "Yggdrasil1" || etag == "" {
 		t.Errorf("snapshot portals %d storage %d seed %q etag %q", len(snap.Portals), len(snap.Storage), snap.Meta.SeedName, etag)
 	}
 
