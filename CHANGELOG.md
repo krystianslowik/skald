@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.6] - 2026-10-17
+
 ### Added
 
 - **Fill fermenters** is back as its own admin action under Base helpers: pick the mead base from its icon, check where (near a player, around the base or a point on the map), and every empty fermenter there gets one batch of it. A fermenter that is still fermenting, or holds mead waiting to be tapped, is left alone. The Saga says what went in ("started 2 fermenters with Mead Base: Tasty near Freya").
