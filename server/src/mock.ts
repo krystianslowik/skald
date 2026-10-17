@@ -17,6 +17,7 @@ import type {
   BridgeStatus,
   FillStations,
   LogLine,
+  MapItem,
   MapSnapshot,
   Metrics,
   Platform,
@@ -28,6 +29,7 @@ import type {
   SettingsRequest,
   SettingsView,
 } from "./types";
+import { ADMIN_COMMANDS } from "./types";
 
 /**
  * Fake agent for `MOCK_AGENT=1`: a living server with a week of seeded history,
@@ -219,6 +221,8 @@ export class MockAgent implements AgentSource {
   private mapBase: MapSnapshot | null = null;
   private iconSet: MockIcons | null = null;
   private mapGeneration = 1;
+  /** Chest contents changed by chest-add since the last save, by container id. */
+  private chestLive = new Map<string, MapItem[]>();
   private piecesAll: ReturnType<typeof mockPieces> | null = null;
   private natureAll: ReturnType<typeof mockNature> | null = null;
   private tiles = new Map<string, Uint8Array>();
@@ -661,7 +665,8 @@ export class MockAgent implements AgentSource {
 
   private bridgeStatus(): BridgeStatus {
     const untested = this.bridgeMode === "untested";
-    const base = { testedBuilds: [MOCK_BUILD], commands: [] as string[], timeFrozen: this.frozen };
+    // The agent's allow-list, as GET /bridge/status lists it (ack-build is the agent's own).
+    const base = { testedBuilds: [MOCK_BUILD], commands: ADMIN_COMMANDS.filter((c) => c !== "ack-build") as string[], timeFrozen: this.frozen };
     if (this.bridgeMode === "disabled") return { ...base, available: false, reason: "disabled" as const, message: "bridge disabled: game API binding failed (ZNet.Kick), game build l-1.0.18", worldLoaded: false, tested: false, acknowledged: false };
     if (this.state.server.status !== "running") return { ...base, available: false, reason: "restarting" as const, worldLoaded: false, tested: false, acknowledged: false };
     return { ...base, available: true, plugin: BRIDGE_PLUGIN_VERSION, gameBuild: untested ? "l-1.0.18" : MOCK_BUILD, worldLoaded: true, tested: !untested, acknowledged: untested && this.acked };
@@ -937,6 +942,12 @@ export class MockAgent implements AgentSource {
         data = { smelters, skipped, full: 0, unloaded: 0, added, ...(what !== "ore" && smelters > 0 ? { fuel: "Coal" } : {}), near, radius: Number(body.radius ?? 20) };
         break;
       }
+      case "chest-add": {
+        const added = this.chestAdd(body);
+        if ("error" in added) return fail(added.status, added.error);
+        data = added.data;
+        break;
+      }
       case "grow":
         data = { plants: Math.floor(Math.random() * 30), near };
         break;
@@ -950,7 +961,7 @@ export class MockAgent implements AgentSource {
     this.log(`[Info   :Skald Bridge] [SkaldBridge] audit actor=${actor} cmd=POST /v1/${command} result=ok ${JSON.stringify({ ok: true, data })}`);
     const counts: Record<string, unknown> = {};
     if (!Array.isArray(data)) {
-      for (const k of ["killed", "tamed", "repaired", "smelters", "kilns", "skipped", "full", "fermenters", "plants", "sentTo", "stopped", "started", "label", "stacks", "day"]) if (k in data) counts[k] = data[k];
+      for (const k of ["killed", "tamed", "repaired", "smelters", "kilns", "skipped", "full", "fermenters", "plants", "sentTo", "stopped", "started", "label", "stacks", "day", "loaded"]) if (k in data) counts[k] = data[k];
       if (data.added && typeof data.added === "object") counts.added = data.added;
       if (typeof data.fuel === "string") counts.fuel = data.fuel;
       if (Array.isArray(data.tables)) counts.tables = data.tables.length;
@@ -1168,7 +1179,64 @@ export class MockAgent implements AgentSource {
     }, 8000));
   }
 
+  /**
+   * POST /v1/containers/add, by the plugin's rules (bridge/plugin/Chests.cs and
+   * ChestPlan.cs): the chest by prefab and position, stacks of the item topped
+   * up first, then empty slots. The map keeps showing the last save until the
+   * next one, which takes the chest's live contents along.
+   */
+  private chestAdd(body: Record<string, unknown>): { data: Record<string, unknown> } | { status: number; error: string } {
+    const prefab = typeof body.prefab === "string" ? body.prefab : "";
+    const item = typeof body.item === "string" ? body.item : "";
+    const at = body.at as { x?: unknown; y?: unknown; z?: unknown } | undefined;
+    const amount = Number(body.amount);
+    if (!prefab || !item) return { status: 400, error: "missing 'prefab' or 'item'" };
+    if (!at || typeof at !== "object" || ![at.x, at.y, at.z].every((v) => Number.isFinite(Number(v)))) return { status: 400, error: "missing 'at': {x, y, z} of the chest" };
+    if (!Number.isInteger(amount) || amount < 1 || amount > 9999) return { status: 400, error: "'amount' must be between 1 and 9999" };
+    if (!/^[A-Z][A-Za-z0-9_]*$/.test(item)) return { status: 404, error: `unknown item prefab '${item}' (use the prefab name, e.g. Wood, Iron)` };
+    this.mapBase ??= mockMap({ now: this.clock() });
+    const chest = (this.mapBase.storage ?? []).find((c) => c.prefab === prefab && Math.hypot(c.x - Number(at.x), (c.y ?? 0) - Number(at.y), c.z - Number(at.z)) <= 0.5);
+    if (!chest) return { status: 404, error: `no such chest at ${Math.round(Number(at.x))}, ${Math.round(Number(at.z))} any more: it was moved or destroyed after the last save` };
+    if (chest.kind !== "chest") return { status: 400, error: "only chests can take items this way, not carts, ships or graves" };
+    const items = (this.chestLive.get(chest.id) ?? chest.items).map((i) => ({ ...i }));
+    const max = mockStackSize(item);
+    const height = Math.max(chest.height, ...items.map((i) => i.y + 1));
+    const used = new Set(items.filter((i) => i.x < chest.width).map((i) => `${i.x},${i.y}`));
+    const same = items.filter((i) => i.name === item && (i.quality ?? 1) === 1 && i.stack < max);
+    const room = same.reduce((n, i) => n + max - i.stack, 0) + (chest.width * height - used.size) * max;
+    if (room < amount) return { status: 409, error: room === 0 ? `that chest has no room for ${item}` : `only ${room} ${item} fit in that chest` };
+    const slots: { x: number; y: number; added: number; stack: number }[] = [];
+    let left = amount;
+    for (const i of same) {
+      const n = Math.min(left, max - i.stack);
+      if (n <= 0) continue;
+      i.stack += n;
+      left -= n;
+      slots.push({ x: i.x, y: i.y, added: n, stack: i.stack });
+    }
+    for (let y = 0; y < height && left > 0; y++) {
+      for (let x = 0; x < chest.width && left > 0; x++) {
+        if (used.has(`${x},${y}`)) continue;
+        const n = Math.min(left, max);
+        items.push({ name: item, stack: n, x, y });
+        left -= n;
+        slots.push({ x, y, added: n, stack: n });
+      }
+    }
+    this.chestLive.set(chest.id, items);
+    slots.sort((a, b) => a.y - b.y || a.x - b.x);
+    return { data: { prefab, item, amount, position: { x: chest.x, y: chest.y ?? 0, z: chest.z }, loaded: this.state.players.length > 0, room: room - amount, slots } };
+  }
+
   private save(): void {
+    // Chests filled since the last save show their new contents from now on.
+    if (this.mapBase && this.chestLive.size > 0) {
+      for (const c of this.mapBase.storage ?? []) {
+        const live = this.chestLive.get(c.id);
+        if (live) c.items = live;
+      }
+      this.chestLive.clear();
+    }
     const ms = Math.round(40 + Math.random() * 160);
     this.state.world.lastSaveAt = new Date(this.clock()).toISOString();
     this.state.world.lastSaveMs = ms;
@@ -1322,6 +1390,14 @@ export class MockAgent implements AgentSource {
       this.emit("player_count", { count: i + 1 }, at);
     }
   }
+}
+
+/** Stack sizes close enough for the mock, as the game has them (the plugin reads the real ones from the item prefab). */
+function mockStackSize(item: string): number {
+  if (/^(Arrow|Bolt|Missile)/.test(item) || /Nails$/.test(item)) return 100;
+  if (/^(Mead|Cooked|Bread|Pie|Soup|Stew|Sausage|Fish)/.test(item)) return 10;
+  if (/^(Sword|Axe|Pickaxe|Battleaxe|Bow|Crossbow|Knife|Mace|Sledge|Atgeir|Spear|Shield|Helmet|Armor|Cape|Club|Torch|Hammer|Hoe|Cultivator|Staff|Lantern|Trinket|Belt|Wishbone)/.test(item)) return 1;
+  return 50;
 }
 
 /** The agent's argument summary for an admin event: names, never ids. */
