@@ -10,6 +10,7 @@
     <Compile Include="../plugin/MapData.cs" Link="MapData.cs" />
     <Compile Include="../plugin/TerrainTile.cs" Link="TerrainTile.cs" />
     <Compile Include="../plugin/FillPlan.cs" Link="FillPlan.cs" />
+    <Compile Include="../plugin/ChestPlan.cs" Link="ChestPlan.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="xunit.v3" Version="4.0.2" />

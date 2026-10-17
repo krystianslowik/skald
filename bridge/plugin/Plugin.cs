@@ -16,7 +16,7 @@ namespace Skald.Bridge
     public class SkaldBridgePlugin : BaseUnityPlugin
     {
         public const string Guid = "dev.skald.bridge";
-        public const string Version = "0.3.0";
+        public const string Version = "0.4.0";
         public const string Prefix = "[SkaldBridge]";
 
         internal static ManualLogSource Log;
@@ -192,6 +192,13 @@ namespace Skald.Bridge
             (typeof(ZDOMan), "GetZDO"), (typeof(ZDO), "GetFloat"), (typeof(ZDO), "GetPosition"),
             (typeof(ZDOVars), "s_health"), (typeof(ZDOVars), "s_maxHealth"),
             (typeof(WorldGenerator), "GetHeight"),
+            // POST /v1/containers/add (Chests.cs).
+            (typeof(ZDOVars), "s_items"), (typeof(ZDOVars), "s_inUse"), (typeof(ZDO), "GetByteArray"), (typeof(ZDO), "GetInt"),
+            (typeof(ZDO), "SetOwner"), (typeof(ZDO), "GetPrefab"), (typeof(ZDOMan), "ForceSendZDO"), (typeof(ZDOMan), "GetSessionID"),
+            (typeof(Inventory), "Load"), (typeof(Inventory), "Save"), (typeof(Inventory), "AddItem"), (typeof(Inventory), "GetAllItems"),
+            (typeof(Inventory), "NrOfItems"), (typeof(Inventory), "SetHeight"), (typeof(Inventory), "GetWidth"), (typeof(Inventory), "GetHeight"),
+            (typeof(Container), "m_width"), (typeof(Container), "m_height"), (typeof(Container), "m_wagon"), (typeof(Container), "m_name"),
+            (typeof(ZPackage), "GetArray"), (typeof(Game), "m_worldLevel"),
         };
 
         // Returns null when everything binds, otherwise "Type.member".

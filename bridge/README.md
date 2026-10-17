@@ -184,6 +184,7 @@ loaded are counted as `unloaded` and skipped. `radius` is at most 100 m.
 | `POST /v1/map/reveal` | `player` or `at`, `radius` | Marks the whole map explored in the shared data of every cartography table in range. It decodes the table blob, merges the change (never replaces it), re-encodes and writes it back (layout in `plugin/MapData.cs`). A table nobody has written gets a fresh blob. An unknown blob version answers 409 and leaves the table untouched |
 | `POST /v1/map/pins` | `pins: [{x, z, name, type: icon0..icon4}]`, `player` or `at`, `radius` | Merges shared pins into the tables in range. Pins carry the fixed owner id `0x534B414C44` ("SKALD") and skip duplicates (same name within 1 m) |
 | `POST /v1/nearby` | `player` or `at`, `radius` | Counts objects by prefab, and how many are loaded. Read-only diagnostics |
+| `POST /v1/containers/add` | `prefab` (e.g. `piece_chest_wood`), `at: {x, y, z}` (the chest's position in the save, within 0.5 m), `item`, `amount` (1-9999) | Puts items into one chest, through the game's own `Inventory`: tops up stacks of that item, then fills empty slots. Refuses with 409 when a player has the chest open or stands within reach of it, when there is no room (the message says how many fit), when two chests sit on the spot, or when the chest holds items the server does not know or that do not read back the same; 404 when the chest or the item is gone; 400 for carts, ships and graves. The server takes ownership and writes the `items` ZDO value, so a client that has the chest loaded reloads it within a second and gets ownership back within two; an unloaded chest just keeps the new items. Answers `slots: [{x, y, added, stack}]`, `room` (left), `loaded` and `position` |
 
 These answer `501` with the reason, because the state they touch lives only on
 the client: `POST /v1/weather`, `/v1/player/feed`, `/v1/player/godmode`,
@@ -376,3 +377,11 @@ split from the real prefabs (check `GET /v1/build/stations`), the head of the
 ore queue read from the ZDO for `ore: current`, and the fuel top-up from
 `s_fuel`. `RPC_AddOre` and `RPC_AddFuel` are sent as in the verified 0.1.x
 `build/fill`.
+
+**New in v0.4.0, not yet verified on a live server:** `containers/add`
+compiles against the 1.0 reference assemblies, and its room check and the
+"only ever adds" check are unit-tested in `tests/ChestPlanTests.cs`. Not yet
+seen in a loaded world: the round trip of a real chest through the game's
+`Inventory` on the server, and a client that has the chest loaded picking up
+the write (open the chest in game after adding; it should show the items
+within a second, and stay openable).

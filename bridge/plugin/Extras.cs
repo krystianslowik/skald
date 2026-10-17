@@ -23,7 +23,7 @@ namespace Skald.Bridge
         }
 
         // ZDOs within radius of center (the 5x5 zones around it, then a distance filter).
-        static List<ZDO> ZdosAround(Vector3 center, float radius)
+        internal static List<ZDO> ZdosAround(Vector3 center, float radius)
         {
             var near = new List<ZDO>();
             var far = new List<ZDO>();
@@ -32,7 +32,7 @@ namespace Skald.Bridge
                 .Where(z => z != null && Utils.DistanceXZ(z.GetPosition(), center) <= radius).ToList();
         }
 
-        static T PrefabComponent<T>(ZDO z) where T : Component
+        internal static T PrefabComponent<T>(ZDO z) where T : Component
         {
             var prefab = ZNetScene.instance.GetPrefab(z.GetPrefab());
             return prefab != null ? prefab.GetComponent<T>() : null;
@@ -46,7 +46,7 @@ namespace Skald.Bridge
 
         // The uid of the connected peer simulating this object, or 0 when nobody
         // has it loaded (then there is no instance to receive an RPC).
-        static long LoadedBy(ZDO z)
+        internal static long LoadedBy(ZDO z)
         {
             long owner = z.GetOwner();
             if (owner == 0) return 0;
@@ -56,7 +56,7 @@ namespace Skald.Bridge
             return ZNet.instance.GetPeer(owner) != null ? owner : 0;
         }
 
-        static string Id(ZDOID id) => id.UserID + ":" + id.ID;
+        internal static string Id(ZDOID id) => id.UserID + ":" + id.ID;
 
         // ---- inspection -----------------------------------------------------
 
