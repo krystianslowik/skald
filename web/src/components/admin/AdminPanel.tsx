@@ -193,7 +193,10 @@ function Notify() {
       let r = await testNotify();
       if (r.needsAdmin && (await admin.unlock())) r = await testNotify();
       if (r.ok) admin.toast(true, t("admin.notify.sent"));
-      else if (!r.needsAdmin) admin.toast(false, r.status === 0 ? t("admin.notify.offline") : t("admin.notify.failed", { error: r.error ?? `HTTP ${r.status}` }));
+      else if (!r.needsAdmin) {
+        const msg = r.status === 0 ? t("admin.notify.offline") : r.status === 429 ? t("admin.notify.busy") : t("admin.notify.failed", { error: r.error ?? `HTTP ${r.status}` });
+        admin.toast(false, msg);
+      }
     } catch {
       // signed out; the next poll takes the panel back to the login screen
     } finally {

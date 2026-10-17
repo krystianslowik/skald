@@ -27,7 +27,17 @@ export async function me(): Promise<boolean> {
   return true;
 }
 
-export type LoginResult = { ok: true } | { ok: false; retryAfter?: number };
+export type LoginResult = { ok: true } | { ok: false; retryAfter?: number; /** The server's origin check refused the request. */ refused?: boolean };
+
+/** The server refused a request as coming from another origin: a proxy setting (PUBLIC_ORIGIN), not a wrong password. */
+export async function originRefused(res: Response): Promise<boolean> {
+  if (res.status !== 403) return false;
+  try {
+    return ((await res.clone().json()) as { error?: unknown }).error === "cross_origin";
+  } catch {
+    return false;
+  }
+}
 
 export async function login(password: string): Promise<LoginResult> {
   const res = await fetch("/api/login", {
@@ -41,6 +51,7 @@ export async function login(password: string): Promise<LoginResult> {
     const retryAfter = Number(res.headers.get("Retry-After")) || 900;
     return { ok: false, retryAfter };
   }
+  if (await originRefused(res)) return { ok: false, refused: true };
   return { ok: false };
 }
 

@@ -221,6 +221,9 @@ services:
       # Behind a reverse proxy, name the header with the real client IP
       # (X-Forwarded-For, CF-Connecting-IP, ...) so the login rate limit is per client.
       TRUSTED_IP_HEADER: ${TRUSTED_IP_HEADER:-}
+      # Only when the proxy rewrites the Host header: the address browsers open
+      # the panel on, e.g. https://panel.example.
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
       # Optional: a Prometheus with cAdvisor metrics for the resource charts.
       PROM_URL: ${PROM_URL:-}
     volumes:

@@ -1,5 +1,5 @@
 import { HttpAgent, type AgentSource } from "./agent";
-import { createApp } from "./app";
+import { createApp, panelOriginPolicy } from "./app";
 import { upgradeLive } from "./auth";
 import { checkPasswordHash, loadConfig, type Config } from "./config";
 import { HistoryStore } from "./db";
@@ -8,6 +8,7 @@ import { Hub } from "./hub";
 import { MapCache } from "./map";
 import { DiscordNotifier, NotifySettings } from "./notify";
 import { metricsFetch, VERSION } from "./buildinfo";
+import { log } from "./log";
 import { cachedMetrics, fetchMetrics } from "./prom";
 import { mountStatic } from "./static";
 import type { Metrics } from "./types";
@@ -101,6 +102,7 @@ const app = createApp({
   metricsConfigured,
   locale: cfg.locale,
   trustedIpHeader: cfg.trustedIpHeader,
+  publicOrigins: cfg.publicOrigins,
   map: new MapCache((etag) => agent.map(etag), cfg.mapSpoilers),
   notify,
   version: VERSION,
@@ -111,6 +113,9 @@ const app = createApp({
 mountStatic(app, cfg.webRoot, cfg.locale);
 
 const live = liveSocket(hub);
+const originPolicy = panelOriginPolicy(cfg);
+const liveRefused = (origin: string, expected: string) =>
+  log.warn("cross-origin request refused", { method: "GET", route: "/live", status: 403, origin: origin.slice(0, 200), expected, hint: "set PUBLIC_ORIGIN to the address the panel is opened on" });
 
 const [host, portStr] = cfg.bind.split(":");
 const server = Bun.serve<LiveSocketData>({
@@ -118,7 +123,7 @@ const server = Bun.serve<LiveSocketData>({
   port: Number.parseInt(portStr ?? "8080", 10),
   fetch(req, srv) {
     const url = new URL(req.url);
-    if (url.pathname === "/live") return upgradeLive(req, cfg.sessionSecret, () => srv.upgrade(req, { data: liveSocketData(url) }));
+    if (url.pathname === "/live") return upgradeLive(req, cfg.sessionSecret, () => srv.upgrade(req, { data: liveSocketData(url) }), { origin: originPolicy, onRefused: liveRefused });
     return app.fetch(req, { server: srv });
   },
   websocket: {

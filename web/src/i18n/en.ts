@@ -39,6 +39,7 @@ export const en = {
   "login.submit": "Kindle",
   "login.busy": "The fire is listening...",
   "login.locked": "The fire will not listen. Try again in {min} min.",
+  "login.refused": "The server refused this address. Its operator needs to set PUBLIC_ORIGIN to the address you opened the panel on.",
   "login.wrong": "That is not the word. The fire barely smoulders.",
   "login.offline": "No connection. Try again in a moment.",
 
@@ -2068,6 +2069,7 @@ export const en = {
   "admin.notify.test": "Send a test notification",
   "admin.notify.sent": "Test notification sent.",
   "admin.notify.failed": "Discord did not take it ({error}).",
+  "admin.notify.busy": "A test message was just sent. Try again in a few seconds.",
   "admin.notify.offline": "No connection. Try again in a moment.",
   "admin.bans.title": "Banned",
   "admin.bans.none": "Nobody is banned.",

@@ -36,6 +36,9 @@ Only the latest release receives security fixes.
   plain text, readable by the agent and the game. Treat it like a secret.
 - **Transport.** Serve the panel over HTTPS with `COOKIE_SECURE=true`, and set
   `TRUSTED_IP_HEADER` behind a proxy so the rate limits see real addresses.
+- **Origin check.** Requests that change something, and the live connection,
+  are accepted only from the panel's own page (or from clients that are not
+  browsers). Set `PUBLIC_ORIGIN` if a proxy rewrites the `Host` header.
 
 More detail in [docs/configuration.md](docs/configuration.md).
 

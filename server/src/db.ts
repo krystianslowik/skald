@@ -21,6 +21,8 @@ export class HistoryStore {
   constructor(path: string) {
     this.db = new Database(path, { create: true });
     this.db.exec("PRAGMA journal_mode = WAL");
+    // Deleted and overwritten content (a removed Discord webhook) is zeroed, not left in free pages.
+    this.db.exec("PRAGMA secure_delete = ON");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS events (
         id    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -130,6 +132,16 @@ export class HistoryStore {
 
   setMeta(key: string, value: string): void {
     this.db.query("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
+  }
+
+  /** Copies the journal into the database and truncates it, so nothing overwritten stays readable there. */
+  checkpoint(): void {
+    this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+  }
+
+  /** The secure_delete setting, for tests. */
+  secureDelete(): boolean {
+    return (this.db.query("PRAGMA secure_delete").get() as { secure_delete: number }).secure_delete === 1;
   }
 
   close(): void {

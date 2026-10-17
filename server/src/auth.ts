@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { checkOrigin, type OriginPolicy } from "./origin";
 
 export const SESSION_COOKIE = "skald_session";
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -83,8 +84,21 @@ export function readCookie(header: string | null, name: string): string | undefi
 /**
  * The `/live` WebSocket upgrade: authenticated before the upgrade, never
  * after. Returns the response to send, or undefined once `upgrade` took over.
+ * A browser always sends Origin on the handshake; with `origin`, a socket
+ * opened by another origin's page is refused (it would read the live state).
  */
-export function upgradeLive(req: Request, secret: string, upgrade: () => boolean, now = Date.now()): Response | undefined {
+export function upgradeLive(
+  req: Request,
+  secret: string,
+  upgrade: () => boolean,
+  o: { origin: OriginPolicy; now?: number; onRefused?: (origin: string, expected: string) => void },
+): Response | undefined {
+  const v = checkOrigin(req, o.origin);
+  if (!v.ok) {
+    o.onRefused?.(v.origin, v.expected);
+    return new Response("cross-origin request refused", { status: 403 });
+  }
+  const now = o.now ?? Date.now();
   if (!verifySession(secret, readCookie(req.headers.get("cookie"), SESSION_COOKIE), now)) {
     return new Response("unauthorized", { status: 401 });
   }

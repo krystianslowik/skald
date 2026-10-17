@@ -9,6 +9,7 @@ import type { Hub } from "./hub";
 import { cause, log as defaultLog, type Logger } from "./log";
 import type { MapCache, MapView } from "./map";
 import type { NotifyChange, NotifySettings } from "./notify";
+import { checkOrigin, type OriginPolicy } from "./origin";
 import {
   ACCESS_LISTS,
   ACCESS_OPS,
@@ -49,6 +50,8 @@ export interface AppDeps {
   locale?: Locale;
   /** Header holding the real client IP behind a trusted proxy; empty = socket address. */
   trustedIpHeader?: string;
+  /** PUBLIC_ORIGIN: the origins browsers open the panel on; empty or unset: the request's own host. */
+  publicOrigins?: readonly string[];
   limiter?: RateLimiter;
   /** argon2id hash of the admin password; empty or unset: everyone signed in is an admin. */
   adminPasswordHash?: string;
@@ -107,6 +110,13 @@ export function parsePiecesBox(query: (k: string) => string | undefined): Pieces
   return [x0, z0, x1, z1];
 }
 
+const SAFE_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/** How the origin check finds the panel's own origin; shared with the /live upgrade. */
+export function panelOriginPolicy(o: { publicOrigins?: readonly string[]; trustedIpHeader?: string }): OriginPolicy {
+  return { publicOrigins: o.publicOrigins ?? [], trustForwardedHost: Boolean(o.trustedIpHeader) };
+}
+
 /** The admin routes a signed-in non-admin may call. */
 const ADMIN_OPEN = new Set(["GET /api/admin/status", "POST /api/admin/unlock", "POST /api/admin/lock"]);
 
@@ -149,6 +159,25 @@ export function createApp(deps: AppDeps): Hono {
   app.use("*", (c, next) =>
     compress({ contentTypeFilter: (type) => !c.res.headers.has("ETag") && COMPRESSIBLE_CONTENT_TYPE_REGEX.test(type) })(c, next),
   );
+
+  // ---- origin check ---------------------------------------------------------
+  // Every request that changes something, login and logout included, must come
+  // from the panel's own page (or from no browser at all). See origin.ts.
+  const originPolicy = panelOriginPolicy(deps);
+  let mismatchLogged = false;
+  app.use("/api/*", async (c, next) => {
+    if (SAFE_METHODS.has(c.req.method)) return next();
+    const v = checkOrigin(c.req.raw, originPolicy);
+    if (!v.ok) {
+      logger.warn("cross-origin request refused", { ...where(c), status: 403, origin: v.origin.slice(0, 200), expected: v.expected, hint: "set PUBLIC_ORIGIN to the address the panel is opened on" });
+      return c.json({ ok: false, error: "cross_origin", message: "request from another origin refused; set PUBLIC_ORIGIN if the panel sits behind a proxy that rewrites Host" }, 403);
+    }
+    if (v.mismatch && !mismatchLogged) {
+      mismatchLogged = true;
+      logger.warn("origin differs from the request host", { ...where(c), origin: v.mismatch.origin.slice(0, 200), expected: v.mismatch.expected, hint: "set PUBLIC_ORIGIN, or browsers without Sec-Fetch-Site are refused" });
+    }
+    return next();
+  });
 
   app.get("/healthz", (c) => c.text("ok"));
 
@@ -473,6 +502,8 @@ export function createApp(deps: AppDeps): Hono {
     if (!deps.notify) return c.json({ ok: false, error: "not_configured" }, 404);
     const res = await deps.notify.test();
     if (!res.ok && res.error === "not_configured") return c.json(res, 404);
+    // One test at a time, then a short pause: each one posts to the channel.
+    if (!res.ok && res.error === "busy") return c.json({ ok: false, error: "busy" }, 429, { "Retry-After": String(res.retryAfter ?? 10) });
     // The notifier already strips the webhook URL out of its errors.
     if (!res.ok) logger.warn("discord test failed", { ...where(c), status: 502, cause: res.error });
     return res.ok ? c.json({ ok: true }) : c.json({ ok: false, error: res.error }, 502);

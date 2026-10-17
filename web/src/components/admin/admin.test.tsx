@@ -182,6 +182,15 @@ describe("admin", () => {
     expect(calls.filter((c) => c.url === "/api/notify/test" && c.method === "POST")).toHaveLength(1);
   });
 
+  it("says to wait when a test message was just sent", async () => {
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
+    api(status({ notifyConfigured: true }), () => Response.json({ ok: false, error: "busy" }, { status: 429, headers: { "Retry-After": "8" } }));
+    renderDashboard();
+    const dialog = await openAdmin();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send a test notification" }));
+    expect(await screen.findByText("A test message was just sent. Try again in a few seconds.")).toBeInTheDocument();
+  });
+
   it("says how to turn Discord notifications on when they are off", async () => {
     vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
     api(status(), undefined, () => Response.json({ ok: true, source: "panel", masked: null, enabled: true, kinds: [...NOTIFY_KINDS] }));

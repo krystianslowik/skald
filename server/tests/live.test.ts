@@ -12,7 +12,7 @@ const SECRET = "secret";
 const server = Bun.serve<object>({
   port: 0,
   fetch(req, srv) {
-    if (new URL(req.url).pathname === "/live") return upgradeLive(req, SECRET, () => srv.upgrade(req, { data: {} }));
+    if (new URL(req.url).pathname === "/live") return upgradeLive(req, SECRET, () => srv.upgrade(req, { data: {} }), { origin: { publicOrigins: [], trustForwardedHost: false } });
     return new Response("not found", { status: 404 });
   },
   websocket: {

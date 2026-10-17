@@ -252,7 +252,7 @@ export interface NotifierOptions {
   maxAgeMs?: number;
 }
 
-export type SendResult = { ok: true } | { ok: false; error: string };
+export type SendResult = { ok: true } | { ok: false; error: string; /** Seconds, with error "busy". */ retryAfter?: number };
 
 /**
  * Posts notable live events to a Discord webhook. Fed by the hub's listener:
@@ -342,9 +342,10 @@ export class DiscordNotifier {
   /**
    * Sends the test message now, outside the queue, and says how it went. To
    * `url` when given: a saved webhook can be tried before it is turned on.
+   * A 429 is reported, not waited out: the admin can try again.
    */
   async test(url = this.url): Promise<SendResult> {
-    return this.post(STRINGS[this.o.locale].test, url, true);
+    return this.post(STRINGS[this.o.locale].test, url, false);
   }
 
   /**
@@ -488,10 +489,11 @@ export class DiscordNotifier {
   }
 
   /**
-   * `url` is fixed when the message starts. Unless `pinned` (a test), a 429
-   * retry is given up once the webhook changed or was removed meanwhile.
+   * `url` is fixed when the message starts. With `retry`, a 429 is waited out
+   * (up to maxRetries), and given up once the webhook changed or was removed
+   * meanwhile.
    */
-  private async post(content: string, url = this.url, pinned = false): Promise<SendResult> {
+  private async post(content: string, url = this.url, retry = true): Promise<SendResult> {
     // Player names must never ping @everyone or a role.
     const body = JSON.stringify({ content, allowed_mentions: { parse: [] } });
     if (!url) return { ok: false, error: "not_configured" };
@@ -513,10 +515,10 @@ export class DiscordNotifier {
         await res.body?.cancel();
         return { ok: true };
       }
-      if (res.status === 429 && attempt < this.opts.maxRetries) {
+      if (retry && res.status === 429 && attempt < this.opts.maxRetries) {
         const wait = Math.min(RETRY_CAP_MS, await retryAfterMs(res));
         await this.sleep(wait);
-        if (pinned || this.url === url) continue;
+        if (this.url === url) continue;
         return { ok: false, error: "webhook changed" };
       }
       await res.body?.cancel();
@@ -572,7 +574,12 @@ export function maskWebhookUrl(url: string): string {
 export interface MetaStore {
   getMeta(key: string): string | null;
   setMeta(key: string, value: string): void;
+  /** Writes the journal back and empties it, so a removed webhook is not left in it. */
+  checkpoint?(): void;
 }
+
+/** Test messages: one at a time, and at most one per this many ms. */
+export const TEST_COOLDOWN_MS = 10_000;
 
 const META_URL = "discord.url";
 const META_ENABLED = "discord.enabled";
@@ -594,6 +601,7 @@ export class NotifySettings {
       envUrl: string;
       /** DISCORD_NOTIFY, also the panel's default choice. */
       envKinds: readonly NotifyKind[];
+      clock?: () => number;
     },
   ) {
     this.apply();
@@ -622,9 +630,12 @@ export class NotifySettings {
       url = parseWebhookUrl(change.url);
       if (!url) return { ok: false, error: "bad_url" };
     }
+    const previous = this.o.store.getMeta(META_URL);
     if (url) this.o.store.setMeta(META_URL, url);
     if (change.enabled !== undefined) this.o.store.setMeta(META_ENABLED, change.enabled ? "true" : "false");
     if (change.kinds !== undefined) this.o.store.setMeta(META_KINDS, JSON.stringify(NOTIFY_KINDS.filter((k) => change.kinds!.includes(k))));
+    // The old webhook would otherwise linger in the journal.
+    if (url && previous && previous !== url) this.o.store.checkpoint?.();
     this.apply();
     return { ok: true, config: this.view() };
   }
@@ -634,16 +645,33 @@ export class NotifySettings {
     if (this.fromEnv) return { ok: false, error: "env" };
     this.o.store.setMeta(META_URL, "");
     this.o.store.setMeta(META_ENABLED, "true");
+    this.o.store.checkpoint?.();
     this.apply();
     return { ok: true, config: this.view() };
   }
 
   /** A test message to the webhook in use, also while notifications are turned off. */
-  test(): Promise<SendResult> {
+  async test(): Promise<SendResult> {
     const { url } = this.current();
-    if (!url) return Promise.resolve({ ok: false, error: "not_configured" });
-    return this.o.notifier.test(url);
+    if (!url) return { ok: false, error: "not_configured" };
+    const now = (this.o.clock ?? Date.now)();
+    if (this.testing || now - this.lastTest < TEST_COOLDOWN_MS) {
+      return { ok: false, error: "busy", retryAfter: Math.max(1, Math.ceil((this.lastTest + TEST_COOLDOWN_MS - now) / 1000)) };
+    }
+    this.testing = true;
+    this.lastTest = now;
+    try {
+      const res = await this.o.notifier.test(url);
+      // Nothing reached the channel: a corrected webhook can be tried at once. A 429 keeps the pause.
+      if (!res.ok && res.error !== "HTTP 429") this.lastTest = Number.NEGATIVE_INFINITY;
+      return res;
+    } finally {
+      this.testing = false;
+    }
   }
+
+  private testing = false;
+  private lastTest = Number.NEGATIVE_INFINITY;
 
   private current(): { url: string; enabled: boolean; kinds: readonly NotifyKind[] } {
     if (this.fromEnv) return { url: this.o.envUrl, enabled: true, kinds: this.o.envKinds };
