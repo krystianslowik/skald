@@ -8,7 +8,7 @@ import { ItemPicker } from "./ItemPicker";
 import { Glide } from "../../lib/live";
 import { createLogStore } from "../../lib/useValheim";
 import { preloadLazyChunks } from "../../test-preload";
-import { emptyAgentState, type AccessState, type AdminStatus, type AgentEvent, type ApiState, type RestoreInfo } from "../../types";
+import { emptyAgentState, NOTIFY_KINDS, type AccessState, type AdminStatus, type AgentEvent, type ApiState, type NotifyConfig, type RestoreInfo } from "../../types";
 import { restoreProgress, RestoreSheet } from "./WorldTools";
 import { AdminProvider } from "./AdminContext";
 import { BRIDGE_PLUGIN_VERSION } from "@server/bridgeplugin";
@@ -68,7 +68,7 @@ const STATIONS = {
 };
 
 /** The panel's API as far as these tests need it; everything else 404s. */
-function api(st: AdminStatus, commands: (url: string, n: number) => Response = () => Response.json({ ok: true, data: {} })) {
+function api(st: AdminStatus, commands: (url: string, n: number) => Response = () => Response.json({ ok: true, data: {} }), notify?: (method: string, body: unknown) => Response) {
   const calls: Call[] = [];
   let n = 0;
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -81,6 +81,7 @@ function api(st: AdminStatus, commands: (url: string, n: number) => Response = (
     if (u === "/api/admin/access" && method === "GET") return Response.json({ ok: true, data: ACCESS });
     if (u === "/api/admin/restore" && method === "GET") return Response.json({ ok: true, data: RESTORE });
     if (u === "/api/admin/unlock") return Response.json({ ok: true });
+    if (u === "/api/admin/notify" && notify) return notify(method, init?.body ? JSON.parse(String(init.body)) : undefined);
     if (u.startsWith("/api/admin/") && method === "POST") return commands(u, n++);
     if (u === "/api/notify/test" && method === "POST") return commands(u, n++);
     return new Response("{}", { status: 404 });
@@ -183,11 +184,70 @@ describe("admin", () => {
 
   it("says how to turn Discord notifications on when they are off", async () => {
     vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
-    api(status());
+    api(status(), undefined, () => Response.json({ ok: true, source: "panel", masked: null, enabled: true, kinds: [...NOTIFY_KINDS] }));
     renderDashboard();
     const dialog = await openAdmin();
-    expect(within(dialog).getByText(/Set DISCORD_WEBHOOK_URL/)).toBeInTheDocument();
+    expect(await within(dialog).findByText(/Paste a Discord channel webhook/)).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Send a test notification" })).not.toBeInTheDocument();
+  });
+
+  it("saves a webhook, then shows only its masked form, and picks what goes out", async () => {
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
+    const token = "Zx9-fictional-token-for-Astrid_000000000000000000000000000000000000";
+    const hook = `https://discord.com/api/webhooks/123456789012345678/${token}`;
+    let cfg: NotifyConfig = { source: "panel", masked: null, enabled: true, kinds: [...NOTIFY_KINDS] };
+    const calls = api(status(), undefined, (method, body) => {
+      if (method === "GET") return Response.json({ ok: true, ...cfg });
+      const b = body as { url?: string; enabled?: boolean; kinds?: NotifyConfig["kinds"] };
+      if (b.url !== undefined && b.url !== hook) return Response.json({ ok: false, error: "bad_url" }, { status: 400 });
+      cfg = { ...cfg, ...(b.url ? { masked: "discord.com/api/webhooks/…5678/Zx9-…" } : {}), ...(b.enabled !== undefined ? { enabled: b.enabled } : {}), ...(b.kinds ? { kinds: b.kinds } : {}) };
+      return Response.json({ ok: true, ...cfg });
+    });
+    renderDashboard();
+    const dialog = await openAdmin();
+    const field = await within(dialog).findByLabelText("Webhook URL");
+    fireEvent.change(field, { target: { value: "https://example.com/hook" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save webhook" }));
+    expect(await within(dialog).findByText(/not a Discord webhook URL/)).toBeInTheDocument();
+    fireEvent.change(field, { target: { value: hook } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save webhook" }));
+    expect(await within(dialog).findByText("discord.com/api/webhooks/…5678/Zx9-…")).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("Webhook URL")).not.toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain(token);
+    expect(calls.filter((c) => c.url === "/api/admin/notify" && c.method === "PUT").map((c) => c.body)).toEqual([{ url: "https://example.com/hook" }, { url: hook }]);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Deaths" }));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Deaths" })).toHaveAttribute("aria-pressed", "false"));
+    expect(calls.filter((c) => c.method === "PUT").at(-1)?.body).toEqual({ kinds: NOTIFY_KINDS.filter((k) => k !== "death") });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send notifications" }));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Send notifications" })).toHaveAttribute("aria-pressed", "false"));
+    expect(calls.filter((c) => c.method === "PUT").at(-1)?.body).toEqual({ enabled: false });
+    expect(within(dialog).getByRole("button", { name: "Raids" })).toBeDisabled();
+  });
+
+  it("shows a webhook from the environment read-only", async () => {
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
+    const calls = api(status({ notifyConfigured: true }), undefined, () => Response.json({ ok: true, source: "env", masked: "discord.com/api/webhooks/…4321/AbCd…", enabled: true, kinds: ["join_code"] }));
+    renderDashboard();
+    const dialog = await openAdmin();
+    expect(await within(dialog).findByText(/Set by the server environment/)).toBeInTheDocument();
+    expect(within(dialog).getByText("discord.com/api/webhooks/…4321/AbCd…")).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("Webhook URL")).not.toBeInTheDocument();
+    expect(within(within(dialog).getByRole("region", { name: "Discord" })).queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Send notifications" })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "New join codes" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Send a test notification" })).toBeEnabled();
+    expect(calls.filter((c) => c.url === "/api/admin/notify" && c.method !== "GET")).toHaveLength(0);
+  });
+
+  it("does not ask for the Discord settings before the admin unlocks", async () => {
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
+    const calls = api(status({ required: true, unlocked: false }), undefined, () => Response.json({ ok: true, source: "panel", masked: null, enabled: true, kinds: [] }));
+    renderDashboard();
+    const dialog = await openAdmin();
+    expect(within(dialog).getByText("Unlock to set the webhook and choose what goes out.")).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("Webhook URL")).not.toBeInTheDocument();
+    expect(calls.filter((c) => c.url === "/api/admin/notify")).toHaveLength(0);
   });
 
   it("without a bridge, shows only the Discord status, the lists and backups", async () => {

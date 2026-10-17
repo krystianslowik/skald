@@ -1,8 +1,6 @@
-import type { AgentEvent, AgentState, LiveMessage, Locale } from "./types";
+import { NOTIFY_KINDS, type AgentEvent, type AgentState, type LiveMessage, type Locale, type NotifyChange, type NotifyConfig, type NotifyKind } from "./types";
 
-/** What DISCORD_NOTIFY may list; all of them when it is unset. */
-export const NOTIFY_KINDS = ["join", "leave", "death", "raid", "server", "join_code", "version", "failure"] as const;
-export type NotifyKind = (typeof NOTIFY_KINDS)[number];
+export { NOTIFY_KINDS, type NotifyChange, type NotifyKind };
 
 /** One line waiting to go out; joins, leaves and deaths of a batch share a line. */
 type Item =
@@ -234,6 +232,7 @@ async function retryAfterMs(res: Response): Promise<number> {
 }
 
 export interface NotifierOptions {
+  /** The webhook; empty means off until `configure` sets one. */
   url: string;
   kinds: readonly NotifyKind[];
   locale: Locale;
@@ -261,7 +260,8 @@ export type SendResult = { ok: true } | { ok: false; error: string };
  * never held up by Discord. Only events that happen after boot are sent.
  */
 export class DiscordNotifier {
-  private readonly kinds: ReadonlySet<NotifyKind>;
+  private url: string;
+  private kinds: ReadonlySet<NotifyKind>;
   private readonly fetchImpl: typeof fetch;
   private readonly clock: () => number;
   private readonly log: (line: string) => void;
@@ -283,6 +283,7 @@ export class DiscordNotifier {
   private stopped = false;
 
   constructor(private readonly o: NotifierOptions) {
+    this.url = o.url;
     this.kinds = new Set(o.kinds);
     this.fetchImpl = o.fetchImpl ?? fetch;
     this.clock = o.clock ?? Date.now;
@@ -304,7 +305,26 @@ export class DiscordNotifier {
       if (m.type === "state") this.seed(m.state, m.online);
       else if (m.type === "event") this.event(m.event);
     } catch (e) {
-      this.log(`discord: ${redact(e instanceof Error ? e.message : String(e), this.o.url)}`);
+      this.log(`discord: ${redact(e instanceof Error ? e.message : String(e), this.url)}`);
+    }
+  }
+
+  /**
+   * Points the notifier at another webhook, or turns it off with null. What it
+   * learned from the live states (the baseline join code, who is online since
+   * when) is kept, so turning it on mid-session sends no stale news. Messages
+   * still waiting are dropped when it is turned off or points elsewhere: they
+   * were meant for the old channel. A message in flight stops retrying.
+   */
+  configure(target: { url: string; kinds: readonly NotifyKind[] } | null): void {
+    const before = this.url;
+    this.url = target?.url ?? "";
+    this.kinds = new Set(target?.kinds ?? []);
+    if (this.url !== before) {
+      this.pending = [];
+      this.outbox = [];
+      if (this.flushTimer) clearTimeout(this.flushTimer);
+      this.flushTimer = null;
     }
   }
 
@@ -319,9 +339,12 @@ export class DiscordNotifier {
     while (this.sending) await this.sending;
   }
 
-  /** Sends the test message now, outside the queue, and says how it went. */
-  async test(): Promise<SendResult> {
-    return this.post(STRINGS[this.o.locale].test);
+  /**
+   * Sends the test message now, outside the queue, and says how it went. To
+   * `url` when given: a saved webhook can be tried before it is turned on.
+   */
+  async test(url = this.url): Promise<SendResult> {
+    return this.post(STRINGS[this.o.locale].test, url, true);
   }
 
   /**
@@ -429,7 +452,7 @@ export class DiscordNotifier {
   }
 
   private add(item: Item): void {
-    if (this.stopped || !this.kinds.has(item.kind)) return;
+    if (this.stopped || !this.url || !this.kinds.has(item.kind)) return;
     this.pending.push(item);
     if (COALESCED.has(item.kind)) {
       if (!this.flushTimer) this.flushTimer = setTimeout(() => this.flush(), this.opts.coalesceMs);
@@ -464,20 +487,27 @@ export class DiscordNotifier {
     }
   }
 
-  private async post(content: string): Promise<SendResult> {
+  /**
+   * `url` is fixed when the message starts. Unless `pinned` (a test), a 429
+   * retry is given up once the webhook changed or was removed meanwhile.
+   */
+  private async post(content: string, url = this.url, pinned = false): Promise<SendResult> {
     // Player names must never ping @everyone or a role.
     const body = JSON.stringify({ content, allowed_mentions: { parse: [] } });
+    if (!url) return { ok: false, error: "not_configured" };
     for (let attempt = 0; ; attempt++) {
       let res: Response;
       try {
-        res = await this.fetchImpl(this.o.url, {
+        res = await this.fetchImpl(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body,
+          // Webhooks never redirect; following one would send the body past the host allow-list.
+          redirect: "error",
           signal: AbortSignal.timeout(this.opts.timeoutMs),
         });
       } catch (e) {
-        return { ok: false, error: redact(e instanceof Error ? e.message : String(e), this.o.url) };
+        return { ok: false, error: redact(e instanceof Error ? e.message : String(e), url) };
       }
       if (res.ok) {
         await res.body?.cancel();
@@ -486,10 +516,152 @@ export class DiscordNotifier {
       if (res.status === 429 && attempt < this.opts.maxRetries) {
         const wait = Math.min(RETRY_CAP_MS, await retryAfterMs(res));
         await this.sleep(wait);
-        continue;
+        if (pinned || this.url === url) continue;
+        return { ok: false, error: "webhook changed" };
       }
       await res.body?.cancel();
       return { ok: false, error: `HTTP ${res.status}` };
     }
+  }
+}
+
+// ---- the webhook from the admin sheet ----------------------------------------
+
+const WEBHOOK_HOSTS: ReadonlySet<string> = new Set(["discord.com", "discordapp.com", "ptb.discord.com", "canary.discord.com"]);
+/** The one query Discord's webhooks take that matters here: post into a thread of a forum channel. */
+const WEBHOOK_QUERY = /^\?thread_id=\d{1,32}$/;
+const WEBHOOK_PATH = /^\/api\/webhooks\/(\d{1,32})\/([A-Za-z0-9_-]{1,256})$/;
+
+/**
+ * A Discord webhook URL as the admin sheet accepts it: https, discord.com or
+ * discordapp.com (or the PTB and Canary clients' hosts),
+ * `/api/webhooks/<id>/<token>`, optionally `?thread_id=<id>`, nothing else (no
+ * port, login, other query or fragment). Returns the canonical URL, or null. The host check is
+ * what keeps a saved webhook and its test message from reaching anything but
+ * Discord.
+ */
+export function parseWebhookUrl(raw: string): string | null {
+  const text = raw.trim();
+  if (!text || text.length > 512) return null;
+  let u: URL;
+  try {
+    u = new URL(text);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "https:" || !WEBHOOK_HOSTS.has(u.hostname) || u.port || u.username || u.password || u.hash) return null;
+  if (u.search && !WEBHOOK_QUERY.test(u.search)) return null;
+  if (!WEBHOOK_PATH.test(u.pathname)) return null;
+  return `https://${u.hostname}${u.pathname}${u.search}`;
+}
+
+/** A webhook URL that can be recognised but not used: the id's last four digits, the token's first four characters. */
+export function maskWebhookUrl(url: string): string {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return "…";
+  }
+  const m = WEBHOOK_PATH.exec(u.pathname);
+  if (!m) return `${u.hostname}/…`;
+  return `${u.hostname}/api/webhooks/…${m[1]!.slice(-4)}/${m[2]!.slice(0, 4)}…`;
+}
+
+/** Where the panel's choice is kept: skald-web's own database (the history store's meta table). */
+export interface MetaStore {
+  getMeta(key: string): string | null;
+  setMeta(key: string, value: string): void;
+}
+
+const META_URL = "discord.url";
+const META_ENABLED = "discord.enabled";
+const META_KINDS = "discord.kinds";
+
+export type NotifyUpdate = { ok: true; config: NotifyConfig } | { ok: false; error: "env" | "bad_url" };
+
+/**
+ * Discord notifications as configured: DISCORD_WEBHOOK_URL (with
+ * DISCORD_NOTIFY) when set, which wins and is read-only, else what an admin
+ * saved in the panel. Every change re-points the one notifier.
+ */
+export class NotifySettings {
+  constructor(
+    private readonly o: {
+      notifier: Pick<DiscordNotifier, "configure" | "test">;
+      store: MetaStore;
+      /** DISCORD_WEBHOOK_URL; empty when unset. */
+      envUrl: string;
+      /** DISCORD_NOTIFY, also the panel's default choice. */
+      envKinds: readonly NotifyKind[];
+    },
+  ) {
+    this.apply();
+  }
+
+  get fromEnv(): boolean {
+    return this.o.envUrl !== "";
+  }
+
+  /** Whether messages go out: a webhook, turned on, with at least one kind. */
+  get on(): boolean {
+    const c = this.current();
+    return c.url !== "" && c.enabled && c.kinds.length > 0;
+  }
+
+  view(): NotifyConfig {
+    const c = this.current();
+    return { source: this.fromEnv ? "env" : "panel", masked: c.url ? maskWebhookUrl(c.url) : null, enabled: c.enabled, kinds: [...c.kinds] };
+  }
+
+  /** A change from the panel. Fields left out keep their value; the URL is checked first. */
+  update(change: NotifyChange): NotifyUpdate {
+    if (this.fromEnv) return { ok: false, error: "env" };
+    let url: string | null = null;
+    if (change.url !== undefined) {
+      url = parseWebhookUrl(change.url);
+      if (!url) return { ok: false, error: "bad_url" };
+    }
+    if (url) this.o.store.setMeta(META_URL, url);
+    if (change.enabled !== undefined) this.o.store.setMeta(META_ENABLED, change.enabled ? "true" : "false");
+    if (change.kinds !== undefined) this.o.store.setMeta(META_KINDS, JSON.stringify(NOTIFY_KINDS.filter((k) => change.kinds!.includes(k))));
+    this.apply();
+    return { ok: true, config: this.view() };
+  }
+
+  /** Forgets the panel's webhook. The kinds stay for the next one, which starts turned on. */
+  clear(): NotifyUpdate {
+    if (this.fromEnv) return { ok: false, error: "env" };
+    this.o.store.setMeta(META_URL, "");
+    this.o.store.setMeta(META_ENABLED, "true");
+    this.apply();
+    return { ok: true, config: this.view() };
+  }
+
+  /** A test message to the webhook in use, also while notifications are turned off. */
+  test(): Promise<SendResult> {
+    const { url } = this.current();
+    if (!url) return Promise.resolve({ ok: false, error: "not_configured" });
+    return this.o.notifier.test(url);
+  }
+
+  private current(): { url: string; enabled: boolean; kinds: readonly NotifyKind[] } {
+    if (this.fromEnv) return { url: this.o.envUrl, enabled: true, kinds: this.o.envKinds };
+    let kinds: readonly NotifyKind[] = this.o.envKinds;
+    const raw = this.o.store.getMeta(META_KINDS);
+    if (raw !== null) {
+      try {
+        const list: unknown = JSON.parse(raw);
+        if (Array.isArray(list)) kinds = NOTIFY_KINDS.filter((k) => list.includes(k));
+      } catch {
+        // unreadable: the default choice
+      }
+    }
+    return { url: this.o.store.getMeta(META_URL) ?? "", enabled: this.o.store.getMeta(META_ENABLED) !== "false", kinds };
+  }
+
+  private apply(): void {
+    const c = this.current();
+    this.o.notifier.configure(c.url && c.enabled ? { url: c.url, kinds: c.kinds } : null);
   }
 }

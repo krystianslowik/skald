@@ -2,7 +2,7 @@
 // the per-device things (the name in the saga, saved kits).
 
 import type { TextKey } from "../i18n";
-import type { AccessListName, AccessOp, AccessState, AdminCatalog, AdminCommand, AdminRead, AdminResult, AdminStatus, BanEntry, LivePlayer, RestoreInfo } from "../types";
+import type { AccessListName, AccessOp, AccessState, AdminCatalog, AdminCommand, AdminRead, AdminResult, AdminStatus, BanEntry, LivePlayer, NotifyChange, NotifyConfig, RestoreInfo } from "../types";
 import { Unauthorized } from "./api";
 
 /** A command's outcome; `status` 403 + `needsAdmin` means: unlock first. */
@@ -105,6 +105,23 @@ export async function testNotify(): Promise<AdminOutcome> {
   return outcome(res.status, await json<AdminResult>(res), `HTTP ${res.status}`);
 }
 
+/** PUT or DELETE /api/admin/notify; on success the answer is the new settings, the webhook masked. */
+export async function changeNotify(change: NotifyChange | null): Promise<AdminOutcome & Partial<NotifyConfig>> {
+  let res: Response;
+  try {
+    res = await fetch("/api/admin/notify", {
+      method: change ? "PUT" : "DELETE",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: change ? JSON.stringify(change) : undefined,
+    });
+  } catch {
+    return { ok: false, status: 0, error: "offline" };
+  }
+  if (res.status === 401) throw new Unauthorized();
+  return outcome(res.status, await json<AdminResult>(res), `HTTP ${res.status}`);
+}
+
 async function getAdmin<T>(path: string): Promise<{ status: number; data: T | null; error?: string; needsAdmin?: boolean }> {
   const res = await fetch(path, { credentials: "same-origin" });
   if (res.status === 401) throw new Unauthorized();
@@ -113,6 +130,7 @@ async function getAdmin<T>(path: string): Promise<{ status: number; data: T | nu
   return { status: res.status, data: body as T };
 }
 
+export const getNotify = () => getAdmin<NotifyConfig>("/api/admin/notify");
 export const getCatalog = () => getAdmin<AdminCatalog>("/api/admin/catalog");
 export const getBans = () => getAdmin<{ data: BanEntry[] }>("/api/admin/read/bans").then((r) => ({ ...r, data: r.data?.data ?? null }));
 export const getAdminPlayers = () => getAdmin<{ data: { players: (LivePlayer & { y: number })[] } }>("/api/admin/players").then((r) => ({ ...r, data: r.data?.data.players ?? null }));

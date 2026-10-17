@@ -6,7 +6,7 @@ import { HistoryStore } from "./db";
 import { hashPassword } from "./hash";
 import { Hub } from "./hub";
 import { MapCache } from "./map";
-import { DiscordNotifier } from "./notify";
+import { DiscordNotifier, NotifySettings } from "./notify";
 import { metricsFetch, VERSION } from "./buildinfo";
 import { cachedMetrics, fetchMetrics } from "./prom";
 import { mountStatic } from "./static";
@@ -72,8 +72,11 @@ const store = new HistoryStore(cfg.dbPath);
 const hub = new Hub(agent, store, { timeZone: cfg.timeZone });
 // Subscribed before start: the first state it sees is its baseline, and
 // nothing that happened before boot is sent.
-const notifier = cfg.discordWebhookUrl ? new DiscordNotifier({ url: cfg.discordWebhookUrl, kinds: cfg.discordNotify, locale: cfg.locale }) : null;
-if (notifier) hub.subscribe((m) => notifier.handle(m));
+// Always there, so a webhook saved in the admin sheet later starts from the same
+// baseline; it sends nothing until DISCORD_WEBHOOK_URL or the panel gives it one.
+const notifier = new DiscordNotifier({ url: "", kinds: cfg.discordNotify, locale: cfg.locale });
+hub.subscribe((m) => notifier.handle(m));
+const notify = new NotifySettings({ notifier, store, envUrl: cfg.discordWebhookUrl, envKinds: cfg.discordNotify });
 hub.start();
 
 const target = { namespace: cfg.promNamespace, container: cfg.promContainer, podRegex: cfg.promPodRegex };
@@ -99,7 +102,7 @@ const app = createApp({
   locale: cfg.locale,
   trustedIpHeader: cfg.trustedIpHeader,
   map: new MapCache((etag) => agent.map(etag), cfg.mapSpoilers),
-  notifyTest: notifier ? () => notifier.test() : undefined,
+  notify,
   version: VERSION,
   update: updates ? () => updates.get() : undefined,
 });
@@ -135,5 +138,5 @@ if (cfg.metricsBind) {
 }
 
 console.log(
-  `skald-web ${VERSION} listening on ${server.hostname}:${server.port} (locale ${cfg.locale}, tz ${cfg.timeZone}, metrics ${metricsConfigured ? "on" : "off"}, map spoilers ${cfg.mapSpoilers ? "on" : "off"}, admin password ${adminPasswordHash ? "on" : "off"}, discord ${notifier ? "on" : "off"}, update check ${updates ? "on" : "off"})${cfg.mock ? " (mock agent)" : ""}`,
+  `skald-web ${VERSION} listening on ${server.hostname}:${server.port} (locale ${cfg.locale}, tz ${cfg.timeZone}, metrics ${metricsConfigured ? "on" : "off"}, map spoilers ${cfg.mapSpoilers ? "on" : "off"}, admin password ${adminPasswordHash ? "on" : "off"}, discord ${notify.fromEnv ? "env" : notify.on ? "panel" : "off"}, update check ${updates ? "on" : "off"})${cfg.mock ? " (mock agent)" : ""}`,
 );

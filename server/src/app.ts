@@ -8,7 +8,7 @@ import { ADMIN_COOKIE, ADMIN_IDLE_MS, createAdminSession, createSession, RateLim
 import type { Hub } from "./hub";
 import { cause, log as defaultLog, type Logger } from "./log";
 import type { MapCache, MapView } from "./map";
-import type { SendResult } from "./notify";
+import type { NotifyChange, NotifySettings } from "./notify";
 import {
   ACCESS_LISTS,
   ACCESS_OPS,
@@ -16,6 +16,7 @@ import {
   ADMIN_COMMANDS,
   ADMIN_READS,
   BACKUP_NAME,
+  NOTIFY_KINDS,
   SKALD_BACKUP_NAME,
   type AccessListName,
   type AccessOp,
@@ -30,6 +31,7 @@ import {
   type ApplyMode,
   type Locale,
   type Metrics,
+  type NotifyKind,
   type PublicConfig,
   type SettingsRequest,
 } from "./types";
@@ -54,8 +56,8 @@ export interface AppDeps {
   adminLimiter?: RateLimiter;
   /** The world map; without it /api/map answers 404. */
   map?: MapCache;
-  /** Sends a Discord test message; unset when DISCORD_WEBHOOK_URL is empty. */
-  notifyTest?: () => Promise<SendResult>;
+  /** Discord notifications: the environment's or the panel's webhook. Unset: the feature is off. */
+  notify?: Pick<NotifySettings, "on" | "fromEnv" | "view" | "update" | "clear" | "test">;
   verifyPassword?: (password: string, hash: string) => Promise<boolean>;
   clock?: () => number;
   /** This build's Skald release; "dev" when unset. */
@@ -468,8 +470,9 @@ export function createApp(deps: AppDeps): Hono {
   app.post("/api/notify/test", async (c) => {
     const denied = needAdmin(c);
     if (denied) return denied;
-    if (!deps.notifyTest) return c.json({ ok: false, error: "not_configured" }, 404);
-    const res = await deps.notifyTest();
+    if (!deps.notify) return c.json({ ok: false, error: "not_configured" }, 404);
+    const res = await deps.notify.test();
+    if (!res.ok && res.error === "not_configured") return c.json(res, 404);
     // The notifier already strips the webhook URL out of its errors.
     if (!res.ok) logger.warn("discord test failed", { ...where(c), status: 502, cause: res.error });
     return res.ok ? c.json({ ok: true }) : c.json({ ok: false, error: res.error }, 502);
@@ -588,7 +591,7 @@ export function createApp(deps: AppDeps): Hono {
 
   app.get("/api/admin/status", async (c) => {
     c.header("Cache-Control", "no-store");
-    const body: AdminStatus = { bridge: await bridgeStatus(c), required: adminRequired, unlocked: isAdmin(c), idleMs: ADMIN_IDLE_MS, notifyConfigured: Boolean(deps.notifyTest) };
+    const body: AdminStatus = { bridge: await bridgeStatus(c), required: adminRequired, unlocked: isAdmin(c), idleMs: ADMIN_IDLE_MS, notifyConfigured: deps.notify?.on ?? false };
     body.update = deps.update?.() ?? null;
     return c.json(body);
   });
@@ -731,6 +734,58 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   app.get("/api/admin/restore", (c) => passTools(c, { op: "restore-info" }));
+
+  // ---- admin: Discord notifications ------------------------------------------
+  // Behind the admin middleware. The webhook URL is a secret: it comes in on a
+  // PUT and only ever goes out masked; it is never logged and never becomes an
+  // event, so it stays out of the saga. With DISCORD_WEBHOOK_URL set, the
+  // environment wins and these answer 409.
+
+  const notifyAnswer = (c: Context, res: ReturnType<NonNullable<AppDeps["notify"]>["update"]>) => {
+    if (res.ok) return c.json({ ok: true, ...res.config });
+    if (res.error === "env") return c.json({ ok: false, error: "env", message: "set by the server environment" }, 409);
+    // Never echoes the value: a mistyped webhook is still a token.
+    return c.json({ ok: false, error: "bad_url", message: "not a Discord webhook URL (https://discord.com/api/webhooks/<id>/<token>)" }, 400);
+  };
+
+  app.get("/api/admin/notify", (c) => {
+    c.header("Cache-Control", "no-store");
+    if (!deps.notify) return c.json({ ok: false, error: "not_available" }, 404);
+    return c.json({ ok: true, ...deps.notify.view() });
+  });
+
+  app.put("/api/admin/notify", async (c) => {
+    c.header("Cache-Control", "no-store");
+    if (!deps.notify) return c.json({ ok: false, error: "not_available" }, 404);
+    // JSON only: a cross-site form cannot send it without a CORS preflight.
+    if (!/^application\/json\b/i.test(c.req.header("Content-Type") ?? "")) return c.json({ ok: false, error: "bad request body" }, 415);
+    const body = await objectBody(c);
+    if (body instanceof Response) return body;
+    const change: NotifyChange = {};
+    if (body.url !== undefined) {
+      if (typeof body.url !== "string") return c.json({ ok: false, error: "bad request body" }, 400);
+      change.url = body.url;
+    }
+    if (body.enabled !== undefined) {
+      if (typeof body.enabled !== "boolean") return c.json({ ok: false, error: "bad request body" }, 400);
+      change.enabled = body.enabled;
+    }
+    if (body.kinds !== undefined) {
+      if (!Array.isArray(body.kinds) || !body.kinds.every((k) => NOTIFY_KINDS.includes(k as NotifyKind))) return c.json({ ok: false, error: "unknown kind" }, 400);
+      change.kinds = body.kinds as NotifyKind[];
+    }
+    const res = deps.notify.update(change);
+    if (res.ok) logger.info("discord settings changed", { ...where(c), webhook: change.url !== undefined, enabled: res.config.enabled, kinds: res.config.kinds.join(",") });
+    return notifyAnswer(c, res);
+  });
+
+  app.delete("/api/admin/notify", (c) => {
+    c.header("Cache-Control", "no-store");
+    if (!deps.notify) return c.json({ ok: false, error: "not_available" }, 404);
+    const res = deps.notify.clear();
+    if (res.ok) logger.info("discord webhook removed", where(c));
+    return notifyAnswer(c, res);
+  });
 
   app.post("/api/admin/restore", async (c) => {
     const body = await objectBody(c);

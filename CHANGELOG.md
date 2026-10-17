@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Added
+
+- Discord notifications can now be set up from the admin sheet: paste the channel's webhook URL, save, send a test message, turn them on or off, and pick what goes out (joins, leaves, deaths, raids, server stop and start, new join codes, game updates, failed commands). No secret edit or redeploy needed. The webhook is kept in skald-web's database and only an admin can change it; once saved, the panel shows only a shortened form such as `discord.com/api/webhooks/…5678/AbCd…`, never the whole URL, and it never goes into the log or the Saga. Only Discord webhook URLs (`https://discord.com/api/webhooks/…`, also from the PTB and Canary clients, optionally with `?thread_id=` for a forum thread) are accepted. Unpicking every kind turns notifications off (#105).
+- **Operators:** nothing changes for a server that sets `DISCORD_WEBHOOK_URL`: it still wins, and the admin sheet shows it as set by the server environment, read-only. To manage the webhook from the panel instead, remove the variable. skald-web needs outbound HTTPS (TCP 443) to Discord either way; on Kubernetes, uncomment the internet egress rule in the example NetworkPolicy.
+
 ### Fixed
 
 - The map's chest view, and the totals in Village stores, read the stack size and the quality of an item the wrong way round when an item has both, which vanilla items rarely do (modded items can): a quality 3 item in a stack of 37 showed as quality 37 in a stack of 3. Items with only a stack or only a quality were always right. **Operators:** the fix is in `skald-agent`, which runs in the game pod, so deploying it restarts the game (#104).

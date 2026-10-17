@@ -55,8 +55,9 @@ spec:
             - name: SESSION_SECRET
               valueFrom:
                 secretKeyRef: {name: skald-web, key: SESSION_SECRET}
-            # Optional Discord notifications: without the key they are off.
-            # Uncomment the Discord egress rule in networkpolicy.yaml too.
+            # Optional: Discord notifications can also be set up in the admin sheet.
+            # Set here, the key wins and the panel shows it read-only.
+            # Either way, uncomment the internet egress rule in networkpolicy.yaml.
             - name: DISCORD_WEBHOOK_URL
               valueFrom:
                 secretKeyRef: {name: skald-web, key: DISCORD_WEBHOOK_URL, optional: true}

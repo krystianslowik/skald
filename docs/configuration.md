@@ -51,8 +51,8 @@
 | `BIND` | `0.0.0.0:8080` | Listen address |
 | `METRICS_BIND` | (empty = off) | Prometheus listener, e.g. `0.0.0.0:9465`, serving `GET /metrics` with `skald_build_info`. No session, like the agent's `METRICS_ADDR`: restrict it with a NetworkPolicy or firewall. The panel port never serves `/metrics` |
 | `WEB_ROOT` | `../web/dist` | Built SPA, relative to the working directory |
-| `DISCORD_WEBHOOK_URL` | (empty) | A Discord channel webhook for notifications. Empty turns them off at no cost. A secret: it is never logged or sent to the browser. See [Discord notifications](#discord-notifications) |
-| `DISCORD_NOTIFY` | all | Which notifications to send, comma-separated: `join`, `leave`, `death`, `raid`, `server`, `join_code`, `version`, `failure`. An unknown name stops skald-web at startup |
+| `DISCORD_WEBHOOK_URL` | (empty) | A Discord channel webhook for notifications. Optional: an admin can set the webhook in the admin sheet instead. Set, it wins over the panel, which then shows it read-only. A secret: it is never logged or sent to the browser. See [Discord notifications](#discord-notifications) |
+| `DISCORD_NOTIFY` | all | Which notifications `DISCORD_WEBHOOK_URL` sends, comma-separated: `join`, `leave`, `death`, `raid`, `server`, `join_code`, `version`, `failure`. Without `DISCORD_WEBHOOK_URL` it is only the panel's starting choice. An unknown name stops skald-web at startup |
 | `MAP_SPOILERS` | `false` | `true` shows every boss altar, trader and dungeon of the seed on the world map. Off, only places someone has been to are sent to the browser |
 | `MOCK_AGENT` | (unset) | `1` runs against a built-in fake server (development, `bun run dev` from a source checkout; release images have no mock and exit at startup). It also turns `COOKIE_SECURE` off and keeps the history in memory unless `DB_PATH` is set |
 | `MOCK_BRIDGE` | `on` | With `MOCK_AGENT=1`: the fake bridge's state, `on`, `off`, `untested` or `disabled` |
@@ -66,9 +66,30 @@ whatever labels your cAdvisor uses, or leave `PROM_URL` empty.
 
 ## Discord notifications
 
-With `DISCORD_WEBHOOK_URL` set (Discord: channel settings, Integrations,
-Webhooks, New Webhook, Copy Webhook URL), skald-web posts short messages to
-that channel, in the `SKALD_LOCALE` language:
+Given a channel webhook (Discord: channel settings, Integrations, Webhooks, New
+Webhook, Copy Webhook URL), skald-web posts short messages to that channel, in
+the `SKALD_LOCALE` language. There are two ways to give it one:
+
+- **The admin sheet** (the usual way). Paste the webhook URL into the Discord
+  section and save, then send a test message. The same section turns
+  notifications on and off and picks which kinds go out. Only an admin can
+  see or change it (with `ADMIN_PASSWORD_HASH` set, an unlocked admin
+  session). The URL is kept in skald-web's database (`DB_PATH`), so it
+  survives restarts; treat backups of that file as secret. After saving, the
+  panel shows only a shortened form (`discord.com/api/webhooks/…5678/AbCd…`):
+  the full URL is never sent back to a browser, never logged and never
+  written to the Saga. Only `https://discord.com/api/webhooks/<id>/<token>`
+  is accepted (also on `discordapp.com`, `ptb.discord.com` and
+  `canary.discord.com`), optionally with `?thread_id=<id>` to post into a
+  thread of a forum channel. Removing the webhook blanks it in the database;
+  older backups of the file still hold it, so delete or regenerate the
+  webhook in Discord if it may have leaked.
+- **`DISCORD_WEBHOOK_URL`** (with `DISCORD_NOTIFY`), as before. When set it
+  wins over whatever the panel saved, and the admin sheet shows it as "set by
+  the server environment", read-only: existing deployments keep working
+  unchanged. Remove the variable to manage the webhook from the panel.
+
+The kinds:
 
 | Kind | When |
 |---|---|
@@ -89,11 +110,12 @@ waits as long as Discord asks and tries again, up to three times. A message
 that still fails is dropped and logged, without the webhook URL. Player names
 never ping anyone (`@everyone` in a name stays plain text).
 
-The admin sheet (there when the bridge is on) shows whether notifications are on and has a button that
-sends a test message (an admin session when `ADMIN_PASSWORD_HASH` is set).
+The test message reports Discord's answer, for example `HTTP 401` for a webhook
+that was deleted in Discord.
 
-On Kubernetes, the example `skald-web` NetworkPolicy allows no internet
-egress; uncomment its Discord rule.
+skald-web needs outbound HTTPS (TCP 443) to `discord.com` for notifications,
+whichever way the webhook is set. On Kubernetes, the example `skald-web`
+NetworkPolicy allows no internet egress; uncomment its internet rule.
 
 ## Versions and the update check
 

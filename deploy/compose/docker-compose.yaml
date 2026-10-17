@@ -211,7 +211,7 @@ services:
       ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
       SKALD_LOCALE: ${SKALD_LOCALE:-en}
-      # Optional Discord notifications; an empty webhook keeps them off.
+      # Optional Discord notifications; empty: set the webhook in the admin sheet.
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       DISCORD_NOTIFY: ${DISCORD_NOTIFY:-}
       SKALD_TZ: ${TZ:-UTC}

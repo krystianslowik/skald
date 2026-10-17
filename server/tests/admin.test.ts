@@ -5,7 +5,8 @@ import { ADMIN_IDLE_MS, RateLimiter } from "../src/auth";
 import { HistoryStore } from "../src/db";
 import { Hub } from "../src/hub";
 import { MockAgent, mockRefusal } from "../src/mock";
-import type { SendResult } from "../src/notify";
+import { createLogger, type Logger } from "../src/log";
+import { DiscordNotifier, NOTIFY_KINDS, NotifySettings, type NotifyKind } from "../src/notify";
 import { emptyAgentState, type AdminStatus, type AgentEvent, type LiveMessage } from "../src/types";
 
 const PANEL = await Bun.password.hash("ognisko");
@@ -64,7 +65,7 @@ function fakeAgent(calls: BridgeRequest[], status = 200, toolCalls: ToolsRequest
   };
 }
 
-async function setup(opts: { admin?: boolean; bridgeStatus?: number; notifyTest?: () => Promise<SendResult> } = {}) {
+async function setup(opts: { admin?: boolean; bridgeStatus?: number; notify?: NotifySettings; log?: Logger } = {}) {
   const calls: BridgeRequest[] = [];
   const toolCalls: ToolsRequest[] = [];
   const agent = fakeAgent(calls, opts.bridgeStatus, toolCalls);
@@ -85,9 +86,10 @@ async function setup(opts: { admin?: boolean; bridgeStatus?: number; notifyTest?
     limiter: new RateLimiter(5, 60_000, 900_000, () => t),
     adminLimiter: new RateLimiter(5, 60_000, 900_000, () => t),
     clock: () => t,
-    notifyTest: opts.notifyTest,
+    notify: opts.notify,
+    log: opts.log,
   });
-  return { app, calls, toolCalls, advance: (ms: number) => (t += ms) };
+  return { app, hub, calls, toolCalls, advance: (ms: number) => (t += ms) };
 }
 
 type App = Awaited<ReturnType<typeof setup>>["app"];
@@ -555,20 +557,210 @@ describe("HttpAgent.bridge", () => {
   });
 });
 
+// A token no test data shares, so finding it anywhere is a leak.
+const TOKEN = "Rg7xSecretTokenOfFreya-and_Bjorn0123456789abcdefghijklmnopqrstuvwxyzAB";
+const HOOK = `https://discord.com/api/webhooks/123456789012345678/${TOKEN}`;
+
+/** The notifier and its settings on a fake Discord, with every log line kept. */
+function discord(opts: { envUrl?: string; envKinds?: readonly NotifyKind[]; replies?: Array<Response | Error>; store?: HistoryStore } = {}) {
+  const posts: string[] = [];
+  const lines: string[] = [];
+  const replies = opts.replies ?? [];
+  const notifier = new DiscordNotifier({
+    url: "",
+    kinds: NOTIFY_KINDS,
+    locale: "en",
+    log: (l) => lines.push(l),
+    fetchImpl: (async (url: string) => {
+      posts.push(url);
+      const r = replies.shift();
+      if (r instanceof Error) throw r;
+      return r ?? new Response(null, { status: 204 });
+    }) as unknown as typeof fetch,
+  });
+  const store = opts.store ?? new HistoryStore(":memory:");
+  const notify = new NotifySettings({ notifier, store, envUrl: opts.envUrl ?? "", envKinds: opts.envKinds ?? NOTIFY_KINDS });
+  const log = createLogger({ write: (l) => lines.push(l), windowMs: 0 });
+  return { notifier, notify, store, posts, lines, log };
+}
+
+const req = (app: App, method: string, path: string, cookie: string, body?: unknown, headers: Record<string, string> = {}) =>
+  app.request(path, { method, headers: { Cookie: cookie, "Content-Type": "application/json", ...headers }, body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body) });
+const status = async (app: App, cookie: string) => (await (await app.request("/api/admin/status", { headers: { Cookie: cookie } })).json()) as AdminStatus;
+
+describe("discord notifications from the admin sheet", () => {
+  it("refuses everything to a request without a session and to a view-only session", async () => {
+    const d = discord();
+    const { app } = await setup({ admin: true, notify: d.notify, log: d.log });
+    const viewer = await signIn(app);
+    const routes = [
+      ["GET", "/api/admin/notify"],
+      ["PUT", "/api/admin/notify"],
+      ["DELETE", "/api/admin/notify"],
+      ["POST", "/api/notify/test"],
+    ] as const;
+    for (const [method, path] of routes) {
+      const body = method === "PUT" ? { url: HOOK, enabled: true } : undefined;
+      expect([method, path, (await req(app, method, path, "", body)).status]).toEqual([method, path, 401]);
+      const res = await req(app, method, path, viewer, body);
+      expect([method, path, res.status]).toEqual([method, path, 403]);
+      expect(((await res.json()) as { error: string }).error).toBe("admin_required");
+    }
+    expect(d.store.getMeta("discord.url")).toBeNull();
+    expect(d.posts).toEqual([]);
+    expect((await status(app, viewer)).notifyConfigured).toBe(false);
+  });
+
+  it("saves a webhook for an admin, shows it masked only and sends the test to it", async () => {
+    const d = discord();
+    const { app } = await setup({ admin: true, notify: d.notify, log: d.log });
+    const cookie = await signIn(app);
+    const both = `${cookie}; ${adminCookie(await post(app, "/api/admin/unlock", cookie, { password: "jarl" }))}`;
+    expect(await (await req(app, "GET", "/api/admin/notify", both)).json()).toEqual({ ok: true, source: "panel", masked: null, enabled: true, kinds: [...NOTIFY_KINDS] });
+    expect((await req(app, "POST", "/api/notify/test", both)).status).toBe(404);
+
+    const res = await req(app, "PUT", "/api/admin/notify", both, { url: `  ${HOOK}  `, kinds: ["death", "join"] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, source: "panel", masked: "discord.com/api/webhooks/…5678/Rg7x…", enabled: true, kinds: ["join", "death"] });
+    expect(d.store.getMeta("discord.url")).toBe(HOOK);
+    expect((await status(app, cookie)).notifyConfigured).toBe(true);
+    // No kind picked: nothing would go out, so it does not count as on.
+    await req(app, "PUT", "/api/admin/notify", both, { kinds: [] });
+    expect((await status(app, cookie)).notifyConfigured).toBe(false);
+    await req(app, "PUT", "/api/admin/notify", both, { kinds: ["join", "death"] });
+
+    expect((await req(app, "POST", "/api/notify/test", both)).status).toBe(200);
+    expect(d.posts).toEqual([HOOK]);
+
+    // Turned off: nothing goes out, the test still reaches the saved webhook.
+    const off = await req(app, "PUT", "/api/admin/notify", both, { enabled: false });
+    expect(((await off.json()) as { enabled: boolean; masked: string }).enabled).toBe(false);
+    expect((await status(app, cookie)).notifyConfigured).toBe(false);
+    expect((await req(app, "POST", "/api/notify/test", both)).status).toBe(200);
+    expect(d.posts).toHaveLength(2);
+
+    // Removed: no webhook, the choice of kinds stays and the next one starts turned on.
+    const gone = await req(app, "DELETE", "/api/admin/notify", both);
+    expect(await gone.json()).toEqual({ ok: true, source: "panel", masked: null, enabled: true, kinds: ["join", "death"] });
+    expect((await req(app, "POST", "/api/notify/test", both)).status).toBe(404);
+  });
+
+  it("keeps the panel's choice in skald-web's database across a restart", async () => {
+    const store = new HistoryStore(":memory:");
+    const first = discord({ store });
+    expect(first.notify.update({ url: HOOK, enabled: true, kinds: ["raid"] }).ok).toBe(true);
+    const again = discord({ store });
+    expect(again.notify.on).toBe(true);
+    expect(again.notify.view()).toEqual({ source: "panel", masked: "discord.com/api/webhooks/…5678/Rg7x…", enabled: true, kinds: ["raid"] });
+  });
+
+  it("accepts only a Discord webhook URL and never echoes what it refused", async () => {
+    const d = discord();
+    const { app } = await setup({ notify: d.notify, log: d.log });
+    const cookie = await signIn(app);
+    const id = "123456789012345678";
+    const bad = [
+      `http://discord.com/api/webhooks/${id}/${TOKEN}`,
+      `https://discord.com.evil.example/api/webhooks/${id}/${TOKEN}`,
+      `https://discord.com@evil.example/api/webhooks/${id}/${TOKEN}`,
+      `https://user:pw@discord.com/api/webhooks/${id}/${TOKEN}`,
+      `https://evil.example/api/webhooks/${id}/${TOKEN}`,
+      `https://discord.com:8443/api/webhooks/${id}/${TOKEN}`,
+      `https://discord.com/api/webhooks/abc/${TOKEN}`,
+      `https://discord.com/api/webhooks/${id}/${TOKEN}?wait=true`,
+      `https://discord.com/api/webhooks/${id}/${TOKEN}#x`,
+      `https://discord.com/api/webhooks/${id}/${TOKEN}/slack`,
+      `https://discord.com/api/v10/channels/${id}/${TOKEN}`,
+      `https://discord.com/api/webhooks/${id}/`,
+      `${TOKEN} https://discord.com/api/webhooks/${id}/x`,
+      `javascript:alert(1)//discord.com/api/webhooks/${id}/${TOKEN}`,
+      "",
+    ];
+    for (const url of bad) {
+      const res = await req(app, "PUT", "/api/admin/notify", cookie, { url });
+      const text = await res.text();
+      expect([url, res.status]).toEqual([url, 400]);
+      expect(text).not.toContain(TOKEN);
+      expect(text).toContain("bad_url");
+    }
+    expect(d.store.getMeta("discord.url")).toBeNull();
+    expect((await req(app, "PUT", "/api/admin/notify", cookie, { url: `https://discordapp.com/api/webhooks/${id}/${TOKEN}` })).status).toBe(200);
+    expect((await req(app, "PUT", "/api/admin/notify", cookie, { url: `https://DISCORD.com/api/webhooks/${id}/${TOKEN}` })).status).toBe(200);
+    expect(d.store.getMeta("discord.url")).toBe(`https://discord.com/api/webhooks/${id}/${TOKEN}`);
+
+    expect((await req(app, "PUT", "/api/admin/notify", cookie, { kinds: ["join", "boss"] })).status).toBe(400);
+    expect((await req(app, "PUT", "/api/admin/notify", cookie, { kinds: "join" })).status).toBe(400);
+    expect((await req(app, "PUT", "/api/admin/notify", cookie, { enabled: "yes" })).status).toBe(400);
+    expect((await req(app, "PUT", "/api/admin/notify", cookie, { url: 42 })).status).toBe(400);
+    expect((await req(app, "PUT", "/api/admin/notify", cookie, "[1]")).status).toBe(400);
+    expect((await req(app, "PUT", "/api/admin/notify", cookie, { url: "x".repeat(5000) })).status).toBe(413);
+    // A cross-site form can only send text/plain or form bodies.
+    expect((await req(app, "PUT", "/api/admin/notify", cookie, JSON.stringify({ enabled: false }), { "Content-Type": "text/plain" })).status).toBe(415);
+    expect(d.notify.view().enabled).toBe(true);
+  });
+
+  it("lets DISCORD_WEBHOOK_URL win and keeps it read-only", async () => {
+    const env = `https://discord.com/api/webhooks/987654321098765432/${TOKEN}`;
+    const store = new HistoryStore(":memory:");
+    store.setMeta("discord.url", HOOK.replace("1234", "5555"));
+    const d = discord({ envUrl: env, envKinds: ["join_code"], store });
+    const { app } = await setup({ notify: d.notify, log: d.log });
+    const cookie = await signIn(app);
+    expect(await (await req(app, "GET", "/api/admin/notify", cookie)).json()).toEqual({ ok: true, source: "env", masked: "discord.com/api/webhooks/…5432/Rg7x…", enabled: true, kinds: ["join_code"] });
+    expect((await req(app, "PUT", "/api/admin/notify", cookie, { enabled: false })).status).toBe(409);
+    expect((await req(app, "PUT", "/api/admin/notify", cookie, { url: HOOK })).status).toBe(409);
+    expect((await req(app, "DELETE", "/api/admin/notify", cookie)).status).toBe(409);
+    expect((await status(app, cookie)).notifyConfigured).toBe(true);
+    expect((await req(app, "POST", "/api/notify/test", cookie)).status).toBe(200);
+    expect(d.posts).toEqual([env]);
+  });
+
+  it("never puts the webhook URL in an answer, a log line or the saga", async () => {
+    const d = discord({ replies: [new Error(`connect ECONNREFUSED ${HOOK}`), new Response("nope", { status: 500 })] });
+    const { app, hub } = await setup({ admin: true, notify: d.notify, log: d.log });
+    const cookie = await signIn(app);
+    const both = `${cookie}; ${adminCookie(await post(app, "/api/admin/unlock", cookie, { password: "jarl" }))}`;
+    const bodies: string[] = [];
+    const keep = async (res: Response | Promise<Response>) => bodies.push(await (await res).text());
+    await keep(req(app, "PUT", "/api/admin/notify", both, { url: HOOK }));
+    await keep(req(app, "PUT", "/api/admin/notify", both, { url: `${HOOK}?x=1` }));
+    await keep(req(app, "PUT", "/api/admin/notify", cookie, { url: HOOK }));
+    await keep(req(app, "GET", "/api/admin/notify", both));
+    await keep(req(app, "GET", "/api/admin/notify", cookie));
+    await keep(req(app, "POST", "/api/notify/test", both));
+    await keep(req(app, "POST", "/api/notify/test", both));
+    await keep(app.request("/api/admin/status", { headers: { Cookie: both } }));
+    await keep(app.request("/api/state", { headers: { Cookie: both } }));
+    await keep(req(app, "DELETE", "/api/admin/notify", both));
+    expect(d.posts).toEqual([HOOK, HOOK]);
+    expect(bodies.length).toBe(10);
+    expect(d.lines.length).toBeGreaterThan(0);
+    for (const text of [...bodies, ...d.lines]) {
+      expect(text).not.toContain(TOKEN);
+      expect(text).not.toContain("123456789012345678");
+    }
+    // Nothing of it became an event.
+    const saga = JSON.stringify({ history: hub.history(), events: hub.getState() });
+    expect(saga).not.toContain(TOKEN);
+    expect(saga).not.toContain("discord");
+  });
+});
+
 describe("discord test notification", () => {
   it("says whether it is configured and needs an admin session to send", async () => {
-    let sent = 0;
-    const { app } = await setup({ admin: true, notifyTest: async () => (sent++, { ok: true }) });
+    const d = discord();
+    d.notify.update({ url: HOOK });
+    const { app } = await setup({ admin: true, notify: d.notify });
     const cookie = await signIn(app);
     const st = (await (await app.request("/api/admin/status", { headers: { Cookie: cookie } })).json()) as AdminStatus;
     expect(st.notifyConfigured).toBe(true);
     expect(JSON.stringify(st)).not.toContain("webhook");
     expect((await post(app, "/api/notify/test", cookie)).status).toBe(403);
-    expect(sent).toBe(0);
+    expect(d.posts).toHaveLength(0);
     const admin = adminCookie(await post(app, "/api/admin/unlock", cookie, { password: "jarl" }));
     const res = await post(app, "/api/notify/test", `${cookie}; ${admin}`);
     expect(res.status).toBe(200);
-    expect(sent).toBe(1);
+    expect(d.posts).toHaveLength(1);
   });
 
   it("answers 404 when off and 502 with the redacted error when Discord fails", async () => {
@@ -576,7 +768,9 @@ describe("discord test notification", () => {
     const c1 = await signIn(off.app);
     expect(((await (await off.app.request("/api/admin/status", { headers: { Cookie: c1 } })).json()) as AdminStatus).notifyConfigured).toBe(false);
     expect((await post(off.app, "/api/notify/test", c1)).status).toBe(404);
-    const failing = await setup({ notifyTest: async () => ({ ok: false, error: "HTTP 401" }) });
+    const d = discord({ replies: [new Response(null, { status: 401 })] });
+    d.notify.update({ url: HOOK });
+    const failing = await setup({ notify: d.notify, log: d.log });
     const c2 = await signIn(failing.app);
     const res = await post(failing.app, "/api/notify/test", c2);
     expect(res.status).toBe(502);

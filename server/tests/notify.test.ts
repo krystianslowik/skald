@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { DiscordNotifier, formatBatch, NOTIFY_KINDS, parseNotifyKinds, redact, type NotifierOptions, type NotifyKind } from "../src/notify";
+import { DiscordNotifier, formatBatch, maskWebhookUrl, NOTIFY_KINDS, parseNotifyKinds, parseWebhookUrl, redact, type NotifierOptions, type NotifyKind } from "../src/notify";
 import { emptyAgentState, type AgentEvent, type AgentState, type LiveMessage } from "../src/types";
 
 const URL_ = "https://discord.example/api/webhooks/123/s3cr3t-token";
@@ -276,5 +276,79 @@ describe("redact", () => {
   it("removes the configured URL and anything shaped like a webhook", () => {
     expect(redact(`failed: ${URL_}`, URL_)).toBe("failed: [webhook]");
     expect(redact("at https://discord.com/api/webhooks/9/other: refused", "")).toBe("at [webhook] refused");
+  });
+});
+
+describe("webhook URL from the admin sheet", () => {
+  it("accepts only Discord's webhook shape and canonicalises it", () => {
+    expect(parseWebhookUrl(" https://discord.com/api/webhooks/42/Ab_c-9 ")).toBe("https://discord.com/api/webhooks/42/Ab_c-9");
+    expect(parseWebhookUrl("https://DiscordApp.com/api/webhooks/42/x")).toBe("https://discordapp.com/api/webhooks/42/x");
+    expect(parseWebhookUrl("https://canary.discord.com/api/webhooks/42/x")).toBe("https://canary.discord.com/api/webhooks/42/x");
+    expect(parseWebhookUrl("https://ptb.discord.com/api/webhooks/42/x?thread_id=77")).toBe("https://ptb.discord.com/api/webhooks/42/x?thread_id=77");
+    for (const bad of [
+      "https://evil.discord.com/api/webhooks/42/x",
+      "https://discord.com/api/webhooks/42/x?thread_id=1&wait=true",
+      "https://discord.com/api/webhooks/42/x?thread_id=abc",
+      "https://discord.com/api/webhooks/42/x y",
+      "ftp://discord.com/api/webhooks/42/x",
+    ]) {
+      expect([bad, parseWebhookUrl(bad)]).toEqual([bad, null]);
+    }
+  });
+
+  it("masks to the id's tail and the token's head", () => {
+    expect(maskWebhookUrl("https://discord.com/api/webhooks/123456789/abcdefghij")).toBe("discord.com/api/webhooks/…6789/abcd…");
+    expect(maskWebhookUrl("https://hooks.example/private/path?token=s3cr3t")).toBe("hooks.example/…");
+    expect(maskWebhookUrl("not a url")).toBe("…");
+  });
+});
+
+describe("DiscordNotifier.configure", () => {
+  it("sends nothing while off, keeps its baseline and starts sending once configured", async () => {
+    const d = fakeDiscord();
+    const { n } = notifier(d.fetchImpl, { url: "" });
+    n.handle(live(ev(1, "raid", { name: "wolves" })));
+    n.handle(live(ev(2, "join_code", { code: "482915" })));
+    await settle(n);
+    expect(d.calls).toHaveLength(0);
+    expect(await n.test()).toEqual({ ok: false, error: "not_configured" });
+    n.configure({ url: URL_, kinds: ["raid", "join_code"] });
+    // The baseline join code from the first state is still known: not news.
+    n.handle(live(ev(3, "join_code", { code: "482915" })));
+    n.handle(live(ev(4, "raid", { name: "wolves" })));
+    n.handle(live(ev(5, "death", { name: "Ragnar" })));
+    await settle(n);
+    expect(d.contents()).toEqual(["Raid: You are being hunted..."]);
+    expect(d.calls[0]!.url).toBe(URL_);
+  });
+
+  it("stops retrying a message once its webhook is removed, and drops what was queued for the old one", async () => {
+    const d = fakeDiscord([new Response("{}", { status: 429, headers: { "Retry-After": "1" } })]);
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const { n, logs } = notifier(d.fetchImpl, { sleep: () => gate });
+    n.handle(live(ev(1, "raid", { name: "wolves" })));
+    await Bun.sleep(30);
+    n.handle(live(ev(2, "raid", { name: "bats" })));
+    await Bun.sleep(30);
+    expect(d.calls).toHaveLength(1);
+    n.configure({ url: "https://discord.example/api/webhooks/9/new", kinds: NOTIFY_KINDS });
+    release();
+    await settle(n);
+    // Neither the retry nor the queued raid went anywhere.
+    expect(d.calls.map((c) => c.url)).toEqual([URL_]);
+    expect(logs).toEqual(["discord: message dropped: webhook changed"]);
+  });
+
+  it("drops what waits when turned off, and tests another webhook on request", async () => {
+    const d = fakeDiscord();
+    const { n } = notifier(d.fetchImpl, { coalesceMs: 40 });
+    n.handle(live(ev(1, "player_join", { name: "Freya" })));
+    n.configure(null);
+    await settle(n, 80);
+    expect(d.calls).toHaveLength(0);
+    const other = "https://discord.example/api/webhooks/9/other";
+    expect(await n.test(other)).toEqual({ ok: true });
+    expect(d.calls.map((c) => c.url)).toEqual([other]);
   });
 });
