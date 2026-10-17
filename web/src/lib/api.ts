@@ -65,6 +65,18 @@ export async function login(password: string): Promise<LoginResult> {
  */
 export type LogoutResult = "ok" | "offline" | "refused" | "failed";
 
+/** The terrain tiles the service worker keeps (sw.js), dropped on sign-out or when the session is gone: the world's land is for signed-in viewers. */
+export async function dropTerrainTiles(): Promise<void> {
+  const c = globalThis.caches;
+  if (!c) return;
+  try {
+    const names = await c.keys();
+    await Promise.all(names.filter((n) => n.startsWith("skald-terrain-")).map((n) => c.delete(n)));
+  } catch {
+    // no storage to clear
+  }
+}
+
 export async function logout(): Promise<LogoutResult> {
   let res: Response;
   try {
@@ -73,7 +85,11 @@ export async function logout(): Promise<LogoutResult> {
     return "offline";
   }
   // Only skald-web's own answer counts: a proxy's login page reached through a redirect is a 200 too.
-  if (res.ok) return ((await res.json().catch(() => null)) as { ok?: unknown } | null)?.ok === true ? "ok" : "failed";
+  if (res.ok) {
+    if (((await res.json().catch(() => null)) as { ok?: unknown } | null)?.ok !== true) return "failed";
+    await dropTerrainTiles();
+    return "ok";
+  }
   if (await originRefused(res)) return "refused";
   // A proxy's error page while skald-web is down: as good as no connection.
   return res.status >= 500 ? "offline" : "failed";
