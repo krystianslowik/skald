@@ -1,11 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { Suspense } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChunkBoundary } from "../components/ErrorBoundary";
 import { I18nProvider } from "../i18n";
 import { en } from "../i18n/en";
 import { pl } from "../i18n/pl";
-import { isChunkError, lazyChunk, page, reloadOnce } from "./chunks";
+import { chunkUrl, failedChunkUrl, isChunkError, lazyChunk, page, probeChunk, reloadOnce } from "./chunks";
 
 /** Per-tab storage for the loop guard; Node's own experimental global shadows jsdom's. */
 function memorySession() {
@@ -80,7 +80,7 @@ describe("reloadOnce", () => {
 });
 
 describe("a lazy chunk gone after a deploy", () => {
-  const failing = (err: Error) => lazyChunk<object>(() => Promise.reject(err));
+  const failing = (err: Error) => lazyChunk<object>(() => Promise.reject(err), "MapView");
   const Sheet = (locale: "en" | "pl", Lazy: ReturnType<typeof failing>, onClose?: () => void) =>
     render(
       <I18nProvider locale={locale}>
@@ -142,5 +142,150 @@ describe("a lazy chunk gone after a deploy", () => {
     view.rerender(app("out"));
     expect(await screen.findByText("Login")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("a lazy chunk that fails offline or with the server down", () => {
+  const url = "/assets/MapView-Abc123.js";
+  const failing = () => lazyChunk<object>(() => Promise.reject(safariMiss()), "MapView");
+  const Sheet = (locale: "en" | "pl", Lazy: ReturnType<typeof failing>, onClose?: () => void) =>
+    render(
+      <I18nProvider locale={locale}>
+        <p>Hearth</p>
+        <ChunkBoundary overlay onClose={onClose}>
+          <Suspense fallback={null}>
+            <Lazy />
+          </Suspense>
+        </ChunkBoundary>
+      </I18nProvider>,
+    );
+  let onLine = true;
+  let fetchChunk: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    onLine = true;
+    vi.spyOn(navigator, "onLine", "get").mockImplementation(() => onLine);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.stubGlobal("__skaldChunks", { MapView: url });
+    fetchChunk = vi.fn(async () => new Response("export default 1", { status: 200 }));
+    vi.stubGlobal("fetch", fetchChunk);
+  });
+
+  it("knows the built chunk URLs, and has none outside a build", () => {
+    expect(chunkUrl("MapView")).toBe(url);
+    expect(chunkUrl("Nope")).toBeUndefined();
+    vi.stubGlobal("__skaldChunks", undefined);
+    expect(chunkUrl("MapView")).toBeUndefined();
+  });
+
+  it("offline: says there is no connection, not that Skald was updated, and does not reload (EN and PL)", async () => {
+    onLine = false;
+    const view = Sheet("en", failing(), () => undefined);
+    const card = await screen.findByRole("alert");
+    expect(card).toHaveTextContent(en["crash.offline"]);
+    expect(card).not.toHaveTextContent(en["crash.stale"]);
+    expect(reload).not.toHaveBeenCalled();
+    expect(fetchChunk).not.toHaveBeenCalled();
+    view.unmount();
+
+    Sheet("pl", failing());
+    expect(await screen.findByRole("alert")).toHaveTextContent(pl["crash.offline"]);
+  });
+
+  it("back online: fetches the chunk again and reloads the page once", async () => {
+    onLine = false;
+    Sheet("en", failing());
+    await screen.findByRole("alert");
+    onLine = true;
+    act(() => void window.dispatchEvent(new Event("online")));
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    expect(fetchChunk.mock.calls[0]?.[0]).toBe(url);
+  });
+
+  it("closed offline and opened again online: reloads at once", async () => {
+    onLine = false;
+    const Lazy = failing();
+    const close = vi.fn();
+    const view = Sheet("en", Lazy, close);
+    await screen.findByRole("alert");
+    fireEvent.click(screen.getByRole("button", { name: en["crash.close"] }));
+    view.unmount();
+    onLine = true;
+    // React.lazy keeps the rejection, so the boundary sees the same offline error again.
+    Sheet("en", Lazy, close);
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+  });
+
+  it("server down while the device is online: the offline note, no reload into an error page", async () => {
+    fetchChunk.mockRejectedValue(new TypeError("Load failed"));
+    Sheet("en", failing());
+    expect(await screen.findByRole("alert")).toHaveTextContent(en["crash.offline"]);
+    expect(fetchChunk.mock.calls[0]?.[0]).toBe(url);
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("server down while the device is online: keeps checking, and reloads once the server answers", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      fetchChunk.mockRejectedValue(new TypeError("Load failed"));
+      Sheet("en", failing());
+      await vi.waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(en["crash.offline"]));
+      // The load's own probe found it down: no second request at once.
+      expect(fetchChunk).toHaveBeenCalledTimes(1);
+      await act(async () => void (await vi.advanceTimersByTimeAsync(5000)));
+      expect(fetchChunk).toHaveBeenCalledTimes(2);
+      expect(reload).not.toHaveBeenCalled();
+      fetchChunk.mockResolvedValue(new Response("export default 1", { status: 200 }));
+      await act(async () => void (await vi.advanceTimersByTimeAsync(10_000)));
+      expect(reload).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("probes past the browser cache and the service worker, and counts any answer as the server being up", async () => {
+    fetchChunk.mockResolvedValue(new Response("", { status: 500 }));
+    expect(await probeChunk(url)).toBe("gone");
+    const [, init] = fetchChunk.mock.calls[0] as [string, RequestInit];
+    expect(init.cache).toBe("no-store");
+    expect(init.redirect).toBe("manual");
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    fetchChunk.mockRejectedValue(new DOMException("timed out", "TimeoutError"));
+    expect(await probeChunk(url)).toBe("down");
+  });
+
+  it("probes the chunk the browser names as failed (a dependency), else the one asked for", () => {
+    expect(failedChunkUrl(new TypeError(`Failed to fetch dynamically imported module: ${location.origin}/assets/MapCanvas-X1.js`))).toBe("/assets/MapCanvas-X1.js");
+    expect(failedChunkUrl(new TypeError("Failed to fetch dynamically imported module: https://elsewhere.example/assets/a.js"))).toBeUndefined();
+    expect(failedChunkUrl(safariMiss())).toBeUndefined();
+  });
+
+  it("gone from the server (a deploy): reloads once, as before", async () => {
+    fetchChunk.mockResolvedValue(new Response("Not found", { status: 404 }));
+    Sheet("en", failing());
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("back online but a reload just happened: the general note, not the update one", async () => {
+    afterReload();
+    onLine = false;
+    Sheet("en", failing());
+    await screen.findByRole("alert");
+    onLine = true;
+    act(() => void window.dispatchEvent(new Event("online")));
+    await vi.waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(en["crash.body"]));
+    expect(reload).not.toHaveBeenCalled();
+  });
+});
+
+describe("lazyChunk call sites", () => {
+  // The build lists each lazy chunk under its module's file name; a name that does not match finds no URL.
+  it("name each chunk after the module they import", () => {
+    const sources = import.meta.glob<string>(["../**/*.{ts,tsx}", "!../**/*.test.*"], { query: "?raw", import: "default", eager: true });
+    const sites = Object.values(sources).flatMap((text) => [...text.matchAll(/lazyChunk(?:<[^>]*>)?\(\s*\(\)\s*=>\s*import\("([^"]+)"\),\s*"([^"]+)"\)/g)]);
+    expect(sites.length).toBeGreaterThanOrEqual(5);
+    for (const [, path, name] of sites) expect(name).toBe(path!.slice(path!.lastIndexOf("/") + 1));
+    expect(new Set(sites.map((m) => m[2])).size).toBe(sites.length);
   });
 });

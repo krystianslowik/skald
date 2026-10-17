@@ -17,11 +17,14 @@ const plural = (p: Plural): Plural => p;
 
 export const en = {
   "app.loading": "Stirring the embers...",
+  "app.unreachable": "The server cannot be reached. Retrying on its own; the panel opens as soon as it answers.",
+  "app.retry": "Try now",
   "crash.title": "Something went wrong",
   "crash.body": "Part of the panel stopped working. Reloading the page usually fixes it.",
   "crash.stale": "Skald was updated while this page was open. Reload to get the new version.",
   "crash.reload": "Reload",
   "crash.close": "Close",
+  "crash.offline": "No connection, so this part could not load. It loads by itself once the connection is back.",
   "footer.unofficial": "Skald is a fan project, not affiliated with Iron Gate Studio or Coffee Stain.",
   "version.label": "Skald {v}",
   "version.mismatch": "Agent {agent}, panel {web}: update the other part so they match.",

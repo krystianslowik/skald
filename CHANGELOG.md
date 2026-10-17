@@ -9,6 +9,12 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- One dropped download of the language file no longer leaves the page blank or the language switch dead until a reload. The panel asks for it again, and a switch that failed while offline works on the next press once the connection is back. A tab left open across an update that changed the texts reloads once into the new version, in the language you picked.
+- Opening the map, a profile, the settings or an admin sheet while offline no longer claims that Skald was updated. The panel says there is no connection, and once the connection is back that part loads by itself; reconnecting no longer leaves it broken until you press Reload.
+- Opening the panel while offline or while skald-web is down no longer shows only "Stirring the embers..." forever. After a few seconds without an answer the panel says the server cannot be reached and keeps trying, with a button to try at once; it opens as soon as the server answers.
+
 ## [2026.10.5] - 2026-10-17
 
 ### Added

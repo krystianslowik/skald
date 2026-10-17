@@ -7,7 +7,7 @@ import { useI18n } from "../../i18n";
 import { lazyChunk, preload } from "../../lib/chunks";
 import { ChunkBoundary } from "../ErrorBoundary";
 
-const AdminSheets = lazyChunk(() => import("./AdminSheets"));
+const AdminSheets = lazyChunk(() => import("./AdminSheets"), "AdminSheets");
 export const preloadAdmin = () => preload(() => import("./AdminSheets"));
 
 /** Where a command acts: next to a player, or at a point of the world. */

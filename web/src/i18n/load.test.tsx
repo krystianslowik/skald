@@ -99,6 +99,110 @@ describe("dictionary chunks", () => {
     }
   });
 
+  describe("after a failed download", () => {
+    // In a browser a failed `import()` stays failed for the page: the mocked `./en` keeps throwing, like that.
+    const served = { en: "/assets/en-T1.js", pl: "/assets/pl-T2.js" };
+    beforeEach(() => {
+      vi.stubGlobal("__skaldChunks", served);
+      vi.doMock("./en", () => {
+        throw new TypeError("Failed to fetch dynamically imported module: http://127.0.0.1/assets/en-T1.js");
+      });
+    });
+    afterEach(() => {
+      vi.doUnmock("./en");
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    });
+    const real = async () => (await vi.importActual<typeof import("./en")>("./en")).en;
+
+    it("the first load asks again under a fresh URL and the page comes up", async () => {
+      const { i18n, load } = await fresh();
+      const urls: string[] = [];
+      const en = await real();
+      load.chunkImport.load = async (url) => {
+        urls.push(url);
+        return { en };
+      };
+      const Probe = () => <p>{i18n.useI18n().t("login.submit")}</p>;
+      render(
+        <i18n.I18nProvider locale="en" fallback={<p>waiting</p>}>
+          <Probe />
+        </i18n.I18nProvider>,
+      );
+      expect(await screen.findByText("Kindle")).toBeInTheDocument();
+      expect(urls).toEqual(["/assets/en-T1.js?retry=1"]);
+    });
+
+    it("the toggle pressed offline does nothing, and the next press back online switches", async () => {
+      let onLine = false;
+      vi.spyOn(navigator, "onLine", "get").mockImplementation(() => onLine);
+      const { i18n, load } = await fresh();
+      await load.loadLocale("pl");
+      const en = await real();
+      const urls: string[] = [];
+      load.chunkImport.load = async (url) => {
+        urls.push(url);
+        if (!onLine) throw new TypeError("Importing a module script failed.");
+        return { en };
+      };
+      const Probe = () => {
+        const { t, setLocale } = i18n.useI18n();
+        return (
+          <button type="button" onClick={() => setLocale("en")}>
+            {t("login.submit")}
+          </button>
+        );
+      };
+      render(
+        <i18n.I18nProvider locale="pl">
+          <Probe />
+        </i18n.I18nProvider>,
+      );
+      act(() => fireEvent.click(screen.getByRole("button", { name: "Rozpal" })));
+      await act(async () => undefined);
+      expect(screen.getByRole("button", { name: "Rozpal" })).toBeInTheDocument();
+      onLine = true;
+      act(() => fireEvent.click(screen.getByRole("button", { name: "Rozpal" })));
+      expect(await screen.findByRole("button", { name: "Kindle" })).toBeInTheDocument();
+      // Every try after the first failure is a URL no failure is cached under.
+      expect(new Set(urls).size).toBe(urls.length);
+      expect(urls.at(-1)).toMatch(/^\/assets\/en-T1\.js\?retry=\d+$/);
+    });
+
+    it("a dictionary gone after a deploy reloads the page once, in the language asked for", async () => {
+      const store = new Map<string, string>();
+      vi.stubGlobal("localStorage", { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: () => undefined });
+      const session = new Map<string, string>();
+      vi.stubGlobal("sessionStorage", { getItem: (k: string) => session.get(k) ?? null, setItem: (k: string, v: string) => void session.set(k, v) });
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("Not found", { status: 404 })));
+      const { i18n, load } = await fresh();
+      const chunks = await import("../lib/chunks");
+      const reload = vi.fn();
+      chunks.page.reload = reload;
+      chunks.page.reloading = false;
+      await load.loadLocale("pl");
+      load.chunkImport.load = async () => {
+        throw new TypeError("Importing a module script failed.");
+      };
+      const Probe = () => {
+        const { t, setLocale } = i18n.useI18n();
+        return (
+          <button type="button" onClick={() => setLocale("en")}>
+            {t("login.submit")}
+          </button>
+        );
+      };
+      render(
+        <i18n.I18nProvider locale="pl">
+          <Probe />
+        </i18n.I18nProvider>,
+      );
+      act(() => fireEvent.click(screen.getByRole("button", { name: "Rozpal" })));
+      await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+      expect(store.get("skald_locale")).toBe("en");
+    });
+  });
+
   it("item search matches the other language once its dictionary arrives", async () => {
     const { load, storage } = await fresh();
     await load.loadLocale("en");
@@ -151,6 +255,18 @@ describe("locale preload script", () => {
     document.documentElement.setAttribute("data-locale", "en");
     run();
     expect(preloads()).toEqual(["/assets/en-A1.js"]);
+  });
+
+  it("publishes every lazy chunk's URL for retries, before and regardless of the language", () => {
+    const lazy = { MapView: "/assets/MapView-C3.js", en: "/assets/en-A1.js", pl: "/assets/pl-B2.js" };
+    new Function(localePreloadScript(chunks, lazy))();
+    expect((window as unknown as Record<string, unknown>).__skaldChunks).toEqual(lazy);
+    // A stored value naming a lazy chunk is still not a language.
+    store.set("skald_locale", "MapView");
+    document.documentElement.setAttribute("data-locale", "pl");
+    new Function(localePreloadScript(chunks, lazy))();
+    expect(preloads()).toEqual(["/assets/pl-B2.js"]);
+    delete (window as unknown as Record<string, unknown>).__skaldChunks;
   });
 
   it("still works when storage throws", () => {

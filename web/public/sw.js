@@ -35,6 +35,8 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
   const p = url.pathname;
   if (p.startsWith("/api/") || p === "/api" || p === "/live" || p === "/healthz" || p === "/sw.js") return;
+  // A page checking whether the server is reachable (lib/chunks.ts probeChunk) wants the network's answer.
+  if (req.cache === "no-store") return;
 
   if (req.mode === "navigate") {
     event.respondWith(
