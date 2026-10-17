@@ -1,6 +1,7 @@
 import { memo } from "react";
 import type { ApiState, SettingsSummary } from "../types";
 import { useCampfireSound } from "../lib/campfire";
+import { useEmbers } from "../lib/embers";
 import { gameVersion } from "../lib/format";
 import { LocaleToggle, useI18n, type TextKey } from "../i18n";
 import { Flame, type FlameLevel } from "./Flame";
@@ -137,6 +138,7 @@ export const Header = memo(function Header({
               </button>
             )}
             <SoundToggle />
+            <EmbersToggle />
             <LocaleToggle />
             <button
               type="button"
@@ -228,6 +230,35 @@ export function SoundToggle() {
           </>
         ) : (
           <path d="M13.5 8l4 4M17.5 8l-4 4" />
+        )}
+      </svg>
+    </button>
+  );
+}
+
+/** The rising embers behind the page, next to the sound (phones have the switch in Settings). */
+export function EmbersToggle() {
+  const { t } = useI18n();
+  const { on, toggle } = useEmbers();
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-pressed={on}
+      aria-label={t("embers.label")}
+      title={on ? t("embers.on") : t("embers.off")}
+      className="plaque press grid h-8 w-8 place-items-center coarse:h-11 coarse:w-11"
+    >
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M6 16.5c-1.3-1.6-.6-3.4.6-4.6.3 1 .9 1.6 1.6 1.8-.4-2.4.8-4.4 2.6-5.6-.2 2.2.9 3.4 2 4.6 1 1.1 1.2 2.6.4 3.8" />
+        {on ? (
+          <>
+            <circle cx="5" cy="6" r="0.9" fill="currentColor" stroke="none" />
+            <circle cx="14.5" cy="4" r="0.9" fill="currentColor" stroke="none" />
+            <circle cx="9.5" cy="3" r="0.7" fill="currentColor" stroke="none" />
+          </>
+        ) : (
+          <path d="M3 3l14 14" />
         )}
       </svg>
     </button>

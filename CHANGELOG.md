@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Added
+
+- The desktop header has an Embers button next to the campfire sound, so the full-screen ember animation can be switched off on a laptop too (until now the switch was only in the phone's Settings tab). Both stay in step (#97).
+
 ### Changed
 
 - An open panel uses much less data: the server state is only sent when something in it changed, and then only the part that changed; log lines are only sent while the Chronicle is on screen; everything on the live connection is compressed. On the mock, a phone left on the Fire tab went from about 30 KB to about 6 KB a minute. A tab in the background also no longer downloads the world map after every save; it fetches the new map when you look at it again. Pages opened before the update keep working (#98).
