@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Changed
+
+- On a slow connection, the map is sharp where a fling comes to rest. The map now loads up to 16 terrain tiles at once (8 while you drag), instead of 6, so a landing spot of about 25 tiles arrives in roughly one round trip. In a test with 0.6 s per tile, a fling used to stop with about 10 blurry tiles that took around a second to sharpen; now it stops sharp. The fallback map for browsers without WebGL now also starts loading the landing spot the moment you let go, as the WebGL map already did; there a fling used to stop with about 18 blurry tiles, most still blurry 3 s later, and now stops sharp too (#123).
+
 ### Fixed
 
 - On Safari (iPhone and Mac), opening the admin sheet without a connection and then getting the connection back no longer leaves a blank page that even Reload could not fix. When the connection returns, the panel now fetches its own scripts again before it reloads, and waits with the "No connection" note until they all answer. If the panel ever cannot start at all, it says so and offers a Reload button instead of a blank page (#128).

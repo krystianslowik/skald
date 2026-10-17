@@ -10,6 +10,7 @@ import { MapDetails } from "./MapDetails";
 import { MapLayers } from "./MapLayers";
 import { OrePopover } from "./OrePopover";
 import MapView, { TerrainFrame } from "./MapView";
+import { mapStatsOn } from "./MapCanvas";
 
 const inLocale = (ui: ReactElement, locale: "en" | "pl" = "en") => render(<I18nProvider locale={locale}>{ui}</I18nProvider>);
 const snap = gateMap(mockMap({ now: Date.parse("2026-10-10T20:00:00Z") }), false);
@@ -148,6 +149,29 @@ describe("MapView", () => {
     const sheet = await screen.findByRole("dialog", { name: "Warstwy" });
     expect(within(sheet).getByRole("button", { name: "Zamknij warstwy" })).toBeInTheDocument();
     expect(within(sheet).queryByRole("button", { name: "Zamknij mapę" })).not.toBeInTheDocument();
+  });
+
+  it("offers the perf harness hook only under ?mapstats, and takes it away on close", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(snap)));
+    expect(mapStatsOn("?mapstats")).toBe(true);
+    expect(mapStatsOn("?map=canvas&mapstats=1")).toBe(true);
+    expect(mapStatsOn("?map=canvas")).toBe(false);
+    const plain = inLocale(<MapView seedName="ZbzIWkK5KK" saveKey="a" onClose={vi.fn()} />);
+    await screen.findAllByRole("button", { name: "Portals: shown" });
+    expect(window.__mapStats).toBeUndefined();
+    plain.unmount();
+    history.replaceState(null, "", "/?mapstats");
+    try {
+      const withStats = inLocale(<MapView seedName="ZbzIWkK5KK" saveKey="a" onClose={vi.fn()} />);
+      await screen.findAllByRole("button", { name: "Portals: shown" });
+      const s = window.__mapStats?.();
+      expect(s?.view.scale).toBeGreaterThan(0);
+      expect(s?.ahead).toBeNull();
+      withStats.unmount();
+      expect(window.__mapStats).toBeUndefined();
+    } finally {
+      history.replaceState(null, "", "/");
+    }
   });
 
   it("explains a missing map", async () => {

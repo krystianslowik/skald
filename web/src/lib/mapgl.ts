@@ -18,7 +18,7 @@ import type { FogField, SeaMask } from "./fogfield";
 import { COAST, PAPER, PAPER_DARK, PAPER_INK, VOID, type Textures } from "./paper";
 import type { TileFeed } from "./terraindata";
 import { FOREST_DARKEN, paletteOf, RELIEF, SWAMP, WATER_DEEP, WATER_SHALLOW } from "./terrainpaint";
-import { pinnedTiles, planView, tileKey, tilesIn, type TileRef, type TilesDoc } from "./terraintiles";
+import { loadLimit, pinnedTiles, planView, tileKey, tilesIn, type TileRef, type TilesDoc } from "./terraintiles";
 import type { View } from "./mapgeo";
 
 /** The most device pixels per CSS pixel the terrain is drawn at: finer than the data on any phone, and a third of the fill on a 3x screen. */
@@ -977,7 +977,7 @@ export class GLMap {
     for (let i = 0; i < plan.low; i++) consider(plan.want[i]!);
     const low = wish.length;
     for (let i = plan.low; i < plan.want.length; i++) consider(plan.want[i]!);
-    feed.want(wish, low, loadAllowance(fr.moving ?? false, fr.t0, performance.now()));
+    feed.want(wish, low, loadAllowance(fr.moving ?? false, fr.t0, performance.now()), loadLimit(fr.moving ?? false, !!fr.ahead));
     // Tiles waiting on the CPU side with none going up: the GPU path is not working.
     const why = this.watchdog.frame(now, pending > 0 && went === 0, feed);
     if (why) {

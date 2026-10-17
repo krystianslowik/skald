@@ -5,7 +5,7 @@
 // WebGL context can be refilled without the network.
 
 import { paletteOf } from "./terrainpaint";
-import { ByteLRU, TileScheduler, type TilesDoc } from "./terraintiles";
+import { ByteLRU, LOADS_AT_REST, TileScheduler, type TilesDoc } from "./terraintiles";
 
 const RETRY_MS = 5000;
 
@@ -58,7 +58,7 @@ export class TileFeed {
       w.onmessage = (e: MessageEvent<{ key: string; data?: Uint8Array; status?: number; error?: string }>) => this.arrive(e.data);
       this.workers.push(slot);
     }
-    this.sched = new TileScheduler(o.concurrency ?? 6, (key) => {
+    this.sched = new TileScheduler(o.concurrency ?? LOADS_AT_REST, (key) => {
       // The least busy worker decodes it.
       const slot = this.workers.reduce((a, b) => (b.busy < a.busy ? b : a));
       slot.busy++;
@@ -103,8 +103,8 @@ export class TileFeed {
     return this.missing.has(key);
   }
 
-  /** The tiles still to fetch, most important first, from `low` on at low priority, at most `starts` new loads (TileScheduler); anything else in flight is cancelled. */
-  want(keys: readonly string[], low = keys.length, starts = Infinity): void {
+  /** The tiles still to fetch, most important first, from `low` on at low priority, at most `starts` new loads and `limit` running (TileScheduler); anything else in flight is cancelled. */
+  want(keys: readonly string[], low = keys.length, starts = Infinity, limit?: number): void {
     const now = Date.now();
     const out: string[] = [];
     let lo = 0;
@@ -113,7 +113,7 @@ export class TileFeed {
       out.push(k);
       if (i < low) lo = out.length;
     });
-    this.sched.update(out, lo, starts);
+    this.sched.update(out, lo, starts, limit);
   }
 
   get held(): { bytes: number; tiles: number; inflight: number } {

@@ -246,6 +246,21 @@ export interface Relief {
   radius: number;
 }
 
+/** Terrain tile coverage of a view, for the ?mapstats perf harness. */
+export interface MapTileStats {
+  renderer: "gl" | "2d";
+  /** Tile slots the view needs at the level drawn. */
+  wanted: number;
+  /** Slots showing their own tile (the rest show a coarser or finer stand-in, or nothing). */
+  own: number;
+  /** Slots with some part showing nothing. */
+  blank: number;
+  /** Tiles arrived but not on the GPU yet (WebGL only). */
+  pending: number;
+  /** Tile loads in flight. */
+  inflight: number;
+}
+
 export interface FrameState {
   view: View;
   layers: Record<LayerId, boolean>;
@@ -262,7 +277,7 @@ export interface FrameState {
   reduced?: boolean;
   /** The storey picked in the floor switcher; every other base shows its ground. */
   storey?: StoreyPick | null;
-  /** Where the view is headed (a fling's or glide's landing), for the WebGL map to load ahead. */
+  /** Where the view is headed (a fling's or glide's landing): its terrain tiles load first. */
   ahead?: View | null;
   /** The view is moving: tile loads wait for frames with time to spare. */
   moving?: boolean;
@@ -541,6 +556,19 @@ export class MapRenderer {
     return this.gl?.ready && this.feed ? this.gl.stats : null;
   }
 
+  /**
+   * For the ?mapstats harness: terrain tiles for view `v` on whichever
+   * renderer draws them (the WebGL map's last frame, or the Canvas2D tiles
+   * worked out for `v`), with the loads in flight; null without tiles.
+   */
+  tileStats(v: View): MapTileStats | null {
+    const gl = this.glStats;
+    if (gl) return { renderer: "gl", wanted: gl.wanted, own: gl.own, blank: gl.blank, pending: gl.pending, inflight: this.feed!.held.inflight };
+    if (!this.tiles?.ready) return null;
+    const [x0, z0, x1, z1] = viewBox(v);
+    return { renderer: "2d", pending: 0, ...this.tiles.coverage({ x0, z0, x1, z1 }, v.scale, this.base?.dpr ?? this.dpr) };
+  }
+
   /** Frees the WebGL context and the tile workers (the map is going away). */
   dispose(): void {
     this.setTiles(null);
@@ -731,6 +759,12 @@ export class MapRenderer {
     }
     if (this.gl?.ready && this.feed && f.layers.relief) return this.drawGL(f);
     this.overlay = [];
+    if (this.tiles?.ready && f.layers.relief) {
+      // A fast frame only moves the cached picture: the landing's tiles are asked for here.
+      const a = f.ahead;
+      const box = a ? viewBox(a) : null;
+      this.tiles.motion(f.moving ?? false, a && box ? { view: { x0: box[0], z0: box[1], x1: box[2], z1: box[3] }, scale: a.scale } : null, this.base?.dpr ?? this.dpr);
+    }
     const plan = f.layers.buildings && this.plan ? `${this.planVersion}:${f.storey ? `${f.storey.base}/${f.storey.level}` : ""}:${this.storeys(v, f.layers)?.base ?? ""}` : "";
     const nature = f.layers.nature || f.layers.resources ? `${f.layers.nature ? 1 : 0}${f.layers.resources ? 1 : 0}:${this.nature.version}` : "";
     const key = `${f.layers.fog ? 1 : 0}${f.layers.terrain ? 1 : 0}${f.layers.relief ? 1 : 0}:${this.version}:${this.tiles?.ready ? 1 : 0}:${v.w}x${v.h}:${this.dpr}:${plan}:${nature}`;
