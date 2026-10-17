@@ -14,6 +14,8 @@ const SHOWN_MAX = 600;
 export const Chronicle = memo(function Chronicle({ source }: { source: LogStore }) {
   const { t, clockSec } = useI18n();
   const lines = useSyncExternalStore(source.subscribe, source.getSnapshot);
+  // Shown, so the server sends the lines (and the tail is read again).
+  useEffect(() => source.watch?.(), [source]);
   const [q, setQ] = useState("");
   const [onlyNotable, setOnlyNotable] = useState(false);
   // Typing stays instant; the (up to 1500-line) filter catches up when the main thread is free.

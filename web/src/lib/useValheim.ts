@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { capRecent } from "@server/history";
-import type { AgentEvent, ApiState, LiveMessage, LogLine } from "../types";
+import type { AgentEvent, ApiState, LiveWireMessage, LogLine } from "../types";
 import { getLogs, getState, Unauthorized } from "./api";
 import { applyEvent } from "./apply";
 import { getLivePositions, setLivePositions, setPositionsSink, watchingPositions } from "./live";
@@ -15,15 +15,28 @@ const WS_OPEN = 1;
  * The live log tail, kept outside React state: log lines are the most frequent
  * event, and only the Chronicle shows them, so only the Chronicle subscribes
  * (useSyncExternalStore). The rest of the dashboard does not re-render per line.
+ * While it is mounted it also `watch`es: only then does the server send lines.
  */
 export interface LogStore {
   subscribe(listener: () => void): () => void;
   getSnapshot(): LogLine[];
+  /** Asks the server for live lines until the returned function is called. */
+  watch?(): () => void;
 }
 
-export function createLogStore(initial: LogLine[] = []): LogStore & { set(next: (l: LogLine[]) => LogLine[]): void } {
+export interface LiveLogStore extends LogStore {
+  set(next: (l: LogLine[]) => LogLine[]): void;
+  watch(): () => void;
+  watching(): boolean;
+  /** Where the first watcher and the last one going are reported (the /live socket). */
+  setSink(fn: ((on: boolean) => void) | null): void;
+}
+
+export function createLogStore(initial: LogLine[] = []): LiveLogStore {
   let lines = initial;
   const listeners = new Set<() => void>();
+  let watchers = 0;
+  let sink: ((on: boolean) => void) | null = null;
   return {
     subscribe(listener) {
       listeners.add(listener);
@@ -33,6 +46,21 @@ export function createLogStore(initial: LogLine[] = []): LogStore & { set(next: 
     set(next) {
       lines = next(lines);
       for (const l of listeners) l();
+    },
+    watch() {
+      watchers += 1;
+      if (watchers === 1) sink?.(true);
+      let done = false;
+      return () => {
+        if (done) return;
+        done = true;
+        watchers -= 1;
+        if (watchers === 0) sink?.(false);
+      };
+    },
+    watching: () => watchers > 0,
+    setSink(fn) {
+      sink = fn;
     },
   };
 }
@@ -141,12 +169,11 @@ export function useValheim(onUnauthorized: () => void): Valheim {
 
   useEffect(() => {
     void refresh();
-    reloadLogs();
     const poll = setInterval(refreshIfShown, 60_000);
     return () => {
       clearInterval(poll);
     };
-  }, [refresh, refreshIfShown, reloadLogs]);
+  }, [refresh, refreshIfShown]);
 
   useEffect(() => {
     let cancelled = false;
@@ -156,12 +183,14 @@ export function useValheim(onUnauthorized: () => void): Valheim {
     // Set once a socket closes: what happened until the next one opens never reached us.
     let dropped = false;
     let hiddenAt: number | null = document.hidden ? Date.now() : null;
+    // The Chronicle asked for lines while no socket was open: the tail is read again once one is.
+    let logsPending = logs.watching();
 
-    /** /live does not replay what was missed: read state and the log tail again. */
+    /** /live does not replay what was missed: read state and, if shown, the log tail again. */
     const resync = () => {
       missed.current = false;
       void refresh();
-      reloadLogs();
+      if (logs.watching()) reloadLogs();
     };
 
     /** `stored`: the server kept it in the history, so the saga gains a line; rankings follow as a "history" message. */
@@ -195,8 +224,9 @@ export function useValheim(onUnauthorized: () => void): Valheim {
       if (typeof WebSocket === "undefined") return;
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
       // topics=: positions only after a subscribe; a server older than that sends them anyway.
+      // logtopic=1: log lines only after a subscribe too (only the Chronicle shows them).
       // history=1: this page applies "history" deltas, so the server sends them.
-      const s = new WebSocket(`${proto}//${location.host}/live?topics=&history=1`);
+      const s = new WebSocket(`${proto}//${location.host}/live?topics=&history=1&logtopic=1`);
       sock = s;
       // A socket replaced by wake() may still report late; only the current one counts.
       const stale = () => cancelled || s !== sock;
@@ -205,16 +235,22 @@ export function useValheim(onUnauthorized: () => void): Valheim {
         attempt = 0;
         setWs("up");
         if (watchingPositions()) tell(s, true);
-        if (!dropped) return;
+        if (logs.watching()) tell(s, true, "logs");
+        const gap = logsPending;
+        logsPending = false;
+        if (!dropped) {
+          if (gap && logs.watching()) reloadLogs();
+          return;
+        }
         dropped = false;
         // Events that passed while the socket was down are only in /api/state.
         resync();
       };
       s.onmessage = (m) => {
         if (stale()) return;
-        let msg: LiveMessage;
+        let msg: LiveWireMessage;
         try {
-          msg = JSON.parse(String(m.data)) as LiveMessage;
+          msg = JSON.parse(String(m.data)) as LiveWireMessage;
         } catch {
           return;
         }
@@ -229,7 +265,11 @@ export function useValheim(onUnauthorized: () => void): Valheim {
           // One still on its way after the last watcher left must not bring the markers back.
           if (watchingPositions()) setLivePositions({ t: msg.t, players: msg.players });
         } else if (msg.type === "state") {
+          // Newer than a /api/state read still on its way, which must not undo
+          // it: the hub does not send these slices again.
+          if ("partial" in msg) liveGen.current += 1;
           setAgentUp(msg.online);
+          // A `partial` state holds only the slices that changed; a whole one replaces them all.
           setState((s) => (s ? share(s, { ...s, ...msg.state, online: msg.online }) : s));
         }
       };
@@ -245,10 +285,21 @@ export function useValheim(onUnauthorized: () => void): Valheim {
       };
     };
 
-    const tell = (s: WebSocket, on: boolean) => s.send(JSON.stringify({ type: on ? "subscribe" : "unsubscribe", topic: "positions" }));
+    const tell = (s: WebSocket, on: boolean, topic = "positions") => s.send(JSON.stringify({ type: on ? "subscribe" : "unsubscribe", topic }));
     // A socket still connecting subscribes in onopen; a closed one on the next.
     setPositionsSink((on) => {
       if (sock && sock.readyState === WS_OPEN) tell(sock, on);
+    });
+    // Lines that passed while nobody watched never came: the tail is read again
+    // (after the subscribe, so nothing falls between the two).
+    logs.setSink((on) => {
+      const st = sock?.readyState;
+      if (st === WS_OPEN) tell(sock!, on, "logs");
+      if (!on) return;
+      // Without an open socket the tail is read now (a socket that never opens
+      // still shows it) and once more when one opens, for the lines in between.
+      if (st !== WS_OPEN) logsPending = true;
+      reloadLogs();
     });
 
     /**
@@ -297,6 +348,7 @@ export function useValheim(onUnauthorized: () => void): Valheim {
     return () => {
       cancelled = true;
       setPositionsSink(null);
+      logs.setSink(null);
       document.removeEventListener("visibilitychange", wake);
       window.removeEventListener("pageshow", wake);
       window.removeEventListener("online", wake);

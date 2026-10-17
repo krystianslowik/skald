@@ -306,3 +306,90 @@ describe("Hub history deltas", () => {
     expect(msgs.filter((m) => m.type === "history")).toHaveLength(0);
   });
 });
+
+describe("Hub state polls", () => {
+  /** An agent whose /state the test edits; every read is a new `now`. */
+  const pollAgent = () => {
+    const st = emptyAgentState(new Date("2026-10-09T18:00:00Z"));
+    st.agent.startedAt = "A";
+    let reads = 0;
+    let fail = false;
+    const agent: AgentSource = {
+      ...fakeAgent("A", []),
+      async getState() {
+        if (fail) throw new Error("agent down");
+        reads += 1;
+        return structuredClone({ ...st, now: new Date(Date.parse("2026-10-09T18:00:00Z") + reads * 15_000).toISOString() });
+      },
+      async stream(_since, _on, signal) {
+        await new Promise<void>((r) => signal.addEventListener("abort", () => r(), { once: true }));
+      },
+    };
+    return { st, agent, failNext: (on: boolean) => (fail = on) };
+  };
+  const states = (sent: LiveMessage[]) => sent.filter((m): m is Extract<LiveMessage, { type: "state" }> => m.type === "state");
+
+  it("sends nothing when a poll finds only a new time and new log lines, and names the slices that moved", async () => {
+    const { st, agent, failNext } = pollAgent();
+    const hub = new Hub(agent, new HistoryStore(":memory:"), { statePollMs: 60_000 });
+    const poll = () => (hub as unknown as { pollState(): Promise<void> }).pollState();
+    const sent: LiveMessage[] = [];
+    hub.subscribe((m) => sent.push(m));
+    hub.start();
+    await settle();
+    expect(states(sent)).toHaveLength(1);
+    expect(states(sent)[0]!.changed).toBeUndefined();
+
+    st.agent.lastLogAt = "2026-10-09T18:00:10Z";
+    await poll();
+    await poll();
+    expect(states(sent)).toHaveLength(1);
+    // The served state still moves on.
+    expect(hub.getState().agent.lastLogAt).toBe("2026-10-09T18:00:10Z");
+
+    st.world.clock = { netTime: 100, day: 0, dayFraction: 0.05, daylight: false, advancing: true, rate: 1 };
+    await poll();
+    expect(states(sent)).toHaveLength(2);
+    expect(states(sent)[1]!.changed).toEqual(["world"]);
+    expect(states(sent)[1]!.online).toBe(true);
+
+    failNext(true);
+    await poll();
+    expect(states(sent)).toHaveLength(3);
+    expect(states(sent)[2]).toMatchObject({ online: false, changed: [] });
+    await poll();
+    expect(states(sent)).toHaveLength(3);
+    failNext(false);
+    await poll();
+    expect(states(sent)[3]).toMatchObject({ online: true, changed: [] });
+    hub.stop();
+  });
+
+  it("does not resend what a live event already told the pages, and sends all after a replayed one", async () => {
+    const { st, agent } = pollAgent();
+    const hub = new Hub(agent, new HistoryStore(":memory:"), { statePollMs: 60_000 });
+    const poll = () => (hub as unknown as { pollState(): Promise<void> }).pollState();
+    const sent: LiveMessage[] = [];
+    hub.subscribe((m) => sent.push(m));
+    hub.start();
+    await settle();
+    // A join the pages applied from the event; the next /state agrees.
+    hub.ingest("A", { seq: 100, ts: "2026-10-09T18:01:00Z", type: "join_code", data: { code: "111111" } });
+    st.server.joinCode = "111111";
+    st.server.joinCodeAt = "2026-10-09T18:01:00Z";
+    await poll();
+    expect(states(sent)).toHaveLength(1);
+
+    // An old event that changes nothing on either side does not force a full state.
+    hub.ingest("A", { seq: 101, ts: "2026-10-09T17:00:00Z", type: "death", data: { name: "Bjorn" } });
+    await poll();
+    expect(states(sent)).toHaveLength(1);
+
+    // Older than the state: the hub keeps its state, a page applies it anyway.
+    hub.ingest("A", { seq: 102, ts: "2026-10-09T17:00:00Z", type: "join_code", data: { code: "222222" } });
+    await poll();
+    expect(states(sent)).toHaveLength(2);
+    expect(states(sent)[1]!.changed).toBeUndefined();
+    hub.stop();
+  });
+});

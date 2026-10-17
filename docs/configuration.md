@@ -615,6 +615,15 @@ start. The NetworkPolicy needs no change: the plugin is loopback only.
   `{"type":"subscribe","topic":"positions"}` (and stops after
   `{"type":"unsubscribe","topic":"positions"}`); a plain `/live` from an older
   page gets them all along.
+- **What else `/live` sends.** Log lines work like positions with the topic
+  `logs`, for a page that opens `/live?...&logtopic=1` (from 2026.10.8): the
+  page subscribes while the Chronicle is on screen, and an older page without
+  `logtopic=1` gets every line as before. The 15 s state poll goes out only
+  when something in the state changed, as a `{"type":"state","partial":true}`
+  message with just the top-level parts that did (the first state on a socket
+  is always whole). Frames are compressed (permessage-deflate) for every
+  browser that asks, which all current ones do; a reverse proxy passes this
+  on without extra settings.
 
 **Who is named.** The actor in the saga is the name a device set in the admin
 sheet ("Your name in the saga", kept in that browser) folded to ASCII, or

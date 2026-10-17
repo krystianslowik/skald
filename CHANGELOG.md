@@ -13,6 +13,11 @@ above them.
 
 - Discord notifications can now be set up from the admin sheet: paste the channel's webhook URL, save, send a test message, turn them on or off, and pick what goes out (joins, leaves, deaths, raids, server stop and start, new join codes, game updates, failed commands). No secret edit or redeploy needed. The webhook is kept in skald-web's database and only an admin can change it; once saved, the panel shows only a shortened form such as `discord.com/api/webhooks/…5678/AbCd…`, never the whole URL, and it never goes into the log or the Saga. Only Discord webhook URLs (`https://discord.com/api/webhooks/…`, also from the PTB and Canary clients, optionally with `?thread_id=` for a forum thread) are accepted. Unpicking every kind turns notifications off (#105).
 - **Operators:** nothing changes for a server that sets `DISCORD_WEBHOOK_URL`: it still wins, and the admin sheet shows it as set by the server environment, read-only. To manage the webhook from the panel instead, remove the variable. skald-web needs outbound HTTPS (TCP 443) to Discord either way; on Kubernetes, uncomment the internet egress rule in the example NetworkPolicy.
+- The desktop header has an Embers button next to the campfire sound, so the full-screen ember animation can be switched off on a laptop too (until now the switch was only in the phone's Settings tab). Both stay in step (#97).
+
+### Changed
+
+- An open panel uses much less data: the server state is only sent when something in it changed, and then only the part that changed; log lines are only sent while the Chronicle is on screen; everything on the live connection is compressed. On the mock, a phone left on the Fire tab went from about 30 KB to about 6 KB a minute. A tab in the background also no longer downloads the world map after every save; it fetches the new map when you look at it again. Pages opened before the update keep working (#98).
 
 ### Fixed
 

@@ -360,8 +360,26 @@ export type LiveMessage =
   | { type: "event"; event: AgentEvent; stored?: boolean }
   /** The derived rankings and 7-day series after stored events; the saga is kept from the events themselves. */
   | { type: "history"; players: History["players"]; online7d: History["online7d"] }
-  | { type: "state"; state: AgentState; online: boolean }
+  /**
+   * The agent's state. From the hub, `changed` lists the top-level slices
+   * that differ from the last state it sent (absent: treat all as new); on
+   * the wire such a message is `partial` and carries only those slices.
+   */
+  | { type: "state"; state: AgentState; online: boolean; changed?: StateSlice[] }
   | { type: "positions"; t: number; players: LivePlayer[] };
+
+/** A top-level part of the agent's state; `now` is not one (it moves on every read). */
+export type StateSlice = Exclude<keyof AgentState, "now">;
+
+/**
+ * A message as it travels on /live. A `partial` state holds only the slices
+ * that changed: a page merges it over what it has (pages from before
+ * 2026.10.8 already merge every state that way).
+ */
+export type LiveWireMessage =
+  | Exclude<LiveMessage, { type: "state" }>
+  | { type: "state"; state: AgentState; online: boolean }
+  | { type: "state"; state: Partial<AgentState>; online: boolean; partial: true };
 
 export interface ActionResult {
   ok: boolean;

@@ -1,7 +1,9 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Embers } from "./Atmosphere";
+import { Header } from "./Header";
 import { Preferences } from "./Preferences";
+import { emptyAgentState } from "../types";
 
 // The system's reduced-motion setting, as motion reports it.
 let reducedMotion = false;
@@ -145,5 +147,35 @@ describe("Embers switch", () => {
     act(() => void window.dispatchEvent(new StorageEvent("storage", { key: "skald_embers", newValue: "0" })));
     expect(screen.getByRole("switch", { name: "Embers" })).toHaveAttribute("aria-checked", "false");
     expect(canvas()).toBeNull();
+  });
+});
+
+describe("Embers in the desktop header", () => {
+  const canvas = () => document.querySelector("canvas");
+  const desktop = (compact = false) => (
+    <>
+      <Embers />
+      <Header server={emptyAgentState().server} online onLogout={() => {}} compact={compact} />
+    </>
+  );
+
+  it("turns them off and on next to the sound, and remembers it", () => {
+    render(desktop());
+    const button = screen.getByRole("button", { name: "Embers" });
+    expect(button).toHaveAttribute("aria-pressed", "true");
+    expect(button).toHaveAttribute("title", "Embers: on");
+    act(() => button.click());
+    expect(button).toHaveAttribute("aria-pressed", "false");
+    expect(button).toHaveAttribute("title", "Embers: off");
+    expect(canvas()).toBeNull();
+    expect(store.get("skald_embers")).toBe("0");
+    act(() => button.click());
+    expect(store.get("skald_embers")).toBe("1");
+    expect(canvas()).not.toBeNull();
+  });
+
+  it("is not in the phone header, which has the switch in Settings", () => {
+    render(desktop(true));
+    expect(screen.queryByRole("button", { name: "Embers" })).toBeNull();
   });
 });
