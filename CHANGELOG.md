@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.8] - 2026-10-17
+
 ### Added
 
 - Discord notifications can now be set up from the admin sheet: paste the channel's webhook URL, save, send a test message, turn them on or off, and pick what goes out (joins, leaves, deaths, raids, server stop and start, new join codes, game updates, failed commands). No secret edit or redeploy needed. The webhook is kept in skald-web's database and only an admin can change it; once saved, the panel shows only a shortened form such as `discord.com/api/webhooks/…5678/AbCd…`, never the whole URL, and it never goes into the log or the Saga. Only Discord webhook URLs (`https://discord.com/api/webhooks/…`, also from the PTB and Canary clients, optionally with `?thread_id=` for a forum thread) are accepted. Unpicking every kind turns notifications off (#105).
