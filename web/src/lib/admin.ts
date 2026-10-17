@@ -3,7 +3,7 @@
 
 import type { TextKey } from "../i18n";
 import type { AccessListName, AccessOp, AccessState, AdminCatalog, AdminCommand, AdminRead, AdminResult, AdminStatus, BanEntry, LivePlayer, NotifyChange, NotifyConfig, RestoreInfo } from "../types";
-import { Unauthorized } from "./api";
+import { originRefused, Unauthorized } from "./api";
 
 /** A command's outcome; `status` 403 + `needsAdmin` means: unlock first. */
 export interface AdminOutcome extends AdminResult {
@@ -47,7 +47,7 @@ export async function getAdminStatus(): Promise<AdminStatus> {
   return (await res.json()) as AdminStatus;
 }
 
-export type UnlockResult = { ok: true } | { ok: false; retryAfter?: number };
+export type UnlockResult = { ok: true } | { ok: false; retryAfter?: number; refused?: boolean };
 
 export async function unlockAdmin(password: string): Promise<UnlockResult> {
   const res = await fetch("/api/admin/unlock", {
@@ -60,6 +60,7 @@ export async function unlockAdmin(password: string): Promise<UnlockResult> {
   // A wrong admin password is "invalid"; an expired panel session is "unauthorized".
   if (res.status === 401 && (await json<{ error?: string }>(res))?.error === "unauthorized") throw new Unauthorized();
   if (res.status === 429) return { ok: false, retryAfter: Number(res.headers.get("Retry-After")) || 900 };
+  if (await originRefused(res)) return { ok: false, refused: true };
   return { ok: false };
 }
 

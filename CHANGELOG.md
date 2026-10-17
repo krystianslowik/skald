@@ -9,6 +9,13 @@ above them.
 
 ## [Unreleased]
 
+### Security
+
+- skald-web now checks where a request comes from before it changes anything: sign-in, sign-out, admin commands, settings and the Discord test are accepted only from the panel's own page or from tools that are not a browser (curl, scripts), and the live connection only from the panel's page. Before, the session cookie alone decided.
+- **Operators:** nothing to do behind a proxy or tunnel that passes the `Host` header on (Caddy, Traefik, ingress-nginx, Cloudflare Tunnel) or on a LAN address. If your proxy replaces `Host` (plain nginx without `proxy_set_header Host $host;`), set the new `PUBLIC_ORIGIN` to the address you open the panel on, e.g. `https://panel.example`; otherwise older browsers are refused, and the log says `origin differs from the request host`. See the Origin check section in docs/configuration.md.
+- The Discord test message can be sent once every 10 seconds, one at a time; a second press says to wait (a test that failed can be retried at once). A test that Discord rate-limits now says so at once instead of retrying for minutes.
+- From now on, a Discord webhook removed or replaced in the admin sheet is wiped from skald-web's database file and its journal instead of lingering there.
+
 ## [2026.10.8] - 2026-10-17
 
 ### Added

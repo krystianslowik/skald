@@ -80,6 +80,10 @@ spec:
             # (X-Forwarded-For, X-Real-IP, CF-Connecting-IP). Empty = socket peer.
             - name: TRUSTED_IP_HEADER
               value: ""
+            # Only when the ingress or tunnel rewrites the Host header: the
+            # address browsers open the panel on, e.g. https://panel.example.
+            - name: PUBLIC_ORIGIN
+              value: ""
             # Keep "true" when Skald is served over HTTPS (it should be).
             - name: COOKIE_SECURE
               value: "true"

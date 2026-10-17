@@ -28,6 +28,7 @@ export const pl: Dict = {
   "login.submit": "Rozpal",
   "login.busy": "Ogień słucha...",
   "login.locked": "Ogień nie słucha. Spróbuj ponownie za {min} min.",
+  "login.refused": "Serwer odrzucił ten adres. Administrator musi ustawić PUBLIC_ORIGIN na adres, pod którym otwierasz panel.",
   "login.wrong": "To nie to słowo. Ogień ledwo się tli.",
   "login.offline": "Brak łączności. Spróbuj za chwilę.",
 
@@ -2057,6 +2058,7 @@ export const pl: Dict = {
   "admin.notify.test": "Wyślij testowe powiadomienie",
   "admin.notify.sent": "Testowe powiadomienie wysłane.",
   "admin.notify.failed": "Discord go nie przyjął ({error}).",
+  "admin.notify.busy": "Testowa wiadomość właśnie poszła. Spróbuj za kilka sekund.",
   "admin.notify.offline": "Brak połączenia. Spróbuj za chwilę.",
   "admin.bans.title": "Zbanowani",
   "admin.bans.none": "Nikt nie jest zbanowany.",

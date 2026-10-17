@@ -6,7 +6,7 @@ import { HistoryStore } from "../src/db";
 import { Hub } from "../src/hub";
 import { MockAgent, mockRefusal } from "../src/mock";
 import { createLogger, type Logger } from "../src/log";
-import { DiscordNotifier, NOTIFY_KINDS, NotifySettings, type NotifyKind } from "../src/notify";
+import { DiscordNotifier, NOTIFY_KINDS, NotifySettings, TEST_COOLDOWN_MS, type NotifyKind } from "../src/notify";
 import { emptyAgentState, type AdminStatus, type AgentEvent, type LiveMessage } from "../src/types";
 
 const PANEL = await Bun.password.hash("ognisko");
@@ -579,9 +579,12 @@ function discord(opts: { envUrl?: string; envKinds?: readonly NotifyKind[]; repl
     }) as unknown as typeof fetch,
   });
   const store = opts.store ?? new HistoryStore(":memory:");
-  const notify = new NotifySettings({ notifier, store, envUrl: opts.envUrl ?? "", envKinds: opts.envKinds ?? NOTIFY_KINDS });
+  let now = 1_000_000;
+  const notify = new NotifySettings({ notifier, store, envUrl: opts.envUrl ?? "", envKinds: opts.envKinds ?? NOTIFY_KINDS, clock: () => now });
   const log = createLogger({ write: (l) => lines.push(l), windowMs: 0 });
-  return { notifier, notify, store, posts, lines, log };
+  /** Past the test-message cooldown. */
+  const later = () => (now += TEST_COOLDOWN_MS);
+  return { notifier, notify, store, posts, lines, log, later };
 }
 
 const req = (app: App, method: string, path: string, cookie: string, body?: unknown, headers: Record<string, string> = {}) =>
@@ -636,6 +639,7 @@ describe("discord notifications from the admin sheet", () => {
     const off = await req(app, "PUT", "/api/admin/notify", both, { enabled: false });
     expect(((await off.json()) as { enabled: boolean; masked: string }).enabled).toBe(false);
     expect((await status(app, cookie)).notifyConfigured).toBe(false);
+    d.later();
     expect((await req(app, "POST", "/api/notify/test", both)).status).toBe(200);
     expect(d.posts).toHaveLength(2);
 
@@ -728,6 +732,7 @@ describe("discord notifications from the admin sheet", () => {
     await keep(req(app, "GET", "/api/admin/notify", both));
     await keep(req(app, "GET", "/api/admin/notify", cookie));
     await keep(req(app, "POST", "/api/notify/test", both));
+    d.later();
     await keep(req(app, "POST", "/api/notify/test", both));
     await keep(app.request("/api/admin/status", { headers: { Cookie: both } }));
     await keep(app.request("/api/state", { headers: { Cookie: both } }));

@@ -69,7 +69,7 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
       setShake((n) => n + 1);
       setWord("");
       setError(
-        r.retryAfter ? t("login.locked", { min: Math.ceil(r.retryAfter / 60) }) : t("login.wrong"),
+        r.retryAfter ? t("login.locked", { min: Math.ceil(r.retryAfter / 60) }) : r.refused ? t("login.refused") : t("login.wrong"),
       );
       input.current?.focus();
     } catch {

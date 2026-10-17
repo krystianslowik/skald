@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { DiscordNotifier, formatBatch, maskWebhookUrl, NOTIFY_KINDS, parseNotifyKinds, parseWebhookUrl, redact, type NotifierOptions, type NotifyKind } from "../src/notify";
+import { DiscordNotifier, formatBatch, maskWebhookUrl, NOTIFY_KINDS, NotifySettings, parseNotifyKinds, parseWebhookUrl, redact, TEST_COOLDOWN_MS, type NotifierOptions, type NotifyKind, type SendResult } from "../src/notify";
 import { emptyAgentState, type AgentEvent, type AgentState, type LiveMessage } from "../src/types";
 
 const URL_ = "https://discord.example/api/webhooks/123/s3cr3t-token";
@@ -350,5 +350,73 @@ describe("DiscordNotifier.configure", () => {
     const other = "https://discord.example/api/webhooks/9/other";
     expect(await n.test(other)).toEqual({ ok: true });
     expect(d.calls.map((c) => c.url)).toEqual([other]);
+  });
+});
+
+describe("test messages", () => {
+  const HOOK = "https://discord.com/api/webhooks/123456789/fictional-token-of-Bjorn";
+
+  it("reports a 429 instead of waiting it out", async () => {
+    const d = fakeDiscord([new Response(JSON.stringify({ retry_after: 30 }), { status: 429 })]);
+    const { n, waits } = notifier(d.fetchImpl);
+    expect(await n.test()).toEqual({ ok: false, error: "HTTP 429" });
+    expect(waits).toEqual([]);
+    expect(d.calls).toHaveLength(1);
+  });
+
+  function settings() {
+    let now = 5_000_000;
+    let release: (r: SendResult) => void = () => {};
+    const sent: string[] = [];
+    const meta = new Map<string, string>([["discord.url", HOOK]]);
+    let checkpoints = 0;
+    const notify = new NotifySettings({
+      notifier: {
+        configure() {},
+        test: (url?: string) => {
+          sent.push(url ?? "");
+          return new Promise<SendResult>((r) => (release = r));
+        },
+      },
+      store: { getMeta: (k) => meta.get(k) ?? null, setMeta: (k, v) => void meta.set(k, v), checkpoint: () => void checkpoints++ },
+      envUrl: "",
+      envKinds: NOTIFY_KINDS,
+      clock: () => now,
+    });
+    return { notify, sent, release: (r: SendResult = { ok: true }) => release(r), advance: (ms: number) => (now += ms), checkpoints: () => checkpoints };
+  }
+
+  it("sends one at a time and at most one per cooldown", async () => {
+    const s = settings();
+    const first = s.notify.test();
+    // In flight: a second one is refused without reaching Discord.
+    expect(await s.notify.test()).toEqual({ ok: false, error: "busy", retryAfter: 10 });
+    s.release();
+    expect(await first).toEqual({ ok: true });
+    s.advance(4_000);
+    expect(await s.notify.test()).toEqual({ ok: false, error: "busy", retryAfter: 6 });
+    s.advance(TEST_COOLDOWN_MS - 4_000);
+    const third = s.notify.test();
+    s.release({ ok: false, error: "HTTP 404" });
+    expect(await third).toEqual({ ok: false, error: "HTTP 404" });
+    // Nothing was posted: the next try (a corrected webhook) goes out at once.
+    const fourth = s.notify.test();
+    s.release({ ok: false, error: "HTTP 429" });
+    expect(await fourth).toEqual({ ok: false, error: "HTTP 429" });
+    // Discord asked to slow down: the pause holds.
+    expect(((await s.notify.test()) as { error: string }).error).toBe("busy");
+    expect(s.sent).toEqual([HOOK, HOOK, HOOK]);
+  });
+
+  it("empties the database journal when the webhook is removed or replaced", () => {
+    const s = settings();
+    s.notify.update({ enabled: false });
+    expect(s.checkpoints()).toBe(0);
+    s.notify.update({ url: HOOK });
+    expect(s.checkpoints()).toBe(0);
+    s.notify.update({ url: "https://discord.com/api/webhooks/987654321/fictional-token-of-Astrid" });
+    expect(s.checkpoints()).toBe(1);
+    s.notify.clear();
+    expect(s.checkpoints()).toBe(2);
   });
 });

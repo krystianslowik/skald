@@ -1,4 +1,7 @@
 import { describe, expect, it } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { HistoryStore } from "../src/db";
 import { deriveHistory } from "../src/history";
 import { deriveProfiles } from "../src/profiles";
@@ -178,4 +181,24 @@ describe("prune keeps every derived view identical", () => {
       }
     });
   }
+});
+
+describe("HistoryStore storage", () => {
+  it("zeroes deleted content and leaves no old webhook in the journal", () => {
+    const dir = mkdtempSync(join(tmpdir(), "skald-db-"));
+    const path = join(dir, "skald.db");
+    const secret = "fictional-webhook-token-of-Freya-0123456789";
+    try {
+      const store = new HistoryStore(path);
+      expect(store.secureDelete()).toBe(true);
+      store.setMeta("discord.url", `https://discord.com/api/webhooks/1/${secret}`);
+      store.setMeta("discord.url", "");
+      store.checkpoint();
+      expect(statSync(`${path}-wal`).size).toBe(0);
+      expect(readFileSync(path).includes(secret)).toBe(false);
+      store.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

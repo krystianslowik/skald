@@ -52,7 +52,7 @@ function UnlockSheet({ onDone }: { onDone: (ok: boolean) => void }) {
         setOk(true);
         return;
       }
-      setError(r.retryAfter ? t("admin.unlock.locked", { min: Math.ceil(r.retryAfter / 60) }) : t("admin.unlock.wrong"));
+      setError(r.retryAfter ? t("admin.unlock.locked", { min: Math.ceil(r.retryAfter / 60) }) : r.refused ? t("login.refused") : t("admin.unlock.wrong"));
       navigator.vibrate?.([30, 40, 30]);
     } catch (err) {
       setError(err instanceof Unauthorized ? t("admin.unlock.expired") : t("admin.unreachable"));

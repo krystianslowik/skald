@@ -1,4 +1,5 @@
 import { parseNotifyKinds, type NotifyKind } from "./notify";
+import { normaliseOrigin } from "./origin";
 import type { Locale } from "./types";
 
 export const LOCALES: readonly Locale[] = ["en", "pl"];
@@ -32,6 +33,11 @@ export interface Config {
   cookieSecure: boolean;
   /** Header carrying the real client IP (e.g. CF-Connecting-IP); empty = socket address. */
   trustedIpHeader: string;
+  /**
+   * PUBLIC_ORIGIN: where browsers open the panel (`https://panel.example`),
+   * comma-separated for several. Empty: the request's own host.
+   */
+  publicOrigins: string[];
   /** Show every boss, trader and dungeon location, not only the ones someone found. */
   mapSpoilers: boolean;
   /** Mock mode only: how the fake bridge behaves (on, off, disabled, untested). */
@@ -83,6 +89,27 @@ export async function checkPasswordHash(
   }
 }
 
+/** PUBLIC_ORIGIN as a list of `scheme://host[:port]`; throws on anything else (a path, a query, no scheme). */
+export function parsePublicOrigins(raw: string): string[] {
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const v = part.trim();
+    if (!v) continue;
+    let u: URL | null = null;
+    try {
+      u = new URL(v);
+    } catch {
+      // reported below
+    }
+    const o = u && normaliseOrigin(v);
+    if (!u || !o || u.username || u.password || u.pathname !== "/" || u.search || u.hash) {
+      throw new Error(`PUBLIC_ORIGIN must be scheme://host[:port] (http or https, no path), comma-separated: ${v}`);
+    }
+    if (!out.includes(o)) out.push(o);
+  }
+  return out;
+}
+
 export function loadConfig(env: Env = process.env): Config {
   const mock = env.MOCK_AGENT === "1";
   const opt = (k: string, def: string): string => env[k] || def;
@@ -129,6 +156,7 @@ export function loadConfig(env: Env = process.env): Config {
     timeZone,
     cookieSecure: mock ? false : opt("COOKIE_SECURE", "true") !== "false",
     trustedIpHeader: opt("TRUSTED_IP_HEADER", ""),
+    publicOrigins: parsePublicOrigins(opt("PUBLIC_ORIGIN", "")),
     mapSpoilers: ["1", "true", "yes", "on"].includes(opt("MAP_SPOILERS", "false").toLowerCase()),
     mockBridge: opt("MOCK_BRIDGE", "on").toLowerCase(),
     discordWebhookUrl,

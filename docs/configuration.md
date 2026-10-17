@@ -42,7 +42,8 @@
 | `SKALD_LOCALE` | `en` | Default UI language, `en` or `pl`; each viewer can switch in the header |
 | `SKALD_TZ` | `$TZ`, else `UTC` | IANA zone for calendar days: streaks, daily playtime, the night-owl badge |
 | `COOKIE_SECURE` | `true` | Secure flag on the session cookie; `false` only for plain-http setups |
-| `TRUSTED_IP_HEADER` | (empty) | Header with the real client IP behind a proxy (`X-Forwarded-For`, `X-Real-IP`, `CF-Connecting-IP`); empty uses the socket address |
+| `TRUSTED_IP_HEADER` | (empty) | Header with the real client IP behind a proxy (`X-Forwarded-For`, `X-Real-IP`, `CF-Connecting-IP`); empty uses the socket address. Set, the proxy's `X-Forwarded-Host` also counts as the panel's address for the [origin check](#origin-check) |
+| `PUBLIC_ORIGIN` | (empty) | The address browsers open the panel on, `scheme://host[:port]` with no path, e.g. `https://panel.example`; comma-separated for several. Needed only when a proxy changes the `Host` header on its way to skald-web. Empty, the request's own `Host` is the panel's address. An invalid value stops skald-web at startup. See [Origin check](#origin-check) |
 | `PROM_URL` | (empty) | Prometheus base URL; empty turns the resource charts off |
 | `PROM_NAMESPACE` | `$POD_NAMESPACE`, else `valheim` | Namespace label in the cAdvisor queries |
 | `PROM_CONTAINER` | `valheim` | Container label of the game server |
@@ -63,6 +64,35 @@ The resource charts query cAdvisor series as kube-prometheus-stack scrapes
 them (`container_cpu_usage_seconds_total`, `container_memory_working_set_bytes`,
 `container_network_*_bytes_total`). Outside Kubernetes, point `PROM_*` at
 whatever labels your cAdvisor uses, or leave `PROM_URL` empty.
+
+## Origin check
+
+skald-web only accepts a request that changes something (any `POST`, `PUT` or
+`DELETE` under `/api/`, sign-in and sign-out included) and the live
+connection (`/live`) when it comes from the panel's own page, or from a client
+that is not a browser. It decides with headers a web page cannot set itself:
+
+- `Sec-Fetch-Site`: `same-origin` (or `none`) is accepted, anything else
+  (`same-site`, `cross-site`) is refused. Current browsers send it.
+- Otherwise `Origin`: it must match `PUBLIC_ORIGIN` when that is set (scheme,
+  host and port), else the host and port of the request's `Host` header (the
+  scheme is not compared, since behind a TLS-terminating proxy skald-web sees
+  plain http). With `TRUSTED_IP_HEADER` set, the proxy's `X-Forwarded-Host`
+  counts too.
+- Neither header: not a browser (curl, scripts, monitoring), accepted. The
+  password and admin password still apply.
+
+A refused request gets `403` with `"error": "cross_origin"` and a
+`cross-origin request refused` line in the log, naming the origin and what the
+panel's address was taken to be.
+
+Most setups need nothing: a reverse proxy that passes the `Host` header on
+(Caddy, Traefik, Kubernetes ingress-nginx, Cloudflare Tunnel by default) and
+direct access on a LAN address both work as they are. Set `PUBLIC_ORIGIN` when
+the proxy replaces `Host` with the upstream's name, as plain nginx does unless
+it has `proxy_set_header Host $host;`. Without it, browsers without
+`Sec-Fetch-Site` are refused there, and the log says
+`origin differs from the request host` once.
 
 ## Discord notifications
 
@@ -221,7 +251,8 @@ settings live on the `valheim-config` PVC under `skald/`.
 - Exposing `skald-web` is up to you: an Ingress or Gateway with TLS, or a tunnel
   (Cloudflare Tunnel, Tailscale, ...) pointing at `skald-web:8080`. Set
   `TRUSTED_IP_HEADER` to the header your proxy uses so the login rate limit sees
-  real client addresses, and narrow the `skald-web` NetworkPolicy ingress rule to
+  real client addresses, set `PUBLIC_ORIGIN` if the proxy rewrites the `Host`
+  header (see [Origin check](#origin-check)), and narrow the `skald-web` NetworkPolicy ingress rule to
   the proxy's namespace.
 
 ## World map
