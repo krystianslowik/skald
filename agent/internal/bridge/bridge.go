@@ -40,41 +40,45 @@ const DefaultTimeout = 8 * time.Second
 var DefaultTestedBuilds = []string{"l-1.0.17", "l-1.0.20"}
 
 // Command is one entry of the allow-list: the plugin route behind an agent
-// command name. Every command here changes the world.
+// command name. Every command here changes the world. Validate, when set,
+// refuses a malformed body before it reaches the plugin (the plugin checks
+// again).
 type Command struct {
-	Path string
+	Path     string
+	Validate func(body map[string]any) error
 }
 
 // Commands is the allow-list of POST /bridge/{command}. Nothing else reaches
 // the plugin.
 var Commands = map[string]Command{
-	"broadcast":        {"/v1/broadcast"},
-	"save":             {"/v1/save"},
-	"kick":             {"/v1/kick"},
-	"ban":              {"/v1/ban"},
-	"unban":            {"/v1/unban"},
-	"time":             {"/v1/time"},
-	"skip-to-morning":  {"/v1/time/skip-to-morning"},
-	"time-freeze":      {"/v1/time/freeze"},
-	"time-resume":      {"/v1/time/resume"},
-	"event-start":      {"/v1/events/start"},
-	"event-stop":       {"/v1/events/stop"},
-	"spawn":            {"/v1/spawn"},
-	"teleport":         {"/v1/teleport"},
-	"globalkey-set":    {"/v1/globalkeys/set"},
-	"globalkey-remove": {"/v1/globalkeys/remove"},
-	"creature-spawn":   {"/v1/creatures/spawn"},
-	"creature-kill":    {"/v1/creatures/kill"},
-	"creature-tame":    {"/v1/creatures/tame"},
-	"heal":             {"/v1/player/heal"},
-	"status":           {"/v1/player/status"},
-	"repair":           {"/v1/build/repair"},
-	"fill":             {"/v1/build/fill"},
-	"fill-kilns":       {"/v1/build/fill-kilns"},
-	"fill-smelters":    {"/v1/build/fill-smelters"},
-	"grow":             {"/v1/build/grow"},
-	"map-reveal":       {"/v1/map/reveal"},
-	"map-pins":         {"/v1/map/pins"},
+	"broadcast":        {Path: "/v1/broadcast"},
+	"save":             {Path: "/v1/save"},
+	"kick":             {Path: "/v1/kick"},
+	"ban":              {Path: "/v1/ban"},
+	"unban":            {Path: "/v1/unban"},
+	"time":             {Path: "/v1/time"},
+	"skip-to-morning":  {Path: "/v1/time/skip-to-morning"},
+	"time-freeze":      {Path: "/v1/time/freeze"},
+	"time-resume":      {Path: "/v1/time/resume"},
+	"event-start":      {Path: "/v1/events/start"},
+	"event-stop":       {Path: "/v1/events/stop"},
+	"spawn":            {Path: "/v1/spawn"},
+	"teleport":         {Path: "/v1/teleport"},
+	"globalkey-set":    {Path: "/v1/globalkeys/set"},
+	"globalkey-remove": {Path: "/v1/globalkeys/remove"},
+	"creature-spawn":   {Path: "/v1/creatures/spawn"},
+	"creature-kill":    {Path: "/v1/creatures/kill"},
+	"creature-tame":    {Path: "/v1/creatures/tame"},
+	"heal":             {Path: "/v1/player/heal"},
+	"status":           {Path: "/v1/player/status"},
+	"repair":           {Path: "/v1/build/repair"},
+	"fill":             {Path: "/v1/build/fill"},
+	"fill-kilns":       {Path: "/v1/build/fill-kilns"},
+	"fill-smelters":    {Path: "/v1/build/fill-smelters"},
+	"grow":             {Path: "/v1/build/grow"},
+	"map-reveal":       {Path: "/v1/map/reveal"},
+	"map-pins":         {Path: "/v1/map/pins"},
+	"chest-add":        {Path: "/v1/containers/add", Validate: validateChestAdd},
 }
 
 // Reads is the allow-list of GET /bridge/{name}, besides status, players and bans.
@@ -633,6 +637,20 @@ func (c *Client) Run(ctx context.Context, name string, body map[string]any, acto
 	if body == nil {
 		body = map[string]any{}
 	}
+	if v := Commands[name].Validate; v != nil {
+		if err := v(body); err != nil {
+			// Refused here, but still an admin attempt: audited like a plugin refusal.
+			msg := err.Error()
+			var e *Error
+			if errors.As(err, &e) {
+				msg = e.Message
+			}
+			ev := c.summarizeArgs(body)
+			ev["actor"], ev["command"], ev["result"], ev["error"] = auditActor(actor), name, "error", truncate(msg, 200)
+			c.publishAdmin(ev)
+			return nil, err
+		}
+	}
 	if err := c.gate(ctx); err != nil {
 		return nil, err
 	}
@@ -673,6 +691,51 @@ func (c *Client) Run(ctx context.Context, name string, body map[string]any, acto
 		return nil, &Error{http.StatusBadGateway, "bad answer"}
 	}
 	return scrub(v), nil
+}
+
+// maxChestAdd is the plugin's cap on one chest-add (ChestPlan.MaxAmount).
+const maxChestAdd = 9999
+
+// validateChestAdd: a prefab, an item, the chest's position and a whole amount.
+func validateChestAdd(body map[string]any) error {
+	bad := func(msg string) error { return &Error{http.StatusBadRequest, msg} }
+	for _, k := range []string{"prefab", "item"} {
+		s, _ := body[k].(string)
+		if s = strings.TrimSpace(s); s == "" || len(s) > 64 {
+			return bad("'" + k + "' must be a prefab name")
+		}
+	}
+	at, _ := body["at"].(map[string]any)
+	for _, k := range []string{"x", "y", "z"} {
+		f, ok := number(at[k])
+		if !ok || math.Abs(f) > 10500 {
+			return bad("'at' must be the chest's {x, y, z}")
+		}
+	}
+	n, ok := number(body["amount"])
+	if !ok || n != math.Trunc(n) || n < 1 || n > maxChestAdd {
+		return bad(fmt.Sprintf("'amount' must be a whole number from 1 to %d", maxChestAdd))
+	}
+	for k := range body {
+		if k != "prefab" && k != "item" && k != "at" && k != "amount" {
+			return bad("unexpected '" + k + "'")
+		}
+	}
+	return nil
+}
+
+// number reads a JSON number however the caller decoded it.
+func number(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, !math.IsNaN(n) && !math.IsInf(n, 0)
+	case int:
+		return float64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	}
+	return 0, false
 }
 
 // uidOf finds a connected player's uid by name, from a fresh player list.
@@ -898,7 +961,7 @@ func (c *Client) summarizeResult(cmd string, data json.RawMessage, ev map[string
 	if json.Unmarshal(data, &d) != nil {
 		return
 	}
-	for _, k := range []string{"killed", "tamed", "alreadyTamed", "repaired", "smelters", "kilns", "skipped", "full", "fermenters", "plants", "sentTo", "stopped", "started", "label", "stacks", "unloaded", "day"} {
+	for _, k := range []string{"killed", "tamed", "alreadyTamed", "repaired", "smelters", "kilns", "skipped", "full", "fermenters", "plants", "sentTo", "stopped", "started", "label", "stacks", "unloaded", "day", "loaded"} {
 		if v, ok := d[k]; ok {
 			ev[k] = v
 		}

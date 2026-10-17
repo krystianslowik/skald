@@ -680,6 +680,7 @@ export const ADMIN_COMMANDS = [
   "grow",
   "map-reveal",
   "map-pins",
+  "chest-add",
   "ack-build",
 ] as const;
 export type AdminCommand = (typeof ADMIN_COMMANDS)[number];
