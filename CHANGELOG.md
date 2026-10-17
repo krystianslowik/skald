@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.5] - 2026-10-17
+
 ### Added
 
 - Docs on what the game image's backups hold: every world in `worlds_local`, but not the game's own auto-backups, and which `BACKUPS_*` settings Skald needs (docs/configuration.md). The docs also name the two image internals the start hook depends on, to check before moving to a newer game image.
