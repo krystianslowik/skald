@@ -156,17 +156,29 @@ describe("MapView", () => {
     expect(mapStatsOn("?mapstats")).toBe(true);
     expect(mapStatsOn("?map=canvas&mapstats=1")).toBe(true);
     expect(mapStatsOn("?map=canvas")).toBe(false);
-    const plain = inLocale(<MapView seedName="ZbzIWkK5KK" saveKey="a" onClose={vi.fn()} />);
-    await screen.findAllByRole("button", { name: "Portals: shown" });
+    const onClose = vi.fn();
+    // The hook comes from a passive effect, which under load can still be pending when the buttons are in the DOM (#134).
+    // Rendering the same tree again commits, and every commit first runs the effects still pending from the last one.
+    const mounted = async () => {
+      const ui = (
+        <I18nProvider locale="en">
+          <MapView seedName="ZbzIWkK5KK" saveKey="a" onClose={onClose} />
+        </I18nProvider>
+      );
+      const r = render(ui);
+      await screen.findAllByRole("button", { name: "Portals: shown" });
+      r.rerender(ui);
+      return r;
+    };
+    const plain = await mounted();
     expect(window.__mapStats).toBeUndefined();
     plain.unmount();
     history.replaceState(null, "", "/?mapstats");
     try {
-      const withStats = inLocale(<MapView seedName="ZbzIWkK5KK" saveKey="a" onClose={vi.fn()} />);
-      await screen.findAllByRole("button", { name: "Portals: shown" });
-      const s = window.__mapStats?.();
-      expect(s?.view.scale).toBeGreaterThan(0);
-      expect(s?.ahead).toBeNull();
+      const withStats = await mounted();
+      const s = window.__mapStats!();
+      expect(s.view.scale).toBeGreaterThan(0);
+      expect(s.ahead).toBeNull();
       withStats.unmount();
       expect(window.__mapStats).toBeUndefined();
     } finally {
