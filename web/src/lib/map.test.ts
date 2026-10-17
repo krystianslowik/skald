@@ -3,6 +3,7 @@ import { gateMap } from "@server/mapgate";
 import { mockMap } from "@server/mapmock";
 import { makeI18n } from "../i18n";
 import {
+  backInside,
   buildMarkers,
   clampView,
   clipRing,
@@ -16,6 +17,8 @@ import {
   gridOutline,
   interestBounds,
   mainBase,
+  MAX_SCALE,
+  minScale,
   type Marker,
   isExplored,
   isoPolygons,
@@ -37,9 +40,10 @@ import {
   smoothLoop,
   worldToScreen,
   zoomAt,
+  WORLD_RADIUS,
   type Box,
 } from "./mapgeo";
-import { bandCentre, EDGE_RUBBER, flingOffset, inertiaStep, REST_SPEED, RUBBER, rubberBand, SampleRing, springStep, unbandCentre, ZOOM_DECELERATION, ZOOM_REST, zoomFlingOffset } from "./mapmotion";
+import { bandCentre, bounceGlide, EDGE_RUBBER, flingOffset, glideStep, inertiaStep, intoBand, REST_SPEED, RUBBER, rubberBand, SampleRing, springStep, unbandCentre, unrubberBand, ZOOM_DECELERATION, ZOOM_REST, zoomFlingOffset } from "./mapmotion";
 import { mapUrlAt, terrainUrl } from "./world";
 
 const snap = mockMap({ now: Date.parse("2026-10-10T20:00:00Z") });
@@ -462,6 +466,8 @@ describe("motion", () => {
     expect(b - a).toBeLessThan(0.4);
     expect(c).toBeLessThan(RUBBER);
     expect(rubberBand(-0.5, 0, 2)).toBeCloseTo(-(rubberBand(2.5, 0, 2) - 2), 10);
+    // Undone exactly, so a pinch that catches a zoom springing back goes on from where it shows.
+    for (const x of [-0.5, 1, 2.1, 2.5, 4]) expect(unrubberBand(rubberBand(x, 0, 2), 0, 2)).toBeCloseTo(x, 9);
   });
 
   it("lets a pinch's momentum run out sooner than a pan's", () => {
@@ -551,6 +557,140 @@ describe("motion", () => {
         }
       }
     }
+  });
+
+  describe("spring back from a limit", () => {
+    const R = 10500;
+    const scale = 0.5;
+    /** px past the world's edge, due east. */
+    const past = (v: { cx: number; scale: number }) => (v.cx - R) * v.scale;
+    /** Runs a glide at 60 fps: the px past the edge every frame, until it settles or `sec` runs out. */
+    const run = (cx: number, vx: number, sec = 2) => {
+      let v = { cx, cz: 0, scale };
+      const gl = { cx: R, cz: 0, ls: Math.log(scale), v: [vx, 0, 0] as [number, number, number], back: true };
+      const out: number[] = [];
+      for (let i = 0; i < sec * 60; i++) {
+        const s = glideStep(v, gl, 1 / 60, R);
+        v = s.view;
+        out.push(past(v));
+        if (s.done) break;
+      }
+      return out;
+    };
+
+    it("carries a fling's speed across the edge into the stretch", () => {
+      // Straight out: sped up behind the stretch, so the stretch moves as fast as the map did.
+      const [vx] = intoBand({ cx: R, cz: 0, scale: 1 }, 1000, 0, R);
+      const shown = bandCentre({ cx: R + vx * 1e-4, cz: 0, scale: 1 }, R);
+      expect((shown.cx - R) / 1e-4).toBeCloseTo(1000, -1);
+      // Along the edge or back inside: unchanged.
+      expect(intoBand({ cx: R, cz: 0, scale: 1 }, 0, 500, R)).toEqual([0, 500]);
+      expect(intoBand({ cx: R, cz: 0, scale: 1 }, -300, 0, R)).toEqual([-300, 0]);
+      // At an angle only the outward part grows.
+      const [x, z] = intoBand({ cx: 0, cz: R, scale: 1 }, 400, 300, R);
+      expect(x).toBe(400);
+      expect(z).toBeCloseTo(300 / 0.55, 9);
+      // Already well into the band (a fast fling, a dropped frame): the shown stretch still keeps the speed.
+      const deep = { cx: R + 100, cz: 0, scale: 1 };
+      const [dv] = intoBand(deep, 1000, 0, R);
+      const before = bandCentre(deep, R).cx;
+      const after = bandCentre({ ...deep, cx: deep.cx + dv * 1e-5 }, R).cx;
+      expect((after - before) / 1e-5).toBeCloseTo(1000, -1);
+    });
+
+    it("springs back from the edge over the spring's response, not in a few frames (#125)", () => {
+      // Let go 50 px past the edge (banded, as a pan leaves it), from rest.
+      const start = bandCentre({ cx: R + 300 / scale, cz: 0, scale }, R);
+      expect(past(start)).toBeCloseTo(50, 0);
+      const px = run(start.cx, 0);
+      // One frame later it has barely moved (the old glide squeezed it to 20 px), and it does not jump.
+      expect(px[0]).toBeGreaterThan(45);
+      expect(px[0]).toBeLessThan(50);
+      for (let i = 1; i < px.length; i++) expect(px[i]!).toBeLessThanOrEqual(px[i - 1]! + 1e-9);
+      const settled = px.findIndex((p) => p < 1) / 60;
+      expect(settled).toBeGreaterThan(0.25);
+      expect(settled).toBeLessThan(0.4);
+      expect(px[px.length - 1]).toBe(0);
+    });
+
+    it("lets a fling into the edge give more the faster it was, never past the band (#125)", () => {
+      const peak = (speed: number) => {
+        const px = run(R, intoBand({ cx: R, cz: 0, scale }, speed / scale, 0, R)[0]);
+        // Back at the edge well within a second.
+        expect(px.findIndex((p, i) => i > 3 && p < 1) / 60).toBeLessThan(0.6);
+        return Math.max(...px);
+      };
+      const slow = peak(600);
+      const brisk = peak(1800);
+      const hard = peak(6000);
+      expect(slow).toBeGreaterThan(6);
+      expect(brisk).toBeGreaterThan(18);
+      expect(brisk).toBeGreaterThan(slow * 1.8);
+      expect(hard).toBeGreaterThan(brisk);
+      expect(hard).toBeLessThan(EDGE_RUBBER);
+    });
+
+    it("never leaves a view past a limit when a tap stops its spring back (#124)", () => {
+      const w = 390;
+      const h = 844;
+      // A pinch let go at 30.8 px/m, past the closest zoom: it springs back round the fingers.
+      let v = { cx: 100, cz: 50, scale: 30.8, w, h };
+      const target = backInside(v, 195, 400)!;
+      expect(target.scale).toBe(MAX_SCALE);
+      const gl = { cx: target.cx, cz: target.cz, ls: Math.log(target.scale), v: [0, 0, 0] as [number, number, number], back: true };
+      for (let i = 0; i < 3; i++) v = glideStep(v, gl, 1 / 60, WORLD_RADIUS).view;
+      // A finger lands 50 ms in: the map stops where it is, still past the limit.
+      expect(v.scale).toBeGreaterThan(MAX_SCALE + 1);
+      // When it lifts (a tap, or after a pan that kept the zoom), it springs back from there.
+      for (const caught of [v, { ...v, cx: v.cx + 3, cz: v.cz - 2 }]) {
+        const back = backInside(caught, 200, 600)!;
+        expect(back).toEqual(clampView(back));
+        const g = { cx: back.cx, cz: back.cz, ls: Math.log(back.scale), v: [0, 0, 0] as [number, number, number], back: true };
+        let u = caught;
+        let done = false;
+        for (let i = 0; i < 60 && !done; i++) ({ view: u, done } = glideStep(u, g, 1 / 60, WORLD_RADIUS));
+        expect(done).toBe(true);
+        expect(u.scale).toBeCloseTo(MAX_SCALE, 9);
+      }
+      // The same at the farthest zoom and at the world's edge; inside every limit there is nothing to do.
+      const far = backInside({ cx: 0, cz: 0, scale: minScale(w, h) * 0.7, w, h }, 195, 400)!;
+      expect(far.scale).toBe(minScale(w, h));
+      const edge = backInside({ cx: WORLD_RADIUS + 60, cz: 0, scale: 0.5, w, h }, 195, 400)!;
+      expect(Math.hypot(edge.cx, edge.cz)).toBeCloseTo(WORLD_RADIUS, 6);
+      expect(backInside({ cx: WORLD_RADIUS - 1, cz: 0, scale: 0.5, w, h }, 195, 400)).toBeNull();
+    });
+
+    it("lets a fling at an angle into the edge run on along it without sliding back", () => {
+      // 1500 px/s along the edge and 1500 px/s out, just past the east edge.
+      let v = { cx: R + 1, cz: 0, scale };
+      const gl = bounceGlide(v, 1500 / scale, 1500 / scale, R);
+      let prev = v.cz;
+      let peak = 0;
+      for (let i = 0; i < 60; i++) {
+        const s = glideStep(v, gl, 1 / 60, R);
+        v = s.view;
+        expect(v.cz).toBeGreaterThanOrEqual(prev - 1e-9);
+        prev = v.cz;
+        peak = Math.max(peak, past(v));
+        if (s.done) break;
+      }
+      expect(peak).toBeGreaterThan(10);
+      expect(Math.hypot(v.cx, v.cz)).toBeCloseTo(R, 3);
+    });
+
+    it("springs a zoom back from past its limit in about the same time", () => {
+      let v = { cx: 0, cz: 0, scale: 30.8 };
+      const gl = { cx: 0, cz: 0, ls: Math.log(24), v: [0, 0, 0] as [number, number, number], back: true };
+      let t = 0;
+      for (; t < 120; t++) {
+        const s = glideStep(v, gl, 1 / 60, R);
+        v = s.view;
+        if (s.done) break;
+      }
+      expect(v.scale).toBeCloseTo(24, 9);
+      expect(t / 60).toBeGreaterThan(0.25);
+      expect(t / 60).toBeLessThan(0.5);
+    });
   });
 
   it("knows where a fling lands the moment it starts", () => {

@@ -17,6 +17,9 @@ export const ZOOM_REST = 0.05;
 /** How far past a zoom limit a pinch can stretch at most, in log scale (about 40 %). */
 export const RUBBER = Math.log(1.4);
 
+/** How fast a rubber band gives at its limit: the stretch moves at this share of the motion behind it. */
+export const BAND_SLOPE = 0.55;
+
 /**
  * A log scale `x` past [lo, hi] pulled back towards the limit, ever more
  * stiffly the further it goes and never more than `d` past it: the rubber
@@ -24,8 +27,15 @@ export const RUBBER = Math.log(1.4);
  * the fingers dead.
  */
 export function rubberBand(x: number, lo: number, hi: number, d = RUBBER): number {
-  const band = (o: number) => (1 - 1 / ((o * 0.55) / d + 1)) * d;
+  const band = (o: number) => (1 - 1 / ((o * BAND_SLOPE) / d + 1)) * d;
   return x > hi ? hi + band(x - hi) : x < lo ? lo - band(lo - x) : x;
+}
+
+/** rubberBand undone: what the fingers asked for behind a stretched value, so a new gesture goes on from there. */
+export function unrubberBand(x: number, lo: number, hi: number, d = RUBBER): number {
+  // The band, b = (1 - 1 / (BAND_SLOPE o / d + 1)) d, solved for the overshoot o.
+  const unband = (b: number) => (d / BAND_SLOPE) * (1 / (1 - Math.min(b, d * 0.999) / d) - 1);
+  return x > hi ? hi + unband(x - hi) : x < lo ? lo - unband(lo - x) : x;
 }
 
 /** Advance a fling by `dtMs`: the distance travelled and the velocity left. */
@@ -169,21 +179,105 @@ interface Centred {
  * world's edge gives a little and springs back instead of stopping dead.
  */
 export function bandCentre<V extends Centred>(v: V, radius: number): V {
-  const r = Math.hypot(v.cx, v.cz) * v.scale;
-  const edge = radius * v.scale;
-  if (r <= edge) return v;
-  const k = rubberBand(r, -Infinity, edge, EDGE_RUBBER) / r;
-  return { ...v, cx: v.cx * k, cz: v.cz * k };
+  return bandRadial(v, radius, (o) => rubberBand(o, -Infinity, 0, EDGE_RUBBER));
 }
 
 /** The centre the finger asked for behind a banded one (bandCentre undone): a pan goes on from there. */
 export function unbandCentre<V extends Centred>(v: V, radius: number): V {
+  return bandRadial(v, radius, (o) => unrubberBand(o, -Infinity, 0, EDGE_RUBBER));
+}
+
+/**
+ * A centre past a disc of `radius` metres shown stretched by `f`, a function
+ * of the overshoot in CSS px: bandCentre and unbandCentre.
+ */
+function bandRadial<V extends Centred>(v: V, radius: number, f: (o: number) => number): V {
   const r = Math.hypot(v.cx, v.cz) * v.scale;
   const edge = radius * v.scale;
   if (r <= edge) return v;
-  // rubberBand's band, b = (1 - 1 / (0.55 o / d + 1)) d, solved for the overshoot o.
-  const b = Math.min(r - edge, EDGE_RUBBER * 0.999);
-  const o = (EDGE_RUBBER / 0.55) * (1 / (1 - b / EDGE_RUBBER) - 1);
-  const k = (edge + o) / r;
+  const k = (edge + f(r - edge)) / r;
   return { ...v, cx: v.cx * k, cz: v.cz * k };
+}
+
+/**
+ * A velocity (world units per second) carried across the world's edge by a
+ * view whose centre is past it (unstretched): the part straight out is sped
+ * up behind the stretch by as much as bandCentre slows it there, so the
+ * stretch that shows keeps the speed the map had.
+ */
+export function intoBand(v: Centred, vx: number, vz: number, radius: number): [number, number] {
+  const r = Math.hypot(v.cx, v.cz);
+  const out = r > 0 ? (vx * v.cx + vz * v.cz) / r : 0;
+  if (out <= 0) return [vx, vz];
+  // bandCentre's slope at this overshoot (BAND_SLOPE at the edge itself).
+  const o = Math.max(0, r - radius) * v.scale;
+  const slope = BAND_SLOPE / ((BAND_SLOPE * o) / EDGE_RUBBER + 1) ** 2;
+  const k = (out * (1 / slope - 1)) / r;
+  return [vx + v.cx * k, vz + v.cz * k];
+}
+
+/** A spring back to a limit (the world's edge, the closest or farthest zoom) settles in about this many seconds. */
+export const BACK_RESPONSE = 0.3;
+
+/** A glide in flight: where it settles (a world centre and a log scale) and its speed on each (per second). */
+export interface Glide {
+  cx: number;
+  cz: number;
+  ls: number;
+  v: [number, number, number];
+  /** A spring back to the limits: settles in BACK_RESPONSE, a little quicker than a move the user asked for. */
+  back?: boolean;
+}
+
+/** A glide from where it is now to `target`, at velocity `v`. */
+export function toGlide(target: Centred, v: [number, number, number], back = false): Glide {
+  return { cx: target.cx, cz: target.cz, ls: Math.log(target.scale), v, back };
+}
+
+/**
+ * The spring back for a fling that has run past the world's edge at `v`
+ * (unstretched) with velocity (vx, vz) in world units per second: back to
+ * the edge, and on along it as far as a spring from that speed comes to rest
+ * on its own, so the run along the edge slows down instead of sliding back.
+ */
+export function bounceGlide(v: Centred, vx: number, vz: number, radius: number): Glide {
+  const r = Math.hypot(v.cx, v.cz) || 1;
+  const out = (vx * v.cx + vz * v.cz) / r;
+  const w = (2 * Math.PI) / BACK_RESPONSE;
+  // A critically damped spring that starts on its target at speed u comes to rest u / w further on.
+  const cx = v.cx + (vx - (out * v.cx) / r) / w;
+  const cz = v.cz + (vz - (out * v.cz) / r) / w;
+  const k = Math.min(1, radius / Math.hypot(cx, cz));
+  const [gx, gz] = intoBand(v, vx, vz, radius);
+  return toGlide({ cx: cx * k, cz: cz * k, scale: v.scale }, [gx, gz, 0], true);
+}
+
+/** Where a glide settles, as a view. */
+export function glideTarget<V extends Centred>(v: V, gl: Glide): V {
+  return { ...v, cx: gl.cx, cz: gl.cz, scale: Math.exp(gl.ls) };
+}
+
+/**
+ * One frame of a glide: the centre and the log scale each on their own
+ * critically damped spring towards the glide's target. Past the world's edge
+ * the centre is shown stretched (bandCentre, as under a panning finger), so a
+ * glide back from there, or a fling that ran into the edge, gives and springs
+ * back. The spring runs on the centre behind the stretch, and the stretch is
+ * applied once for show: stretching the stretched centre again would squeeze
+ * the overshoot away in a few frames (#125). `gl.v` is updated in place.
+ * `done`: it has settled, and `view` is exactly the target.
+ */
+export function glideStep<V extends Centred>(v: V, gl: Glide, dtSec: number, radius: number): { view: V; done: boolean } {
+  const response = gl.back ? BACK_RESPONSE : 0.4;
+  const u = unbandCentre(v, radius);
+  const sx = springStep(u.cx, gl.v[0], gl.cx, dtSec, response);
+  const sz = springStep(u.cz, gl.v[1], gl.cz, dtSec, response);
+  const ss = springStep(Math.log(v.scale), gl.v[2], gl.ls, dtSec, response);
+  gl.v[0] = sx.v;
+  gl.v[1] = sz.v;
+  gl.v[2] = ss.v;
+  // Close and slow: a fling that has only just crossed the edge is close to its target too, but on its way out.
+  const done = Math.abs(sx.x - gl.cx) * v.scale < 0.3 && Math.abs(sz.x - gl.cz) * v.scale < 0.3 && Math.abs(ss.x - gl.ls) < 0.002 && Math.hypot(sx.v, sz.v) * v.scale < REST_SPEED && Math.abs(ss.v) < ZOOM_REST;
+  if (done) return { view: glideTarget(v, gl), done };
+  return { view: bandCentre({ ...v, cx: sx.x, cz: sz.x, scale: Math.exp(ss.x) }, radius), done };
 }

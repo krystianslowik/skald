@@ -2,6 +2,7 @@ import { useReducedMotion } from "motion/react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useI18n } from "../../i18n";
 import {
+  backInside,
   clampView,
   exploredBounds,
   fitBounds,
@@ -9,6 +10,8 @@ import {
   markerBounds,
   MAX_SCALE,
   minScale,
+  pastEdge,
+  pastLimits,
   pickItem,
   screenToWorld,
   WORLD_RADIUS,
@@ -21,7 +24,7 @@ import {
 } from "../../lib/mapgeo";
 import { useIconSheet } from "../../lib/itemicons";
 import { COARSE, useMedia } from "../../lib/useMedia";
-import { bandCentre, flingOffset, inertiaStep, REST_SPEED, rubberBand, SampleRing, springStep, unbandCentre, ZOOM_DECELERATION, ZOOM_REST, zoomFlingOffset } from "../../lib/mapmotion";
+import { bandCentre, bounceGlide, flingOffset, glideStep, glideTarget, inertiaStep, toGlide, REST_SPEED, rubberBand, SampleRing, unbandCentre, unrubberBand, ZOOM_DECELERATION, ZOOM_REST, zoomFlingOffset, type Glide } from "../../lib/mapmotion";
 import { MapRenderer, type MapTileStats, type Relief } from "../../lib/maprender";
 import type { GLStats } from "../../lib/mapgl";
 import type { TilesDoc } from "../../lib/terraintiles";
@@ -81,9 +84,6 @@ const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
 /** The view held within the world (it may stretch a little past the edge), and the centre the finger asked for behind that. */
 const edgeBand = (v: View) => bandCentre(v, WORLD_RADIUS);
 const edgeUnband = (v: View) => unbandCentre(v, WORLD_RADIUS);
-
-/** The centre is past the world's edge (by more than a rounding error). */
-const pastEdge = (v: View) => Math.hypot(v.cx, v.cz) * v.scale > WORLD_RADIUS * v.scale + 0.5;
 
 function storedView(): Pick<View, "cx" | "cz" | "scale"> | null {
   try {
@@ -164,7 +164,7 @@ export const MapCanvas = forwardRef<
   // Motion in flight: a fling's velocity (px/s), a pinch's zoom momentum (log scale per second, round a screen point) or a spring's target.
   const fling = useRef<{ vx: number; vy: number } | null>(null);
   const zfling = useRef<{ v: number; x: number; y: number } | null>(null);
-  const glide = useRef<{ cx: number; cz: number; ls: number; v: [number, number, number] } | null>(null);
+  const glide = useRef<Glide | null>(null);
   // Where the motion in flight will land (set once the finger lifts): the renderer loads its tiles first.
   const ahead = useRef<View | null>(null);
   // Fingers (or the mouse button) are down on the map.
@@ -226,6 +226,8 @@ export const MapCanvas = forwardRef<
       const dt = Math.min(64, gap);
       last.current = now;
       let moving = false;
+      // A glide that a fling hands over to in this frame starts with the next one: the fling has moved the map this frame already.
+      let handed = false;
       const f = fling.current;
       if (f) {
         // The decay is integrated exactly, so a dropped frame costs no distance: the fling still stops where it was predicted to.
@@ -237,17 +239,18 @@ export const MapCanvas = forwardRef<
         f.vx = sx.v;
         f.vy = sy.v;
         if (pastEdge(next)) {
-          // Into the world's edge: it gives a little under the fling's speed, then springs back.
+          // Into the world's edge: it runs on into the band as far as the fling's speed takes it, then springs back.
           fling.current = null;
           view.current = edgeBand(next);
-          const back = clampView(next);
-          glide.current = { cx: back.cx, cz: back.cz, ls: Math.log(back.scale), v: [-f.vx / v.scale, f.vy / v.scale, 0] };
+          glide.current = bounceGlide(next, -f.vx / v.scale, f.vy / v.scale, WORLD_RADIUS);
+          const back = glideTarget(next, glide.current);
           ahead.current = back;
+          handed = true;
         } else {
           view.current = next;
           if (Math.hypot(f.vx, f.vy) < REST_SPEED) fling.current = null;
         }
-        moving = fling.current !== null;
+        moving = fling.current !== null || handed;
       }
       const zf = zfling.current;
       if (zf) {
@@ -260,22 +263,16 @@ export const MapCanvas = forwardRef<
         else moving = true;
       }
       const gl = glide.current;
-      if (gl) {
-        const v = view.current;
-        // Each axis on its own spring; zoom springs in log space so it feels even.
-        const sx = springStep(v.cx, gl.v[0], gl.cx, dt / 1000);
-        const sz = springStep(v.cz, gl.v[1], gl.cz, dt / 1000);
-        const ss = springStep(Math.log(v.scale), gl.v[2], gl.ls, dt / 1000);
-        gl.v[0] = sx.v;
-        gl.v[1] = sz.v;
-        gl.v[2] = ss.v;
+      if (gl && !handed) {
         // The target is inside the limits; on the way back from past one (a zoom or the edge stretched), the spring is not cut short.
-        view.current = edgeBand({ ...v, cx: sx.x, cz: sz.x, scale: Math.exp(ss.x) });
-        const done = Math.abs(sx.x - gl.cx) * v.scale < 0.3 && Math.abs(sz.x - gl.cz) * v.scale < 0.3 && Math.abs(ss.x - gl.ls) < 0.002;
-        if (done) {
-          view.current = clampView({ ...view.current, cx: gl.cx, cz: gl.cz, scale: Math.exp(gl.ls) });
+        const g = glideStep(view.current, gl, dt / 1000, WORLD_RADIUS);
+        if (g.done) {
+          view.current = clampView(g.view);
           glide.current = null;
-        } else moving = true;
+        } else {
+          view.current = g.view;
+          moving = true;
+        }
       }
       if (!moving) ahead.current = null;
       draw("fast", now);
@@ -319,8 +316,9 @@ export const MapCanvas = forwardRef<
   const fitFor = useCallback((w: number, h: number) => fitBounds(w, h, bounds(), fitInsets.current), [bounds]);
   const fit = useCallback(() => fitFor(view.current.w, view.current.h), [fitFor]);
 
+  /** `back`: a spring back to the limits, a little quicker than a move the user asked for. */
   const glideTo = useCallback(
-    (target: View) => {
+    (target: View, back = false) => {
       fling.current = null;
       zfling.current = null;
       const t = clampView(target);
@@ -331,7 +329,7 @@ export const MapCanvas = forwardRef<
       }
       const prev = glide.current;
       // A new target keeps the current velocity: the move bends, it does not restart.
-      glide.current = { cx: t.cx, cz: t.cz, ls: Math.log(t.scale), v: prev?.v ?? [0, 0, 0] };
+      glide.current = toGlide(t, prev?.v ?? [0, 0, 0], back);
       ahead.current = t;
       schedule();
     },
@@ -345,7 +343,7 @@ export const MapCanvas = forwardRef<
         glideTo({ ...view.current, cx: x, cz: z, scale: Math.max(Math.min(view.current.scale, maxScale ?? Infinity), minScale ?? 0) });
       },
       reveal(x, z, hidden) {
-        const v = glide.current ? { ...view.current, cx: glide.current.cx, cz: glide.current.cz, scale: Math.exp(glide.current.ls) } : view.current;
+        const v = glide.current ? glideTarget(view.current, glide.current) : view.current;
         const [sx, sy] = worldToScreen(v, x, z);
         const clear = v.h - hidden;
         if (sx > 24 && sx < v.w - 24 && sy > 24 && sy < clear - 24) return;
@@ -353,7 +351,7 @@ export const MapCanvas = forwardRef<
         glideTo({ ...v, cx: x, cz: z - (v.h / 2 - clear / 2) / v.scale });
       },
       zoomBy(factor) {
-        const base = glide.current ? { ...view.current, cx: glide.current.cx, cz: glide.current.cz, scale: Math.exp(glide.current.ls) } : view.current;
+        const base = glide.current ? glideTarget(view.current, glide.current) : view.current;
         glideTo({ ...base, scale: base.scale * factor });
       },
       fit() {
@@ -488,17 +486,20 @@ export const MapCanvas = forwardRef<
     };
   }, [interactive]);
 
-  useEffect(
-    () => () => {
+  // The map is going away (not just its gesture effect re-running).
+  const closed = useRef(false);
+  useEffect(() => {
+    closed.current = false;
+    return () => {
+      closed.current = true;
       if (frame.current !== null) cancelAnimationFrame(frame.current);
       if (idle.current) clearTimeout(idle.current);
       if (arrival.current) clearTimeout(arrival.current);
       // Woods still being built, or a coast still being traced, must not draw a closed map.
       if (renderer.current) renderer.current.onChange = null;
       renderer.current?.dispose();
-    },
-    [],
-  );
+    };
+  }, []);
 
   /** Zoom into a cluster until it splits; a pile that never would (a portal hub) opens as a list. */
   const openCluster = useCallback(
@@ -546,6 +547,8 @@ export const MapCanvas = forwardRef<
     // A finger resting on one spot: after LONG_PRESS_MS it is a long press, and its release is not a tap.
     let press: ReturnType<typeof setTimeout> | null = null;
     let pressed = false;
+    // Where a spring back to the limits that this touch stopped was heading; a tap that does not move picks it up again.
+    let caught: View | null = null;
     // The map answered this touch (often by opening a sheet over itself): its touchend cancels the
     // click the browser would send next, which is hit-tested again and would land on that sheet.
     const answer = (e: PointerEvent) => {
@@ -575,26 +578,35 @@ export const MapCanvas = forwardRef<
     };
     /** A zoom stretched past a limit springs back to it, around the fingers' point. */
     const settleZoom = (x: number, y: number) => {
-      const v = view.current;
-      const s = Math.min(MAX_SCALE, Math.max(minScale(v.w, v.h), v.scale));
-      if (s !== v.scale) glideTo(zoomAt(v, x, y, s / v.scale));
+      const t = backInside(view.current, x, y);
+      if (t) glideTo(t, true);
     };
-    /** Let go past the world's edge: back to it from rest (the view only crept along the band, whatever the finger did). */
-    const springBack = () => {
-      if (!pastEdge(view.current)) return false;
-      glideTo(clampView(view.current));
-      if (glide.current) glide.current.v = [0, 0, 0];
+    /**
+     * The last finger lifted: a view left past a limit (a zoom stretched, the edge, or a spring back
+     * the touch stopped) springs back from rest, around (x, y). False when it is inside its limits.
+     */
+    const springBack = (x: number, y: number) => {
+      const c = caught;
+      caught = null;
+      const t = backInside(view.current, x, y);
+      if (!t) return false;
+      // Already on its way back (a pinch let go with its zoom past a limit).
+      if (glide.current) return true;
+      // From rest: no glide is running, so there is no speed to keep.
+      glideTo(!moved && c ? c : t, true);
       return true;
     };
     const zoomTo = (x: number, y: number, factor: number) => {
-      const base = glide.current ? { ...view.current, cx: glide.current.cx, cz: glide.current.cz, scale: Math.exp(glide.current.ls) } : view.current;
+      const base = glide.current ? glideTarget(view.current, glide.current) : view.current;
       glideTo(zoomAt(base, x, y, factor));
     };
 
     const down = (e: PointerEvent) => {
       if (e.button !== 0 && e.pointerType === "mouse") return;
       el.setPointerCapture(e.pointerId);
-      // A touch stops the map where it is.
+      // A touch stops the map where it is, even on its way back from past a limit: it springs back again when the finger lifts.
+      const gl = glide.current;
+      if (pts.size === 0) caught = gl?.back && pastLimits(view.current) ? glideTarget(view.current, gl) : null;
       stopMotion();
       // Once per finger, not per move: the box is read when a pointer goes down.
       rect = el.getBoundingClientRect();
@@ -622,7 +634,8 @@ export const MapCanvas = forwardRef<
         cancelPress();
         moved = true;
         pinch = pinchState();
-        rawZoom = Math.log(view.current.scale);
+        // A zoom caught past its limit goes on from the stretch the fingers would have asked for.
+        rawZoom = unrubberBand(Math.log(view.current.scale), Math.log(minScale(view.current.w, view.current.h)), Math.log(MAX_SCALE));
         zoomSamples.clear();
         pinchEnd = null;
         if (pts.size === 2 && pinch) two = { t: e.timeStamp, start: new Map(pts), travel: 0, mx: pinch.mx, my: pinch.my };
@@ -658,10 +671,11 @@ export const MapCanvas = forwardRef<
           const lo = Math.log(minScale(v0.w, v0.h));
           const hi = Math.log(MAX_SCALE);
           const s = Math.exp(reduced ? Math.min(hi, Math.max(lo, rawZoom)) : rubberBand(rawZoom, lo, hi));
-          // Scale around the old midpoint, then follow the midpoint's travel.
+          // Scale around the old midpoint, then follow the midpoint's travel; past the world's edge, as a pan does.
           const [wx, wz] = screenToWorld(v0, pinch.mx, pinch.my);
-          const v = clampView({ ...v0, cx: wx - (now.mx - v0.w / 2) / s, cz: wz + (now.my - v0.h / 2) / s });
-          view.current = { ...v, scale: s };
+          const u = edgeUnband(v0);
+          const next = { ...v0, scale: s, cx: u.cx + wx - (now.mx - v0.w / 2) / s - v0.cx, cz: u.cz + wz + (now.my - v0.h / 2) / s - v0.cz };
+          view.current = reduced ? { ...clampView(next), scale: s } : edgeBand(next);
           schedule();
           zoomSamples.push(Math.log(s), 0, e.timeStamp);
         }
@@ -707,6 +721,7 @@ export const MapCanvas = forwardRef<
         if (pts.size === 0) {
           pressed = false;
           if (e.type === "pointerup") answer(e);
+          springBack(p.x, p.y);
         }
         el.style.cursor = "grab";
         return;
@@ -724,7 +739,7 @@ export const MapCanvas = forwardRef<
       if (pts.size > 0) return;
       el.style.cursor = "grab";
       if (e.type === "pointercancel") {
-        springBack();
+        springBack(p.x, p.y);
         return;
       }
       if (two) {
@@ -732,12 +747,16 @@ export const MapCanvas = forwardRef<
         two = null;
         const end = pinchEnd;
         pinchEnd = null;
-        // The last finger of a pinch panned past the edge.
-        if (springBack()) return;
-        // Two fingers that tapped together without pinching: zoom out around them.
-        if (e.timeStamp - t2.t < TWO_TAP_MS && t2.travel < SLOP * 2) zoomTo(t2.mx, t2.my, 0.5);
+        // Two fingers that tapped together without pinching: zoom out around them (back inside the limits, too).
+        if (e.timeStamp - t2.t < TWO_TAP_MS && t2.travel < SLOP * 2) {
+          caught = null;
+          zoomTo(t2.mx, t2.my, 0.5);
+          return;
+        }
+        // The last finger of a pinch panned past the edge, or both lifted with the zoom past a limit.
+        if (springBack(p.x, p.y)) return;
         // Both lifted while zooming: the zoom runs on a little, around where the fingers were.
-        else if (end && !reduced && !glide.current && e.timeStamp - end.t < 150 && Math.abs(end.v) > 0.5) {
+        if (end && !reduced && !glide.current && e.timeStamp - end.t < 150 && Math.abs(end.v) > 0.5) {
           zfling.current = { v: end.v, x: end.x, y: end.y };
           ahead.current = zoomAt(view.current, end.x, end.y, Math.exp(zoomFlingOffset(end.v)));
           schedule();
@@ -746,6 +765,8 @@ export const MapCanvas = forwardRef<
       }
       if (!moved) {
         answer(e);
+        // A tap that stopped a spring back lets it carry on.
+        springBack(p.x, p.y);
         const touch = e.pointerType !== "mouse";
         const hit = renderer.current ? pickItem(renderer.current.visible, p.x, p.y, touch ? 28 : 16) : null;
         if (hit) {
@@ -776,8 +797,10 @@ export const MapCanvas = forwardRef<
       }
       const [vx, vy] = samples.velocity(e.timeStamp);
       const v = view.current;
-      if (springBack()) return;
+      if (springBack(p.x, p.y)) return;
       if (!reduced && Math.hypot(vx, vy) > 120) {
+        // A spring back still running inside the limits (a pinch let go to a pan) gives way to the fling.
+        glide.current = null;
         fling.current = { vx, vy };
         // The fling's landing is known now: its tiles load while it runs.
         const [ox, oy] = flingOffset(vx, vy);
@@ -826,8 +849,12 @@ export const MapCanvas = forwardRef<
       el.removeEventListener("pointercancel", up);
       el.removeEventListener("pointerleave", leave);
       el.removeEventListener("wheel", wheel);
-      // The pointers this effect tracked are forgotten with it.
+      // The pointers this effect tracked are forgotten with it; a view they left past a limit springs back.
       gesturing.current = false;
+      if (pts.size > 0 && !glide.current && !closed.current) {
+        const t = backInside(view.current, view.current.w / 2, view.current.h / 2);
+        if (t) glideTo(t, true);
+      }
     };
   }, [interactive, onPointerWorld, onSelect, onLongPress, onTapWorld, onOre, openCluster, glideTo, reduced, schedule, setView]);
 

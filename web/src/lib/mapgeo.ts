@@ -656,6 +656,28 @@ export function zoomAt(v: View, sx: number, sy: number, factor: number): View {
   return clampView({ ...v, scale, cx: wx - (sx - v.w / 2) / scale, cz: wz + (sy - v.h / 2) / scale });
 }
 
+/** The centre is past the world's edge (by more than half a pixel). */
+export function pastEdge(v: View): boolean {
+  return Math.hypot(v.cx, v.cz) * v.scale > WORLD_RADIUS * v.scale + 0.5;
+}
+
+/**
+ * Where a view stretched past a limit springs back to: the zoom to its
+ * limit around the screen point (sx, sy), the centre into the world. Null
+ * when the view is inside its limits.
+ */
+export function backInside(v: View, sx: number, sy: number): View | null {
+  if (!pastLimits(v)) return null;
+  const s = Math.min(MAX_SCALE, Math.max(minScale(v.w, v.h), v.scale));
+  return zoomAt(v, sx, sy, s / v.scale);
+}
+
+/** Zoomed past the closest or farthest zoom, or the centre past the world's edge. */
+export function pastLimits(v: View): boolean {
+  // A hair of tolerance: a scale worked out through exp(log(...)) at a limit can land a rounding error past it.
+  return v.scale > MAX_SCALE * (1 + 1e-9) || v.scale < minScale(v.w, v.h) * (1 - 1e-9) || pastEdge(v);
+}
+
 /** A view that shows the box [x0, z0]..[x1, z1] with some padding. */
 export function fitView(w: number, h: number, x0: number, z0: number, x1: number, z1: number, pad = 0.15): View {
   const bw = Math.max(400, x1 - x0);
