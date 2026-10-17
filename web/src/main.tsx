@@ -19,5 +19,7 @@ createRoot(document.getElementById("root")!).render(
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    // Installed to the home screen: ask that the kept terrain tiles survive storage pressure (granted quietly or not at all there).
+    if (matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone) void navigator.storage?.persist?.().catch(() => false);
   });
 }

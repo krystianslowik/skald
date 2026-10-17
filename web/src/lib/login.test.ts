@@ -36,3 +36,16 @@ describe("log out", () => {
     expect(await logout()).toBe("offline");
   });
 });
+
+describe("log out and the kept terrain", () => {
+  it("drops the terrain tiles kept on this device, and only those, once the session ended", async () => {
+    const names = new Set(["skald-shell-abc", "skald-terrain-b1"]);
+    vi.stubGlobal("caches", { keys: async () => [...names], delete: async (n: string) => names.delete(n) });
+    answer(403, { ok: false, error: "cross_origin" });
+    expect(await logout()).toBe("refused");
+    expect([...names]).toEqual(["skald-shell-abc", "skald-terrain-b1"]);
+    answer(200, { ok: true });
+    expect(await logout()).toBe("ok");
+    expect([...names]).toEqual(["skald-shell-abc"]);
+  });
+});
