@@ -252,7 +252,11 @@ export interface NotifierOptions {
   maxAgeMs?: number;
 }
 
-export type SendResult = { ok: true } | { ok: false; error: string; /** Seconds, with error "busy". */ retryAfter?: number };
+/**
+ * `busy`: a test is in flight or one just went out. `rate_limited`: Discord
+ * answered 429 and asked to wait. Both carry `retryAfter` in seconds.
+ */
+export type SendResult = { ok: true } | { ok: false; error: string; retryAfter?: number };
 
 /**
  * Posts notable live events to a Discord webhook. Fed by the hub's listener:
@@ -342,7 +346,8 @@ export class DiscordNotifier {
   /**
    * Sends the test message now, outside the queue, and says how it went. To
    * `url` when given: a saved webhook can be tried before it is turned on.
-   * A 429 is reported, not waited out: the admin can try again.
+   * A 429 is reported, not waited out: the admin can try again once
+   * Discord's wait (`retryAfter`, capped) is over.
    */
   async test(url = this.url): Promise<SendResult> {
     return this.post(STRINGS[this.o.locale].test, url, false);
@@ -521,6 +526,11 @@ export class DiscordNotifier {
         if (this.url === url) continue;
         return { ok: false, error: "webhook changed" };
       }
+      if (!retry && res.status === 429) {
+        // Reads the body for retry_after, so no cancel() after it.
+        const wait = Math.min(RETRY_CAP_MS, await retryAfterMs(res));
+        return { ok: false, error: "rate_limited", retryAfter: Math.max(1, Math.ceil(wait / 1000)) };
+      }
       await res.body?.cancel();
       return { ok: false, error: `HTTP ${res.status}` };
     }
@@ -655,15 +665,23 @@ export class NotifySettings {
     const { url } = this.current();
     if (!url) return { ok: false, error: "not_configured" };
     const now = (this.o.clock ?? Date.now)();
-    if (this.testing || now - this.lastTest < TEST_COOLDOWN_MS) {
-      return { ok: false, error: "busy", retryAfter: Math.max(1, Math.ceil((this.lastTest + TEST_COOLDOWN_MS - now) / 1000)) };
+    if (this.testing || now < this.pauseUntil) {
+      // What the pause says depends on why it is there: a test went out (or is going), or Discord asked to wait.
+      return { ok: false, error: this.limited ? "rate_limited" : "busy", retryAfter: Math.max(1, Math.ceil((this.pauseUntil - now) / 1000)) };
     }
     this.testing = true;
-    this.lastTest = now;
+    this.limited = false;
+    this.pauseUntil = now + TEST_COOLDOWN_MS;
     try {
       const res = await this.o.notifier.test(url);
-      // Nothing reached the channel: a corrected webhook can be tried at once. A 429 keeps the pause.
-      if (!res.ok && res.error !== "HTTP 429") this.lastTest = Number.NEGATIVE_INFINITY;
+      if (!res.ok && res.error === "rate_limited") {
+        // At least as long as Discord asked (capped by the notifier), never shorter than the usual pause.
+        this.limited = true;
+        this.pauseUntil = now + Math.max(TEST_COOLDOWN_MS, (res.retryAfter ?? 0) * 1000);
+        return { ok: false, error: "rate_limited", retryAfter: Math.max(1, Math.ceil((this.pauseUntil - now) / 1000)) };
+      }
+      // Nothing reached the channel: a corrected webhook can be tried at once.
+      if (!res.ok) this.pauseUntil = Number.NEGATIVE_INFINITY;
       return res;
     } finally {
       this.testing = false;
@@ -671,7 +689,9 @@ export class NotifySettings {
   }
 
   private testing = false;
-  private lastTest = Number.NEGATIVE_INFINITY;
+  /** No test before this time; `limited` when Discord's 429 set it. */
+  private pauseUntil = Number.NEGATIVE_INFINITY;
+  private limited = false;
 
   private current(): { url: string; enabled: boolean; kinds: readonly NotifyKind[] } {
     if (this.fromEnv) return { url: this.o.envUrl, enabled: true, kinds: this.o.envKinds };

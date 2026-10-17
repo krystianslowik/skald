@@ -56,7 +56,7 @@ describe("Dashboard", () => {
   it("opens the world map at #map and Back closes it", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 })));
     history.replaceState(null, "", "/");
-    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     fireEvent.click(screen.getByRole("button", { name: "Open the world map" }));
     expect(location.hash).toBe("#map");
     expect(history.state).toEqual({ skaldMap: true });
@@ -72,8 +72,26 @@ describe("Dashboard", () => {
     expect(location.hash).toBe("");
   });
 
+  it.each([
+    ["refused", "en", "Not logged out, the session is still on. The server refused this address. Its operator needs to set PUBLIC_ORIGIN to the address you opened the panel on."],
+    ["offline", "pl", "Nie wylogowano, sesja nadal trwa. Brak połączenia. Spróbuj za chwilę."],
+    ["failed", "en", "Not logged out, the session is still on. The server did not confirm it. Try again."],
+  ] as const)("says so when Log out did not reach the server (%s, %s), and a press again retries", async (result, locale, text) => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 })));
+    const onLogout = vi.fn(async (): Promise<"ok" | typeof result> => result);
+    const ui = <Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={onLogout} />;
+    if (locale === "pl") inPolish(ui);
+    else render(ui);
+    fireEvent.click(screen.getByRole("button", { name: locale === "pl" ? "Wyloguj" : "Log out" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(text);
+    expect(onLogout).toHaveBeenCalledTimes(1);
+    onLogout.mockResolvedValueOnce("ok");
+    fireEvent.click(screen.getByRole("button", { name: locale === "pl" ? "Wyloguj" : "Log out" }));
+    await waitFor(() => expect(onLogout).toHaveBeenCalledTimes(2));
+  });
+
   it("renders every plank in English by default", () => {
-    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     expect(screen.getByRole("button", { name: /Join code 4 8 2 9 1 5/ })).toBeInTheDocument();
     for (const t of ["At the fire", "World", "Progress", "Saga", "Warrior ranking", "Forge", "Treasury", "Runes of power", "Chronicle"]) {
       expect(screen.getByRole("heading", { name: t })).toBeInTheDocument();
@@ -91,7 +109,7 @@ describe("Dashboard", () => {
   it("explains how to enable the resource charts when Prometheus is not configured", () => {
     const s = fixture();
     s.metricsConfigured = false;
-    render(<Dashboard live={{ state: s, logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: s, logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     expect(screen.getByText("The charts are asleep")).toBeInTheDocument();
     expect(screen.getByText(/Set PROM_URL/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "How to enable metrics" })).toHaveAttribute("href", expect.stringContaining("#metrics"));
@@ -100,7 +118,7 @@ describe("Dashboard", () => {
   });
 
   it("renders every plank from a state snapshot in Polish", () => {
-    inPolish(<Dashboard live={{ state: fixture(), logs: createLogStore([{ ts: "2026-10-09T19:59:00Z", line: "10/09/2026 19:59:00: World saved ( 87ms )" }]), online: true, lastAction: null }} onLogout={() => {}} />);
+    inPolish(<Dashboard live={{ state: fixture(), logs: createLogStore([{ ts: "2026-10-09T19:59:00Z", line: "10/09/2026 19:59:00: World saved ( 87ms )" }]), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     expect(screen.getByRole("button", { name: /Kod dołączenia 4 8 2 9 1 5/ })).toBeInTheDocument();
     for (const t of ["Przy ognisku", "Świat", "Postęp", "Saga", "Ranking wojów", "Kuźnia", "Skarbiec", "Runy mocy", "Kronika"]) {
       expect(screen.getByRole("heading", { name: t })).toBeInTheDocument();
@@ -127,7 +145,7 @@ describe("Dashboard", () => {
     const s = fixture();
     s.world.meta = null;
     s.server.netStats = null;
-    inPolish(<Dashboard live={{ state: s, logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    inPolish(<Dashboard live={{ state: s, logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     expect(screen.getByText(/Zapis świata nie jest jeszcze czytelny/)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Mapa świata/ })).not.toBeInTheDocument();
     expect(screen.queryByText("Obiekty w świecie")).not.toBeInTheDocument();
@@ -148,7 +166,7 @@ describe("Dashboard", () => {
       worldKeys: ["resourcerate 200", "teleportall"],
       bosses: ["eikthyr", "gdking", "bonemass", "dragon", "goblinking", "queen", "fader"].map((b, i) => ({ key: `defeated_${b}`, defeated: i < 2 })),
     };
-    render(<Dashboard live={{ state: s, logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: s, logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     // Two trophies, plus the readout under the strip naming the last one down.
     expect(screen.getAllByText("defeated")).toHaveLength(3);
     expect(screen.getByText("The Elder", { selector: ".boss-title" })).toBeInTheDocument();
@@ -162,7 +180,7 @@ describe("Dashboard", () => {
   });
 
   it("keeps the header stacked on a tablet and lays it out in a row only from the lg breakpoint", () => {
-    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     const header = screen.getByRole("heading", { level: 1, name: "My Valheim" }).closest("header")!;
     const facts = header.querySelector("dl")!;
     // At 640-1023 px the row squeezed the title to a few pixels (#57).
@@ -177,7 +195,7 @@ describe("Dashboard", () => {
     vi.useFakeTimers();
     try {
       const retry = vi.fn();
-      const view = render(<Dashboard live={{ state: null, logs: createLogStore(), online: false, lastAction: null, retry }} onLogout={() => {}} />);
+      const view = render(<Dashboard live={{ state: null, logs: createLogStore(), online: false, lastAction: null, retry }} onLogout={async () => "ok" as const} />);
       // A normal load does not flash the note.
       expect(screen.getByText(en["app.loading"])).toBeInTheDocument();
       expect(screen.queryByText(en["app.unreachable"])).toBeNull();
@@ -188,7 +206,7 @@ describe("Dashboard", () => {
       expect(retry).toHaveBeenCalledTimes(1);
       view.unmount();
 
-      inPolish(<Dashboard live={{ state: null, logs: createLogStore(), online: false, lastAction: null, retry }} onLogout={() => {}} />);
+      inPolish(<Dashboard live={{ state: null, logs: createLogStore(), online: false, lastAction: null, retry }} onLogout={async () => "ok" as const} />);
       act(() => vi.advanceTimersByTime(3000));
       expect(screen.getByText(pl["app.unreachable"])).toBeInTheDocument();
       expect(screen.getByRole("button", { name: pl["app.retry"] })).toBeInTheDocument();
@@ -200,7 +218,7 @@ describe("Dashboard", () => {
   it("keeps only the loading line while the link is up", () => {
     vi.useFakeTimers();
     try {
-      render(<Dashboard live={{ state: null, logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+      render(<Dashboard live={{ state: null, logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
       act(() => vi.advanceTimersByTime(10_000));
       expect(screen.getByText(en["app.loading"])).toBeInTheDocument();
       expect(screen.queryByRole("status")).toBeNull();
@@ -210,7 +228,7 @@ describe("Dashboard", () => {
   });
 
   it("shows the outage banner and sleeps the runes when offline", () => {
-    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: false, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: false, lastAction: null }} onLogout={async () => "ok" as const} />);
     expect(screen.getByText("The fire has dimmed.")).toBeInTheDocument();
     const runes = screen.getAllByRole("button", { name: /Hold for one and a half seconds/ });
     expect(runes).toHaveLength(3);
@@ -244,7 +262,7 @@ describe("Profile sheet", () => {
   it("opens from a player name, shows stats and badges, traps focus and closes on Escape", async () => {
     const fetchMock = vi.fn(async (url: string) => (String(url) === "/api/players/Ragnar" ? Response.json(profile()) : new Response("{}", { status: 404 })));
     vi.stubGlobal("fetch", fetchMock);
-    inPolish(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    inPolish(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     const ranking = screen.getByRole("heading", { name: "Ranking wojów" }).closest("section")!;
     const opener = within(ranking).getByRole("button", { name: "Ragnar" });
     fireEvent.click(opener);
@@ -288,7 +306,7 @@ function withSettings(pending = false, armed = false): ApiState {
 
 describe("Server settings", () => {
   it("is hidden while the agent has the feature off", () => {
-    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     expect(screen.queryByRole("button", { name: "Server settings" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Show password" })).not.toBeInTheDocument();
   });
@@ -296,7 +314,7 @@ describe("Server settings", () => {
   it("shows the server password next to the join code only when asked", async () => {
     const fetchMock = vi.fn(async (url: string) => (String(url) === "/api/settings/password" ? Response.json({ password: "hearth-77" }) : new Response("{}", { status: 404 })));
     vi.stubGlobal("fetch", fetchMock);
-    render(<Dashboard live={{ state: withSettings(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: withSettings(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     expect(screen.queryByText("hearth-77")).not.toBeInTheDocument();
     // The map board fetches the map; the password is never fetched unasked.
     expect(fetchMock).not.toHaveBeenCalledWith("/api/settings/password", expect.anything());
@@ -310,9 +328,9 @@ describe("Server settings", () => {
   it("shows the pending chip and the armed chip with its cancel", () => {
     const fetchMock = vi.fn(async () => Response.json(settingsView()));
     vi.stubGlobal("fetch", fetchMock);
-    const { rerender } = render(<Dashboard live={{ state: withSettings(true), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    const { rerender } = render(<Dashboard live={{ state: withSettings(true), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     expect(screen.getByRole("button", { name: /Saved settings wait for a restart/ })).toHaveTextContent("Restart pending");
-    rerender(<Dashboard live={{ state: withSettings(true, true), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    rerender(<Dashboard live={{ state: withSettings(true, true), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     expect(screen.getByRole("button", { name: /Saved settings wait for a restart/ })).toHaveTextContent("Applies when empty");
     fireEvent.click(screen.getByRole("button", { name: "Cancel applying when the server is empty" }));
     expect(fetchMock).toHaveBeenCalledWith("/api/settings/apply", expect.objectContaining({ method: "DELETE" }));
@@ -331,7 +349,7 @@ describe("Server settings", () => {
       return new Response("{}", { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<Dashboard live={{ state: withSettings(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: withSettings(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     fireEvent.click(screen.getByRole("button", { name: "Server settings" }));
     const dialog = await screen.findByRole("dialog", { name: "Settings" });
     await within(dialog).findByText("World modifiers");
@@ -391,7 +409,7 @@ describe("Server settings", () => {
     }));
     const s = withSettings();
     s.world.meta = { ...s.world.meta!, modifiers: { resources: "muchmore", portals: "casual", raids: "less" } };
-    render(<Dashboard live={{ state: s, logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: s, logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     fireEvent.click(screen.getByRole("button", { name: "Server settings" }));
     const dialog = await screen.findByRole("dialog", { name: "Settings" });
     // raids is already in the settings; only what they lack is named.
@@ -410,7 +428,7 @@ describe("Server settings", () => {
       return String(url) === "/api/settings" ? Response.json(settingsView()) : new Response("{}", { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<Dashboard live={{ state: withSettings(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: withSettings(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     fireEvent.click(screen.getByRole("button", { name: "Server settings" }));
     const dialog = await screen.findByRole("dialog", { name: "Settings" });
     fireEvent.change(await within(dialog).findByLabelText("Server name"), { target: { value: "Hall of Ash" } });
@@ -426,7 +444,7 @@ describe("Server settings", () => {
       { seq: 8, ts: "2026-10-09T19:52:00Z", type: "settings_apply", data: { state: "applied", mode: "when_empty" } },
       { seq: 7, ts: "2026-10-09T19:51:00Z", type: "settings_changed", data: { changedKeys: ["name", "password", "modifier.raids", "key.nomap"] } },
     ];
-    render(<Dashboard live={{ state: s, logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: s, logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     expect(screen.getByText("Server settings changed: name, password, raids, no map")).toBeInTheDocument();
     expect(screen.getByText("New settings are in effect")).toBeInTheDocument();
   });
@@ -455,7 +473,7 @@ describe("Campfire sound", () => {
     }
     vi.stubGlobal("AudioContext", FakeAudioContext);
     const store = memoryStorage();
-    const view = render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    const view = render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     const toggle = screen.getByRole("button", { name: "Campfire crackle" });
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     expect(made).toEqual([]);
@@ -464,7 +482,7 @@ describe("Campfire sound", () => {
     expect(made).toEqual(["ctx"]);
     expect(store.get("skald_campfire_sound")).toBe("1");
     view.unmount();
-    const again = render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    const again = render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     expect(screen.getByRole("button", { name: "Campfire crackle" })).toHaveAttribute("aria-pressed", "true");
     again.unmount();
   });
@@ -644,7 +662,7 @@ describe("On a phone", () => {
   it("shows one tab at a time and Back returns to the fire", async () => {
     phone();
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 })));
-    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     const tabs = screen.getByRole("navigation", { name: "Sections" });
     expect(within(tabs).getByRole("link", { name: "Fire" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByText(/^Tap to copy\./)).toBeInTheDocument();
@@ -680,7 +698,7 @@ describe("On a phone", () => {
     const share = vi.fn(async () => undefined);
     Object.defineProperty(navigator, "share", { value: share, configurable: true });
     vi.stubGlobal("fetch", vi.fn(async (url: string) => (String(url) === "/api/settings/password" ? Response.json({ password: "hearth-77" }) : new Response("{}", { status: 404 }))));
-    render(<Dashboard live={{ state: withSettings(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: withSettings(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     expect(screen.getByRole("checkbox", { name: "Include password" })).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Share the join code" }));
     await waitFor(() => expect(share).toHaveBeenCalledWith({ text: "Join My Valheim in Valheim: code 482915, password hearth-77" }));
@@ -694,7 +712,7 @@ describe("On a phone", () => {
     phone();
     const writeText = clip();
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })));
-    inPolish(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    inPolish(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     expect(screen.getByText(/^Stuknij, aby skopiować\./)).toBeInTheDocument();
     // No password on this server: no toggle either.
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();

@@ -806,6 +806,8 @@ export interface AdminResult {
   ok: boolean;
   data?: unknown;
   error?: string;
+  /** Seconds to wait, with a 429 (`busy`, `rate_limited`). */
+  retryAfter?: number;
 }
 
 // ---- admin: access lists and world restore (agent files, no bridge needed) ---

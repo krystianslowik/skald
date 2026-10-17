@@ -52,7 +52,7 @@ afterEach(() => {
 describe("relative times", () => {
   it("tick in the labels alone, without re-rendering the dashboard", async () => {
     history.replaceState(null, "", "/");
-    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
     // Let the boards' own fetches settle first.
     await act(async () => {});
     // Burning for 2 h, Ragnar at the fire for 30 min, Freya last seen an hour ago.

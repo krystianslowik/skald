@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { NOTIFY_KINDS, type AdminCatalog, type NotifyChange, type NotifyConfig, type NotifyKind } from "../../types";
 import { BROADCAST_MAX, changeNotify, gameClock, getCatalog, getNotify, lockAdmin, storeActorName, storedActorName, testNotify, WORLD_KEYS } from "../../lib/admin";
-import { failText } from "../../lib/refusal";
+import { isOriginRefusal } from "../../lib/api";
+import { failText, notifyTestText } from "../../lib/refusal";
 import { useLivePositions } from "../../lib/live";
 import { useI18n, type TextKey } from "../../i18n";
 import { ItemIcon } from "../storage/ItemIcon";
@@ -164,7 +165,7 @@ function Notify() {
         admin.toast(false, t("admin.notify.env"));
         reload();
       }
-      else if (!r.needsAdmin) admin.toast(false, r.status === 0 ? t("admin.notify.offline") : t("admin.notify.saveFailed", { error: failText(i18n, r) }));
+      else if (!r.needsAdmin) admin.toast(false, r.status === 0 ? t("admin.notify.offline") : isOriginRefusal(r.status, r) ? t("login.refused") : t("admin.notify.saveFailed", { error: failText(i18n, r) }));
       return false;
     } catch {
       // signed out; the next poll takes the panel back to the login screen
@@ -193,10 +194,7 @@ function Notify() {
       let r = await testNotify();
       if (r.needsAdmin && (await admin.unlock())) r = await testNotify();
       if (r.ok) admin.toast(true, t("admin.notify.sent"));
-      else if (!r.needsAdmin) {
-        const msg = r.status === 0 ? t("admin.notify.offline") : r.status === 429 ? t("admin.notify.busy") : t("admin.notify.failed", { error: r.error ?? `HTTP ${r.status}` });
-        admin.toast(false, msg);
-      }
+      else if (!r.needsAdmin) admin.toast(false, notifyTestText(i18n, r));
     } catch {
       // signed out; the next poll takes the panel back to the login screen
     } finally {

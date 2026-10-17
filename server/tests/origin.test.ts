@@ -5,7 +5,7 @@ import { createSession, SESSION_COOKIE, upgradeLive } from "../src/auth";
 import { loadConfig } from "../src/config";
 import { HistoryStore } from "../src/db";
 import { Hub } from "../src/hub";
-import { silentLog } from "../src/log";
+import { silentLog, type Logger } from "../src/log";
 import { checkOrigin } from "../src/origin";
 import { emptyAgentState } from "../src/types";
 
@@ -30,7 +30,7 @@ const agent: AgentSource = {
 };
 
 /** The panel behind a real listener, so the Host header reaches the app as it does in production. */
-function serve(opts: { publicOrigins?: string[]; trustedIpHeader?: string } = {}) {
+function serve(opts: { publicOrigins?: string[]; trustedIpHeader?: string; log?: Logger } = {}) {
   const hub = new Hub(agent, new HistoryStore(":memory:"));
   Object.defineProperty(hub, "online", { get: () => true });
   const app = createApp({ sessionSecret: SECRET, passwordHash: HASH, secureCookie: false, agent, hub, metrics: async () => null, log: silentLog, ...opts });
@@ -97,6 +97,24 @@ describe("origin check on requests that change something", () => {
     expect((await p.call("POST", "/api/action/backup", { Origin: p.base, "Sec-Fetch-Site": "same-site" })).status).toBe(403);
     expect((await p.call("POST", "/api/action/backup", { "Sec-Fetch-Site": "same-origin" })).status).toBe(200);
     expect((await p.call("POST", "/api/action/backup", { "Sec-Fetch-Site": "none" })).status).toBe(200);
+  });
+
+  it("names the refused endpoint in the log, by its pattern, not the middleware's", async () => {
+    const lines: Array<{ msg: string; method?: unknown; route?: unknown }> = [];
+    const log: Logger = { info() {}, error() {}, warn: (msg, f) => void lines.push({ msg, method: f?.method, route: f?.route }) };
+    const p = serve({ log });
+    const foreign = { Origin: "https://evil.example" };
+    await p.call("POST", "/api/login", foreign);
+    await p.call("POST", "/api/admin/save", foreign);
+    await p.call("PUT", "/api/settings", foreign);
+    await p.call("POST", "/api/no-such-thing", foreign);
+    expect(lines.filter((l) => l.msg === "cross-origin request refused").map((l) => `${l.method} ${l.route}`)).toEqual([
+      "POST /api/login",
+      "POST /api/admin/:command",
+      "PUT /api/settings",
+      // No route of its own: the closest pattern that matched.
+      "POST /api/*",
+    ]);
   });
 
   it("leaves reads alone", async () => {

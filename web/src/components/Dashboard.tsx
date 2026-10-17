@@ -22,7 +22,7 @@ import type { MapFocus } from "./map/MapView";
 import type { StoreEntry } from "../lib/storage";
 import { Progress, World } from "./World";
 import { BOSSES } from "../lib/world";
-import { cancelApply } from "../lib/api";
+import { cancelApply, type LogoutResult } from "../lib/api";
 import { PHONE, useMedia } from "../lib/useMedia";
 import { TABS, useRoute, type Tab } from "../lib/useRoute";
 import { AdminProvider } from "./admin/AdminContext";
@@ -36,7 +36,7 @@ const SettingsSheet = lazyChunk(() => import("./SettingsSheet"), "SettingsSheet"
 const MapView = lazyChunk(() => import("./map/MapView"), "MapView");
 const MapPreview = lazyChunk(() => import("./map/MapPreview"), "MapPreview");
 
-export function Dashboard({ live, onLogout, onUnauthorized = onLogout }: { live: Valheim; onLogout: () => void; onUnauthorized?: () => void }) {
+export function Dashboard({ live, onLogout, onUnauthorized = () => void onLogout() }: { live: Valheim; onLogout: () => Promise<LogoutResult>; onUnauthorized?: () => void }) {
   const { t, tn, dayLabel, clock, intl } = useI18n();
   const { state, online, logs, lastAction, retry } = live;
   const [profile, setProfile] = useState<string | null>(null);

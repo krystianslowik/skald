@@ -9,6 +9,12 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- When the server refuses a request because of the address the panel was opened on, every part of the panel now says what sign-in already said, in the panel's language: the operator needs to set `PUBLIC_ORIGIN`. Admin commands, the Discord test, server settings and the runes used to show the raw `cross_origin` code, and the Discord test blamed Discord for it. The skald-web log line for such a refusal now names the endpoint (`/api/login`, `/api/admin/:command`, ...) instead of `/api/*` (#126).
+- Log out now only shows the login screen once the server has ended the session. If it was refused, or there was no connection, the panel stays open and says you are still signed in, and pressing Log out again retries. Before, the login screen appeared while the session stayed, so the next visit was signed straight back in (#126).
+- When Discord rate-limits the test message, the panel says "Discord asked to slow down, try again in N s" with the wait Discord asked for (up to a minute), instead of "HTTP 429". Pressing the button again during that wait says the same rather than claiming a test message was just sent, and skald-web does not call Discord again until the wait is over (#127).
+
 ## [2026.10.9] - 2026-10-17
 
 ### Changed

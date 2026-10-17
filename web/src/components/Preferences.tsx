@@ -1,6 +1,7 @@
 import { memo, type ReactNode } from "react";
 import { LocaleToggle, useI18n } from "../i18n";
-import { SoundToggle } from "./Header";
+import { SoundToggle, useLogout } from "./Header";
+import type { LogoutResult } from "../lib/api";
 import { Plank } from "./Plank";
 import { preloadSettingsSheet, SettingsGlyph } from "./SettingsGlyph";
 import { SkaldVersion } from "./SkaldVersion";
@@ -46,11 +47,12 @@ export const Preferences = memo(function Preferences({
   agentVersion,
 }: {
   onServerSettings?: () => void;
-  onLogout: () => void;
+  onLogout: () => Promise<LogoutResult>;
   webVersion?: string;
   agentVersion?: string;
 }) {
   const { t } = useI18n();
+  const { logout, busy } = useLogout(onLogout);
   return (
     <Plank title={t("tab.settings")} id="prefs">
       {onServerSettings && (
@@ -77,7 +79,7 @@ export const Preferences = memo(function Preferences({
       <Row label={t("embers.label")}>
         <EmbersSwitch />
       </Row>
-      <button type="button" onClick={onLogout} className="plaque press mt-3 min-h-12 w-full font-bold">
+      <button type="button" onClick={() => void logout()} aria-busy={busy} className="plaque press mt-3 min-h-12 w-full font-bold">
         {t("header.logout")}
       </button>
       {webVersion && <SkaldVersion web={webVersion} agent={agentVersion} className="mt-4 text-center" />}

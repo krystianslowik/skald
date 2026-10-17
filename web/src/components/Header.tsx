@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import type { ApiState, SettingsSummary } from "../types";
 import { useCampfireSound } from "../lib/campfire";
 import { useEmbers } from "../lib/embers";
@@ -11,7 +11,35 @@ import { Elapsed } from "./RelativeTime";
 import { preloadAdmin, useAdmin } from "./admin/AdminContext";
 import { AdminGlyph } from "./admin/glyphs";
 import { preload } from "../lib/chunks";
+import type { LogoutResult } from "../lib/api";
 import type { WorldClock as Clock } from "../types";
+
+/**
+ * The Log out button's press: the panel leaves only once the server ended the
+ * session (App does that); otherwise a toast says it did not, and a press again retries.
+ */
+export function useLogout(onLogout: () => Promise<LogoutResult>) {
+  const { t } = useI18n();
+  const toast = useAdmin()?.toast;
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const logout = useCallback(async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      const r = await onLogout();
+      if (r !== "ok") {
+        const reason = r === "refused" ? t("login.refused") : r === "offline" ? t("admin.notify.offline") : t("logout.failed");
+        toast?.(false, t("logout.notDone", { reason }));
+      }
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }, [onLogout, t, toast]);
+  return { logout, busy };
+}
 
 export function flameLevel(s: ApiState["server"] | null, online: boolean): FlameLevel {
   if (!s || !online) return "embers";
@@ -50,7 +78,7 @@ export const Header = memo(function Header({
 }: {
   server: ApiState["server"];
   online: boolean;
-  onLogout: () => void;
+  onLogout: () => Promise<LogoutResult>;
   /** Present when the agent can change server settings. */
   settings?: SettingsSummary | null;
   /** Opens the settings sheet; `footer` lands on the apply choice. */
@@ -65,6 +93,7 @@ export const Header = memo(function Header({
   compact?: boolean;
 }) {
   const { t } = useI18n();
+  const { logout, busy: loggingOut } = useLogout(onLogout);
   const level = flameLevel(s, online);
   const since = s?.serverStartedAt && s.status === "running" ? s.serverStartedAt : null;
   return (
@@ -142,7 +171,8 @@ export const Header = memo(function Header({
             <LocaleToggle />
             <button
               type="button"
-              onClick={onLogout}
+              onClick={() => void logout()}
+              aria-busy={loggingOut}
               className="plaque press whitespace-nowrap px-3 py-1.5 text-xs font-bold"
             >
               {t("header.logout")}

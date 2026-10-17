@@ -41,7 +41,7 @@ function api(unlocked: boolean) {
   return calls;
 }
 
-const renderDashboard = () => render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+const renderDashboard = () => render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
 
 beforeAll(preloadLazyChunks);
 

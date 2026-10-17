@@ -90,7 +90,7 @@ function api(st: AdminStatus, commands: (url: string, n: number) => Response = (
   return calls;
 }
 
-const renderDashboard = () => render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />);
+const renderDashboard = () => render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
 
 async function openAdmin() {
   const button = await screen.findByRole("button", { name: "Admin" });
@@ -189,6 +189,19 @@ describe("admin", () => {
     const dialog = await openAdmin();
     fireEvent.click(within(dialog).getByRole("button", { name: "Send a test notification" }));
     expect(await screen.findByText("A test message was just sent. Try again in a few seconds.")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["Discord's rate limit, with its wait", () => Response.json({ ok: false, error: "rate_limited", retryAfter: 27 }, { status: 429, headers: { "Retry-After": "27" } }), /^Discord asked to slow down\. Try again in 27\ss\.$/],
+    ["the origin check, without blaming Discord", () => Response.json({ ok: false, error: "cross_origin", message: "request from another origin refused" }, { status: 403 }), "The server refused this address. Its operator needs to set PUBLIC_ORIGIN to the address you opened the panel on."],
+    ["a proxy's error page as no connection", () => new Response("<h1>Bad Gateway</h1>", { status: 502 }), "No connection. Try again in a moment."],
+  ])("names %s after a test", async (_, answer, text) => {
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
+    api(status({ notifyConfigured: true }), answer);
+    renderDashboard();
+    const dialog = await openAdmin();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send a test notification" }));
+    expect(await screen.findByText(text)).toBeInTheDocument();
   });
 
   it("says how to turn Discord notifications on when they are off", async () => {
@@ -755,7 +768,7 @@ describe("in Polish", () => {
     api(status());
     render(
       <I18nProvider locale="pl">
-        <Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={() => {}} />
+        <Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />
       </I18nProvider>,
     );
     const sheet = await openAdmin();
