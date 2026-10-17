@@ -5,7 +5,7 @@ import { ChunkBoundary } from "../components/ErrorBoundary";
 import { I18nProvider } from "../i18n";
 import { en } from "../i18n/en";
 import { pl } from "../i18n/pl";
-import { chunkUrl, failedChunkUrl, isChunkError, lazyChunk, page, probeChunk, reloadOnce } from "./chunks";
+import { chunkUrl, failedChunkUrl, isChunkError, lazyChunk, page, probeChunk, recoverChunk, reloadOnce } from "./chunks";
 
 /** Per-tab storage for the loop guard; Node's own experimental global shadows jsdom's. */
 function memorySession() {
@@ -226,6 +226,52 @@ describe("a lazy chunk that fails offline or with the server down", () => {
     act(() => void window.dispatchEvent(new Event("online")));
     await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     expect(beforeReload).toEqual([url, ...deps].sort());
+  });
+
+  it("warms the entry module and its static imports before reloading", async () => {
+    const entry = document.createElement("script");
+    entry.type = "module";
+    entry.src = "/assets/index-A1.js";
+    const preload = document.createElement("link");
+    preload.rel = "modulepreload";
+    preload.href = "/assets/Sheet-B2.js";
+    document.head.append(entry, preload);
+
+    try {
+      const fetched: string[] = [];
+      let beforeReload: string[] = [];
+      fetchChunk.mockImplementation(async (u: string, init?: RequestInit) => {
+        if (init?.cache !== "no-store") fetched.push(u);
+        return new Response("export default 1", { status: 200 });
+      });
+      reload.mockImplementation(() => void (beforeReload = [...fetched].sort()));
+
+      expect(await recoverChunk([url])).toBe("reloading");
+      expect(beforeReload).toEqual([url, "/assets/index-A1.js", "/assets/Sheet-B2.js"].sort());
+    } finally {
+      entry.remove();
+      preload.remove();
+    }
+  });
+
+  it("withholds the reload when the entry module could not be warmed", async () => {
+    const entry = document.createElement("script");
+    entry.type = "module";
+    entry.src = "/assets/index-C3.js";
+    document.head.append(entry);
+
+    try {
+      fetchChunk.mockImplementation(async (u: string, init?: RequestInit) => {
+        if (init?.cache !== "no-store" && u === "/assets/index-C3.js") return new Response("Unavailable", { status: 503 });
+        return new Response("export default 1", { status: 200 });
+      });
+
+      expect(await recoverChunk([url])).toBe("down");
+      expect(reload).not.toHaveBeenCalled();
+      expect(page.warmed.has("/assets/index-C3.js")).toBe(false);
+    } finally {
+      entry.remove();
+    }
   });
 
   it("knows what each built chunk imports, and nothing outside a build", async () => {

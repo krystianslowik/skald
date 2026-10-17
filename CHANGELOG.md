@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- Safari now checks that the panel's entry scripts are available before reloading after an offline admin sheet, avoiding a blank page when the connection returns (#128).
+
 ## [2026.10.9] - 2026-10-17
 
 ### Changed
