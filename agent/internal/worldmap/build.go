@@ -284,6 +284,9 @@ func (b *Builder) build(gen int) (*Snapshot, *Pieces, *Nature, error) {
 			continue
 		}
 		snap.Stats.ChunksParsed++
+		if cd.noPrefab > 0 {
+			b.opt.Logger.Debug("world map: inventory items without a prefab skipped", "chunk", filepath.Base(chunkFile(dir, row)), "items", cd.noPrefab)
+		}
 		b.cache[row.id] = &cacheEntry{rev: row.rev, count: row.count, data: cd}
 	}
 	for id := range b.cache {

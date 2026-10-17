@@ -34,8 +34,13 @@ import (
 //	       0x02 equipped, 0x10 variant (i32) follows, 0x80 custom data
 //	            (count, then key/value strings) follows: never seen in a
 //	            container, so a blob with any of them is refused rather than
-//	            decoded on an untested path. So is an item without 0x40,
-//	            which has no prefab and which the game itself drops on load.
+//	            decoded on an untested path.
+//
+// An item without 0x40 (or with a zero hash) has no prefab. The game reads it
+// to its end and leaves it out (Inventory.Load adds an item only when its
+// prefab hash is not 0), so it is read past and skipped here too, and the rest
+// of the inventory still counts. Its layout is the game's item reader with the
+// hash left out; none of the saves below holds one.
 //
 // Quality is written before stack. Both are u16, so a blob reads to its last
 // byte in either order; only items with both a quality and a stack above 1
@@ -74,32 +79,33 @@ type rawItem struct {
 
 var errInventory = errors.New("worldmap: unreadable inventory")
 
-// parseInventory decodes an "items" blob. A blob that does not match the
-// layout above exactly (unknown version or flag bits, trailing bytes) is an
-// error; nothing is half-read.
-func parseInventory(blob []byte) ([]rawItem, error) {
+// parseInventory decodes an "items" blob and counts the items it skipped for
+// having no prefab. A blob that does not match the layout above exactly
+// (unknown version or flag bits, trailing bytes) is an error; nothing is
+// half-read.
+func parseInventory(blob []byte) (items []rawItem, skipped int, err error) {
 	r := &buf{b: blob}
 	if v := r.i32(); r.err == nil && v != inventoryVersion {
-		return nil, fmt.Errorf("%w: version %d", errInventory, v)
+		return nil, 0, fmt.Errorf("%w: version %d", errInventory, v)
 	}
 	n := int(r.u16())
 	if r.err != nil {
-		return nil, r.err
+		return nil, 0, r.err
 	}
 	if n > maxItems {
-		return nil, fmt.Errorf("%w: %d items", errInventory, n)
+		return nil, 0, fmt.Errorf("%w: %d items", errInventory, n)
 	}
-	items := make([]rawItem, 0, n)
+	items = make([]rawItem, 0, n)
 	for i := 0; i < n; i++ {
 		dur := r.i32()
 		x, y := r.u8(), r.u8()
 		r.u8() // world level
 		flags := r.u8()
 		if r.err != nil {
-			return nil, r.err
+			return nil, 0, r.err
 		}
-		if flags&^itemKnown != 0 || flags&itemPrefab == 0 {
-			return nil, fmt.Errorf("%w: item flags %#02x", errInventory, flags)
+		if flags&^itemKnown != 0 {
+			return nil, 0, fmt.Errorf("%w: item flags %#02x", errInventory, flags)
 		}
 		it := rawItem{stack: 1, quality: 1, durability: float32(dur) / 100, x: int(x), y: int(y)}
 		if flags&itemQuality != 0 {
@@ -112,10 +118,17 @@ func parseInventory(blob []byte) ([]rawItem, error) {
 			r.i64() // crafter id: platform id, dropped
 			it.crafter = r.str(maxNameBytes)
 		}
-		hash := r.i32()
+		var hash int32
+		if flags&itemPrefab != 0 {
+			hash = r.i32()
+		}
 		r.u8() // extra flags
 		if r.err != nil {
-			return nil, r.err
+			return nil, 0, r.err
+		}
+		if hash == 0 {
+			skipped++
+			continue
 		}
 		if info, ok := itemByHash[hash]; ok {
 			it.name, it.typ = info.name, info.typ
@@ -125,9 +138,9 @@ func parseInventory(blob []byte) ([]rawItem, error) {
 		items = append(items, it)
 	}
 	if r.p != len(blob) {
-		return nil, fmt.Errorf("%w: %d trailing bytes", errInventory, len(blob)-r.p)
+		return nil, 0, fmt.Errorf("%w: %d trailing bytes", errInventory, len(blob)-r.p)
 	}
-	return items, nil
+	return items, skipped, nil
 }
 
 // items.tsv is every item prefab name with its game item type (from the

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
@@ -24,6 +25,7 @@ type invItem struct {
 	crafter    string
 	worldLevel byte
 	cheated    byte
+	zeroHash   bool // write a prefab hash of 0 under flag 0x40
 }
 
 func encodeInventory(items []invItem) []byte {
@@ -52,7 +54,11 @@ func encodeInventory(items []invItem) []byte {
 			b.WriteByte(byte(len(it.crafter)))
 			b.WriteString(it.crafter)
 		}
-		w(stableHash(it.name))
+		if it.flags&itemPrefab != 0 && it.zeroHash {
+			w(int32(0))
+		} else if it.flags&itemPrefab != 0 {
+			w(stableHash(it.name))
+		}
 		b.WriteByte(it.cheated)
 	}
 	return b.Bytes()
@@ -74,7 +80,7 @@ func TestParseInventoryFlagSets(t *testing.T) {
 		{name: "ArrowFire", x: 2, y: 1, flags: 0x4c, stack: 37, quality: 3},
 		{name: "SpearBronze", x: 3, y: 1, flags: 0x6d, stack: 2, quality: 4, crafterID: 42, crafter: "Freya", cheated: 1},
 	}
-	got, err := parseInventory(encodeInventory(in))
+	got, _, err := parseInventory(encodeInventory(in))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +110,7 @@ func TestParseInventoryFlagSets(t *testing.T) {
 
 func TestParseInventoryRefuses(t *testing.T) {
 	good := encodeInventory([]invItem{{name: "Wood", flags: 0x49, stack: 3}})
-	if items, err := parseInventory(encodeInventory(nil)); err != nil || len(items) != 0 {
+	if items, _, err := parseInventory(encodeInventory(nil)); err != nil || len(items) != 0 {
 		t.Errorf("empty inventory = %v %v", items, err)
 	}
 	cases := map[string][]byte{
@@ -116,18 +122,67 @@ func TestParseInventoryRefuses(t *testing.T) {
 		b := encodeInventory([]invItem{{name: "Wood", flags: 0x49 | bit, stack: 3}})
 		cases[fmt.Sprintf("flag %#02x", bit)] = b
 	}
-	cases["no 0x40"] = encodeInventory([]invItem{{name: "Wood", flags: 0x09, stack: 3}})
 	for name, b := range cases {
-		if _, err := parseInventory(b); err == nil {
+		if _, _, err := parseInventory(b); err == nil {
 			t.Errorf("%s: parsed, want an error", name)
 		}
 	}
-	unknown, err := parseInventory(encodeInventory([]invItem{{name: "NotAnItem_xyz", flags: 0x41}}))
+	unknown, _, err := parseInventory(encodeInventory([]invItem{{name: "NotAnItem_xyz", flags: 0x41}}))
 	if err != nil || len(unknown) != 1 || !strings.HasPrefix(unknown[0].name, "#") {
 		t.Errorf("unknown item = %v %v", unknown, err)
 	}
-	if _, err := parseInventory([]byte{1}); !errors.Is(err, errShort) {
+	if _, _, err := parseInventory([]byte{1}); !errors.Is(err, errShort) {
 		t.Errorf("short blob err = %v", err)
+	}
+}
+
+func TestParseInventorySkipsNoPrefab(t *testing.T) {
+	// The game reads an item without a prefab hash (flag 0x40 clear) to its
+	// end and leaves it out (Inventory.Load adds only a non-zero hash). The
+	// rest of the chest stays, so the reader must stay aligned past it,
+	// whatever optional fields the skipped item carries.
+	in := []invItem{
+		{name: "Wood", flags: 0x49, stack: 20},
+		{flags: 0x09, x: 1, stack: 3},
+		{flags: 0x2d, x: 2, stack: 2, quality: 3, crafterID: 42, crafter: "Astrid", cheated: 1},
+		{flags: 0x01, x: 3},
+		{name: "Stone", x: 4, y: 1, flags: 0x41},
+	}
+	got, skipped, err := parseInventory(encodeInventory(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skipped != 3 || len(got) != 2 || got[0].name != "Wood" || got[0].stack != 20 || got[1].name != "Stone" || got[1].x != 4 || got[1].y != 1 {
+		t.Errorf("items = %+v, skipped %d", got, skipped)
+	}
+	// A prefab flag with a zero hash is skipped the same way.
+	zero := encodeInventory([]invItem{{flags: 0x49, stack: 1, zeroHash: true}})
+	if got, skipped, err := parseInventory(zero); err != nil || len(got) != 0 || skipped != 1 {
+		t.Errorf("zero hash = %v %d %v", got, skipped, err)
+	}
+	// Skipping does not loosen the layout checks: an item without a prefab
+	// is still refused when the blob around it is malformed.
+	bad := encodeInventory([]invItem{{flags: 0x09, stack: 3}, {name: "Wood", flags: 0x49, stack: 1}})
+	for name, b := range map[string][]byte{
+		"truncated": bad[:len(bad)-1],
+		"trailing":  append(append([]byte{}, bad...), 0),
+		"variant":   encodeInventory([]invItem{{flags: 0x19, stack: 3}}),
+	} {
+		if _, _, err := parseInventory(b); err == nil {
+			t.Errorf("%s: parsed, want an error", name)
+		}
+	}
+}
+
+func TestNoPrefabDebugLog(t *testing.T) {
+	var logs bytes.Buffer
+	b := New(Options{Dir: fixture, Logger: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))})
+	if _, err := b.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	out := logs.String()
+	if strings.Count(out, "inventory items without a prefab skipped") != 1 || !strings.Contains(out, "chunk=20_20__1_4.chunk items=1") {
+		t.Errorf("logs = %s", out)
 	}
 }
 
@@ -137,12 +192,14 @@ func TestStorageFixture(t *testing.T) {
 	for _, c := range s.Storage {
 		byID[c.ID] = c
 	}
-	// Built: two wood chests (one empty, no items key), a reinforced chest
-	// with an unreadable inventory, the karve, the cart and the raft.
+	// Built: three wood chests (one empty, no items key, one holding an
+	// item without a prefab), a reinforced chest with an unreadable
+	// inventory, the karve, the cart and the raft.
 	want := map[string]string{
 		"piece_chest_wood@110,-200": KindChest,
 		"piece_chest_wood@112,-200": KindChest,
 		"piece_chest@114,-200":      KindChest,
+		"piece_chest_wood@116,-200": KindChest,
 		"Karve@-150,250":            KindShip,
 		"Cart@90,40":                KindCart,
 		"Raft@1800,1900":            KindShip,
@@ -173,6 +230,13 @@ func TestStorageFixture(t *testing.T) {
 	}
 	if c := byID["piece_chest@114,-200"]; !c.Unreadable || len(c.Items) != 0 || c.Width != 6 || c.Height != 4 {
 		t.Errorf("unreadable chest = %+v", c)
+	}
+	// The item without a prefab is left out, as the game does on load; the
+	// rest of the chest stays and its grid does not grow to the dropped
+	// item's slot.
+	if c := byID["piece_chest_wood@116,-200"]; c.Unreadable || len(c.Items) != 2 || c.Items[0].Name != "Resin" || c.Items[0].Stack != 12 ||
+		c.Items[1].Name != "Flint" || c.Items[1].X != 2 || c.Items[1].Y != 1 || c.Width != 5 || c.Height != 2 || c.Items[0].Crafter != "" || c.Items[1].Crafter != "" {
+		t.Errorf("chest with an item without a prefab = %+v", c)
 	}
 	if c := byID["Cart@90,40"]; c.Width != 6 || c.Height != 3 || len(c.Items) != 2 {
 		t.Errorf("cart = %+v", c)

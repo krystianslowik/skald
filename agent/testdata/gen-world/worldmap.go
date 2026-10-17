@@ -306,7 +306,9 @@ func inventory(items ...item) []byte {
 			i64(&b, it.crafterID)
 			str(&b, it.crafter)
 		}
-		i32(&b, stableHash(it.name))
+		if it.flags&0x40 != 0 {
+			i32(&b, stableHash(it.name))
+		}
 		b.WriteByte(0) // extra flags
 	}
 	return b.Bytes()
@@ -386,8 +388,10 @@ func writeMapWorld(dir string) {
 		// Storage: a wood chest with one item per flag set seen in real
 		// saves plus one with both a stack and a quality, an empty one (no
 		// items key), a reinforced chest whose inventory has a flag bit
-		// nobody has seen, a chest nobody built and two world chests. Only
-		// the first three may be exported.
+		// nobody has seen, a wood chest holding one item without a prefab
+		// (0x40 clear, skipped like the game does) between two good ones, a
+		// chest nobody built and two world chests. Only the first four may
+		// be exported.
 		chest("piece_chest_wood", 110, -200, true, inventory(
 			item{name: "SwordBronze", flags: 0x65, quality: 2, durability: 25000, crafterID: fakeCrafterID, crafter: "Hakon"},
 			item{name: "Stone", x: 1, flags: 0x41},
@@ -400,6 +404,11 @@ func writeMapWorld(dir string) {
 		)),
 		chest("piece_chest_wood", 112, -200, true, nil),
 		chest("piece_chest", 114, -200, true, inventory(item{name: "Iron", flags: 0x49 | 0x10, stack: 30})),
+		chest("piece_chest_wood", 116, -200, true, inventory(
+			item{name: "Resin", flags: 0x49, stack: 12},
+			item{x: 6, y: 3, flags: 0x29, stack: 4, crafterID: fakeCrafterID, crafter: "Freya"},
+			item{name: "Flint", x: 2, y: 1, flags: 0x41},
+		)),
 		chest("piece_chest_wood", 300, 280, false, inventory(item{name: "Coins", flags: 0x49, stack: 99})),
 		chest("TreasureChest_meadows", 320, 300, false, inventory(item{name: "Ruby", flags: 0x48, stack: 2})),
 		chest("shipwreck_karve_chest", -300, 320, false, inventory(item{name: "Ruby", flags: 0x48, stack: 3})),
