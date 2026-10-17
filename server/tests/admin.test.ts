@@ -4,7 +4,7 @@ import { createApp, fillStations, foldActor } from "../src/app";
 import { ADMIN_IDLE_MS, RateLimiter } from "../src/auth";
 import { HistoryStore } from "../src/db";
 import { Hub } from "../src/hub";
-import { MockAgent } from "../src/mock";
+import { MockAgent, mockRefusal } from "../src/mock";
 import type { SendResult } from "../src/notify";
 import { emptyAgentState, type AdminStatus, type AgentEvent, type LiveMessage } from "../src/types";
 
@@ -408,6 +408,16 @@ describe("mock bridge", () => {
     expect(adds[0]).toMatchObject({ result: "error", error: "only 13 Wood fit in that chest" });
     abort.abort();
     mock.stop();
+  });
+
+  it("refuses the way the plugin does when MOCK_REFUSE asks for it", () => {
+    expect(mockRefusal(undefined, "chest-add", {})).toBeNull();
+    expect(mockRefusal("chest-near", "chest-add", {}, "Freya")).toEqual({ status: 409, error: "Freya is standing at that chest; try again once they step away" });
+    expect(mockRefusal("chest-open", "chest-add", {})?.status).toBe(409);
+    expect(mockRefusal("chest-open", "fill-smelters", {})).toBeNull();
+    expect(mockRefusal("player-gone", "fill-smelters", { player: "Ragnar" })).toEqual({ status: 404, error: "no connected player 'Ragnar'" });
+    expect(mockRefusal("player-gone", "fill-smelters", { at: { x: 0, z: 0 } })).toBeNull();
+    expect(mockRefusal("world-loading", "save", {})).toEqual({ status: 503, error: "world not loaded yet" });
   });
 
   it("can play a bridge that is off, disabled or on an untested build", async () => {

@@ -56,6 +56,7 @@
 | `MAP_SPOILERS` | `false` | `true` shows every boss altar, trader and dungeon of the seed on the world map. Off, only places someone has been to are sent to the browser |
 | `MOCK_AGENT` | (unset) | `1` runs against a built-in fake server (development, `bun run dev` from a source checkout; release images have no mock and exit at startup). It also turns `COOKIE_SECURE` off and keeps the history in memory unless `DB_PATH` is set |
 | `MOCK_BRIDGE` | `on` | With `MOCK_AGENT=1`: the fake bridge's state, `on`, `off`, `untested` or `disabled` |
+| `MOCK_REFUSE` | (unset) | With `MOCK_AGENT=1`: the fake bridge refuses with the plugin's own words, to see how the panel shows it: `chest-open`, `chest-near`, `chest-two` or `chest-unsafe` refuse every Add item, `player-gone` refuses commands aimed at a player, `world-loading` refuses every command |
 | `SKALD_UPDATE_CHECK` | `on` | `off` stops skald-web from asking GitHub whether a newer Skald release exists. See [Versions and the update check](#versions-and-the-update-check) |
 
 The resource charts query cAdvisor series as kube-prometheus-stack scrapes

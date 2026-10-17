@@ -2,6 +2,7 @@ import { createContext, Suspense, useCallback, useContext, useEffect, useMemo, u
 import type { AdminCatalog, AdminCommand, AdminStatus, AgentEvent, ApiState, MapContainer, Platform, RestoreBackup } from "../../types";
 import { getAdminStatus, postAdmin, runAdmin, type AdminOutcome, type KitLine } from "../../lib/admin";
 import { Unauthorized } from "../../lib/api";
+import { failText } from "../../lib/refusal";
 import { useWorldMap } from "../../lib/useWorldMap";
 import { useI18n } from "../../i18n";
 import { lazyChunk, preload } from "../../lib/chunks";
@@ -112,7 +113,7 @@ export function AdminProvider({
   onShowMap: () => void;
   children: ReactNode;
 }) {
-  const { t } = useI18n();
+  const i18n = useI18n();
   const [status, setStatus] = useState<AdminStatus | null>(null);
   const [view, setView] = useState<AdminView | null>(null);
   const [unlocking, setUnlocking] = useState<((ok: boolean) => void) | null>(null);
@@ -179,12 +180,12 @@ export function AdminProvider({
       }
       if (!res.ok && res.status === 409) refresh();
       if (!opts.quiet) {
-        if (res.ok) toast(true, (typeof opts.done === "function" ? opts.done(res.data) : opts.done) ?? t("admin.done"));
-        else if (!res.needsAdmin) toast(false, res.status === 0 || res.status === 502 ? t("admin.unreachable") : res.error || t("admin.failed"));
+        if (res.ok) toast(true, (typeof opts.done === "function" ? opts.done(res.data) : opts.done) ?? i18n.t("admin.done"));
+        else if (!res.needsAdmin) toast(false, failText(i18n, res));
       }
       return res;
     },
-    [unlock, refresh, toast, t],
+    [unlock, refresh, toast, i18n],
   );
   const run = useCallback<Admin["run"]>((command, body = {}, opts) => call(() => runAdmin(command, body), opts), [call]);
   const post = useCallback<Admin["post"]>((path, body, opts) => call(() => postAdmin(path, body), opts), [call]);

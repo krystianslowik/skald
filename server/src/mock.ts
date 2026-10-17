@@ -761,6 +761,8 @@ export class MockAgent implements AgentSource {
     this.log(`[Info   :Skald Bridge] [SkaldBridge] audit actor=${actor} cmd=POST /v1/${command} args=${JSON.stringify({ ...body, player: body.player ? "***" : undefined })}`);
     const online = (n: unknown) => typeof n === "string" && this.state.players.some((p) => p.name.toLowerCase() === n.toLowerCase());
     const nameOf = (n: unknown) => this.state.players.find((p) => p.name.toLowerCase() === String(n).toLowerCase())?.name ?? String(n);
+    const refused = mockRefusal(process.env.MOCK_REFUSE, command, body, this.state.players[0]?.name);
+    if (refused) return fail(refused.status, refused.error);
     for (const k of ["player", "toPlayer"]) {
       if (k in body && !online(body[k])) return fail(404, `no connected player '${String(body[k])}'`);
     }
@@ -1413,6 +1415,30 @@ function mockStackSize(item: string): number {
   if (/^(Mead|Cooked|Bread|Pie|Soup|Stew|Sausage|Fish)/.test(item)) return 10;
   if (/^(Sword|Axe|Pickaxe|Battleaxe|Bow|Crossbow|Knife|Mace|Sledge|Atgeir|Spear|Shield|Helmet|Armor|Cape|Club|Torch|Hammer|Hoe|Cultivator|Staff|Lantern|Trinket|Belt|Wishbone)/.test(item)) return 1;
   return 50;
+}
+
+/**
+ * MOCK_REFUSE: the plugin's refusals that the fake world never runs into on its
+ * own (bridge/plugin/Chests.cs, Commands.cs), word for word, to see how the
+ * panel shows them. chest-open, chest-near, chest-two and chest-unsafe refuse
+ * every chest-add; player-gone refuses any command aimed at a player;
+ * world-loading refuses every command.
+ */
+export function mockRefusal(kind: string | undefined, command: string, body: Record<string, unknown>, someone = "Ragnar"): { status: number; error: string } | null {
+  if (kind === "world-loading") return { status: 503, error: "world not loaded yet" };
+  if (kind === "player-gone" && typeof body.player === "string") return { status: 404, error: `no connected player '${body.player}'` };
+  if (command !== "chest-add") return null;
+  switch (kind) {
+    case "chest-open":
+      return { status: 409, error: "a player has that chest open; try again once it is closed" };
+    case "chest-near":
+      return { status: 409, error: `${someone} is standing at that chest; try again once they step away` };
+    case "chest-two":
+      return { status: 409, error: "two chests sit on that spot; cannot tell which one is meant" };
+    case "chest-unsafe":
+      return { status: 409, error: "the new contents do not read back the same; chest left untouched" };
+  }
+  return null;
 }
 
 /** The agent's argument summary for an admin event: names, never ids. */
