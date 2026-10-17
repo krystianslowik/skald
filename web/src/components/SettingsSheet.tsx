@@ -2,7 +2,7 @@ import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } fr
 import { memo, useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
 import { KEYS, MODIFIER_NAMES, MODIFIERS, NAME_LEN, NEUTRAL_AT, normalize, PRESETS, SAVE_INTERVAL, validatePassword, type ModifierName } from "@server/settings";
 import type { SettingsCurrent, SettingsSummary, SettingsView } from "../types";
-import { applySettings, cancelApply, getServerPassword, getSettings, putSettings, type SettingsFailure } from "../lib/api";
+import { applySettings, cancelApply, getServerPassword, getSettings, isOriginRefusal, putSettings, type SettingsFailure } from "../lib/api";
 import { crackle } from "../lib/campfire";
 import { diff, draftErrors, draftReducer, generatePassword, isCustom, strength, toInput, worldOnly, type Draft } from "../lib/settingsForm";
 import { useI18n, type TextKey } from "../i18n";
@@ -158,7 +158,7 @@ function SettingsForm({
       setSaved(before.saved);
       setKnown(before.known);
       setServerErrors(f.errors ?? {});
-      setMessage({ tone: "err", text: f.errors ? t("settings.invalid") : t("settings.saveFailed", { message: f.message || `HTTP ${r.status}` }) });
+      setMessage({ tone: "err", text: f.errors ? t("settings.invalid") : isOriginRefusal(r.status, f) ? t("login.refused") : t("settings.saveFailed", { message: f.message || `HTTP ${r.status}` }) });
     } catch {
       setSaved(before.saved);
       setKnown(before.known);
@@ -177,7 +177,7 @@ function SettingsForm({
         setMessage(null);
         return true;
       }
-      setMessage({ tone: "err", text: r.status === 409 ? t("rune.busy") : r.status >= 500 ? t("rune.offline") : t("rune.failed") });
+      setMessage({ tone: "err", text: r.status === 409 ? t("rune.busy") : r.status >= 500 ? t("rune.offline") : isOriginRefusal(r.status, r.body) ? t("login.refused") : t("rune.failed") });
     } catch {
       setMessage({ tone: "err", text: t("rune.offline") });
     }
@@ -191,7 +191,7 @@ function SettingsForm({
       const r = on ? await applySettings("when_empty") : await cancelApply();
       if (r.status === 200) return;
       setArmedLocal(null);
-      setMessage({ tone: "err", text: r.status >= 500 ? t("rune.offline") : t("rune.failed") });
+      setMessage({ tone: "err", text: r.status >= 500 ? t("rune.offline") : isOriginRefusal(r.status, r.body) ? t("login.refused") : t("rune.failed") });
     } catch {
       setArmedLocal(null);
       setMessage({ tone: "err", text: t("rune.offline") });

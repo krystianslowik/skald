@@ -94,7 +94,11 @@ export async function postAdmin(path: string, body: Record<string, unknown> = {}
   return outcome(res.status, await json<AdminResult>(res), `HTTP ${res.status}`);
 }
 
-/** POST /api/notify/test: one test message to the Discord webhook. */
+/**
+ * POST /api/notify/test: one test message to the Discord webhook. Discord's
+ * own failure comes back as a 502 with JSON; a 5xx without it is a proxy's
+ * page while skald-web is down, as good as no connection.
+ */
 export async function testNotify(): Promise<AdminOutcome> {
   let res: Response;
   try {
@@ -103,7 +107,9 @@ export async function testNotify(): Promise<AdminOutcome> {
     return { ok: false, status: 0, error: "offline" };
   }
   if (res.status === 401) throw new Unauthorized();
-  return outcome(res.status, await json<AdminResult>(res), `HTTP ${res.status}`);
+  const body = await json<AdminResult>(res);
+  if (!body && res.status >= 500) return { ok: false, status: 0, error: "offline" };
+  return outcome(res.status, body, `HTTP ${res.status}`);
 }
 
 /** PUT or DELETE /api/admin/notify; on success the answer is the new settings, the webhook masked. */

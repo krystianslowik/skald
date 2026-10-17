@@ -781,4 +781,30 @@ describe("discord test notification", () => {
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({ ok: false, error: "HTTP 401" });
   });
+
+  it("passes Discord's 429 on with its wait, and keeps to it", async () => {
+    const d = discord({ replies: [Response.json({ message: "You are being rate limited.", retry_after: 30 }, { status: 429, headers: { "Retry-After": "30" } })] });
+    d.notify.update({ url: HOOK });
+    const { app } = await setup({ notify: d.notify, log: d.log });
+    const c = await signIn(app);
+    const first = await post(app, "/api/notify/test", c);
+    expect(first.status).toBe(429);
+    expect(first.headers.get("Retry-After")).toBe("30");
+    expect(await first.json()).toEqual({ ok: false, error: "rate_limited", retryAfter: 30 });
+    // The usual 10 s are over, Discord's 30 s are not: Discord is not asked again.
+    d.later();
+    const second = await post(app, "/api/notify/test", c);
+    expect(second.status).toBe(429);
+    expect(second.headers.get("Retry-After")).toBe("20");
+    expect(await second.json()).toEqual({ ok: false, error: "rate_limited", retryAfter: 20 });
+    expect(d.posts).toHaveLength(1);
+    d.later();
+    d.later();
+    expect((await post(app, "/api/notify/test", c)).status).toBe(200);
+    // After a message that went out: "busy", the ordinary pause.
+    const busy = await post(app, "/api/notify/test", c);
+    expect(busy.status).toBe(429);
+    expect(await busy.json()).toEqual({ ok: false, error: "busy", retryAfter: 10 });
+    expect(d.posts).toHaveLength(2);
+  });
 });

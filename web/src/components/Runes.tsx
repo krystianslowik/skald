@@ -1,7 +1,7 @@
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { ActionName, AgentEvent } from "../types";
-import { runAction } from "../lib/api";
+import { isOriginRefusal, runAction } from "../lib/api";
 import { crackle } from "../lib/campfire";
 import { useI18n, type TextKey } from "../i18n";
 import { actionStatus, actionTitle } from "./Saga";
@@ -193,6 +193,7 @@ export const Runes = memo(function Runes({ online, lastAction }: { online: boole
       try {
         const r = await runAction(name);
         if (r.status === 409) return { ok: false, message: t("rune.busy") };
+        if (isOriginRefusal(r.status, r.body)) return { ok: false, message: t("login.refused") };
         if (r.status === 503 || r.status === 502) return { ok: false, message: t("rune.offline") };
         return { ok: r.body.ok, message: r.body.ok ? t("rune.accepted") : r.body.message || t("rune.failed") };
       } catch {

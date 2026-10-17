@@ -232,6 +232,15 @@ describe("DiscordNotifier", () => {
     expect(logs).toEqual([]);
   });
 
+  it("waits a second on a 429 that names no wait at all", async () => {
+    const d = fakeDiscord([new Response("<html>slow down</html>", { status: 429 })]);
+    const { n, waits } = notifier(d.fetchImpl);
+    n.handle(live(ev(1, "raid", { name: "wolves" })));
+    await settle(n);
+    expect(waits).toEqual([1000]);
+    expect(d.calls).toHaveLength(2);
+  });
+
   it("gives up after the retries and logs it", async () => {
     const limited = () => new Response(JSON.stringify({ retry_after: 500 }), { status: 429 });
     const d = fakeDiscord([limited(), limited(), limited()]);
@@ -356,12 +365,19 @@ describe("DiscordNotifier.configure", () => {
 describe("test messages", () => {
   const HOOK = "https://discord.com/api/webhooks/123456789/fictional-token-of-Bjorn";
 
-  it("reports a 429 instead of waiting it out", async () => {
-    const d = fakeDiscord([new Response(JSON.stringify({ retry_after: 30 }), { status: 429 })]);
+  it("reports a 429 with Discord's wait instead of waiting it out", async () => {
+    const d = fakeDiscord([
+      new Response(JSON.stringify({ retry_after: 30 }), { status: 429 }),
+      new Response("", { status: 429, headers: { "Retry-After": "2.2" } }),
+      new Response(JSON.stringify({ retry_after: 3600 }), { status: 429 }),
+    ]);
     const { n, waits } = notifier(d.fetchImpl);
-    expect(await n.test()).toEqual({ ok: false, error: "HTTP 429" });
+    expect(await n.test()).toEqual({ ok: false, error: "rate_limited", retryAfter: 30 });
+    expect(await n.test()).toEqual({ ok: false, error: "rate_limited", retryAfter: 3 });
+    // Capped: a runaway wait does not lock the button for an hour.
+    expect(await n.test()).toEqual({ ok: false, error: "rate_limited", retryAfter: 60 });
     expect(waits).toEqual([]);
-    expect(d.calls).toHaveLength(1);
+    expect(d.calls).toHaveLength(3);
   });
 
   function settings() {
@@ -401,11 +417,48 @@ describe("test messages", () => {
     expect(await third).toEqual({ ok: false, error: "HTTP 404" });
     // Nothing was posted: the next try (a corrected webhook) goes out at once.
     const fourth = s.notify.test();
-    s.release({ ok: false, error: "HTTP 429" });
-    expect(await fourth).toEqual({ ok: false, error: "HTTP 429" });
-    // Discord asked to slow down: the pause holds.
-    expect(((await s.notify.test()) as { error: string }).error).toBe("busy");
+    s.release({ ok: false, error: "rate_limited", retryAfter: 2 });
+    // Discord asked for less than the usual pause: the usual pause holds, and says why.
+    expect(await fourth).toEqual({ ok: false, error: "rate_limited", retryAfter: 10 });
+    expect(await s.notify.test()).toEqual({ ok: false, error: "rate_limited", retryAfter: 10 });
     expect(s.sent).toEqual([HOOK, HOOK, HOOK]);
+  });
+
+  it("waits as long as Discord asked after a 429, and says so rather than busy", async () => {
+    const s = settings();
+    const first = s.notify.test();
+    s.release({ ok: false, error: "rate_limited", retryAfter: 30 });
+    expect(await first).toEqual({ ok: false, error: "rate_limited", retryAfter: 30 });
+    s.advance(TEST_COOLDOWN_MS);
+    // Past the usual 10 s, still inside Discord's 30 s: nothing reaches Discord.
+    expect(await s.notify.test()).toEqual({ ok: false, error: "rate_limited", retryAfter: 20 });
+    s.advance(19_500);
+    expect(await s.notify.test()).toEqual({ ok: false, error: "rate_limited", retryAfter: 1 });
+    expect(s.sent).toEqual([HOOK]);
+    s.advance(500);
+    const second = s.notify.test();
+    s.release();
+    expect(await second).toEqual({ ok: true });
+    // After a message that went out, the pause is the ordinary one again.
+    expect(await s.notify.test()).toEqual({ ok: false, error: "busy", retryAfter: 10 });
+    expect(s.sent).toEqual([HOOK, HOOK]);
+  });
+
+  it("does not hold a newly saved webhook to another one's rate limit", async () => {
+    const s = settings();
+    const first = s.notify.test();
+    s.release({ ok: false, error: "rate_limited", retryAfter: 45 });
+    await first;
+    const OTHER = "https://discord.com/api/webhooks/987654321/fictional-token-of-Astrid";
+    s.notify.update({ url: OTHER });
+    const second = s.notify.test();
+    s.release();
+    expect(await second).toEqual({ ok: true });
+    // Back to the limited one: Discord's 45 s still hold for it.
+    s.notify.update({ url: HOOK });
+    s.advance(TEST_COOLDOWN_MS);
+    expect(await s.notify.test()).toEqual({ ok: false, error: "rate_limited", retryAfter: 35 });
+    expect(s.sent).toEqual([HOOK, OTHER]);
   });
 
   it("empties the database journal when the webhook is removed or replaced", () => {

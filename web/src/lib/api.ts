@@ -29,11 +29,15 @@ export async function me(): Promise<boolean> {
 
 export type LoginResult = { ok: true } | { ok: false; retryAfter?: number; /** The server's origin check refused the request. */ refused?: boolean };
 
+/** An answer's status and parsed body say the origin check refused it (see originRefused). */
+export const isOriginRefusal = (status: number, body: unknown): boolean =>
+  status === 403 && typeof body === "object" && body !== null && (body as { error?: unknown }).error === "cross_origin";
+
 /** The server refused a request as coming from another origin: a proxy setting (PUBLIC_ORIGIN), not a wrong password. */
 export async function originRefused(res: Response): Promise<boolean> {
   if (res.status !== 403) return false;
   try {
-    return ((await res.clone().json()) as { error?: unknown }).error === "cross_origin";
+    return isOriginRefusal(res.status, await res.clone().json());
   } catch {
     return false;
   }
@@ -55,8 +59,24 @@ export async function login(password: string): Promise<LoginResult> {
   return { ok: false };
 }
 
-export async function logout(): Promise<void> {
-  await fetch("/api/logout", { method: "POST", credentials: "same-origin" });
+/**
+ * Whether the server ended the session. The cookie is HttpOnly: only the
+ * server's answer clears it, so anything else leaves the viewer signed in.
+ */
+export type LogoutResult = "ok" | "offline" | "refused" | "failed";
+
+export async function logout(): Promise<LogoutResult> {
+  let res: Response;
+  try {
+    res = await fetch("/api/logout", { method: "POST", credentials: "same-origin" });
+  } catch {
+    return "offline";
+  }
+  // Only skald-web's own answer counts: a proxy's login page reached through a redirect is a 200 too.
+  if (res.ok) return ((await res.json().catch(() => null)) as { ok?: unknown } | null)?.ok === true ? "ok" : "failed";
+  if (await originRefused(res)) return "refused";
+  // A proxy's error page while skald-web is down: as good as no connection.
+  return res.status >= 500 ? "offline" : "failed";
 }
 
 export const getState = () => call<ApiState>("/api/state");

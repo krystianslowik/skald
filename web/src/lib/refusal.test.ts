@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeI18n } from "../i18n";
-import { failText, refusalReason, refusalText } from "./refusal";
+import { failText, notifyTestText, refusalReason, refusalText } from "./refusal";
 
 // Node's fs and cwd in the test runner; the web's tsconfig has no Node types.
 const fs = "node:fs";
@@ -140,5 +140,33 @@ describe("bridge refusals", () => {
     expect(failText(pl, { status: 404, error: "unknown command POST /v1/build/fill-kilns" })).toBe("To wymaga nowszej wersji mostka.");
     // The agent's own allow-list says it without a method and path: the agent is the one to update.
     expect(failText(en, { status: 404, error: "unknown command fill-fermenters" })).toBe("This needs a newer Skald agent.");
+  });
+
+  it("says what the operator must set when the server's origin check refused the call, never the raw code", () => {
+    const refused = { status: 403, error: "cross_origin" };
+    expect(failText(en, refused)).toBe(en.t("login.refused"));
+    expect(failText(pl, refused)).toBe(pl.t("login.refused"));
+    expect(failText(pl, refused)).toContain("PUBLIC_ORIGIN");
+    // Another 403 with that word in it is not the origin check.
+    expect(failText(en, { status: 409, error: "cross_origin" })).toBe("cross_origin");
+  });
+});
+
+describe("a failed Discord test", () => {
+  it("blames Discord only for Discord's own answer", () => {
+    expect(notifyTestText(en, { status: 502, error: "HTTP 404" })).toBe("Discord did not take it (HTTP 404).");
+    expect(notifyTestText(pl, { status: 502, error: "HTTP 404" })).toBe("Discord go nie przyjął (HTTP 404).");
+    expect(notifyTestText(pl, { status: 403, error: "cross_origin" })).toBe(pl.t("login.refused"));
+    expect(notifyTestText(en, { status: 403, error: "cross_origin" })).not.toContain("Discord");
+    expect(notifyTestText(en, { status: 0, error: "offline" })).toBe("No connection. Try again in a moment.");
+    expect(notifyTestText(en, { status: 404, error: "not_configured" })).toBe("No webhook is set, so there is nothing to test.");
+  });
+
+  it("tells Discord's rate limit, with its wait, apart from the panel's own pause after a test went out", () => {
+    expect(notifyTestText(en, { status: 429, error: "rate_limited", retryAfter: 30 })).toBe("Discord asked to slow down. Try again in 30\u00a0s.");
+    expect(notifyTestText(pl, { status: 429, error: "rate_limited", retryAfter: 30 })).toBe("Discord prosi o wolniejsze tempo. Spróbuj za 30\u00a0s.");
+    expect(notifyTestText(en, { status: 429, error: "busy", retryAfter: 6 })).toBe("A test message was just sent. Try again in a few seconds.");
+    // A 429 from something in front of skald-web (a CDN's own limit): no test went out, so not "just sent".
+    expect(notifyTestText(en, { status: 429, error: "HTTP 429" })).not.toMatch(/just sent|Discord/);
   });
 });

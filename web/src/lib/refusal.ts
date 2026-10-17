@@ -5,6 +5,7 @@
 // the text without one, and the agent turns some statuses into 502.
 
 import type { I18n, TextKey } from "../i18n";
+import { isOriginRefusal } from "./api";
 import { itemLabel } from "./storage";
 
 type Vars = Record<string, string | number>;
@@ -102,8 +103,26 @@ export function refusalReason(i: Labels, error: string | null | undefined): stri
 /** The game was busy and the bridge dropped the command unrun: nothing was done, so trying again is safe. */
 export const isNotPickedUp = (error: string | null | undefined) => NOT_PICKED_UP.test(error?.trim() ?? "");
 
-/** What a failed admin call says: unreachable, a known refusal, the raw text, or "that did not work". */
+/** What a failed admin call says: unreachable, the origin check, a known refusal, the raw text, or "that did not work". */
 export function failText(i: Labels, res: { status: number; error?: string }): string {
   if (res.status === 0 || res.status === 502) return i.t("admin.unreachable");
+  // The server's own refusal, not the game's: a setting for the operator (PUBLIC_ORIGIN).
+  if (isOriginRefusal(res.status, res)) return i.t("login.refused");
   return refusalText(i, res.error) ?? (res.error || i.t("admin.failed"));
+}
+
+/**
+ * What a failed Discord test says. Only a 502 is Discord's own answer; a 429
+ * is the panel's pause, either after a test that went out (`busy`) or because
+ * Discord asked to wait (`rate_limited`, with its seconds). Everything else is
+ * the panel's own failure and never blamed on Discord.
+ */
+export function notifyTestText(i: Labels, res: { status: number; error?: string; retryAfter?: number }): string {
+  if (res.status === 0) return i.t("admin.notify.offline");
+  if (res.error === "rate_limited") return i.t("admin.notify.rateLimited", { s: Math.max(1, Math.ceil(res.retryAfter ?? 10)) });
+  // skald-web's own pause; a 429 without that code came from something in front of it.
+  if (res.error === "busy") return i.t("admin.notify.busy");
+  if (res.status === 502) return i.t("admin.notify.failed", { error: res.error ?? "HTTP 502" });
+  if (res.error === "not_configured") return i.t("admin.notify.notConfigured");
+  return failText(i, res);
 }

@@ -2,7 +2,7 @@ import { Hono, type Context } from "hono";
 import { getConnInfo } from "hono/bun";
 import { compress, COMPRESSIBLE_CONTENT_TYPE_REGEX } from "hono/compress";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { routePath } from "hono/route";
+import { matchedRoutes, routePath } from "hono/route";
 import type { AgentAsset, AgentSource, PiecesBox, ToolsRequest } from "./agent";
 import { ADMIN_COOKIE, ADMIN_IDLE_MS, createAdminSession, createSession, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS, sessionHash, verifyAdminSession, verifySession } from "./auth";
 import type { Hub } from "./hub";
@@ -134,6 +134,12 @@ export function createApp(deps: AppDeps): Hono {
   const logger = deps.log ?? defaultLog;
   const where = (c: Context) => ({ method: c.req.method, route: routePath(c) });
   /**
+   * In a middleware: the route the request is headed for, i.e. the first
+   * matching handler's pattern (middleware registers as ALL), so a refusal
+   * names `/api/login` or `/api/admin/:command` rather than `/api/*`.
+   */
+  const headedFor = (c: Context) => ({ method: c.req.method, route: matchedRoutes(c).find((r) => r.method !== "ALL")?.path ?? routePath(c) });
+  /**
    * An agent call threw; `status` is what the client gets. A request the
    * browser cancelled (a map pan drops tiles) aborts the agent call too: that
    * is not a failure.
@@ -169,12 +175,12 @@ export function createApp(deps: AppDeps): Hono {
     if (SAFE_METHODS.has(c.req.method)) return next();
     const v = checkOrigin(c.req.raw, originPolicy);
     if (!v.ok) {
-      logger.warn("cross-origin request refused", { ...where(c), status: 403, origin: v.origin.slice(0, 200), expected: v.expected, hint: "set PUBLIC_ORIGIN to the address the panel is opened on" });
+      logger.warn("cross-origin request refused", { ...headedFor(c), status: 403, origin: v.origin.slice(0, 200), expected: v.expected, hint: "set PUBLIC_ORIGIN to the address the panel is opened on" });
       return c.json({ ok: false, error: "cross_origin", message: "request from another origin refused; set PUBLIC_ORIGIN if the panel sits behind a proxy that rewrites Host" }, 403);
     }
     if (v.mismatch && !mismatchLogged) {
       mismatchLogged = true;
-      logger.warn("origin differs from the request host", { ...where(c), origin: v.mismatch.origin.slice(0, 200), expected: v.mismatch.expected, hint: "set PUBLIC_ORIGIN, or browsers without Sec-Fetch-Site are refused" });
+      logger.warn("origin differs from the request host", { ...headedFor(c), origin: v.mismatch.origin.slice(0, 200), expected: v.mismatch.expected, hint: "set PUBLIC_ORIGIN, or browsers without Sec-Fetch-Site are refused" });
     }
     return next();
   });
@@ -503,7 +509,11 @@ export function createApp(deps: AppDeps): Hono {
     const res = await deps.notify.test();
     if (!res.ok && res.error === "not_configured") return c.json(res, 404);
     // One test at a time, then a short pause: each one posts to the channel.
-    if (!res.ok && res.error === "busy") return c.json({ ok: false, error: "busy" }, 429, { "Retry-After": String(res.retryAfter ?? 10) });
+    // After Discord's own 429 the pause lasts as long as Discord asked.
+    if (!res.ok && (res.error === "busy" || res.error === "rate_limited")) {
+      const retryAfter = res.retryAfter ?? 10;
+      return c.json({ ok: false, error: res.error, retryAfter }, 429, { "Retry-After": String(retryAfter) });
+    }
     // The notifier already strips the webhook URL out of its errors.
     if (!res.ok) logger.warn("discord test failed", { ...where(c), status: 502, cause: res.error });
     return res.ok ? c.json({ ok: true }) : c.json({ ok: false, error: res.error }, 502);

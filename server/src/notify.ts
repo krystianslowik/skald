@@ -227,7 +227,9 @@ async function retryAfterMs(res: Response): Promise<number> {
   } catch {
     // no JSON body; try the header
   }
-  const h = Number(res.headers.get("Retry-After"));
+  // Number(null) and Number("") are 0: no header must mean the fallback, not "at once".
+  const raw = res.headers.get("Retry-After")?.trim();
+  const h = raw ? Number(raw) : Number.NaN;
   return Number.isFinite(h) && h >= 0 ? h * 1000 : 1000;
 }
 
@@ -252,7 +254,11 @@ export interface NotifierOptions {
   maxAgeMs?: number;
 }
 
-export type SendResult = { ok: true } | { ok: false; error: string; /** Seconds, with error "busy". */ retryAfter?: number };
+/**
+ * `busy`: a test is in flight or one just went out. `rate_limited`: Discord
+ * answered 429 and asked to wait. Both carry `retryAfter` in seconds.
+ */
+export type SendResult = { ok: true } | { ok: false; error: string; retryAfter?: number };
 
 /**
  * Posts notable live events to a Discord webhook. Fed by the hub's listener:
@@ -342,7 +348,8 @@ export class DiscordNotifier {
   /**
    * Sends the test message now, outside the queue, and says how it went. To
    * `url` when given: a saved webhook can be tried before it is turned on.
-   * A 429 is reported, not waited out: the admin can try again.
+   * A 429 is reported, not waited out: the admin can try again once
+   * Discord's wait (`retryAfter`, capped) is over.
    */
   async test(url = this.url): Promise<SendResult> {
     return this.post(STRINGS[this.o.locale].test, url, false);
@@ -521,6 +528,11 @@ export class DiscordNotifier {
         if (this.url === url) continue;
         return { ok: false, error: "webhook changed" };
       }
+      if (!retry && res.status === 429) {
+        // Reads the body for retry_after, so no cancel() after it.
+        const wait = Math.min(RETRY_CAP_MS, await retryAfterMs(res));
+        return { ok: false, error: "rate_limited", retryAfter: Math.max(1, Math.ceil(wait / 1000)) };
+      }
       await res.body?.cancel();
       return { ok: false, error: `HTTP ${res.status}` };
     }
@@ -655,15 +667,24 @@ export class NotifySettings {
     const { url } = this.current();
     if (!url) return { ok: false, error: "not_configured" };
     const now = (this.o.clock ?? Date.now)();
-    if (this.testing || now - this.lastTest < TEST_COOLDOWN_MS) {
-      return { ok: false, error: "busy", retryAfter: Math.max(1, Math.ceil((this.lastTest + TEST_COOLDOWN_MS - now) / 1000)) };
-    }
+    const left = (until: number) => Math.max(1, Math.ceil((until - now) / 1000));
+    if (this.testing) return { ok: false, error: "busy", retryAfter: left(this.busyUntil) };
+    // Discord limits each webhook on its own: another one is not held by this one's 429.
+    if (url === this.limitedUrl && now < this.limitedUntil) return { ok: false, error: "rate_limited", retryAfter: left(this.limitedUntil) };
+    if (now < this.busyUntil) return { ok: false, error: "busy", retryAfter: left(this.busyUntil) };
     this.testing = true;
-    this.lastTest = now;
+    this.busyUntil = now + TEST_COOLDOWN_MS;
     try {
       const res = await this.o.notifier.test(url);
-      // Nothing reached the channel: a corrected webhook can be tried at once. A 429 keeps the pause.
-      if (!res.ok && res.error !== "HTTP 429") this.lastTest = Number.NEGATIVE_INFINITY;
+      if (res.ok) return res;
+      // Nothing reached the channel: another (corrected) webhook can be tried at once.
+      this.busyUntil = Number.NEGATIVE_INFINITY;
+      if (res.error === "rate_limited") {
+        // At least as long as Discord asked (capped by the notifier), never shorter than the usual pause.
+        this.limitedUrl = url;
+        this.limitedUntil = now + Math.max(TEST_COOLDOWN_MS, (res.retryAfter ?? 0) * 1000);
+        return { ok: false, error: "rate_limited", retryAfter: left(this.limitedUntil) };
+      }
       return res;
     } finally {
       this.testing = false;
@@ -671,7 +692,11 @@ export class NotifySettings {
   }
 
   private testing = false;
-  private lastTest = Number.NEGATIVE_INFINITY;
+  /** After a test that went out (or is going): no test to any webhook before this. */
+  private busyUntil = Number.NEGATIVE_INFINITY;
+  /** After Discord's 429: no test to `limitedUrl` before this. */
+  private limitedUrl = "";
+  private limitedUntil = Number.NEGATIVE_INFINITY;
 
   private current(): { url: string; enabled: boolean; kinds: readonly NotifyKind[] } {
     if (this.fromEnv) return { url: this.o.envUrl, enabled: true, kinds: this.o.envKinds };

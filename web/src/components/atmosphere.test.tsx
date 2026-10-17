@@ -77,7 +77,7 @@ describe("Embers switch", () => {
   const prefs = () => (
     <>
       <Embers />
-      <Preferences onLogout={() => {}} />
+      <Preferences onLogout={async () => "ok" as const} />
     </>
   );
 
@@ -155,7 +155,7 @@ describe("Embers in the desktop header", () => {
   const desktop = (compact = false) => (
     <>
       <Embers />
-      <Header server={emptyAgentState().server} online onLogout={() => {}} compact={compact} />
+      <Header server={emptyAgentState().server} online onLogout={async () => "ok" as const} compact={compact} />
     </>
   );
 

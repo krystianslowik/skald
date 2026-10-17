@@ -4,11 +4,11 @@ import { Dashboard } from "./components/Dashboard";
 import { Login } from "./components/Login";
 import { ChunkBoundary } from "./components/ErrorBoundary";
 import { I18nProvider, loadLocale, serverLocale, storedLocale, type Locale } from "./i18n";
-import { getConfig, logout, me } from "./lib/api";
+import { getConfig, logout, me, type LogoutResult } from "./lib/api";
 import { setIconBuild } from "./lib/itemicons";
 import { useValheim } from "./lib/useValheim";
 
-function Panel({ onUnauthorized, onLogout }: { onUnauthorized: () => void; onLogout: () => void }) {
+function Panel({ onUnauthorized, onLogout }: { onUnauthorized: () => void; onLogout: () => Promise<LogoutResult> }) {
   const live = useValheim(onUnauthorized);
   const icons = live.state?.icons;
   // Item icons follow the agent's sheet: loaded once per game build.
@@ -42,8 +42,12 @@ export default function App() {
   }, []);
 
   const toLogin = useCallback(() => setAuth("out"), []);
-  const doLogout = useCallback(() => {
-    void logout().finally(() => setAuth("out"));
+  // Only the server can clear the HttpOnly session cookie: the login screen
+  // comes once it confirms, else the panel stays and says so (useLogout).
+  const doLogout = useCallback(async () => {
+    const r = await logout();
+    if (r === "ok") setAuth("out");
+    return r;
   }, []);
 
   const blank = <div className="min-h-dvh bg-coal" />;
