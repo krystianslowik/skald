@@ -277,7 +277,7 @@ export interface FrameState {
   reduced?: boolean;
   /** The storey picked in the floor switcher; every other base shows its ground. */
   storey?: StoreyPick | null;
-  /** Where the view is headed (a fling's or glide's landing), for the WebGL map to load ahead. */
+  /** Where the view is headed (a fling's or glide's landing): its terrain tiles load first. */
   ahead?: View | null;
   /** The view is moving: tile loads wait for frames with time to spare. */
   moving?: boolean;
@@ -759,6 +759,12 @@ export class MapRenderer {
     }
     if (this.gl?.ready && this.feed && f.layers.relief) return this.drawGL(f);
     this.overlay = [];
+    if (this.tiles?.ready && f.layers.relief) {
+      // A fast frame only moves the cached picture: the landing's tiles are asked for here.
+      const a = f.ahead;
+      const box = a ? viewBox(a) : null;
+      this.tiles.motion(f.moving ?? false, a && box ? { view: { x0: box[0], z0: box[1], x1: box[2], z1: box[3] }, scale: a.scale } : null, this.base?.dpr ?? this.dpr);
+    }
     const plan = f.layers.buildings && this.plan ? `${this.planVersion}:${f.storey ? `${f.storey.base}/${f.storey.level}` : ""}:${this.storeys(v, f.layers)?.base ?? ""}` : "";
     const nature = f.layers.nature || f.layers.resources ? `${f.layers.nature ? 1 : 0}${f.layers.resources ? 1 : 0}:${this.nature.version}` : "";
     const key = `${f.layers.fog ? 1 : 0}${f.layers.terrain ? 1 : 0}${f.layers.relief ? 1 : 0}:${this.version}:${this.tiles?.ready ? 1 : 0}:${v.w}x${v.h}:${this.dpr}:${plan}:${nature}`;

@@ -244,7 +244,7 @@ export class ByteLRU<V> {
     return this.map.get(key)?.v;
   }
 
-  set(key: string, v: V, bytes: number, keep?: ReadonlySet<string>): void {
+  set(key: string, v: V, bytes: number, keep?: { has(key: string): boolean }): void {
     this.delete(key);
     this.map.set(key, { v, bytes });
     this.bytes += bytes;
@@ -273,6 +273,20 @@ export class ByteLRU<V> {
   }
 }
 
+/** Terrain tiles loading at once at rest (MapLibre's 16): a view's worth over a slow link arrives in one round trip, not three... */
+export const LOADS_AT_REST = 16;
+/** ...and while the map moves to no known landing (MapLibre's 8): what a drag crosses is cancelled as it leaves. */
+export const LOADS_MOVING = 8;
+
+/**
+ * How many tile loads may run at once: LOADS_MOVING while the map moves,
+ * LOADS_AT_REST at rest or once the motion's landing is known (a fling,
+ * glide or pinch with the finger lifted), whose tiles are wanted for sure.
+ */
+export function loadLimit(moving: boolean, landing: boolean): number {
+  return moving && !landing ? LOADS_MOVING : LOADS_AT_REST;
+}
+
 /**
  * Starts loads in the order asked, at most `concurrency` at once; a new
  * wish list cancels what is no longer on it. Keys from index `low` on are
@@ -281,7 +295,9 @@ export class ByteLRU<V> {
  * than one of them ahead of those). `start` begins a load and returns its
  * cancel; the owner calls `finish` when it ends either way. `starts` caps
  * the loads begun until the next update (none or two a frame while the map
- * moves: OpenLayers' rule, so a busy frame never also starts loads).
+ * moves: OpenLayers' rule, so a busy frame never also starts loads), and
+ * `limit` the loads running at once until then (fewer while the map moves);
+ * lowering it starts nothing new but cancels nothing still wanted.
  */
 export class TileScheduler {
   private running = new Map<string, () => void>();
@@ -289,20 +305,24 @@ export class TileScheduler {
   private wanted: string[] = [];
   private low = 0;
   private starts = Infinity;
+  private limit: number;
   constructor(
     private readonly concurrency: number,
     private readonly start: (key: string, low: boolean) => () => void,
-  ) {}
+  ) {
+    this.limit = concurrency;
+  }
 
   get inflight(): ReadonlySet<string> {
     return new Set(this.running.keys());
   }
 
-  /** The keys still needed, most important first; from `low` on, low priority. At most `starts` new loads begin until the next update. */
-  update(wanted: readonly string[], low = wanted.length, starts = Infinity): void {
+  /** The keys still needed, most important first; from `low` on, low priority. Until the next update, at most `starts` new loads begin and `limit` (never above the scheduler's concurrency) run at once. */
+  update(wanted: readonly string[], low = wanted.length, starts = Infinity, limit = this.concurrency): void {
     this.wanted = [...wanted];
     this.low = low;
     this.starts = starts;
+    this.limit = Math.min(limit, this.concurrency);
     const keep = new Set(wanted);
     for (const [k, cancel] of this.running) {
       if (!keep.has(k)) {
@@ -329,7 +349,7 @@ export class TileScheduler {
     for (let i = 0; i < this.wanted.length; i++) {
       const k = this.wanted[i]!;
       if (this.running.has(k)) continue;
-      if (this.running.size >= this.concurrency || this.starts <= 0) return;
+      if (this.running.size >= this.limit || this.starts <= 0) return;
       const low = i >= this.low;
       if (low && this.lows.size > 0) return;
       if (low) this.lows.add(k);
@@ -368,6 +388,13 @@ export class TerrainTiles {
   private failed = new Map<string, number>();
   private drawn = new Set<string>();
   private last: Drawn | null = null;
+  /** The motion's landing (where a fling or glide comes to rest): its tiles, asked for first and kept. */
+  private landing: { at: string; keys: string[]; set: ReadonlySet<string> } | null = null;
+  /** What the cache must not drop: what the map draws, and the landing's tiles. */
+  private readonly keep = { has: (k: string) => this.drawn.has(k) || (this.landing?.set.has(k) ?? false) };
+  /** The last drawn view's wish list, behind the landing's tiles. */
+  private wish: { high: string[]; low: string[] } = { high: [], low: [] };
+  private limit = LOADS_AT_REST;
   private readonly palette: Palette;
   /** Called when a tile arrives (or fails); `changed()` says what to redraw. */
   onTile: (() => void) | null = null;
@@ -387,7 +414,7 @@ export class TerrainTiles {
       this.sched.finish(key);
       this.onTile?.();
     };
-    this.sched = new TileScheduler(4, (key, low) => {
+    this.sched = new TileScheduler(LOADS_AT_REST, (key, low) => {
       const [zxy, f] = key.split("@") as [string, string];
       const [z, x, y] = zxy.split("/").map(Number) as [number, number, number];
       const url = `/api/terrain/tile?z=${z}&x=${x}&y=${y}&v=${encodeURIComponent(this.doc.build)}`;
@@ -432,14 +459,63 @@ export class TerrainTiles {
     this.sched.update(keys, keys[0] === "0/0/0@1" ? 1 : 0);
   }
 
+  /**
+   * Whether the map moves and where it will come to rest (`landing`, the
+   * box on screen there), every frame, `dpr` as the map is drawn: as on the
+   * WebGL map, the landing's tiles load ahead of the view's, at
+   * LOADS_AT_REST at once; moving with no landing known, at LOADS_MOVING.
+   * The map is only drawn again once its cached picture runs out, so the
+   * wish list is redone here too.
+   */
+  motion(moving: boolean, landing: { view: Box; scale: number } | null, dpr: number): void {
+    const limit = loadLimit(moving, landing !== null);
+    const at = landing ? `${landing.view.x0},${landing.view.z0},${landing.view.x1},${landing.view.z1},${landing.scale}` : "";
+    if (limit === this.limit && at === (this.landing?.at ?? "")) return;
+    this.limit = limit;
+    if (!landing) {
+      // At rest on the landing: its tiles still on the way stay asked for (the cached picture may
+      // cover it, so no full draw would ask again), ahead of the last wish list, until the next draw.
+      if (this.landing) this.wish = { high: [...this.landing.keys, ...this.wish.high], low: this.wish.low };
+      this.landing = null;
+    } else if (at !== this.landing?.at) {
+      // Planned as the landing will be drawn: its level, its paint factor, nearest its centre first.
+      const p = this.plan(landing.view, landing.view, landing.scale, dpr);
+      const f = paintFactor(p.z, this.doc.maxLevel, landing.scale);
+      const keys = p.want.slice(0, p.low).map((t) => `${tileKey(t)}@${t.z === p.z ? f : 1}`);
+      this.landing = { at, keys, set: new Set(keys) };
+    }
+    this.submit();
+  }
+
   /** The plan's wish list to the scheduler; own tiles in view at another paint factor are asked for again at this one. */
   private ask(p: ViewPlan, view: Box, scale: number): void {
     const { maxLevel, radius } = this.doc;
     const f = paintFactor(p.z, maxLevel, scale);
     const keyOf = (t: TileRef) => `${tileKey(t)}@${t.z === p.z ? f : 1}`;
     const redo = p.slots.filter((s) => s.own && this.loaded(s.tile, f)?.key !== `${tileKey(s.tile)}@${f}` && inBox(tileBox(s.tile, radius), view)).map((s) => `${tileKey(s.tile)}@${f}`);
-    const high = this.askable([...p.want.slice(0, p.low).map(keyOf), ...redo]);
-    this.sched.update([...high, ...this.askable(p.want.slice(p.low).map(keyOf))], high.length);
+    this.wish = { high: [...p.want.slice(0, p.low).map(keyOf), ...redo], low: p.want.slice(p.low).map(keyOf) };
+    this.submit();
+  }
+
+  /** The landing's tiles still missing, then the view's wish list, to the scheduler. */
+  private submit(): void {
+    const first = this.landing ? this.askable(this.landing.keys.filter((k) => !this.holds(k))) : [];
+    const seen = new Set(first);
+    const rest = (keys: string[]) =>
+      this.askable(
+        keys.filter((k) => {
+          if (seen.has(k) || this.holds(k)) return false;
+          seen.add(k);
+          return true;
+        }),
+      );
+    const high = [...first, ...rest(this.wish.high)];
+    this.sched.update([...high, ...rest(this.wish.low)], high.length, Infinity, this.limit);
+  }
+
+  /** A painted bitmap for this exact key is held. */
+  private holds(key: string): boolean {
+    return this.pinned.has(key) || this.cache.peek(key) !== undefined;
   }
 
   private askable(keys: string[]): string[] {
@@ -457,7 +533,7 @@ export class TerrainTiles {
       }
       this.pinned.set(key, bmp);
       this.pinnedBytes += bmp.width * bmp.height * 4;
-    } else this.cache.set(key, bmp, bmp.width * bmp.height * 4, this.drawn);
+    } else this.cache.set(key, bmp, bmp.width * bmp.height * 4, this.keep);
   }
 
   /** A loaded bitmap for a tile at any paint factor, preferring `f`. `touch` marks it recently used. */

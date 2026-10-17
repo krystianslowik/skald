@@ -213,6 +213,28 @@ describe("tile data", () => {
     expect(posted.filter((m) => m.type === "load").map((m) => m.key)).toEqual(["0/0/0", "3/1/1", "3/1/2"]);
     feed.dispose();
   });
+
+  it("runs 16 loads at once by default and as few as the frame's limit says", () => {
+    const posted: { type: string; key: string }[] = [];
+    class FakeWorker {
+      onmessage: ((e: MessageEvent) => void) | null = null;
+      postMessage(m: { type: string; key: string }) {
+        posted.push(m);
+      }
+      terminate() {}
+    }
+    vi.stubGlobal("Worker", FakeWorker);
+    const doc = { build: "b", tileSize: 256, apron: 2, maxLevel: 7, radius: R, palette: null } as unknown as TilesDoc;
+    const feed = new TileFeed(doc, { workers: 2 });
+    const keys = Array.from({ length: 30 }, (_, i) => `6/${i}/0`);
+    const loads = () => posted.filter((m) => m.type === "load").length;
+    feed.want(keys, keys.length, Infinity, 8);
+    expect(loads()).toBe(8);
+    feed.want(keys);
+    expect(loads()).toBe(16);
+    expect(feed.held.inflight).toBe(16);
+    feed.dispose();
+  });
 });
 
 describe("fog field", () => {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mockTerrainTile, packHeights } from "@server/mocktiles";
-import { ByteLRU, levelFor, paintFactor, pinnedTiles, planView, TerrainTiles, tileBox, tileKey, TileScheduler, tileMpp, tilesIn, type Box, type TileRef, type TilesDoc } from "./terraintiles";
+import { ByteLRU, levelFor, loadLimit, LOADS_AT_REST, LOADS_MOVING, paintFactor, pinnedTiles, planView, TerrainTiles, tileBox, tileKey, TileScheduler, tileMpp, tilesIn, type Box, type TileRef, type TilesDoc } from "./terraintiles";
 import { decodeTile, paintTile, paletteOf, TUNED } from "./terrainpaint";
 
 const R = 10500;
@@ -239,6 +239,37 @@ describe("TileScheduler", () => {
     expect(started).toEqual(["a", "b", "c", "d"]);
   });
 
+  it("holds new starts under a lowered limit without cancelling what runs, and fills up when it rises", () => {
+    const started: string[] = [];
+    const cancelled: string[] = [];
+    const s = new TileScheduler(16, (k) => {
+      started.push(k);
+      return () => cancelled.push(k);
+    });
+    const keys = Array.from({ length: 24 }, (_, i) => `k${i}`);
+    s.update(keys);
+    expect(started).toHaveLength(16);
+    s.update(keys, keys.length, Infinity, 8);
+    expect(cancelled).toEqual([]);
+    expect(s.inflight.size).toBe(16);
+    for (let i = 0; i < 8; i++) s.finish(`k${i}`);
+    expect(started).toHaveLength(16);
+    // Under the limit again: one more starts.
+    s.finish("k8");
+    expect(started).toHaveLength(17);
+    expect(s.inflight.size).toBe(8);
+    s.update(keys.slice(9), keys.length - 9, Infinity, 16);
+    expect(s.inflight.size).toBe(15);
+  });
+
+  it("caps loads at 16 at rest and with a landing ahead, at 8 while moving to an unknown one", () => {
+    expect(loadLimit(false, false)).toBe(LOADS_AT_REST);
+    expect(loadLimit(false, true)).toBe(LOADS_AT_REST);
+    expect(loadLimit(true, true)).toBe(LOADS_AT_REST);
+    expect(loadLimit(true, false)).toBe(LOADS_MOVING);
+    expect([LOADS_AT_REST, LOADS_MOVING]).toEqual([16, 8]);
+  });
+
   it("does not restart a finished tile unless asked again", () => {
     const start = vi.fn(() => () => {});
     const s = new TileScheduler(4, start);
@@ -253,12 +284,14 @@ describe("TerrainTiles", () => {
   class FakeWorker {
     static last: FakeWorker;
     loads: { key: string; low: boolean }[] = [];
+    cancels: string[] = [];
     onmessage: ((e: { data: unknown }) => void) | null = null;
     constructor() {
       FakeWorker.last = this;
     }
     postMessage(m: { type: string; key: string; low?: boolean }) {
       if (m.type === "load") this.loads.push({ key: m.key, low: !!m.low });
+      if (m.type === "cancel") this.cancels.push(m.key);
     }
     terminate() {}
     arrive(key: string, px = 256) {
@@ -298,6 +331,57 @@ describe("TerrainTiles", () => {
     expect(drawn.length).toBeGreaterThan(0);
     expect(drawn.length).toBeLessThan(10);
     expect(tiles.changed()).toEqual([]);
+    tiles.dispose();
+  });
+
+  it("loads a fling's landing ahead of the view, also when the map is drawn again on the way", () => {
+    vi.stubGlobal("Worker", FakeWorker);
+    const tiles = new TerrainTiles(doc);
+    const w = FakeWorker.last;
+    w.arrive("0/0/0@1");
+    const { ctx } = g();
+    const here = phone(0.3);
+    const running = () => tiles.coverage(here.view, 0.3, 2).inflight;
+    const from = w.loads.length;
+    tiles.draw(ctx, here.box, here.view, 0.3, 2);
+    expect(running()).toBe(LOADS_AT_REST);
+    const arrived = new Set<string>();
+    // Answers the n oldest loads the view started.
+    const land = (n: number) => {
+      for (const l of w.loads.slice(from).filter((l) => !arrived.has(l.key) && !l.low).slice(0, n)) {
+        arrived.add(l.key);
+        w.arrive(l.key);
+      }
+    };
+    // A drag, landing unknown: what runs goes on, nothing new starts above 8.
+    tiles.motion(true, null, 2);
+    expect(running()).toBe(LOADS_AT_REST);
+    const before = w.loads.length;
+    land(LOADS_AT_REST - LOADS_MOVING);
+    expect(running()).toBe(LOADS_MOVING);
+    expect(w.loads.length).toBe(before);
+    // The finger lifts: the landing's tiles start, up to 16 at once.
+    const landing = phone(0.3, 2000, -1500).view;
+    const ahead = new Set(tilesIn(landing, 6, R).map((t) => `${tileKey(t)}@1`));
+    tiles.motion(true, { view: landing, scale: 0.3 }, 2);
+    expect(running()).toBe(LOADS_AT_REST);
+    const fresh = w.loads.slice(before).map((l) => l.key);
+    expect(fresh).toHaveLength(LOADS_AT_REST - LOADS_MOVING);
+    expect(fresh.every((k) => ahead.has(k))).toBe(true);
+    // Halfway, the cached picture runs out and the map is drawn again: the landing still comes first.
+    // (The view's loads left behind are cancelled, and the freed slots go to the landing, not the new view.)
+    const mid = phone(0.3, -800, -600);
+    const n = w.loads.length;
+    tiles.draw(ctx, mid.box, mid.view, 0.3, 2);
+    const refill = w.loads.slice(n).map((l) => l.key);
+    expect(refill.length).toBeGreaterThan(0);
+    expect(refill.every((k) => ahead.has(k))).toBe(true);
+    expect(running()).toBe(LOADS_AT_REST);
+    // At rest on the landing (whose cached picture may need no new draw): what it still waits for keeps loading.
+    const cancelled = w.cancels.length;
+    tiles.motion(false, null, 2);
+    expect(w.cancels.slice(cancelled).filter((k) => ahead.has(k))).toEqual([]);
+    expect(running()).toBe(LOADS_AT_REST);
     tiles.dispose();
   });
 
