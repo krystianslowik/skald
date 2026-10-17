@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AdminCatalog } from "../../types";
-import { BROADCAST_MAX, gameClock, getCatalog, lockAdmin, storeActorName, storedActorName, testNotify, WORLD_KEYS } from "../../lib/admin";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { NOTIFY_KINDS, type AdminCatalog, type NotifyChange, type NotifyConfig, type NotifyKind } from "../../types";
+import { BROADCAST_MAX, changeNotify, gameClock, getCatalog, getNotify, lockAdmin, storeActorName, storedActorName, testNotify, WORLD_KEYS } from "../../lib/admin";
+import { failText } from "../../lib/refusal";
 import { useLivePositions } from "../../lib/live";
 import { useI18n, type TextKey } from "../../i18n";
 import { ItemIcon } from "../storage/ItemIcon";
@@ -107,17 +108,86 @@ export function AdminPanel({ picked, onClose }: { picked?: { x: number; z: numbe
 }
 
 /**
- * Discord notifications: on or off, and a test message. Works without the
- * bridge, so its blocker does not disable the button. The webhook URL never
- * reaches the browser.
+ * Discord notifications: the webhook, on or off, which kinds go out, and a
+ * test message. Works without the bridge, so its blocker disables nothing
+ * here. The webhook URL is typed in once and never comes back from the
+ * server, only a masked form; with DISCORD_WEBHOOK_URL set it is read-only.
  */
 function Notify() {
-  const { t } = useI18n();
+  const i18n = useI18n();
+  const { t } = i18n;
   const admin = useAdmin()!;
+  const [cfg, setCfg] = useState<NotifyConfig | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [url, setUrl] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [badUrl, setBadUrl] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Read and set at once: two quick taps must not both start a save.
+  const busyRef = useRef(false);
   const on = admin.status?.notifyConfigured ?? false;
+  const canRead = admin.unlocked;
+  const reload = useCallback(() => {
+    getNotify()
+      .then((r) => {
+        setCfg(r.data && pickNotify(r.data));
+        setFailed(!r.data);
+      })
+      .catch(() => setFailed(true));
+  }, []);
+  useEffect(() => {
+    if (canRead) reload();
+    else {
+      // Locked again: the settings and their controls go with the session.
+      setCfg(null);
+      setEditing(false);
+      setUrl("");
+    }
+  }, [canRead, reload]);
+
+  /** Saves a change (null removes the webhook); true when it took. */
+  const change = async (body: NotifyChange | null, done?: string) => {
+    if (busyRef.current) return false;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      let r = await changeNotify(body);
+      if (r.needsAdmin && (await admin.unlock())) r = await changeNotify(body);
+      if (r.ok) {
+        setCfg(pickNotify(r as NotifyConfig));
+        admin.refresh();
+        if (done) admin.toast(true, done);
+        return true;
+      }
+      if (r.status === 400 && r.error === "bad_url") setBadUrl(true);
+      else if (r.status === 409) {
+        admin.toast(false, t("admin.notify.env"));
+        reload();
+      }
+      else if (!r.needsAdmin) admin.toast(false, r.status === 0 ? t("admin.notify.offline") : t("admin.notify.saveFailed", { error: failText(i18n, r) }));
+      return false;
+    } catch {
+      // signed out; the next poll takes the panel back to the login screen
+      return false;
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  const saveUrl = async () => {
+    if (!url.trim()) return;
+    setBadUrl(false);
+    if (await change({ url: url.trim() }, t("admin.notify.saved"))) {
+      // Not kept in the page once saved.
+      setUrl("");
+      setEditing(false);
+    }
+  };
+
   const send = async () => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       let r = await testNotify();
@@ -127,19 +197,133 @@ function Notify() {
     } catch {
       // signed out; the next poll takes the panel back to the login screen
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
+
+  const env = cfg?.source === "env";
+  const hasHook = cfg ? cfg.masked !== null : on;
+  const toggleKind = (k: NotifyKind) => {
+    if (!cfg) return;
+    const kinds = cfg.kinds.includes(k) ? cfg.kinds.filter((x) => x !== k) : [...cfg.kinds, k];
+    void change({ kinds });
+  };
+
   return (
     <Section title={t("admin.notify.title")} aside={on ? t("admin.notify.aside.on") : t("admin.notify.aside.off")}>
-      <p className="mb-2 text-sm text-ash">{on ? t("admin.notify.on") : t("admin.notify.off")}</p>
-      {on && (
+      <p className="mb-2 text-sm text-ash">{on ? t("admin.notify.on") : !cfg ? t("admin.notify.idle") : !cfg.masked ? t("admin.notify.off") : !cfg.enabled ? t("admin.notify.paused") : t("admin.notify.noKinds")}</p>
+      {!cfg ? (
+        <p className="mb-2 text-sm text-ash">{canRead ? (failed ? t("admin.notify.loadFailed") : t("admin.notify.loading")) : t("admin.notify.locked")}</p>
+      ) : (
+        <>
+          {env && (
+            <p role="status" className="mb-3 rounded-[3px] border border-iron/50 bg-black/35 px-3 py-2 text-sm text-bone">
+              {t("admin.notify.env")}
+            </p>
+          )}
+          {cfg.masked && !editing ? (
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <p className="min-w-0 flex-1">
+                <span className="label-caps block">{t("admin.notify.webhook")}</span>
+                <span className="block break-all font-mono text-xs text-bone" translate="no">
+                  {cfg.masked}
+                </span>
+              </p>
+              {!env && (
+                <>
+                  <Btn disabled={busy} onClick={() => setEditing(true)}>
+                    {t("admin.notify.replace")}
+                  </Btn>
+                  <Btn disabled={busy} onClick={() => void change(null, t("admin.notify.removed"))}>
+                    {t("admin.notify.remove")}
+                  </Btn>
+                </>
+              )}
+            </div>
+          ) : (
+            !env && (
+              <div className="mb-3">
+                <label htmlFor="notify-url" className="label-caps mb-1.5 block">
+                  {t("admin.notify.url")}
+                </label>
+                <input
+                  id="notify-url"
+                  type="url"
+                  inputMode="url"
+                  value={url}
+                  maxLength={512}
+                  onChange={(e) => {
+                    setUrl(e.target.value);
+                    setBadUrl(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void saveUrl();
+                  }}
+                  placeholder="https://discord.com/api/webhooks/…"
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  aria-invalid={badUrl}
+                  aria-describedby="notify-url-help"
+                  className={`field w-full font-mono ${badUrl ? "field-bad" : ""}`}
+                />
+                <p id="notify-url-help" className={`mt-1.5 text-xs ${badUrl ? "text-blood" : "text-ash"}`} role={badUrl ? "alert" : undefined}>
+                  {badUrl ? t("admin.notify.badUrl") : t("admin.notify.urlHelp")}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Btn primary disabled={busy || !url.trim()} onClick={() => void saveUrl()}>
+                    {t("admin.notify.save")}
+                  </Btn>
+                  {editing && (
+                    <Btn
+                      disabled={busy}
+                      onClick={() => {
+                        setEditing(false);
+                        setUrl("");
+                        setBadUrl(false);
+                      }}
+                    >
+                      {t("admin.notify.cancel")}
+                    </Btn>
+                  )}
+                </div>
+              </div>
+            )
+          )}
+          {cfg.masked && (
+            <>
+              {!env && (
+                <div className="mb-3">
+                  <Chip on={cfg.enabled} disabled={busy} onClick={() => void change({ enabled: !cfg.enabled })}>
+                    {t("admin.notify.enabled")}
+                  </Chip>
+                </div>
+              )}
+              <p className="label-caps mb-1.5">{t("admin.notify.kinds")}</p>
+              <div className="mb-3 flex flex-wrap gap-2">
+                {NOTIFY_KINDS.map((k) => (
+                  <Chip key={k} on={cfg.kinds.includes(k)} disabled={env || busy || !cfg.enabled} onClick={() => toggleKind(k)}>
+                    {t(`admin.notify.kind.${k}`)}
+                  </Chip>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+      {hasHook && (
         <Btn className="w-full" disabled={busy} onClick={() => void send()}>
           {t("admin.notify.test")}
         </Btn>
       )}
     </Section>
   );
+}
+
+/** Only the settings, whatever else the answer carried. */
+function pickNotify(r: NotifyConfig): NotifyConfig {
+  return { source: r.source, masked: r.masked ?? null, enabled: r.enabled, kinds: r.kinds ?? [] };
 }
 
 /** Everything the bridge does to the live world; shown when the agent has a bridge. */

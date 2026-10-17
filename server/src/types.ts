@@ -710,6 +710,26 @@ export interface BridgeStatus {
   commands: string[];
 }
 
+/** The Discord notification kinds; DISCORD_NOTIFY and the admin sheet pick from these. */
+export const NOTIFY_KINDS = ["join", "leave", "death", "raid", "server", "join_code", "version", "failure"] as const;
+export type NotifyKind = (typeof NOTIFY_KINDS)[number];
+
+/**
+ * GET /api/admin/notify: Discord notifications as the admin sheet shows them.
+ * The webhook URL is a secret and never comes back, only `masked`.
+ */
+/** PUT /api/admin/notify: fields left out keep their value. */
+export type NotifyChange = { url?: string; enabled?: boolean; kinds?: NotifyKind[] };
+
+export interface NotifyConfig {
+  /** "env": DISCORD_WEBHOOK_URL is set and wins, read-only in the panel. */
+  source: "env" | "panel";
+  /** The webhook in a form that cannot be used, e.g. "discord.com/api/webhooks/…6789/AbCd…"; null when none is set. */
+  masked: string | null;
+  enabled: boolean;
+  kinds: NotifyKind[];
+}
+
 /** GET /api/admin/status: the bridge and whether this browser may command it. */
 export interface AdminStatus {
   bridge: BridgeStatus;
@@ -719,7 +739,7 @@ export interface AdminStatus {
   unlocked: boolean;
   /** Idle timeout of an admin session, in ms. */
   idleMs: number;
-  /** DISCORD_WEBHOOK_URL is set; the URL itself never leaves the server. */
+  /** Discord notifications go out (a webhook from the environment or the panel, turned on); the URL never leaves the server. */
   notifyConfigured: boolean;
   /** A newer Skald release than this skald-web; null when none is known or the check is off. */
   update?: { version: string; url: string } | null;
