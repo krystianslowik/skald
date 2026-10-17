@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.11] - 2026-10-17
+
 ### Changed
 
 - The map's terrain tiles are now kept on the device between visits, so the map opens sharp again without downloading them. On Safari (iPhone and Mac) every visit used to download every tile again, because Safari skips its normal browser cache on every visit after the first (once the panel's offline helper is installed); in a test with 0.6 s per tile the first screen took 1.1-1.2 s to sharpen on a second visit and now takes 0.7-1.0 s, with no tile downloaded twice. On Chrome and Android the tiles now also survive the browser clearing its cache: a visit after that took 3.4 s and now 0.65 s. The tiles are kept per world and game version (a new world or game update starts afresh and drops the old ones), take at most 200 MB (or a quarter of the space the browser allows the panel, if that is less; the least recently viewed go first), and are deleted on Log out or when the session ends. Installed to the home screen, the panel also asks the browser to keep them under storage pressure (#69).
