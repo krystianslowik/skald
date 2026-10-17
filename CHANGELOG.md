@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- The map springs back from the edge of the world over about a third of a second instead of snapping back at once, and a fling into the edge now runs on into it further the faster it was before springing back.
+- A tap on the map while it springs back from the closest or farthest zoom, or from the edge of the world, no longer leaves it stuck past that limit: it springs back once the finger lifts.
+
 ## [2026.10.9] - 2026-10-17
 
 ### Changed
