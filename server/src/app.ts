@@ -668,7 +668,7 @@ export function createApp(deps: AppDeps): Hono {
         currentEvent: evd?.current ? { name: evd.current.name, elapsed: evd.current.elapsed, duration: evd.current.duration } : null,
         globalKeys: keys.status === 200 && Array.isArray(keyd) ? keyd : [],
         spots: locs.status === 200 && Array.isArray(locd?.aliases) ? locd.aliases : [],
-        stations: st.status === 200 ? fillStations((st.body as { data?: unknown }).data) : { kilns: [], smelters: [] },
+        stations: st.status === 200 ? fillStations((st.body as { data?: unknown }).data) : { kilns: [], smelters: [], fermenters: [] },
       };
       // A world still loading answers the stations read with 503: not kept, so the next open asks again.
       if (st.status === 200 || st.status === 404) catalogCache = { at: now, value };
@@ -777,11 +777,12 @@ const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is
 
 /** The bridge's station list, keeping only well-formed entries. */
 export function fillStations(data: unknown): FillStations {
-  const d = (data ?? {}) as { kilns?: unknown; smelters?: unknown };
+  const d = (data ?? {}) as { kilns?: unknown; smelters?: unknown; fermenters?: unknown };
   const list = (v: unknown) => (Array.isArray(v) ? v.filter((s): s is Record<string, unknown> => !!s && typeof s === "object" && typeof (s as { prefab?: unknown }).prefab === "string") : []);
   return {
     kilns: list(d.kilns).map((s) => ({ prefab: s.prefab as string, inputs: strings(s.inputs) })),
     smelters: list(d.smelters).map((s) => ({ prefab: s.prefab as string, fuel: typeof s.fuel === "string" ? s.fuel : null, inputs: strings(s.inputs) })),
+    fermenters: list(d.fermenters).map((s) => ({ prefab: s.prefab as string, inputs: strings(s.inputs) })),
   };
 }
 

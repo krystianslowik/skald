@@ -16,7 +16,7 @@ namespace Skald.Bridge
     public class SkaldBridgePlugin : BaseUnityPlugin
     {
         public const string Guid = "dev.skald.bridge";
-        public const string Version = "0.3.0";
+        public const string Version = "0.3.1";
         public const string Prefix = "[SkaldBridge]";
 
         internal static ManualLogSource Log;
@@ -190,7 +190,8 @@ namespace Skald.Bridge
             (typeof(ObjectDB), "GetItemPrefab"), (typeof(ItemDrop), "SetStack"), (typeof(ItemDrop), "SetQuality"),
             (typeof(ItemDrop), "m_itemData"),
             (typeof(ZDOMan), "GetZDO"), (typeof(ZDO), "GetFloat"), (typeof(ZDO), "GetPosition"),
-            (typeof(ZDOVars), "s_health"), (typeof(ZDOVars), "s_maxHealth"),
+            (typeof(ZDOVars), "s_health"), (typeof(ZDOVars), "s_maxHealth"), (typeof(ZDOVars), "s_content"),
+            (typeof(Fermenter), "m_conversion"),
             (typeof(WorldGenerator), "GetHeight"),
         };
 

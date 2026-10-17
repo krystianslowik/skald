@@ -1,5 +1,5 @@
 import { createContext, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { AdminCommand, AdminStatus, AgentEvent, ApiState, Platform, RestoreBackup } from "../../types";
+import type { AdminCatalog, AdminCommand, AdminStatus, AgentEvent, ApiState, Platform, RestoreBackup } from "../../types";
 import { getAdminStatus, postAdmin, runAdmin, type AdminOutcome, type KitLine } from "../../lib/admin";
 import { Unauthorized } from "../../lib/api";
 import { useWorldMap } from "../../lib/useWorldMap";
@@ -15,6 +15,15 @@ export type Target = { player: string } | { at: { x: number; z: number }; label?
 
 export const targetBody = (t: Target): Record<string, unknown> => ("player" in t ? { player: t.player } : { at: { x: Math.round(t.at.x), z: Math.round(t.at.z) } });
 
+/** The success toast: fixed, or built from what the command answered. */
+export type Done = string | ((data: unknown) => string);
+
+/** What a fill flow has picked so far, kept in the view so a map pick does not lose it. */
+export interface FillChoice {
+  pick: string | null;
+  coal: "both" | "ore" | "coal" | null;
+}
+
 /**
  * A sheet the admin layer shows; only one at a time, the unlock sheet over
  * any. `picked` is a point just picked on the map for it (the sheet steps
@@ -27,6 +36,7 @@ export type AdminView = (
   | { kind: "creatures"; target: Target }
   | { kind: "point"; x: number; z: number }
   | { kind: "restore"; backup: RestoreBackup }
+  | { kind: "fill"; station: "smelters" | "fermenters"; target: Target; choice?: FillChoice; catalog?: AdminCatalog | null }
 ) & { picked?: { x: number; z: number } };
 
 /** A map tap someone is waiting for (teleport here, spawn here). */
@@ -58,9 +68,9 @@ export interface Admin {
   /** May command now (no admin password, or unlocked). */
   unlocked: boolean;
   refresh(): void;
-  run(command: AdminCommand, body?: Record<string, unknown>, opts?: { quiet?: boolean; done?: string }): Promise<AdminOutcome>;
+  run(command: AdminCommand, body?: Record<string, unknown>, opts?: { quiet?: boolean; done?: Done }): Promise<AdminOutcome>;
   /** Any other admin POST (lists, restore), with the same unlock-and-retry and toasts. */
-  post(path: string, body: Record<string, unknown>, opts?: { quiet?: boolean; done?: string }): Promise<AdminOutcome>;
+  post(path: string, body: Record<string, unknown>, opts?: { quiet?: boolean; done?: Done }): Promise<AdminOutcome>;
   open(view: AdminView): void;
   close(): void;
   /** Ask for the admin password; resolves true once unlocked. */
@@ -157,7 +167,7 @@ export function AdminProvider({
   );
 
   const call = useCallback(
-    async (send: () => Promise<AdminOutcome>, opts: { quiet?: boolean; done?: string } = {}) => {
+    async (send: () => Promise<AdminOutcome>, opts: { quiet?: boolean; done?: Done } = {}) => {
       let res: AdminOutcome;
       try {
         res = await send();
@@ -168,7 +178,7 @@ export function AdminProvider({
       }
       if (!res.ok && res.status === 409) refresh();
       if (!opts.quiet) {
-        if (res.ok) toast(true, opts.done ?? t("admin.done"));
+        if (res.ok) toast(true, (typeof opts.done === "function" ? opts.done(res.data) : opts.done) ?? t("admin.done"));
         else if (!res.needsAdmin) toast(false, res.status === 0 || res.status === 502 ? t("admin.unreachable") : res.error || t("admin.failed"));
       }
       return res;

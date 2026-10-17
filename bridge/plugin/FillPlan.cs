@@ -19,12 +19,12 @@ namespace Skald.Bridge
         public int MaxFuel;
     }
 
-    enum StationKind { Other, Kiln, Smelter }
+    enum StationKind { Other, Kiln, Smelter, Fermenter }
 
     enum FillWhat { Ore, Both, Fuel }
 
     // Why a station gets nothing: it does not take the chosen ore, it holds
-    // no ore to keep, or it is full.
+    // no ore to keep, or it is full (a fermenter: already holds a batch).
     enum FillSkip { None, Rejects, Empty, Full }
 
     // What to add to one station, or why it gets nothing.
@@ -110,6 +110,16 @@ namespace Skald.Bridge
                 step.FuelCount = Math.Max(0, (int)Math.Floor(s.MaxFuel - fuel));
             if (step.OreCount == 0 && step.FuelCount == 0) return new FillStep { Skip = FillSkip.Full };
             return step;
+        }
+
+        // A fermenter takes one mead base, and only while it is empty: one
+        // fermenting or holding mead to tap is left alone. There is no "keep
+        // current" here, since an empty fermenter holds nothing to keep.
+        public static FillStep Fermenter(Station s, string mead, string content)
+        {
+            if (string.IsNullOrEmpty(mead) || !s.Inputs.Contains(mead)) return new FillStep { Skip = FillSkip.Rejects };
+            if (!string.IsNullOrEmpty(content)) return new FillStep { Skip = FillSkip.Full };
+            return new FillStep { Ore = mead, OreCount = 1 };
         }
     }
 }

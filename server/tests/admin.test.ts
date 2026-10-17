@@ -142,7 +142,7 @@ describe("admin without an admin password", () => {
     const cookie = await signIn(app);
     const cat = await (await app.request("/api/admin/catalog", { headers: { Cookie: cookie } })).json();
     // The bridge is older than 0.3.0: the catalog still answers, with no stations.
-    expect(cat).toEqual({ events: ["wolves"], currentEvent: null, globalKeys: ["defeated_eikthyr"], spots: ["spawn"], stations: { kilns: [], smelters: [] } });
+    expect(cat).toEqual({ events: ["wolves"], currentEvent: null, globalKeys: ["defeated_eikthyr"], spots: ["spawn"], stations: { kilns: [], smelters: [], fermenters: [] } });
   });
 
   it("keeps only well-formed fill stations", () => {
@@ -150,6 +150,7 @@ describe("admin without an admin password", () => {
       fillStations({
         kilns: [{ prefab: "charcoal_kiln", inputs: ["Wood", 7] }, { inputs: ["Wood"] }],
         smelters: [{ prefab: "blastfurnace", fuel: "Coal", inputs: ["BlackMetalScrap"] }, { prefab: "odd", inputs: "x" }, null],
+        fermenters: [{ prefab: "fermenter", inputs: ["MeadBaseTasty", null] }, "x"],
       }),
     ).toEqual({
       kilns: [{ prefab: "charcoal_kiln", inputs: ["Wood"] }],
@@ -157,8 +158,11 @@ describe("admin without an admin password", () => {
         { prefab: "blastfurnace", fuel: "Coal", inputs: ["BlackMetalScrap"] },
         { prefab: "odd", fuel: null, inputs: [] },
       ],
+      fermenters: [{ prefab: "fermenter", inputs: ["MeadBaseTasty"] }],
     });
-    expect(fillStations(undefined)).toEqual({ kilns: [], smelters: [] });
+    // A 0.3.0 bridge sends no fermenters.
+    expect(fillStations({ kilns: [], smelters: [] })).toEqual({ kilns: [], smelters: [], fermenters: [] });
+    expect(fillStations(undefined)).toEqual({ kilns: [], smelters: [], fermenters: [] });
   });
 });
 
@@ -349,6 +353,26 @@ describe("mock bridge", () => {
     expect(fills[3]).toMatchObject({ what: "ore", ore: "current", smelters: 1, skipped: 2, added: { IronScrap: 1 } });
     expect(fills[3]).not.toHaveProperty("fuel");
     expect(fills[4]).toMatchObject({ what: "both", ore: "current", smelters: 3, skipped: 0, added: { IronScrap: 1 }, fuel: "Coal" });
+    abort.abort();
+    mock.stop();
+  });
+
+  it("fills fermenters with the chosen mead base", async () => {
+    const mock = new MockAgent(Date.now, "UTC");
+    const evs: AgentEvent[] = [];
+    const abort = new AbortController();
+    void mock.stream(1_000_000, (e) => evs.push(e), abort.signal);
+    const st = (await mock.bridge({ op: "read", name: "stations" })).body as { data: { fermenters: { inputs: string[] }[] } };
+    expect(st.data.fermenters.flatMap((s) => s.inputs)).toContain("MeadBaseTasty");
+    const run = (body: Record<string, unknown>) => mock.bridge({ op: "run", command: "fill-fermenters", body: { player: "Freya", ...body }, actor: "t" });
+    expect((await run({ base: "MeadBaseTasty" })).status).toBe(200);
+    expect((await run({})).status).toBe(400);
+    expect((await run({ base: "CopperOre" })).status).toBe(400);
+    const fills = evs.filter((e) => e.type === "admin").map((e) => e.data);
+    // The two refusals are audited too, as errors.
+    expect(fills.map((f) => f.result)).toEqual(["ok", "error", "error"]);
+    expect(fills[0]).toMatchObject({ command: "fill-fermenters", base: "MeadBaseTasty", fermenters: 2, full: 1, added: { MeadBaseTasty: 2 }, player: "Freya" });
+    expect(fills[0]).not.toHaveProperty("fuel");
     abort.abort();
     mock.stop();
   });

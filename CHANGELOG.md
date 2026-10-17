@@ -9,6 +9,16 @@ above them.
 
 ## [Unreleased]
 
+### Added
+
+- **Fill fermenters** is back as its own admin action under Base helpers: pick the mead base from its icon, check where (near a player, around the base or a point on the map), and every empty fermenter there gets one batch of it. A fermenter that is still fermenting, or holds mead waiting to be tapped, is left alone. The Saga says what went in ("started 2 fermenters with Mead Base: Tasty near Freya").
+- **Operators:** Fill fermenters needs the bridge 0.3.1 image (`skald-bridge`); it adds `POST /v1/build/fill-fermenters` and lists the mead bases each fermenter takes in `GET /v1/build/stations`. The new plugin loads only when the game restarts. With bridge 0.3.0 the mead base list stays empty and says so; everything else works as before.
+
+### Changed
+
+- **Fill smelters** is now a short step-by-step flow instead of rows of buttons: pick the metal from an icon grid (only ores some smelter or blast furnace takes, or "keep the current ore"), then whether coal goes in (with coal, no coal, or coal only), then check a one-line summary such as "Smelters near Ragnar: scrap iron and coal" and fill. Each step fits one phone screen, with Back to change an earlier choice. Fill kilns with wood still works in one tap.
+- The fill buttons now say what really happened instead of always "Filled.": how many kilns, smelters or fermenters got something, or that nothing went in because the stations there are full, refuse that item, are not loaded by any player nearby, or are not there at all. The smelter and fermenter flows end on this result, with Fill again and Done.
+
 ### Fixed
 
 - One dropped download of the language file no longer leaves the page blank or the language switch dead until a reload. The panel asks for it again, and a switch that failed while offline works on the next press once the connection is back. A tab left open across an update that changed the texts reloads once into the new version, in the language you picked.

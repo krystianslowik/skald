@@ -80,6 +80,12 @@ const MOCK_STATIONS: FillStations = {
     { prefab: "smelter", fuel: "Coal", inputs: ["CopperOre", "TinOre", "IronScrap", "SilverOre"] },
     { prefab: "blastfurnace", fuel: "Coal", inputs: ["BlackMetalScrap", "FlametalOreNew"] },
   ],
+  fermenters: [
+    {
+      prefab: "fermenter",
+      inputs: ["MeadBaseTasty", "MeadBaseHealthMinor", "MeadBaseStaminaMinor", "MeadBasePoisonResist", "MeadBaseFrostResist", "MeadBaseHealthMedium", "MeadBaseStaminaMedium", "MeadBaseEitrMinor"],
+    },
+  ],
 };
 /** What the mock's "plugin" says it was tested on. */
 const MOCK_BUILD = "l-1.0.17";
@@ -937,6 +943,15 @@ export class MockAgent implements AgentSource {
         data = { smelters, skipped, full: 0, unloaded: 0, added, ...(what !== "ore" && smelters > 0 ? { fuel: "Coal" } : {}), near, radius: Number(body.radius ?? 20) };
         break;
       }
+      case "fill-fermenters": {
+        // The plugin's rule (FillPlan.Fermenter) on a base with three
+        // fermenters, one of them still fermenting.
+        const mead = typeof body.base === "string" ? body.base : "";
+        if (!mead) return fail(400, "missing 'base'");
+        if (!MOCK_STATIONS.fermenters.some((s) => s.inputs.includes(mead))) return fail(400, `no fermenter takes '${mead}'; GET /v1/build/stations lists what each one takes`);
+        data = { fermenters: 2, skipped: 0, full: 1, unloaded: 0, added: { [mead]: 2 }, near, radius: Number(body.radius ?? 20) };
+        break;
+      }
       case "grow":
         data = { plants: Math.floor(Math.random() * 30), near };
         break;
@@ -1327,7 +1342,7 @@ export class MockAgent implements AgentSource {
 /** The agent's argument summary for an admin event: names, never ids. */
 function mockSummary(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const k of ["type", "item", "amount", "quality", "prefab", "count", "level", "tamed", "includeBosses", "name", "key", "effect", "dayFraction", "toSpot", "radius", "what", "ore", "player", "toPlayer"]) {
+  for (const k of ["type", "item", "amount", "quality", "prefab", "count", "level", "tamed", "includeBosses", "name", "key", "effect", "dayFraction", "toSpot", "radius", "what", "ore", "base", "player", "toPlayer"]) {
     if (body[k] !== undefined) out[k] = body[k];
   }
   if (typeof body.text === "string") out.text = body.text.slice(0, 120);

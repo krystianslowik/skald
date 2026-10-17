@@ -94,6 +94,8 @@ func (f *fakePlugin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ok(map[string]any{"day": 12, "dayFraction": 0.5})
 	case "/v1/build/fill-smelters":
 		ok(map[string]any{"smelters": 3, "skipped": 1, "full": 0, "unloaded": 0, "added": map[string]any{"IronScrap": 3}, "fuel": "Coal", "near": "Ragnar", "radius": 50})
+	case "/v1/build/fill-fermenters":
+		ok(map[string]any{"fermenters": 2, "skipped": 0, "full": 1, "unloaded": 0, "added": map[string]any{"MeadBaseTasty": 2}, "near": "Freya", "radius": 50})
 	case "/v1/build/fill-kilns":
 		ok(map[string]any{"kilns": 2, "full": 1, "unloaded": 0, "added": map[string]any{"Wood": 2}, "near": "position", "radius": 50})
 	default:
@@ -453,7 +455,7 @@ func TestConcurrentCommandsKeepTheirArguments(t *testing.T) {
 }
 
 func TestFillAuditSaysWhatWentIn(t *testing.T) {
-	if Commands["fill-kilns"].Path != "/v1/build/fill-kilns" || Commands["fill-smelters"].Path != "/v1/build/fill-smelters" || Reads["stations"] != "/v1/build/stations" {
+	if Commands["fill-kilns"].Path != "/v1/build/fill-kilns" || Commands["fill-smelters"].Path != "/v1/build/fill-smelters" || Commands["fill-fermenters"].Path != "/v1/build/fill-fermenters" || Reads["stations"] != "/v1/build/stations" {
 		t.Fatalf("fill routes missing from the allow-lists")
 	}
 	hub := events.New(100, 10)
@@ -465,13 +467,16 @@ func TestFillAuditSaysWhatWentIn(t *testing.T) {
 	if _, err := c.Run(ctx, "fill-kilns", map[string]any{"radius": 50, "at": map[string]any{"x": 10.4, "z": -3}}, "k"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := c.Run(ctx, "fill-fermenters", map[string]any{"base": "MeadBaseTasty", "radius": 50, "player": "Freya"}, "k"); err != nil {
+		t.Fatal(err)
+	}
 	// Choosing the ore reads the stations first; a read is never audited.
 	if _, err := c.Read(ctx, "stations"); err != nil {
 		t.Fatal(err)
 	}
 	evs := adminEvents(t, hub)
-	if len(evs) != 2 {
-		t.Fatalf("want 2 admin events, got %+v", evs)
+	if len(evs) != 3 {
+		t.Fatalf("want 3 admin events, got %+v", evs)
 	}
 	b, _ := json.Marshal(evs)
 	if strings.Contains(string(b), "1234567890123456789") {
@@ -490,6 +495,13 @@ func TestFillAuditSaysWhatWentIn(t *testing.T) {
 	}
 	if added, _ := k["added"].(map[string]any); added["Wood"] != float64(2) {
 		t.Fatalf("fill-kilns added %+v", k["added"])
+	}
+	f := evs[2]
+	if f["command"] != "fill-fermenters" || f["base"] != "MeadBaseTasty" || f["fermenters"] != float64(2) || f["full"] != float64(1) || f["player"] != "Freya" || f["fuel"] != nil {
+		t.Fatalf("fill-fermenters %+v", f)
+	}
+	if added, _ := f["added"].(map[string]any); added["MeadBaseTasty"] != float64(2) {
+		t.Fatalf("fill-fermenters added %+v", f["added"])
 	}
 }
 

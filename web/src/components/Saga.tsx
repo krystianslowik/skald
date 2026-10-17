@@ -45,7 +45,7 @@ export function actionTitle(i: Pick<I18n, "t">, name: string): string {
 type Tone = "join" | "leave" | "death" | "save" | "slow" | "server" | "action" | "raid" | "settings" | "admin";
 
 /** Commands whose saga line names a player when there was one ("for X", "near X"). */
-const WITH_PLAYER = new Set(["spawn", "creature-spawn", "creature-kill", "creature-tame", "repair", "fill", "fill-kilns", "fill-smelters", "grow", "map-reveal", "map-pins", "event-start"]);
+const WITH_PLAYER = new Set(["spawn", "creature-spawn", "creature-kill", "creature-tame", "repair", "fill", "fill-kilns", "fill-smelters", "fill-fermenters", "grow", "map-reveal", "map-pins", "event-start"]);
 
 /** "20 Wood, Iron sword ★3 and 2 more": what a spawn dropped. */
 function itemsText(i: Pick<I18n, "lookup" | "t">, d: Record<string, unknown>): string {
@@ -59,11 +59,17 @@ function itemsText(i: Pick<I18n, "lookup" | "t">, d: Record<string, unknown>): s
   return more > 0 ? i.t("saga.admin.more", { list: parts.join(", "), n: more }) : parts.join(", ");
 }
 
-/** "scrap iron and coal": what a fill command put in, by the items the bridge reported. */
-export function fillText(i: Pick<I18n, "lookup" | "intl">, d: Record<string, unknown>): string {
+/**
+ * "scrap iron and coal": what a fill command put in, by the items the bridge
+ * reported. Mead bases keep their capitals ("Mead Base: Tasty").
+ */
+export function fillText(i: Pick<I18n, "lookup" | "intl">, d: Record<string, unknown>, lower = true): string {
   const added = d.added && typeof d.added === "object" ? Object.keys(d.added) : [];
   const names = [...added, ...(typeof d.fuel === "string" && d.fuel ? [d.fuel] : [])];
-  const labels = names.map((n) => (i.lookup(`admin.fill.item.${n}`) ?? itemLabel(n, i.lookup)).toLocaleLowerCase(i.intl));
+  const labels = names.map((n) => {
+    const label = i.lookup(`admin.fill.item.${n}`) ?? itemLabel(n, i.lookup);
+    return lower ? label.toLocaleLowerCase(i.intl) : label;
+  });
   return new Intl.ListFormat(i.intl, { type: "conjunction" }).format(labels);
 }
 
@@ -139,6 +145,7 @@ export function describeAdmin(i: I18n, d: Record<string, unknown>): string {
       break;
     case "fill-kilns":
     case "fill-smelters":
+    case "fill-fermenters":
       return describeFill(i, command, d, actor, player);
     case "grow":
       vars.n = Number(d.plants ?? 0);
@@ -162,13 +169,10 @@ export function describeAdmin(i: I18n, d: Record<string, unknown>): string {
  * "filled 3 smelters with scrap iron and coal near Ragnar"; or that the
  * stations there were full or refused the ore; or that there were none.
  */
-function describeFill(i: I18n, command: "fill-kilns" | "fill-smelters", d: Record<string, unknown>, actor: string, player: string): string {
-  const n = Number((command === "fill-kilns" ? d.kilns : d.smelters) ?? 0) || 0;
-  const vars = { actor, player, what: fillText(i, d) };
-  if (n > 0) {
-    if (command === "fill-kilns") return player ? i.tn("saga.admin.fill-kilns", n, vars) : i.tn("saga.admin.fill-kilns.at", n, vars);
-    return player ? i.tn("saga.admin.fill-smelters", n, vars) : i.tn("saga.admin.fill-smelters.at", n, vars);
-  }
+function describeFill(i: I18n, command: "fill-kilns" | "fill-smelters" | "fill-fermenters", d: Record<string, unknown>, actor: string, player: string): string {
+  const n = Number((command === "fill-kilns" ? d.kilns : command === "fill-smelters" ? d.smelters : d.fermenters) ?? 0) || 0;
+  const vars = { actor, player, what: fillText(i, d, command !== "fill-fermenters") };
+  if (n > 0) return i.tn(player ? `saga.admin.${command}` : `saga.admin.${command}.at`, n, vars);
   const untouched = (Number(d.skipped ?? 0) || 0) + (Number(d.full ?? 0) || 0) > 0;
   const key = `saga.admin.${command}${untouched ? ".unchanged" : ".none"}${player ? "" : ".at"}`;
   return i.lookup(key, vars) ?? i.t("saga.admin.generic", { actor, what: i.t(`saga.admin.cmd.${command}`) });

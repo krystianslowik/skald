@@ -9,6 +9,7 @@ public class FillPlanTests
     static readonly Station Smelter = new Station { Prefab = "smelter", Fuel = "Coal", Inputs = new[] { "CopperOre", "TinOre", "IronScrap" }, Outputs = new[] { "Copper", "Tin", "Iron" }, MaxOre = 10, MaxFuel = 20 };
     static readonly Station Furnace = new Station { Prefab = "blastfurnace", Fuel = "Coal", Inputs = new[] { "BlackMetalScrap" }, Outputs = new[] { "BlackMetal" }, MaxOre = 10, MaxFuel = 20 };
     static readonly Station Windmill = new Station { Prefab = "windmill", Inputs = new[] { "Barley" }, Outputs = new[] { "BarleyFlour" }, MaxOre = 50 };
+    static readonly Station Fermenter = new Station { Prefab = "fermenter", Inputs = new[] { "MeadBaseHealthMinor", "MeadBaseTasty" }, Outputs = new[] { "MeadHealthMinor", "MeadTasty" }, MaxOre = 1 };
     static readonly Station Refinery = new Station { Prefab = "eitrrefinery", Fuel = "Sap", Inputs = new[] { "Softtissue" }, Outputs = new[] { "Eitr" }, MaxOre = 20, MaxFuel = 20 };
 
     [Fact]
@@ -95,5 +96,26 @@ public class FillPlanTests
         Assert.Equal(FillWhat.Fuel, FillPlan.ParseWhat("coal"));
         Assert.Equal(FillWhat.Both, FillPlan.ParseWhat(null));
         Assert.Throws<ArgumentException>(() => FillPlan.ParseWhat("everything"));
+    }
+
+    [Fact]
+    public void FermentersTakeOneBaseOnlyWhenEmpty()
+    {
+        var s = FillPlan.Fermenter(Fermenter, "MeadBaseTasty", "");
+        Assert.Equal(FillSkip.None, s.Skip);
+        Assert.Equal("MeadBaseTasty", s.Ore);
+        Assert.Equal(1, s.OreCount);
+        Assert.Equal(0, s.FuelCount);
+        // Fermenting, or mead waiting to be tapped: left alone.
+        Assert.Equal(FillSkip.Full, FillPlan.Fermenter(Fermenter, "MeadBaseTasty", "MeadBaseHealthMinor").Skip);
+        Assert.Equal(FillSkip.Rejects, FillPlan.Fermenter(Fermenter, "CopperOre", null).Skip);
+        Assert.Equal(FillSkip.Rejects, FillPlan.Fermenter(Fermenter, null, null).Skip);
+    }
+
+    [Fact]
+    public void FermentersAreNeverKilnsOrSmelters()
+    {
+        var kinds = FillPlan.Classify(new[] { Kiln, Smelter, Fermenter });
+        Assert.Equal(StationKind.Other, kinds["fermenter"]);
     }
 }

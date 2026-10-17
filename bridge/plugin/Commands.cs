@@ -56,6 +56,7 @@ namespace Skald.Bridge
             R("POST", "/v1/build/fill", true, Extras.Fill),
             R("POST", "/v1/build/fill-kilns", true, Extras.FillKilns),
             R("POST", "/v1/build/fill-smelters", true, Extras.FillSmelters),
+            R("POST", "/v1/build/fill-fermenters", true, Extras.FillFermenters),
             R("GET", "/v1/build/stations", false, Extras.FillStations),
             R("POST", "/v1/build/grow", true, Extras.Grow),
             R("GET", "/v1/tombstones", false, Extras.Tombstones),
