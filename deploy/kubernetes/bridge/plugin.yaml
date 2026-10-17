@@ -20,7 +20,7 @@ spec:
         # BepInEx install, if it exists yet) after deleting older copies:
         # the image syncs that directory on start but never prunes it.
         - name: bridge-plugin
-          image: ghcr.io/krystianslowik/skald-bridge:2026.10.6
+          image: ghcr.io/krystianslowik/skald-bridge:2026.10.7
           imagePullPolicy: IfNotPresent
           resources:
             requests: {cpu: 10m, memory: 8Mi}

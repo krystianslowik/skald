@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.7] - 2026-10-17
+
 ### Fixed
 
 - When the game refuses an admin action, the panel now says why in your language instead of the bridge's English, names the player where there is one and says what to do: "Ragnar stoi przy skrzyni. Spróbuj, gdy odejdzie." for Add item, and the same for the other chest refusals (open, no room or only so many fit, moved or destroyed since the last save, two chests on one spot), for Fill smelters and Fill fermenters (the player left, nothing takes that ore), and for other admin commands (world still loading, time already frozen, no event running, and so on). The Saga line of a failed command uses the same words. Refusals the panel does not know yet still show as the game wrote them. No bridge update or game restart needed (#106).
