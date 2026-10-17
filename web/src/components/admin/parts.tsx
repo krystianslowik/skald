@@ -24,15 +24,19 @@ export function Section({ title, aside, children, id }: { title: string; aside?:
   );
 }
 
-/** The header every admin sheet shares: an emblem slot, kicker, title, close. */
-export function AdminHead({ id, kicker, title, sub, emblem, onClose }: { id: string; kicker: string; title: ReactNode; sub?: ReactNode; emblem: ReactNode; onClose: () => void }) {
+/**
+ * The header every admin sheet shares: an emblem slot, kicker, title, close.
+ * `wrap` lets a long title take a second, smaller line on a phone instead of
+ * being cut off.
+ */
+export function AdminHead({ id, kicker, title, sub, emblem, onClose, wrap = false }: { id: string; kicker: string; title: ReactNode; sub?: ReactNode; emblem: ReactNode; onClose: () => void; wrap?: boolean }) {
   const { t } = useI18n();
   return (
     <div className="flex items-center gap-4 pl-2">
       <span className="slot grid h-16 w-16 shrink-0 place-items-center">{emblem}</span>
       <div className="min-w-0 flex-1">
         <p className="label-caps">{kicker}</p>
-        <h2 id={id} className="plank-title truncate text-2xl">
+        <h2 id={id} className={`plank-title ${wrap ? "text-xl leading-tight sm:text-2xl" : "truncate text-2xl"}`}>
           {title}
         </h2>
         {sub && <div className="truncate text-xs text-ash">{sub}</div>}

@@ -3,10 +3,11 @@ import type { AdminCatalog } from "../../types";
 import { BROADCAST_MAX, gameClock, getCatalog, lockAdmin, storeActorName, storedActorName, testNotify, WORLD_KEYS } from "../../lib/admin";
 import { useLivePositions } from "../../lib/live";
 import { useI18n, type TextKey } from "../../i18n";
-import { itemLabel, prettify } from "../../lib/storage";
+import { ItemIcon } from "../storage/ItemIcon";
 import { PlatformGlyph } from "../PlatformGlyph";
 import { Sheet } from "../Sheet";
-import { targetBody, useAdmin, type Target } from "./AdminContext";
+import { targetBody, useAdmin, type Done, type Target } from "./AdminContext";
+import { fillResult } from "./FillSheet";
 import { AdminGlyph } from "./glyphs";
 import { HoldButton } from "./HoldButton";
 import { SkaldVersion } from "../SkaldVersion";
@@ -484,80 +485,37 @@ function WorldKeys({ catalog, onChange }: { catalog: AdminCatalog | null; onChan
   );
 }
 
-type FillWhat = "ore" | "both" | "coal";
-const FILL_WHAT: FillWhat[] = ["ore", "both", "coal"];
-
 /**
- * Fill smelters: what goes in, and which ore. The ores come from the game
- * (the bridge reads what each station takes), grouped by station, so a pick
- * the station would refuse is never offered for it.
+ * Repair, fill, grow, reveal the map: around a base or a player, within 100 m.
+ * Kilns only ever take wood, so they fill in one tap; smelters and fermenters
+ * open a short flow to pick what goes in.
  */
-function FillSmelters({ catalog, target, off }: { catalog: AdminCatalog | null; target: Target | null; off: boolean }) {
-  const { t, lookup } = useI18n();
-  const admin = useAdmin()!;
-  const [what, setWhat] = useState<FillWhat>("both");
-  const [ore, setOre] = useState("current");
-  const smelters = (catalog?.stations?.smelters ?? []).filter((s) => s.inputs.length > 0);
-  const label = (item: string) => lookup(`admin.fill.item.${item}`) ?? itemLabel(item, lookup);
-  const go = () => target && void admin.run("fill-smelters", { radius: 50, what, ...(what === "coal" ? {} : { ore }), ...targetBody(target) }, { done: t("admin.base.filled") });
-  return (
-    <div className="mt-4 border-t border-iron/40 pt-3">
-      <p className="text-sm font-bold text-bone">{t("admin.fill.title")}</p>
-      <p className="label-caps mb-2 mt-2">{t("admin.fill.what")}</p>
-      <div className="flex flex-wrap gap-2">
-        {FILL_WHAT.map((w) => (
-          <Chip key={w} on={what === w} onClick={() => setWhat(w)}>
-            {t(`admin.fill.what.${w}`)}
-          </Chip>
-        ))}
-      </div>
-      {what !== "coal" && (
-        <>
-          <p className="label-caps mb-2 mt-3">{t("admin.fill.ore")}</p>
-          <div className="flex flex-wrap gap-2">
-            <Chip on={ore === "current"} onClick={() => setOre("current")}>
-              {t("admin.fill.current")}
-            </Chip>
-          </div>
-          {ore === "current" && <p className="mt-1.5 text-xs text-ash">{t("admin.fill.currentNote")}</p>}
-          {smelters.map((s) => (
-            <div key={s.prefab} className="mt-2.5">
-              <p className="mb-1.5 text-xs text-ash">{lookup(`admin.fill.station.${s.prefab}`) ?? prettify(s.prefab)}</p>
-              <div className="flex flex-wrap gap-2">
-                {s.inputs.map((item) => (
-                  <Chip key={item} on={ore === item} onClick={() => setOre(item)}>
-                    {label(item)}
-                  </Chip>
-                ))}
-              </div>
-            </div>
-          ))}
-          {catalog && smelters.length === 0 && <p className="mt-2 text-xs text-ash">{t("admin.fill.noStations")}</p>}
-        </>
-      )}
-      <Btn primary className="mt-3 w-full" disabled={off} onClick={go}>
-        {t("admin.fill.go")}
-      </Btn>
-    </div>
-  );
-}
-
-/** Repair, fill, grow, reveal the map: around a base or a player, within 100 m. */
 function BaseHelpers({ catalog, picked }: { catalog: AdminCatalog | null; picked: Target | null }) {
-  const { t } = useI18n();
+  const i18n = useI18n();
+  const { t } = i18n;
   const admin = useAdmin()!;
   const [target, setTarget] = useState<Target | null>(picked ?? (admin.mainBase ? { at: admin.mainBase, label: "base" } : admin.players[0] ? { player: admin.players[0].name } : null));
   const off = !!admin.blocker || !target;
-  const go = (command: "repair" | "fill-kilns" | "grow" | "map-reveal", done: string) => target && void admin.run(command, { radius: command === "map-reveal" ? 60 : 50, ...targetBody(target) }, { done });
+  const go = (command: "repair" | "fill-kilns" | "grow" | "map-reveal", done: Done) => target && void admin.run(command, { radius: command === "map-reveal" ? 60 : 50, ...targetBody(target) }, { done });
+  const fill = (station: "smelters" | "fermenters") => target && admin.open({ kind: "fill", station, target, catalog });
   return (
     <Section title={t("admin.base.title")}>
       <TargetChips value={target} onChange={setTarget} />
       <div className="mt-3 grid grid-cols-2 gap-2">
+        <Btn disabled={off} onClick={() => go("fill-kilns", (data) => fillResult(i18n, "fill-kilns", data))} className="justify-start pl-2.5 text-left">
+          <ItemIcon name="Wood" size={20} iconSize={28} className="text-label" />
+          {t("admin.base.fillKilns")}
+        </Btn>
+        <Btn disabled={off} onClick={() => fill("smelters")} className="justify-start pl-2.5 text-left">
+          <ItemIcon name="CopperOre" size={20} iconSize={28} className="text-label" />
+          {t("admin.fill.title")}
+        </Btn>
+        <Btn disabled={off} onClick={() => fill("fermenters")} className="justify-start pl-2.5 text-left">
+          <ItemIcon name="MeadBaseTasty" size={20} iconSize={28} className="text-label" />
+          {t("admin.ferment.title")}
+        </Btn>
         <Btn disabled={off} onClick={() => go("repair", t("admin.base.repaired"))}>
           {t("admin.base.repair")}
-        </Btn>
-        <Btn disabled={off} onClick={() => go("fill-kilns", t("admin.base.filled"))}>
-          {t("admin.base.fillKilns")}
         </Btn>
         <Btn disabled={off} onClick={() => go("grow", t("admin.base.grown"))}>
           {t("admin.base.grow")}
@@ -566,7 +524,6 @@ function BaseHelpers({ catalog, picked }: { catalog: AdminCatalog | null; picked
           {t("admin.base.reveal")}
         </Btn>
       </div>
-      <FillSmelters catalog={catalog} target={target} off={off} />
       <p className="mt-2 text-xs text-ash">{t("admin.base.note")}</p>
     </Section>
   );

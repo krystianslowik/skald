@@ -177,7 +177,8 @@ loaded are counted as `unloaded` and skipped. `radius` is at most 100 m.
 | `POST /v1/build/fill` | `player` or `at`, `radius`, optional `item` | The pre-0.3.0 command, kept for older panels: every station gets its first (or the requested) input plus fuel, fermenters get mead base |
 | `POST /v1/build/fill-kilns` | `player` or `at`, `radius` | Charcoal kilns get their first input (wood) up to capacity with `RPC_AddOre`. Answers `kilns`, `skipped`, `full`, `unloaded` and `added` (item: stations) |
 | `POST /v1/build/fill-smelters` | `player` or `at`, `radius`, `what` (`ore`, `both` (default) or `coal`), `ore` (an item `GET /v1/build/stations` lists, or `current`; not needed for `coal`) | `RPC_AddOre` with that ore and/or `RPC_AddFuel`, up to capacity. A station that does not take the ore gets nothing (`skipped`); with `current` each station gets the ore at the head of its queue, and one holding no ore gets only fuel (`both`) or nothing (`ore`). Answers `smelters`, `skipped`, `full`, `unloaded`, `added` and `fuel` |
-| `GET /v1/build/stations` | | Every kiln and smelter prefab with the items it takes, in the game's order, read from the prefabs' `Smelter` components: `{kilns:[{prefab, inputs}], smelters:[{prefab, fuel, inputs}]}`. A kiln burns nothing and makes what a smelter burns; a smelter burns what a kiln makes. Windmills, spinning wheels and the eitr refinery are neither |
+| `POST /v1/build/fill-fermenters` | `player` or `at`, `radius`, `base` (a mead base `GET /v1/build/stations` lists) | `RPC_AddItem` with that base, once, on every empty fermenter. One still fermenting or holding mead to tap is left alone (`full`). Answers `fermenters`, `skipped`, `full`, `unloaded` and `added` (0.3.1+) |
+| `GET /v1/build/stations` | | Every kiln and smelter prefab with the items it takes, in the game's order, read from the prefabs' `Smelter` components, and every fermenter with the mead bases its `Fermenter` component takes: `{kilns:[{prefab, inputs}], smelters:[{prefab, fuel, inputs}], fermenters:[{prefab, inputs}]}` (`fermenters` 0.3.1+). A kiln burns nothing and makes what a smelter burns; a smelter burns what a kiln makes. Windmills, spinning wheels and the eitr refinery are neither |
 | `POST /v1/build/grow` | `player` or `at`, `radius` | Back-dates the plant time of crops and saplings |
 | `GET /v1/tombstones` | | `id, owner, position, loaded` |
 | `POST /v1/tombstones/move` | `id`, `player` or `at` | Moves a tombstone that no player has loaded |
@@ -366,6 +367,13 @@ uninitialised `Minimap` and the palette lookup have not run against a loaded
 world yet. Check after deploying: `GET /v1/terrain/info` answers, its `forest`
 is `mask` and `palette.source` says whether the colours came from the game;
 `X-Skald-Sample-Ms` on a 260 x 260 tile shows the real cost per tile.
+
+**New in v0.3.1, not yet verified on a live server:** `build/fill-fermenters`
+and the `fermenters` list in `build/stations` compile against the 1.0 reference
+assemblies, and the rule (one base, only into an empty fermenter, only a base it
+takes) is unit-tested in `tests/FillPlanTests.cs`. Not yet seen in a loaded
+world: the fermenter list from the real prefabs and the empty check on
+`s_content`. `RPC_AddItem` is sent as in the verified 0.1.x `build/fill`.
 
 **New in v0.3.0, not yet verified on a live server:** `build/fill-kilns`,
 `build/fill-smelters` and `build/stations` compile against the 1.0 reference

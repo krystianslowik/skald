@@ -507,7 +507,7 @@ water depth, the same at every zoom.
 
 Opt-in. Live admin commands from the panel: broadcasts, items and kits,
 teleport, heal and Rested, time of day, raids, creatures, world keys, base
-helpers (repair, fill kilns, fill smelters with a chosen ore and coal, grow crops, reveal the map and pin
+helpers (repair, fill kilns, fill smelters with a chosen ore and coal, fill fermenters with a chosen mead base, grow crops, reveal the map and pin
 on cartography tables), save, kick and ban; plus every player on the map,
 moving, every 2 seconds.
 

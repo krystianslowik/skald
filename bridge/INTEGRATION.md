@@ -376,6 +376,7 @@ code. Each item is a yes/no:
    - tame a spawned Boar
    - a damaged piece repaired
    - fill kilns (wood only), then fill smelters with a chosen ore and coal, and with "keep the current ore"
+   - fill fermenters with a chosen mead base: an empty one starts, a busy one is left alone
    - crop grow
    - cartography-table reveal, after recording the map on the table once
    - pins

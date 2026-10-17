@@ -677,6 +677,7 @@ export const ADMIN_COMMANDS = [
   "fill",
   "fill-kilns",
   "fill-smelters",
+  "fill-fermenters",
   "grow",
   "map-reveal",
   "map-pins",
@@ -753,10 +754,12 @@ export interface AdminCatalog {
   stations: FillStations;
 }
 
-/** Agent GET /bridge/stations: kilns and smelters with the items each one takes, in the game's order. */
+/** Agent GET /bridge/stations: kilns, smelters and fermenters with the items each one takes, in the game's order. */
 export interface FillStations {
   kilns: { prefab: string; inputs: string[] }[];
   smelters: { prefab: string; fuel: string | null; inputs: string[] }[];
+  /** Mead bases each fermenter takes (bridge 0.3.1+; empty before). */
+  fermenters: { prefab: string; inputs: string[] }[];
 }
 
 /** One admin command's outcome as the panel gets it. */

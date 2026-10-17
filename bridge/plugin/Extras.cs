@@ -229,7 +229,9 @@ namespace Skald.Bridge
 
         // Every prefab with a Smelter component, read from the game once the
         // scene is up: inputs, outputs, fuel and capacity, and whether it is a
-        // kiln or a smelter (FillPlan.Classify). Nothing here names an item.
+        // kiln or a smelter (FillPlan.Classify). Prefabs with a Fermenter
+        // component join as fermenters, with the mead bases they take. Nothing
+        // here names an item.
         static Dictionary<string, (Station station, StationKind kind)> stations;
 
         static Dictionary<string, (Station station, StationKind kind)> Stations()
@@ -262,6 +264,27 @@ namespace Skald.Bridge
             var kinds = FillPlan.Classify(list);
             var byName = new Dictionary<string, (Station station, StationKind kind)>();
             foreach (var s in list) byName[s.Prefab] = (s, kinds.TryGetValue(s.Prefab, out var k) ? k : StationKind.Other);
+            foreach (var prefab in ZNetScene.instance.m_prefabs)
+            {
+                var fe = prefab != null ? prefab.GetComponent<Fermenter>() : null;
+                if (fe == null || string.IsNullOrEmpty(prefab.name) || byName.ContainsKey(prefab.name)) continue;
+                try
+                {
+                    var conv = (fe.m_conversion ?? new List<Fermenter.ItemConversion>()).Where(c => c != null && c.m_from != null).ToList();
+                    var st = new Station
+                    {
+                        Prefab = prefab.name,
+                        Inputs = conv.Select(c => c.m_from.name).ToArray(),
+                        Outputs = conv.Where(c => c.m_to != null).Select(c => c.m_to.name).ToArray(),
+                        MaxOre = 1,
+                    };
+                    byName[st.Prefab] = (st, StationKind.Fermenter);
+                }
+                catch (Exception e)
+                {
+                    SkaldBridgePlugin.Warn("fill: skipping fermenter prefab " + prefab.name + ": " + e.Message);
+                }
+            }
             // An empty list is not kept, so a too-early call does not stick.
             if (byName.Count > 0) stations = byName;
             return byName;
@@ -276,6 +299,7 @@ namespace Skald.Bridge
             {
                 kilns = all.Where(s => s.kind == StationKind.Kiln).Select(s => new { prefab = s.station.Prefab, inputs = s.station.Inputs }).ToList(),
                 smelters = all.Where(s => s.kind == StationKind.Smelter).Select(s => new { prefab = s.station.Prefab, fuel = s.station.Fuel, inputs = s.station.Inputs }).ToList(),
+                fermenters = all.Where(s => s.kind == StationKind.Fermenter).Select(s => new { prefab = s.station.Prefab, inputs = s.station.Inputs }).ToList(),
             });
         }
 
@@ -341,6 +365,35 @@ namespace Skald.Bridge
                 smelters++;
             }
             return Ok(new { smelters, skipped, full, unloaded, added, fuel = fuelAdded, near, radius = r });
+        }
+
+        // POST /v1/build/fill-fermenters: empty fermenters get one batch of
+        // the chosen mead base; one fermenting or holding mead is left alone.
+        public static object FillFermenters(JObject a)
+        {
+            Net();
+            var pos = Target(a, out string near);
+            float r = Radius(a, 20f);
+            string mead = Str(a, "base", max: 64);
+            var known = Stations();
+            if (!known.Values.Any(s => s.kind == StationKind.Fermenter && s.station.Inputs.Contains(mead)))
+                throw new CommandError(400, "no fermenter takes '" + mead + "'; GET /v1/build/stations lists what each one takes");
+            int fermenters = 0, skipped = 0, full = 0, unloaded = 0;
+            var added = new Dictionary<string, int>();
+            foreach (var z in ZdosAround(pos, r))
+            {
+                if (!known.TryGetValue(PrefabName(z), out var st) || st.kind != StationKind.Fermenter) continue;
+                long owner = LoadedBy(z);
+                if (owner == 0) { unloaded++; continue; }
+                var step = FillPlan.Fermenter(st.station, mead, z.GetString(ZDOVars.s_content));
+                if (step.Skip == FillSkip.Full) { full++; continue; }
+                if (step.Skip != FillSkip.None) { skipped++; continue; }
+                // As in build/fill: the owner checks again that it is empty.
+                ZRoutedRpc.instance.InvokeRoutedRPC(owner, z.m_uid, "RPC_AddItem", step.Ore.GetStableHashCode(), false);
+                Count(added, step.Ore);
+                fermenters++;
+            }
+            return Ok(new { fermenters, skipped, full, unloaded, added, near, radius = r });
         }
 
         // The 0.1/0.2 command, kept for older panels: every Smelter gets its

@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "../Dashboard";
 import { describeAdmin } from "../Saga";
 import { I18nProvider, LocaleToggle, makeI18n } from "../../i18n";
+import { FillSheet, fillResult } from "./FillSheet";
 import { ItemPicker } from "./ItemPicker";
 import { Glide } from "../../lib/live";
 import { createLogStore } from "../../lib/useValheim";
@@ -63,6 +64,7 @@ const STATIONS = {
     { prefab: "smelter", fuel: "Coal", inputs: ["CopperOre", "IronScrap"] },
     { prefab: "blastfurnace", fuel: "Coal", inputs: ["BlackMetalScrap"] },
   ],
+  fermenters: [{ prefab: "fermenter", inputs: ["MeadBaseTasty", "MeadBaseHealthMinor"] }],
 };
 
 /** The panel's API as far as these tests need it; everything else 404s. */
@@ -302,28 +304,137 @@ describe("admin", () => {
     expect(await screen.findByText("Message sent.")).toBeInTheDocument();
   });
 
-  it("fills kilns with wood and smelters with the ore the admin picks", async () => {
-    const calls = api(status());
+  it("fills kilns with wood in one tap and says what happened", async () => {
+    const calls = api(status(), () => Response.json({ ok: true, data: { kilns: 0, skipped: 0, full: 2, unloaded: 0, added: {} } }));
     renderDashboard();
     const sheet = await openAdmin();
     fireEvent.click(within(sheet).getByRole("button", { name: "Fill kilns with wood" }));
     await waitFor(() => expect(calls.find((c) => c.url === "/api/admin/fill-kilns")).toBeTruthy());
     expect(calls.find((c) => c.url === "/api/admin/fill-kilns")!.body).toMatchObject({ radius: 50 });
-    // Ores come from the bridge, under the station that takes them.
-    const iron = await within(sheet).findByRole("button", { name: "Scrap iron" });
-    expect(within(sheet).getByText("Blast furnace")).toBeInTheDocument();
-    expect(within(sheet).getByRole("button", { name: "Black metal scrap" })).toBeInTheDocument();
-    fireEvent.click(iron);
-    fireEvent.click(within(sheet).getByRole("button", { name: "Fill smelters" }));
+    // Not "Filled." when nothing went in.
+    expect(await screen.findByText("Nothing went in: the kilns there are already full.")).toBeInTheDocument();
+  });
+
+  it("words the fill result after what the bridge did", () => {
+    const i = makeI18n("en");
+    const p = makeI18n("pl");
+    expect(fillResult(i, "fill-smelters", { smelters: 3, skipped: 1 })).toBe("Filled 3 smelters.");
+    expect(fillResult(i, "fill-kilns", { kilns: 1 })).toBe("Filled 1 kiln with wood.");
+    expect(fillResult(i, "fill-fermenters", { fermenters: 2, full: 1 })).toBe("Started 2 fermenters.");
+    expect(fillResult(i, "fill-smelters", { smelters: 0, skipped: 2 })).toBe("Nothing went in: the smelters there are full or do not take that ore.");
+    expect(fillResult(i, "fill-fermenters", { fermenters: 0, unloaded: 2 })).toBe("Nothing went in: no player has that place loaded. Someone has to be nearby.");
+    expect(fillResult(i, "fill-kilns", {})).toBe("Nothing went in: there are no kilns there.");
+    expect(fillResult(p, "fill-smelters", { smelters: 3 })).toBe("Napełniono 3 piece.");
+    expect(fillResult(p, "fill-fermenters", { fermenters: 5 })).toBe("Uruchomiono 5 fermentatorów.");
+  });
+
+  it("fills smelters step by step: metal, coal, confirm, result", async () => {
+    const calls = api(status(), () => Response.json({ ok: true, data: { smelters: 2, skipped: 1, full: 0, unloaded: 0, added: { IronScrap: 2 }, fuel: "Coal" } }));
+    renderDashboard();
+    const panel = await openAdmin();
+    fireEvent.click(within(panel).getByRole("button", { name: "Fill smelters" }));
+    const flow = await screen.findByRole("dialog", { name: "Fill smelters" });
+    expect(within(flow).getByText(/Step 1 of 3/)).toBeInTheDocument();
+    // Only what some station takes, from the bridge, and keep-current; the station named when there are several kinds.
+    const metals = await within(flow).findByRole("list", { name: "Which metal?" });
+    const tiles = within(metals).getAllByRole("button").map((b) => b.textContent);
+    expect(tiles).toEqual(["Keep the current ore", "CopperSmelter", "Scrap ironSmelter", "Black metal scrapBlast furnace"]);
+    fireEvent.click(within(metals).getByRole("button", { name: /Scrap iron/ }));
+    // Coal step, then back to the metals with the pick kept.
+    expect(within(flow).getByText(/Step 2 of 3/)).toBeInTheDocument();
+    fireEvent.click(within(flow).getByRole("button", { name: "Back" }));
+    expect(within(flow).getByRole("button", { name: /Scrap iron/ })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(flow).getByRole("button", { name: /Scrap iron/ }));
+    fireEvent.click(within(flow).getByRole("button", { name: "With coal" }));
+    expect(within(flow).getByRole("status")).toHaveTextContent("Smelters near Ragnar: scrap iron and coal");
+    expect(calls.find((c) => c.url === "/api/admin/fill-smelters")).toBeUndefined();
+    fireEvent.click(within(flow).getByRole("button", { name: "Fill smelters" }));
     await waitFor(() => expect(calls.find((c) => c.url === "/api/admin/fill-smelters")).toBeTruthy());
-    expect(calls.find((c) => c.url === "/api/admin/fill-smelters")!.body).toMatchObject({ radius: 50, what: "both", ore: "IronScrap" });
-    fireEvent.click(within(sheet).getByRole("button", { name: "Coal only" }));
-    expect(within(sheet).queryByRole("button", { name: "Scrap iron" })).not.toBeInTheDocument();
-    fireEvent.click(within(sheet).getByRole("button", { name: "Fill smelters" }));
-    await waitFor(() => expect(calls.filter((c) => c.url === "/api/admin/fill-smelters")).toHaveLength(2));
-    const coal = calls.filter((c) => c.url === "/api/admin/fill-smelters")[1]!.body as Record<string, unknown>;
-    expect(coal).toMatchObject({ what: "coal" });
-    expect(coal).not.toHaveProperty("ore");
+    expect(calls.find((c) => c.url === "/api/admin/fill-smelters")!.body).toEqual({ radius: 50, what: "both", ore: "IronScrap", player: "Ragnar" });
+    // What really happened, then back to the panel.
+    await waitFor(() => expect(within(flow).getByRole("status")).toHaveTextContent("Filled 2 smelters."));
+    fireEvent.click(within(flow).getByRole("button", { name: "Done" }));
+    expect(await screen.findByRole("dialog", { name: "Admin" })).toBeInTheDocument();
+  });
+
+  it("sends coal only without an ore, and keeps the current ore", async () => {
+    const calls = api(status());
+    renderDashboard();
+    const run = async (ore: RegExp, coal: string, summary: string) => {
+      const panel = await openAdmin();
+      fireEvent.click(within(panel).getByRole("button", { name: "Fill smelters" }));
+      const flow = await screen.findByRole("dialog", { name: "Fill smelters" });
+      fireEvent.click(await within(flow).findByRole("button", { name: ore }));
+      fireEvent.click(within(flow).getByRole("button", { name: coal }));
+      expect(within(flow).getByRole("status")).toHaveTextContent(summary);
+      fireEvent.click(within(flow).getByRole("button", { name: "Fill smelters" }));
+      await within(flow).findByText("Nothing went in: there are no smelters there.");
+      fireEvent.click(within(flow).getByRole("button", { name: "Done" }));
+      await screen.findByRole("dialog", { name: "Admin" });
+      fireEvent.click(within(screen.getByRole("dialog", { name: "Admin" })).getByRole("button", { name: "Close" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    };
+    await run(/Copper/, "Coal only", "Smelters near Ragnar: coal only");
+    await run(/Keep the current ore/, "No coal", "Smelters near Ragnar: more of the ore each holds");
+    const sent = calls.filter((c) => c.url === "/api/admin/fill-smelters").map((c) => c.body);
+    expect(sent).toEqual([
+      { radius: 50, what: "coal", player: "Ragnar" },
+      { radius: 50, what: "ore", ore: "current", player: "Ragnar" },
+    ]);
+  });
+
+  it("fills fermenters with a mead base picked from the icons", async () => {
+    const calls = api(status());
+    renderDashboard();
+    const panel = await openAdmin();
+    fireEvent.click(within(panel).getByRole("button", { name: "Fill fermenters" }));
+    const flow = await screen.findByRole("dialog", { name: "Fill fermenters" });
+    const bases = await within(flow).findByRole("list", { name: "Which mead base?" });
+    // Short names: the question already says it is a mead base.
+    expect(within(bases).getAllByRole("button").map((b) => b.textContent)).toEqual(["Tasty", "Minor Healing"]);
+    fireEvent.click(within(bases).getByRole("button", { name: "Tasty" }));
+    expect(within(flow).getByText(/Step 2 of 2/)).toBeInTheDocument();
+    expect(within(flow).getByRole("status")).toHaveTextContent("Mead Base: Tasty into empty fermenters near Ragnar");
+    // Another place on the last step.
+    fireEvent.click(within(flow).getByRole("button", { name: /Freya/ }));
+    expect(within(flow).getByRole("status")).toHaveTextContent("near Freya");
+    fireEvent.click(within(flow).getByRole("button", { name: "Fill fermenters" }));
+    await waitFor(() => expect(calls.find((c) => c.url === "/api/admin/fill-fermenters")).toBeTruthy());
+    expect(await within(flow).findByText("Nothing went in: there are no fermenters there.")).toBeInTheDocument();
+    expect(calls.find((c) => c.url === "/api/admin/fill-fermenters")!.body).toEqual({ radius: 50, base: "MeadBaseTasty", player: "Freya" });
+  });
+
+  it("walks the smelter flow in Polish", async () => {
+    api(status());
+    render(<I18nProvider locale="pl"><FillSheet station="smelters" target={{ player: "Ragnar" }} catalog={{ events: [], currentEvent: null, globalKeys: [], spots: [], stations: STATIONS }} onClose={() => {}} /></I18nProvider>);
+    const flow = screen.getByRole("dialog", { name: "Napełnij odlewnie" });
+    expect(within(flow).getByText(/Krok 1 z 3/)).toBeInTheDocument();
+    fireEvent.click(await within(flow).findByRole("button", { name: /Miedź/ }));
+    expect(within(flow).getByText("Dosypać węgla?")).toBeInTheDocument();
+    fireEvent.click(within(flow).getByRole("button", { name: "Z węglem" }));
+    expect(within(flow).getByRole("status")).toHaveTextContent("Odlewnie przy graczu Ragnar: miedź i węgiel");
+    fireEvent.click(within(flow).getByRole("button", { name: "Wstecz" }));
+    fireEvent.click(within(flow).getByRole("button", { name: "Tylko węgiel" }));
+    expect(within(flow).getByRole("status")).toHaveTextContent("Odlewnie przy graczu Ragnar: tylko węgiel");
+  });
+
+  it("asks a view-only session to unlock before it lists the ores", async () => {
+    const calls = api(status({ required: true, unlocked: false }));
+    renderDashboard();
+    const panel = await openAdmin();
+    fireEvent.click(within(panel).getByRole("button", { name: "Fill fermenters" }));
+    const flow = await screen.findByRole("dialog", { name: "Fill fermenters" });
+    expect(within(flow).getByText("Unlock admin to see what the stations take.")).toBeInTheDocument();
+    expect(within(flow).getByRole("button", { name: "Unlock" })).toBeInTheDocument();
+    expect(calls.some((c) => c.url === "/api/admin/catalog")).toBe(false);
+  });
+
+  it("comes back from a map pick on the summary, with the choices kept", async () => {
+    api(status());
+    render(<I18nProvider locale="en"><FillSheet station="smelters" target={{ at: { x: 120.4, z: -40 }, label: "map" }} choice={{ pick: "CopperOre", coal: "ore" }} catalog={{ events: [], currentEvent: null, globalKeys: [], spots: [], stations: STATIONS }} onClose={() => {}} /></I18nProvider>);
+    const flow = screen.getByRole("dialog", { name: "Fill smelters" });
+    expect(within(flow).getByText(/Step 3 of 3/)).toBeInTheDocument();
+    expect(within(flow).getByRole("status")).toHaveTextContent("Smelters around x 120, z -40: copper");
   });
 
   it("gives items found by their Polish name to a player", async () => {
@@ -479,6 +590,11 @@ describe("admin lines in the saga", () => {
     expect(describeAdmin(en, { actor: "k", command: "fill-kilns", result: "timeout" })).toBe("k: filling kilns took too long");
     // Lines stored before the split still read as before.
     expect(describeAdmin(en, { actor: "k", command: "fill", result: "ok", smelters: 2, fermenters: 1 })).toBe("k filled 3 kilns and smelters");
+    const mead = { actor: "k", command: "fill-fermenters", result: "ok", base: "MeadBaseTasty", fermenters: 2, full: 1, added: { MeadBaseTasty: 2 }, player: "Freya" };
+    expect(describeAdmin(en, mead)).toBe("k started 2 fermenters with Mead Base: Tasty near Freya");
+    expect(describeAdmin(pl, mead)).toBe("k napełnił fermentatory (2, Brzeczka miodowa: Pyszna) obok: Freya");
+    expect(describeAdmin(en, { actor: "k", command: "fill-fermenters", result: "ok", fermenters: 0, full: 3, added: {} })).toBe("k added nothing to the fermenters: they are busy or do not take that base");
+    expect(describeAdmin(pl, { actor: "k", command: "fill-fermenters", result: "ok", fermenters: 0, added: {}, player: "Freya" })).toBe("k nie znalazł fermentatorów do napełnienia obok: Freya");
   });
 });
 

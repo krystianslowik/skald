@@ -72,6 +72,7 @@ var Commands = map[string]Command{
 	"fill":             {"/v1/build/fill"},
 	"fill-kilns":       {"/v1/build/fill-kilns"},
 	"fill-smelters":    {"/v1/build/fill-smelters"},
+	"fill-fermenters":  {"/v1/build/fill-fermenters"},
 	"grow":             {"/v1/build/grow"},
 	"map-reveal":       {"/v1/map/reveal"},
 	"map-pins":         {"/v1/map/pins"},
@@ -838,7 +839,7 @@ func (c *Client) publishAdmin(ev map[string]any) {
 var argKeys = map[string]bool{
 	"type": true, "item": true, "amount": true, "quality": true, "prefab": true, "count": true, "level": true,
 	"tamed": true, "includeBosses": true, "name": true, "key": true, "effect": true, "dayFraction": true,
-	"toSpot": true, "radius": true, "what": true, "ore": true,
+	"toSpot": true, "radius": true, "what": true, "ore": true, "base": true,
 }
 
 // summarizeArgs reads the body as the plugin got it (a JSON round trip, so
