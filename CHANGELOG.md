@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- The map's chest view, and the totals in Village stores, read the stack size and the quality of an item the wrong way round when an item has both, which vanilla items rarely do (modded items can): a quality 3 item in a stack of 37 showed as quality 37 in a stack of 3. Items with only a stack or only a quality were always right. **Operators:** the fix is in `skald-agent`, which runs in the game pod, so deploying it restarts the game (#104).
+
 ## [2026.10.7] - 2026-10-17
 
 ### Fixed
