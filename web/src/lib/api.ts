@@ -72,7 +72,8 @@ export async function logout(): Promise<LogoutResult> {
   } catch {
     return "offline";
   }
-  if (res.ok) return "ok";
+  // Only skald-web's own answer counts: a proxy's login page reached through a redirect is a 200 too.
+  if (res.ok) return ((await res.json().catch(() => null)) as { ok?: unknown } | null)?.ok === true ? "ok" : "failed";
   if (await originRefused(res)) return "refused";
   // A proxy's error page while skald-web is down: as good as no connection.
   return res.status >= 500 ? "offline" : "failed";

@@ -119,7 +119,9 @@ export function failText(i: Labels, res: { status: number; error?: string }): st
  */
 export function notifyTestText(i: Labels, res: { status: number; error?: string; retryAfter?: number }): string {
   if (res.status === 0) return i.t("admin.notify.offline");
-  if (res.status === 429) return res.error === "rate_limited" ? i.t("admin.notify.rateLimited", { s: Math.max(1, Math.ceil(res.retryAfter ?? 10)) }) : i.t("admin.notify.busy");
+  if (res.error === "rate_limited") return i.t("admin.notify.rateLimited", { s: Math.max(1, Math.ceil(res.retryAfter ?? 10)) });
+  // skald-web's own pause; a 429 without that code came from something in front of it.
+  if (res.error === "busy") return i.t("admin.notify.busy");
   if (res.status === 502) return i.t("admin.notify.failed", { error: res.error ?? "HTTP 502" });
   if (res.error === "not_configured") return i.t("admin.notify.notConfigured");
   return failText(i, res);

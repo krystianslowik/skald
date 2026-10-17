@@ -30,7 +30,7 @@ export function useLogout(onLogout: () => Promise<LogoutResult>) {
     try {
       const r = await onLogout();
       if (r !== "ok") {
-        const reason = r === "refused" ? t("login.refused") : r === "offline" ? t("admin.notify.offline") : t("logout.failed");
+        const reason = r === "refused" ? t("login.refused") : r === "offline" ? t("logout.offline") : t("logout.failed");
         toast?.(false, t("logout.notDone", { reason }));
       }
     } finally {

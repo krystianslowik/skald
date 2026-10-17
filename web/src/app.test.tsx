@@ -74,7 +74,7 @@ describe("Dashboard", () => {
 
   it.each([
     ["refused", "en", "Not logged out, the session is still on. The server refused this address. Its operator needs to set PUBLIC_ORIGIN to the address you opened the panel on."],
-    ["offline", "pl", "Nie wylogowano, sesja nadal trwa. Brak połączenia. Spróbuj za chwilę."],
+    ["offline", "pl", "Nie wylogowano, sesja nadal trwa. Brak łączności z serwerem. Spróbuj za chwilę."],
     ["failed", "en", "Not logged out, the session is still on. The server did not confirm it. Try again."],
   ] as const)("says so when Log out did not reach the server (%s, %s), and a press again retries", async (result, locale, text) => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 })));

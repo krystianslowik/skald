@@ -60,6 +60,7 @@ export const en = {
   "header.logout": "Log out",
   "logout.notDone": "Not logged out, the session is still on. {reason}",
   "logout.failed": "The server did not confirm it. Try again.",
+  "logout.offline": "No connection to the server. Try again in a moment.",
   "sound.label": "Campfire crackle",
   "sound.on": "Campfire crackle: on",
   "sound.off": "Campfire crackle: off",

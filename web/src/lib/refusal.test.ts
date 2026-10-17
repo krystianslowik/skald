@@ -166,5 +166,7 @@ describe("a failed Discord test", () => {
     expect(notifyTestText(en, { status: 429, error: "rate_limited", retryAfter: 30 })).toBe("Discord asked to slow down. Try again in 30\u00a0s.");
     expect(notifyTestText(pl, { status: 429, error: "rate_limited", retryAfter: 30 })).toBe("Discord prosi o wolniejsze tempo. Spróbuj za 30\u00a0s.");
     expect(notifyTestText(en, { status: 429, error: "busy", retryAfter: 6 })).toBe("A test message was just sent. Try again in a few seconds.");
+    // A 429 from something in front of skald-web (a CDN's own limit): no test went out, so not "just sent".
+    expect(notifyTestText(en, { status: 429, error: "HTTP 429" })).not.toMatch(/just sent|Discord/);
   });
 });

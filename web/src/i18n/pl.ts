@@ -49,6 +49,7 @@ export const pl: Dict = {
   "header.logout": "Wyloguj",
   "logout.notDone": "Nie wylogowano, sesja nadal trwa. {reason}",
   "logout.failed": "Serwer tego nie potwierdził. Spróbuj ponownie.",
+  "logout.offline": "Brak łączności z serwerem. Spróbuj za chwilę.",
   "sound.label": "Trzask ogniska",
   "sound.on": "Trzask ogniska: włączony",
   "sound.off": "Trzask ogniska: wyłączony",

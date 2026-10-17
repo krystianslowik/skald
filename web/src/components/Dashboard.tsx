@@ -36,7 +36,8 @@ const SettingsSheet = lazyChunk(() => import("./SettingsSheet"), "SettingsSheet"
 const MapView = lazyChunk(() => import("./map/MapView"), "MapView");
 const MapPreview = lazyChunk(() => import("./map/MapPreview"), "MapPreview");
 
-export function Dashboard({ live, onLogout, onUnauthorized = () => void onLogout() }: { live: Valheim; onLogout: () => Promise<LogoutResult>; onUnauthorized?: () => void }) {
+// onUnauthorized: App sends the viewer to the login screen; without it (tests) nothing happens.
+export function Dashboard({ live, onLogout, onUnauthorized = () => {} }: { live: Valheim; onLogout: () => Promise<LogoutResult>; onUnauthorized?: () => void }) {
   const { t, tn, dayLabel, clock, intl } = useI18n();
   const { state, online, logs, lastAction, retry } = live;
   const [profile, setProfile] = useState<string | null>(null);

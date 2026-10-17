@@ -26,6 +26,9 @@ describe("log out", () => {
     expect(await logout()).toBe("refused");
     answer(403, { ok: false, error: "something_else" });
     expect(await logout()).toBe("failed");
+    // A proxy's sign-in page reached through a redirect: a 200, but not skald-web's answer.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<html>Sign in</html>", { status: 200 })));
+    expect(await logout()).toBe("failed");
     // A proxy's error page while skald-web is down.
     vi.stubGlobal("fetch", vi.fn(async () => new Response("<h1>Bad Gateway</h1>", { status: 502 })));
     expect(await logout()).toBe("offline");
