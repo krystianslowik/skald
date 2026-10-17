@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- On Safari (iPhone and Mac), opening the admin sheet without a connection and then getting the connection back no longer leaves a blank page that even Reload could not fix. When the connection returns, the panel now fetches its own scripts again before it reloads, and waits with the "No connection" note until they all answer. If the panel ever cannot start at all, it says so and offers a Reload button instead of a blank page (#128).
+
 ## [2026.10.9] - 2026-10-17
 
 ### Changed

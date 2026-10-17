@@ -3,6 +3,9 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./styles/index.css";
 
+// The app's script ran: the boot watchdog in index.html stands down.
+document.documentElement.setAttribute("data-booted", "");
+
 // iOS Safari only applies :active (the press feedback) when a touch listener exists.
 document.addEventListener("touchstart", () => undefined, { passive: true });
 
