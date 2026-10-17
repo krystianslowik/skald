@@ -23,7 +23,6 @@ beforeEach(() => {
   reload = vi.fn<() => void>();
   page.reload = reload;
   page.reloading = false;
-  page.warmed.clear();
 });
 afterEach(() => {
   page.reload = realReload;
@@ -226,6 +225,85 @@ describe("a lazy chunk that fails offline or with the server down", () => {
     act(() => void window.dispatchEvent(new Event("online")));
     await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     expect(beforeReload).toEqual([url, ...deps].sort());
+  });
+
+  describe("the page's own scripts, which the failed import asked for again (Safari)", () => {
+    const entry = "/assets/index-H1.js";
+    const shared = "/assets/Sheet-J2.js";
+    beforeEach(() => {
+      // The built page's entry and a preloaded chunk, plus one from elsewhere that is not ours to fetch.
+      document.head.insertAdjacentHTML(
+        "beforeend",
+        `<script type="module" data-t src="${entry}"></script><link data-t rel="modulepreload" href="${shared}"><link data-t rel="modulepreload" href="https://elsewhere.example/assets/x.js"><link data-t rel="stylesheet" href="/assets/index-K3.css">`,
+      );
+    });
+    afterEach(() => document.head.querySelectorAll("[data-t]").forEach((el) => el.remove()));
+
+    it("lists the entry, the preloaded chunks and the styles, on this origin only", async () => {
+      const { pageAssets } = await import("./chunks");
+      expect(pageAssets().sort()).toEqual([entry, "/assets/index-K3.css", shared].sort());
+    });
+
+    it("back online: fetches the entry and the preloaded chunks again before the reload", async () => {
+      const fetched: string[] = [];
+      fetchChunk.mockImplementation(async (u: string, init?: RequestInit) => {
+        if (init?.cache !== "no-store") fetched.push(u);
+        return new Response("export default 1", { status: 200 });
+      });
+      let beforeReload: string[] = [];
+      reload.mockImplementation(() => void (beforeReload = [...fetched]));
+      onLine = false;
+      Sheet("en", failing());
+      await screen.findByRole("alert");
+      onLine = true;
+      act(() => void window.dispatchEvent(new Event("online")));
+      await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+      expect(beforeReload).toEqual(expect.arrayContaining([url, entry, shared]));
+    });
+
+    it("holds the reload while the entry cannot be fetched yet, keeps the note, and reloads once it can", async () => {
+      // A reload before the entry answered would run into the failed load WebKit kept: a blank page.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      try {
+        let entryUp = false;
+        fetchChunk.mockImplementation(async (u: string) => {
+          if (u === entry && !entryUp) throw new TypeError("Load failed");
+          return new Response("export default 1", { status: 200 });
+        });
+        onLine = false;
+        Sheet("en", failing());
+        await vi.waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(en["crash.offline"]));
+        onLine = true;
+        act(() => void window.dispatchEvent(new Event("online")));
+        await vi.waitFor(() => expect(fetchChunk.mock.calls.some(([u]) => u === entry)).toBe(true));
+        await act(async () => void (await vi.advanceTimersByTimeAsync(0)));
+        expect(reload).not.toHaveBeenCalled();
+        expect(screen.getByRole("alert")).toHaveTextContent(en["crash.offline"]);
+        entryUp = true;
+        // The next periodic check (10 s after the first one was scheduled offline).
+        await act(async () => void (await vi.advanceTimersByTimeAsync(10_000)));
+        expect(reload).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("the lazy chunk is still there but the entry is gone (a deploy that left the chunk alone): reloads once", async () => {
+      fetchChunk.mockImplementation(async (u: string) => new Response("", { status: u === entry ? 404 : 200 }));
+      onLine = false;
+      Sheet("en", failing());
+      await screen.findByRole("alert");
+      onLine = true;
+      act(() => void window.dispatchEvent(new Event("online")));
+      await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    });
+
+    it("gone from the server (a deploy): reloads at once without fetching the old build's scripts", async () => {
+      fetchChunk.mockResolvedValue(new Response("Not found", { status: 404 }));
+      Sheet("en", failing());
+      await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+      expect(fetchChunk.mock.calls.map(([u]) => u)).toEqual([url]);
+    });
   });
 
   it("knows what each built chunk imports, and nothing outside a build", async () => {

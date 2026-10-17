@@ -27,8 +27,6 @@ const SPENT_MS = 5 * 60_000;
 export const page = {
   reload: () => window.location.reload(),
   reloading: false,
-  /** Chunks this page fetched again with an ordinary request, so WebKit dropped their failure: once is enough. */
-  warmed: new Set<string>(),
 };
 
 /**
@@ -75,6 +73,24 @@ export function chunkUrl(name: string): string | undefined {
 export function chunkDeps(url: string): string[] {
   const deps = published(CHUNK_DEPS_GLOBAL, url);
   return Array.isArray(deps) ? deps.filter((d): d is string => typeof d === "string") : [];
+}
+
+/**
+ * The page's own scripts and styles (`/assets/...`): the entry, the chunks the
+ * HTML preloads, and the ones Vite's import helper added since (it adds a
+ * `modulepreload` link for every chunk a lazy one imports).
+ */
+export function pageAssets(): string[] {
+  const out = new Set<string>();
+  for (const el of document.querySelectorAll<HTMLScriptElement | HTMLLinkElement>('script[type="module"][src], link[rel="modulepreload"][href], link[rel="stylesheet"][href]')) {
+    try {
+      const u = new URL(el instanceof HTMLScriptElement ? el.src : el.href, location.href);
+      if (u.origin === location.origin && u.pathname.startsWith("/assets/")) out.add(u.pathname);
+    } catch {
+      // Not a URL: nothing to fetch.
+    }
+  }
+  return [...out];
 }
 
 /** A probe that gets no answer in this time counts as the server being down. */
@@ -131,16 +147,22 @@ export async function recoverChunk(urls: readonly (string | undefined)[]): Promi
   if (probes.includes("gone")) return reloadOnce() ? "reloading" : "stale";
   // WebKit reuses a failed module script, the entry's and each one it imports,
   // even across a reload, until an ordinary request for the same URL succeeds;
-  // the no-store probe does not count. Once per page is enough.
-  const all = [...new Set([...named, ...named.flatMap(chunkDeps)])].filter((u) => !page.warmed.has(u));
-  await Promise.all(
+  // the no-store probe does not count. A lazy import also fails the page's own
+  // scripts it asks for again (Vite preloads every chunk it imports, the entry
+  // included), so those are fetched too. A reload before all of them answered
+  // would leave a blank page: keep the note and try again later instead.
+  const all = [...new Set([...named, ...named.flatMap(chunkDeps), ...pageAssets()])];
+  const warm = await Promise.all(
     all.map((u) =>
       fetch(u, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) }).then(
-        (res) => void (res.ok && page.warmed.add(u)),
-        () => undefined,
+        (res) => (res.ok ? "ok" : "gone"),
+        () => "down",
       ),
     ),
   );
+  if (warm.includes("down")) return "down";
+  // One of the page's own scripts is gone from the server: a deploy changed it, though not the lazy chunk.
+  if (warm.includes("gone")) return reloadOnce() ? "reloading" : "stale";
   if (reloadOnce()) return "reloading";
   return reloadBlock() === "spent" ? "spent" : "held";
 }
