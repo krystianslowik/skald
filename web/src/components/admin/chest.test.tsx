@@ -225,6 +225,32 @@ describe("the chest on the map", () => {
     wrap(<DetailsBody marker={marker} seedName="" roomy />);
     expect(await screen.findByRole("button", { name: "Add item" })).toBeDisabled();
   });
+
+  // Phones never show a title: the reason is a line next to the button.
+  it("says next to a greyed-out Add item why, in both languages", async () => {
+    api(status({ plugin: "0.3.0" }), () => Response.json({ ok: true, data: {} }));
+    const { unmount } = wrap(<DetailsBody marker={marker} seedName="" roomy />);
+    const add = await screen.findByRole("button", { name: "Add item" });
+    await waitFor(() => expect(add).toBeDisabled());
+    expect(add).not.toHaveAttribute("title");
+    expect(add).toHaveAccessibleDescription("Needs bridge 0.4.0 or later");
+    expect(screen.getByText("Needs bridge 0.4.0 or later")).toBeVisible();
+    unmount();
+    vi.unstubAllGlobals();
+    api(status({ tested: false, acknowledged: false, gameBuild: "l-1.0.18" }), () => Response.json({ ok: true, data: {} }));
+    wrap(<DetailsBody marker={marker} seedName="" roomy />, "pl");
+    const dodaj = await screen.findByRole("button", { name: "Dodaj przedmiot" });
+    await waitFor(() => expect(dodaj).toBeDisabled());
+    expect(dodaj).toHaveAccessibleDescription(makeI18n("pl").t("admin.blocker.untested", { build: "l-1.0.18" }));
+  });
+
+  it("gives an enabled Add item no reason line", async () => {
+    api(status(), () => Response.json({ ok: true, data: {} }));
+    wrap(<DetailsBody marker={marker} seedName="" roomy />);
+    const add = await screen.findByRole("button", { name: "Add item" });
+    await waitFor(() => expect(add).toBeEnabled());
+    expect(add).not.toHaveAttribute("aria-describedby");
+  });
 });
 
 describe("the saga line", () => {

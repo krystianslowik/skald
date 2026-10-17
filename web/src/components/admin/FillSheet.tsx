@@ -207,7 +207,8 @@ export function FillSheet({
           <>
             <Question>{t(smelters ? "admin.fill.ask.ore" : "admin.ferment.ask")}</Question>
             <Grid label={t(smelters ? "admin.fill.ask.ore" : "admin.ferment.ask")}>
-              {smelters && (
+              {/* "Keep the current ore" needs the same bridge (0.3.0) as the ore list: a catalog without one, no flow. */}
+              {smelters && !(catalog && choices.length === 0) && (
                 <Tile on={pick === KEEP} onClick={() => choose(KEEP)} icon={<KeepGlyph />} label={t("admin.fill.current")} />
               )}
               {choices.map((c) => (

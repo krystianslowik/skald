@@ -4,7 +4,8 @@ import { getAdminStatus, postAdmin, runAdmin, type AdminOutcome, type KitLine } 
 import { Unauthorized } from "../../lib/api";
 import { failText } from "../../lib/refusal";
 import { useWorldMap } from "../../lib/useWorldMap";
-import { useI18n } from "../../i18n";
+import { useI18n, type TextKey } from "../../i18n";
+import { compareVersions } from "@server/version";
 import { lazyChunk, preload } from "../../lib/chunks";
 import { ChunkBoundary } from "../ErrorBoundary";
 
@@ -56,6 +57,25 @@ export interface Toast {
 
 /** Why controls are off, for the banner and the disabled buttons; null when they work. */
 export type Blocker = "off" | "unreachable" | "disabled" | "token" | "loading" | "restarting" | "agent" | "untested" | "offline" | null;
+
+/** Why the controls are off, one line per blocker (the banner, the chest's Add item). */
+export const BLOCKER_TEXT: Record<Exclude<Blocker, null>, TextKey> = {
+  off: "admin.blocker.off",
+  unreachable: "admin.blocker.unreachable",
+  disabled: "admin.blocker.disabled",
+  token: "admin.blocker.token",
+  loading: "admin.blocker.loading",
+  restarting: "admin.blocker.restarting",
+  agent: "admin.blocker.agent",
+  untested: "admin.blocker.untested",
+  offline: "admin.blocker.offline",
+};
+
+/** Whether the bridge plugin is known and older than `version` (an unknown version is given the benefit of the doubt). */
+export function pluginBelow(status: AdminStatus | null | undefined, version: string): boolean {
+  const plugin = status?.bridge.plugin;
+  return !!plugin && compareVersions(plugin, version) === -1;
+}
 
 export interface Admin {
   status: AdminStatus | null;

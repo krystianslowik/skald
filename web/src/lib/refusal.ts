@@ -61,6 +61,10 @@ const RULES: Rule[] = [
   { re: /^no cartography table within (\d+(?:[.,]\d+)?) m$/, key: "admin.refusal.noTable", vars: (m) => ({ r: m[1]! }) },
   { re: /^too many stacks in one call/, key: "admin.refusal.tooManyStacks" },
   { re: /^not possible server-side/, key: "admin.refusal.notPossible" },
+  // A command the installed plugin predates (bridge/plugin/HttpServer.cs: "unknown command POST /v1/...").
+  { re: /^unknown command [A-Z]+ \//, key: "admin.refusal.oldBridge" },
+  // A command the agent predates (agent/internal/bridge/bridge.go: "unknown command fill-kilns").
+  { re: /^unknown command [a-z-]+$/, key: "admin.refusal.oldAgent" },
   // The bans list (agent).
   { re: /^not on the ban list \(reload it\)$|^'.+' is not on the ban list$/, key: "admin.refusal.notBanned" },
   // The game, the bridge or the agent not ready.

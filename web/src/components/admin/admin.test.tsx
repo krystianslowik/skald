@@ -388,6 +388,54 @@ describe("admin", () => {
     expect(fillResult(p, "fill-fermenters", { fermenters: 5 })).toBe("Uruchomiono 5 fermentatorów.");
   });
 
+  it("says on screen why Fill kilns, smelters and fermenters are off on an old bridge", async () => {
+    api(status({}, { plugin: "0.2.1" }));
+    renderDashboard();
+    const panel = await openAdmin();
+    for (const name of ["Fill kilns with wood", "Fill smelters", "Fill fermenters"]) {
+      const b = within(panel).getByRole("button", { name });
+      expect(b).toBeDisabled();
+      expect(b).toHaveAccessibleDescription("Bridge 0.2.1 cannot fill stations: kilns and smelters need 0.3.0 or later, fermenters 0.4.0.");
+    }
+    expect(within(panel).getByRole("button", { name: "Repair" })).toBeEnabled();
+  });
+
+  it("keeps kilns and smelters on with bridge 0.3.x, and says why fermenters are off", async () => {
+    api(status({}, { plugin: "0.3.0" }));
+    renderDashboard();
+    const panel = await openAdmin();
+    expect(within(panel).getByRole("button", { name: "Fill kilns with wood" })).toBeEnabled();
+    expect(within(panel).getByRole("button", { name: "Fill smelters" })).toBeEnabled();
+    const ferment = within(panel).getByRole("button", { name: "Fill fermenters" });
+    expect(ferment).toBeDisabled();
+    expect(ferment).toHaveAccessibleDescription("Bridge 0.3.0 cannot fill fermenters: that needs 0.4.0 or later.");
+  });
+
+  it("greys out a fill the agent does not list, and says to update the agent", async () => {
+    api(status({}, { commands: ["fill-kilns", "fill-smelters", "repair"] }));
+    renderDashboard();
+    const panel = await openAdmin();
+    expect(within(panel).getByRole("button", { name: "Fill smelters" })).toBeEnabled();
+    const ferment = within(panel).getByRole("button", { name: "Fill fermenters" });
+    expect(ferment).toBeDisabled();
+    expect(ferment).toHaveAccessibleDescription("The Skald agent does not know every fill command yet: update the agent.");
+  });
+
+  it("still offers keep-current before the catalog is in", () => {
+    api(status({ unlocked: false }));
+    render(<I18nProvider locale="en"><FillSheet station="smelters" target={{ player: "Ragnar" }} onClose={() => {}} /></I18nProvider>);
+    const flow = screen.getByRole("dialog", { name: "Fill smelters" });
+    expect(within(flow).getByRole("button", { name: /Keep the current ore/ })).toBeInTheDocument();
+  });
+
+  it("offers no keep-current tile when the bridge sent no ore list", () => {
+    api(status());
+    render(<I18nProvider locale="en"><FillSheet station="smelters" target={{ player: "Ragnar" }} catalog={{ events: [], currentEvent: null, globalKeys: [], spots: [], stations: { kilns: [], smelters: [], fermenters: [] } }} onClose={() => {}} /></I18nProvider>);
+    const flow = screen.getByRole("dialog", { name: "Fill smelters" });
+    expect(within(flow).queryByRole("button", { name: /Keep the current ore/ })).not.toBeInTheDocument();
+    expect(within(flow).getByText(/needs bridge 0\.3\.0 or later/)).toBeInTheDocument();
+  });
+
   it("fills smelters step by step: metal, coal, confirm, result", async () => {
     const calls = api(status(), () => Response.json({ ok: true, data: { smelters: 2, skipped: 1, full: 0, unloaded: 0, added: { IronScrap: 2 }, fuel: "Coal" } }));
     renderDashboard();

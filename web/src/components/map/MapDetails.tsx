@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useId, useRef, type RefObject } from "react";
 import { useI18n } from "../../i18n";
 import { markerItems, markerStore, type Marker } from "../../lib/mapgeo";
 import { topDown } from "../../lib/stacks";
@@ -6,8 +6,7 @@ import { countItems } from "../../lib/storage";
 import { mapUrlAt } from "../../lib/world";
 import type { MapContainer, MapItem } from "../../types";
 import { canAddTo, usePendingItems } from "../../lib/chestadd";
-import { compareVersions } from "@server/version";
-import { useAdmin } from "../admin/AdminContext";
+import { BLOCKER_TEXT, pluginBelow, useAdmin } from "../admin/AdminContext";
 import { clusterSummary, contentsOf, sortCluster, stackText, summarize, type Summary } from "../../lib/clusterlist";
 import { InventoryGrid } from "../storage/Inventory";
 import { containerTitle } from "../storage/VillageStores";
@@ -232,22 +231,33 @@ function PendingNote() {
 function AddItemButton({ chest, roomy, className = "" }: { chest: MapContainer; roomy: boolean; className?: string }) {
   const { t } = useI18n();
   const admin = useAdmin();
+  const whyId = useId();
   const bridge = admin?.status?.bridge;
   if (!admin || !admin.bridgeOn || !bridge?.commands.includes("chest-add") || !canAddTo(chest)) return null;
-  const old = !!bridge.plugin && compareVersions(bridge.plugin, "0.4.0") === -1;
+  const old = pluginBelow(admin.status, "0.4.0");
+  // Said next to the button, not in a title: phones never show titles.
+  const why = admin.blocker ? t(BLOCKER_TEXT[admin.blocker], { build: bridge.gameBuild ?? "?" }) : old ? t("admin.chest.needsBridge") : null;
   return (
-    <button
-      type="button"
-      onClick={() => admin.open({ kind: "chest", chest })}
-      disabled={!!admin.blocker || old}
-      title={old ? t("admin.chest.needsBridge") : undefined}
-      className={`plaque press inline-flex items-center gap-1.5 font-bold disabled:opacity-40 ${roomy ? "min-h-11 px-4 py-2.5 text-sm" : "px-2.5 py-1 text-xs"} ${className}`}
-    >
-      <svg width="11" height="11" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-        <path d="M8 3v10M3 8h10" />
-      </svg>
-      {t("admin.chest.add")}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => admin.open({ kind: "chest", chest })}
+        disabled={!!why}
+        aria-describedby={why ? whyId : undefined}
+        className={`plaque press inline-flex items-center gap-1.5 font-bold disabled:opacity-40 ${roomy ? "min-h-11 px-4 py-2.5 text-sm" : "px-2.5 py-1 text-xs"} ${className}`}
+      >
+        <svg width="11" height="11" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+          <path d="M8 3v10M3 8h10" />
+        </svg>
+        {t("admin.chest.add")}
+      </button>
+      {/* Its own line: under the button in a list, after the other actions in a row of them. */}
+      {why && (
+        <p id={whyId} className="order-last mt-1 basis-full text-xs text-ash">
+          {why}
+        </p>
+      )}
+    </>
   );
 }
 

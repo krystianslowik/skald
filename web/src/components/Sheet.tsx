@@ -79,6 +79,8 @@ export function Sheet({
   const fadeAnim = useRef<AnimationPlaybackControls | null>(null);
   const closing = useRef(false);
   const dragged = useRef(false);
+  // Set by a press that starts on the scrim: only that press's click closes the sheet.
+  const scrimPress = useRef(false);
   const done = useRef(onClose);
   done.current = onClose;
   const scrim = useTransform(() => fade.get() * (1 - Math.min(1, Math.max(0, offset.get() / size.current))));
@@ -169,10 +171,16 @@ export function Sheet({
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape") requestClose();
     };
+    // Every press starts unowned; the scrim's own handler (later, on the way back up) claims it.
+    const onPress = () => {
+      scrimPress.current = false;
+    };
     document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPress, true);
     return () => {
       document.body.style.overflow = overflow;
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPress, true);
     };
   }, []);
 
@@ -258,7 +266,22 @@ export function Sheet({
   // On the body, so a sheet opened inside the map tab still covers the tab bar.
   return createPortal(
     <div className={`fixed inset-0 z-50 ${modal ? "" : "pointer-events-none"}`}>
-      {modal && <motion.div aria-hidden className="sheet-scrim absolute inset-0" style={{ opacity: scrim }} onClick={requestClose} />}
+      {modal && (
+        <motion.div
+          aria-hidden
+          className="sheet-scrim absolute inset-0"
+          style={{ opacity: scrim }}
+          onPointerDown={() => (scrimPress.current = true)}
+          onPointerCancel={() => (scrimPress.current = false)}
+          onClick={() => {
+            // A tap that opened this sheet (a map tap finishing a pick) ends in a click the
+            // browser hit-tests against the new scrim; it started elsewhere, so it is not a close.
+            const own = scrimPress.current;
+            scrimPress.current = false;
+            if (own) requestClose();
+          }}
+        />
+      )}
       <motion.div
         ref={panel}
         role="dialog"
