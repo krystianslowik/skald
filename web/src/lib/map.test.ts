@@ -39,7 +39,7 @@ import {
   zoomAt,
   type Box,
 } from "./mapgeo";
-import { inertiaStep, releaseVelocity, RUBBER, rubberBand, springStep, ZOOM_DECELERATION } from "./mapmotion";
+import { bandCentre, EDGE_RUBBER, flingOffset, inertiaStep, REST_SPEED, RUBBER, rubberBand, SampleRing, springStep, unbandCentre, ZOOM_DECELERATION, ZOOM_REST, zoomFlingOffset } from "./mapmotion";
 import { mapUrlAt, terrainUrl } from "./world";
 
 const snap = mockMap({ now: Date.parse("2026-10-10T20:00:00Z") });
@@ -477,22 +477,114 @@ describe("motion", () => {
     expect(Math.exp(d)).toBeLessThan(2);
   });
 
+  const ring = (pts: readonly (readonly [number, number])[]) => {
+    const r = new SampleRing(8);
+    for (const [x, t] of pts) r.push(x, 0, t);
+    return r;
+  };
+
   it("measures release velocity over the last 100 ms", () => {
-    expect(releaseVelocity([])).toEqual([0, 0]);
-    const [vx] = releaseVelocity([
-      { x: 0, y: 0, t: 0 },
-      { x: 500, y: 0, t: 200 },
-      { x: 600, y: 0, t: 250 },
-      { x: 700, y: 0, t: 300 },
-    ]);
+    expect(new SampleRing().velocity()).toEqual([0, 0]);
+    const [vx] = ring([
+      [0, 0],
+      [500, 200],
+      [600, 250],
+      [700, 300],
+    ]).velocity();
     expect(vx).toBeCloseTo(2000);
     // Lifted right after the last move it keeps its speed; after a pause it has none.
-    const run = [
-      { x: 600, y: 0, t: 250 },
-      { x: 700, y: 0, t: 300 },
-    ];
-    expect(releaseVelocity(run, 308)[0]).toBeCloseTo(2000);
-    expect(releaseVelocity(run, 420)).toEqual([0, 0]);
+    const run = ring([
+      [600, 250],
+      [700, 300],
+    ]);
+    expect(run.velocity(308)[0]).toBeCloseTo(2000);
+    expect(run.velocity(420)).toEqual([0, 0]);
+  });
+
+  it("keeps only the newest samples, without allocating per move", () => {
+    const r = new SampleRing(4);
+    for (let i = 0; i < 40; i++) r.push(i * 10, -i * 5, i * 8);
+    expect(r.size).toBe(4);
+    const [vx, vy] = r.velocity(312);
+    expect(vx).toBeCloseTo(1250);
+    expect(vy).toBeCloseTo(-625);
+  });
+
+  it("fits a noisy release better than its last two samples", () => {
+    // 1500 px/s with a finger's jitter: the last sample comes in late.
+    const pts: [number, number][] = [];
+    const jitter = [0.8, -1.1, 0.4, 1.2, -0.6, 0.9, -1.3, 0, 0.7, -2.4];
+    for (let i = 0; i < 10; i++) pts.push([i * 12 + jitter[i]!, i * 8]);
+    const lsq = ring(pts.slice(-8)).velocity()[0];
+    const two = ring(pts.slice(-2)).velocity()[0];
+    expect(Math.abs(lsq - 1500)).toBeLessThan(Math.abs(two - 1500));
+    expect(Math.abs(lsq - 1500)).toBeLessThan(60);
+  });
+
+  it("stretches a pan past the world's edge a little, and undoes the stretch exactly", () => {
+    const R = 1000;
+    const inside = { cx: 300, cz: -400, scale: 2 };
+    expect(bandCentre(inside, R)).toBe(inside);
+    expect(unbandCentre(inside, R)).toBe(inside);
+    let prev = 0;
+    for (const over of [5, 40, 200, 2000, 1e6]) {
+      // `over` px past the edge, due east and to the north-west.
+      for (const [dx, dz] of [
+        [1, 0],
+        [-Math.SQRT1_2, Math.SQRT1_2],
+      ] as const) {
+        const raw = { cx: dx * (R + over / 2), cz: dz * (R + over / 2), scale: 2 };
+        const b = bandCentre(raw, R);
+        const px = (Math.hypot(b.cx, b.cz) - R) * 2;
+        expect(px).toBeGreaterThan(0);
+        expect(px).toBeLessThan(Math.min(over, EDGE_RUBBER));
+        // The direction is kept.
+        expect(b.cx * dz - b.cz * dx).toBeCloseTo(0, 6);
+        if (dx === 1) {
+          expect(px).toBeGreaterThan(prev);
+          prev = px;
+        }
+        if (over < 2000) {
+          const u = unbandCentre(b, R);
+          expect(u.cx).toBeCloseTo(raw.cx, 4);
+          expect(u.cz).toBeCloseTo(raw.cz, 4);
+        }
+      }
+    }
+  });
+
+  it("knows where a fling lands the moment it starts", () => {
+    for (const [vx, vy] of [
+      [2000, 0],
+      [-900, 1200],
+      [40, -30],
+    ] as const) {
+      let x = 0;
+      let y = 0;
+      let wx: number = vx;
+      let wy: number = vy;
+      for (let i = 0; i < 2000 && Math.hypot(wx, wy) >= REST_SPEED; i++) {
+        const sx = inertiaStep(wx, 8);
+        const sy = inertiaStep(wy, 8);
+        x += sx.d;
+        y += sy.d;
+        wx = sx.v;
+        wy = sy.v;
+      }
+      const [px, py] = flingOffset(vx, vy);
+      // Within the last step's travel, at any frame rate.
+      expect(Math.abs(px - x)).toBeLessThan(0.5);
+      expect(Math.abs(py - y)).toBeLessThan(0.5);
+    }
+    expect(flingOffset(5, 5)).toEqual([0, 0]);
+    let v = 3;
+    let d = 0;
+    while (Math.abs(v) >= ZOOM_REST) {
+      const s = inertiaStep(v, 16, ZOOM_DECELERATION);
+      d += s.d;
+      v = s.v;
+    }
+    expect(zoomFlingOffset(3)).toBeCloseTo(d, 2);
   });
 });
 

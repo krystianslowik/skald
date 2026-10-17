@@ -222,6 +222,23 @@ describe("TileScheduler", () => {
     expect([...s.inflight].sort()).toEqual(["c", "y"]);
   });
 
+  it("starts no more than it is allowed until the next update", () => {
+    const started: string[] = [];
+    const s = new TileScheduler(6, (k) => {
+      started.push(k);
+      return () => {};
+    });
+    s.update(["a", "b", "c", "d"], 4, 2);
+    expect(started).toEqual(["a", "b"]);
+    // A finished load frees a slot, not the allowance.
+    s.finish("a");
+    expect(started).toEqual(["a", "b"]);
+    s.update(["b", "c", "d"], 3, 0);
+    expect(started).toEqual(["a", "b"]);
+    s.update(["b", "c", "d"]);
+    expect(started).toEqual(["a", "b", "c", "d"]);
+  });
+
   it("does not restart a finished tile unless asked again", () => {
     const start = vi.fn(() => () => {});
     const s = new TileScheduler(4, start);

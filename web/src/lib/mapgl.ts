@@ -13,12 +13,12 @@
 // few pieces and draws. maprender.ts falls back to its Canvas2D renderer
 // without WebGL2 or while the context is lost.
 
-import { closeColour, Fades, FADE_MS, flatColour, GPU_PIN_LEVEL, heldLevel, premultiply, selfTestTile, slotQuads, subRect, TexturePool, UploadBudget, Watchdog, type Quad } from "./gltiles";
+import { closeColour, Fades, FADE_MS, flatColour, GPU_PIN_LEVEL, heldLevel, loadAllowance, premultiply, selfTestTile, slotQuads, subRect, TexturePool, UploadBudget, Watchdog, type Quad } from "./gltiles";
 import type { FogField, SeaMask } from "./fogfield";
 import { COAST, PAPER, PAPER_DARK, PAPER_INK, VOID, type Textures } from "./paper";
 import type { TileFeed } from "./terraindata";
 import { FOREST_DARKEN, paletteOf, RELIEF, SWAMP, WATER_DEEP, WATER_SHALLOW } from "./terrainpaint";
-import { pinnedTiles, planView, tileKey, type TileRef, type TilesDoc } from "./terraintiles";
+import { pinnedTiles, planView, tileKey, tilesIn, type TileRef, type TilesDoc } from "./terraintiles";
 import type { View } from "./mapgeo";
 
 /** The most device pixels per CSS pixel the terrain is drawn at: finer than the data on any phone, and a third of the fill on a 3x screen. */
@@ -310,6 +310,12 @@ export interface GLFrame {
   spoilers: boolean;
   /** Frame time (performance.now()). */
   now: number;
+  /** Where the view is headed (a fling's, glide's or pinch's landing): its tiles are loaded and uploaded first. */
+  ahead?: View | null;
+  /** The map is moving (a gesture, a fling, a glide): tile loads are gated by the frame's time. */
+  moving?: boolean;
+  /** When the frame began (the requestAnimationFrame time stamp), for the gate. */
+  t0?: number;
 }
 
 /** What a frame drew, for tests and profiling. */
@@ -420,6 +426,13 @@ export class GLMap {
   private readonly budget = new UploadBudget(3, 3);
   private level: number | undefined;
   private lastUsed: ReadonlySet<string> = new Set();
+  /** The landing view's tiles, worked out once per landing. */
+  private aheadView: View | null = null;
+  private aheadFor = "";
+  private aheadTiles: TileRef[] = [];
+  private aheadKeys: ReadonlySet<string> = new Set();
+  /** Reused every frame: keys already on this frame's wish list. */
+  private readonly listed = new Set<string>();
   /** Tiles the CPU side keeps for good (levels 0..3): the floor, re-uploaded in a frame after a lost context. */
   private pinned: ReadonlySet<string> = new Set();
   private instData = new Float32Array(FLOATS * 64);
@@ -717,6 +730,10 @@ export class GLMap {
     this.palN = pal.length;
     this.level = undefined;
     this.lastUsed = new Set();
+    this.aheadView = null;
+    this.aheadFor = "";
+    this.aheadTiles = [];
+    this.aheadKeys = new Set();
     this.pinned = new Set(doc ? pinnedTiles(doc.maxLevel, doc.radius).map(tileKey) : []);
     this.pool?.clear();
     this.fades.clear();
@@ -878,6 +895,29 @@ export class GLMap {
     return true;
   }
 
+  /** The tiles the landing view `v` will draw, at the level it will draw them, nearest its centre first; worked out once per landing (and level). */
+  private ahead(v: View | null, k: number): ReadonlySet<string> {
+    const doc0 = this.doc;
+    // The level the landing will be drawn at: held as drawTiles holds it, so a fling (same zoom) asks for the level on screen.
+    const z = v && doc0 ? heldLevel(v.scale, k, doc0.maxLevel, doc0.radius, doc0.tileSize, this.level) : -1;
+    const key = `${z}`;
+    if (v === this.aheadView && key === this.aheadFor) return this.aheadKeys;
+    this.aheadView = v;
+    this.aheadFor = key;
+    const doc = this.doc;
+    if (!v || !doc) {
+      this.aheadTiles = [];
+      this.aheadKeys = new Set();
+      return this.aheadKeys;
+    }
+    const R = doc.radius;
+    const hw = v.w / 2 / v.scale;
+    const hh = v.h / 2 / v.scale;
+    this.aheadTiles = tilesIn({ x0: v.cx - hw, z0: v.cz - hh, x1: v.cx + hw, z1: v.cz + hh }, z, R);
+    this.aheadKeys = new Set(this.aheadTiles.map(tileKey));
+    return this.aheadKeys;
+  }
+
   private drawTiles(fr: GLFrame, pxPerM: number, bindSea: (pre: string) => void): boolean {
     const r = this.res!;
     const gl = this.gl;
@@ -904,29 +944,40 @@ export class GLMap {
     if (this.level !== undefined && z !== this.level) for (const s of plan.slots) if (pool.has(tileKey(s.tile))) this.fades.begin(tileKey(s.tile), now);
     this.level = z;
     const slotKeys = new Set(plan.slots.map((s) => tileKey(s.tile)));
-    const keep = (k: string) => this.lastUsed.has(k) || slotKeys.has(k) || Number(k.slice(0, k.indexOf("/"))) <= GPU_PIN_LEVEL;
-    // Up to the GPU what has arrived, in planView's order; ask for the rest.
+    const ahead = this.ahead(fr.ahead ?? null, k);
+    // The landing's tiles are spared from eviction only while the pool has room for them besides the view's and the pinned levels.
+    const pinnedGPU = ((4 ** (GPU_PIN_LEVEL + 1) - 1) / 3) | 0;
+    const spare = ahead.size > 0 && slotKeys.size + this.lastUsed.size + pinnedGPU + ahead.size <= pool.capacity;
+    const keep = (k: string) => this.lastUsed.has(k) || slotKeys.has(k) || (spare && ahead.has(k)) || Number(k.slice(0, k.indexOf("/"))) <= GPU_PIN_LEVEL;
+    // Up to the GPU what has arrived, in planView's order with the landing's
+    // tiles first; ask for the rest. There is a landing only once the finger
+    // has lifted: what a fling crosses shows for a moment and is cancelled
+    // as it leaves, so the slots go to where the view comes to rest.
     const wish: string[] = [];
-    let low = 0;
+    const listed = this.listed;
+    listed.clear();
     let pending = 0;
     let went = 0;
     this.budget.begin(performance.now());
-    plan.want.forEach((t, i) => {
+    const consider = (t: TileRef) => {
       const k = tileKey(t);
-      if (pool.has(k)) return;
+      if (listed.has(k) || pool.has(k)) return;
+      listed.add(k);
       const data = feed.get(k);
       if (!data) {
-        if (feed.gone(k)) return;
-        wish.push(k);
-        if (i < plan.low) low = wish.length;
+        if (!feed.gone(k)) wish.push(k);
         return;
       }
       if (this.budget.take(performance.now()) && this.upload(k, data, keep)) {
         this.fades.begin(k, now);
         went++;
       } else pending++;
-    });
-    feed.want(wish, low);
+    };
+    for (const t of this.aheadTiles) consider(t);
+    for (let i = 0; i < plan.low; i++) consider(plan.want[i]!);
+    const low = wish.length;
+    for (let i = plan.low; i < plan.want.length; i++) consider(plan.want[i]!);
+    feed.want(wish, low, loadAllowance(fr.moving ?? false, fr.t0, performance.now()));
     // Tiles waiting on the CPU side with none going up: the GPU path is not working.
     const why = this.watchdog.frame(now, pending > 0 && went === 0, feed);
     if (why) {
@@ -939,7 +990,7 @@ export class GLMap {
     });
     for (const k of sel.used) pool.touch(k);
     this.lastUsed = sel.used;
-    feed.keep = new Set([...sel.used, ...this.pinned]);
+    feed.keep = new Set([...sel.used, ...this.pinned, ...ahead]);
     const { chunks, chunksPending } = this.stats;
     this.stats = { level: z, wanted: plan.slots.length, quads: sel.quads.length, own: sel.own, ancestor: sel.ancestor, descendant: sel.descendant, blank: sel.blank, fading: sel.fading, uploads: this.budget.used, pending, pool: pool.size, capacity: pool.capacity, chunks, chunksPending };
     if (sel.quads.length) {

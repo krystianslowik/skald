@@ -103,8 +103,8 @@ export class TileFeed {
     return this.missing.has(key);
   }
 
-  /** The tiles still to fetch, most important first, from `low` on at low priority (TileScheduler); anything else in flight is cancelled. */
-  want(keys: readonly string[], low = keys.length): void {
+  /** The tiles still to fetch, most important first, from `low` on at low priority, at most `starts` new loads (TileScheduler); anything else in flight is cancelled. */
+  want(keys: readonly string[], low = keys.length, starts = Infinity): void {
     const now = Date.now();
     const out: string[] = [];
     let lo = 0;
@@ -113,7 +113,7 @@ export class TileFeed {
       out.push(k);
       if (i < low) lo = out.length;
     });
-    this.sched.update(out, lo);
+    this.sched.update(out, lo, starts);
   }
 
   get held(): { bytes: number; tiles: number; inflight: number } {

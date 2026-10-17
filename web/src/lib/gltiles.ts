@@ -133,6 +133,21 @@ export class UploadBudget {
   }
 }
 
+/** While the map moves, a frame that has already used this long (ms) starts no tile loads... */
+export const LOAD_GATE_MS = 8;
+/** ...and one that has not starts at most this many. */
+export const MOVING_STARTS = 2;
+
+/**
+ * How many tile loads a frame may start (OpenLayers' rule for phones): any
+ * number at rest; while the map moves, none once the frame (begun at `t0`,
+ * its requestAnimationFrame time) has used LOAD_GATE_MS, else MOVING_STARTS.
+ */
+export function loadAllowance(moving: boolean, t0: number | undefined, now: number): number {
+  if (!moving) return Infinity;
+  return t0 !== undefined && now - t0 > LOAD_GATE_MS ? 0 : MOVING_STARTS;
+}
+
 const ease = (t: number) => t * t * (3 - 2 * t);
 
 /** When each tile began fading in; a tile with no fade is fully shown. */
