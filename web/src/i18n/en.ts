@@ -1906,6 +1906,7 @@ export const en = {
   "admin.refusal.notBanned": "That entry is not on the ban list any more. Reload the list.",
   "admin.refusal.worldLoading": "The world is still loading. Try again in a moment.",
   "admin.refusal.untested": "Game build {build} is not allowed yet. Allow it in the admin panel first.",
+  "admin.refusal.busy": "The game was busy and did not take the command, so nothing was done. Try again in a moment.",
   "admin.refusal.timeout": "The bridge did not answer in time. It may have worked anyway: check before you try again.",
   "admin.refusal.agentDown": "No contact with the agent. Try again in a moment.",
   "admin.time.title": "Time",

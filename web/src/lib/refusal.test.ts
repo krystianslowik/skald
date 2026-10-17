@@ -55,6 +55,8 @@ const KNOWN: [string, string, string][] = [
   ["EnvMan not available", "The world is still loading. Try again in a moment.", "Świat jeszcze się wczytuje. Spróbuj za chwilę."],
   ["untested game build l-1.0.18: confirm it in the admin panel first", "Game build l-1.0.18 is not allowed yet. Allow it in the admin panel first.", "Wersja gry l-1.0.18 nie jest jeszcze dozwolona. Najpierw zezwól na nią w panelu admina."],
   ["the bridge did not answer in time", "The bridge did not answer in time. It may have worked anyway: check before you try again.", "Mostek nie odpowiedział na czas. Mogło się jednak udać: sprawdź, zanim spróbujesz jeszcze raz."],
+  ["game main thread did not pick up the command in time", "The game was busy and did not take the command, so nothing was done. Try again in a moment.", "Gra była zajęta i nie przyjęła polecenia, więc nic się nie stało. Spróbuj za chwilę."],
+  ["command did not finish in time", "The bridge did not answer in time. It may have worked anyway: check before you try again.", "Mostek nie odpowiedział na czas. Mogło się jednak udać: sprawdź, zanim spróbujesz jeszcze raz."],
   ["agent unreachable", "No contact with the agent. Try again in a moment.", "Brak kontaktu z agentem. Spróbuj za chwilę."],
 ];
 
@@ -74,7 +76,7 @@ describe("bridge refusals", () => {
 
   it("keeps to the bridge's and the agent's own wording", () => {
     // A reworded refusal falls back to English silently, so the literals are pinned to their source.
-    const src = ["Chests.cs", "Extras.cs", "Commands.cs"].map((f) => readFileSync(`${repo}/bridge/plugin/${f}`, "utf8")).join("\n") + readFileSync(`${repo}/agent/internal/bridge/bridge.go`, "utf8");
+    const src = ["Chests.cs", "Extras.cs", "Commands.cs", "Plugin.cs"].map((f) => readFileSync(`${repo}/bridge/plugin/${f}`, "utf8")).join("\n") + readFileSync(`${repo}/agent/internal/bridge/bridge.go`, "utf8");
     for (const literal of [
       "a player has that chest open; try again once it is closed",
       " is standing at that chest; try again once they step away",
@@ -115,6 +117,8 @@ describe("bridge refusals", () => {
       "untested game build ",
       ": confirm it in the admin panel first",
       "the bridge did not answer in time",
+      "game main thread did not pick up the command in time",
+      "command did not finish in time",
     ]) expect(src, literal).toContain(literal);
   });
 
