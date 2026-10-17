@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mockTerrainTile } from "@server/mocktiles";
 import { fogField } from "./fogfield";
-import { closeColour, Fades, FADE_MS, flatColour, heldLevel, HYSTERESIS, premultiply, selfTestTile, slotQuads, subRect, TexturePool, UploadBudget, Watchdog } from "./gltiles";
+import { closeColour, Fades, FADE_MS, flatColour, heldLevel, HYSTERESIS, LOAD_GATE_MS, loadAllowance, MOVING_STARTS, premultiply, selfTestTile, slotQuads, subRect, TexturePool, UploadBudget, Watchdog } from "./gltiles";
 import { chunkCapacity, poolCapacity, TILE_EDGE } from "./mapgl";
 import { boldFaceReady, canvasForced, RENDERER_KEY } from "./maprender";
 import { TileFeed } from "./terraindata";
@@ -68,6 +68,16 @@ describe("upload budget", () => {
     b.begin(300);
     expect(b.take(300)).toBe(true);
     expect(b.used).toBe(1);
+  });
+});
+
+describe("load gate", () => {
+  it("starts any number of loads at rest, a couple while moving, none in a frame already late", () => {
+    expect(loadAllowance(false, 0, 30)).toBe(Infinity);
+    expect(loadAllowance(true, 100, 104)).toBe(MOVING_STARTS);
+    expect(loadAllowance(true, 100, 100 + LOAD_GATE_MS + 0.1)).toBe(0);
+    // Outside a frame (an arrival's redraw) there is nothing to measure against.
+    expect(loadAllowance(true, undefined, 500)).toBe(MOVING_STARTS);
   });
 });
 

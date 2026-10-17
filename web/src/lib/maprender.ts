@@ -262,6 +262,12 @@ export interface FrameState {
   reduced?: boolean;
   /** The storey picked in the floor switcher; every other base shows its ground. */
   storey?: StoreyPick | null;
+  /** Where the view is headed (a fling's or glide's landing), for the WebGL map to load ahead. */
+  ahead?: View | null;
+  /** The view is moving: tile loads wait for frames with time to spare. */
+  moving?: boolean;
+  /** The frame's requestAnimationFrame time stamp. */
+  t0?: number;
 }
 
 /** 0 at or below `a`, 1 at or above `b`, smooth between. */
@@ -763,7 +769,7 @@ export class MapRenderer {
     const v = f.view;
     this.activeBase = this.storeys(v, f.layers)?.base ?? null;
     this.setRasters(f);
-    const busy = this.gl!.draw({ view: v, fog: f.layers.fog && p.fog !== null, spoilers: this.spoilers, now: performance.now() });
+    const busy = this.gl!.draw({ view: v, fog: f.layers.fog && p.fog !== null, spoilers: this.spoilers, now: performance.now(), ahead: f.ahead, moving: f.moving, t0: f.t0 });
     const inputs = [v.cx, v.cz, v.scale, v.w, v.h, this.dpr, f.layers, f.markers, f.selected, f.hovered, f.highlighted, f.cluster, f.labels?.max, f.labels?.px, f.storey?.base, f.storey?.level, this.nature.version, this.planVersion, this.icons, p];
     if (this.splits.size === 0 && inputs.length === this.overlay.length && inputs.every((x, i) => x === this.overlay[i])) return busy;
     this.overlay = inputs;

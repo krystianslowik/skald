@@ -49,21 +49,141 @@ export function springStep(x: number, v: number, target: number, dtSec: number, 
   return { x: target + (d + c * dtSec) * e, v: (c - w * (d + c * dtSec)) * e };
 }
 
+/** Release velocity is fitted over this much of the gesture's end (ms). */
+export const VELOCITY_WINDOW = 100;
+/** Lifted this long (ms) after the last move, the pointer had stopped: no fling. */
+export const STOP_MS = 50;
+
 /**
- * Release velocity in px/s from recent pointer samples (newest last), over
- * the last 100 ms. Lifted at `at` (the release's time stamp) more than
- * 50 ms after the last move, the pointer had stopped: no velocity.
+ * The last pointer samples of a gesture in a fixed ring (no allocation per
+ * move), and the release velocity fitted to them: a weighted least-squares
+ * line through the last VELOCITY_WINDOW ms, newer samples counting up to
+ * twice as much as the oldest. A fit over every coalesced sample does not
+ * jump with the one noisy sample a two-point estimate would hang on.
  */
-export function releaseVelocity(samples: readonly { x: number; y: number; t: number }[], at?: number): [number, number] {
-  const last = samples.at(-1);
-  if (!last || (at !== undefined && at - last.t > 50)) return [0, 0];
-  let first = last;
-  for (let i = samples.length - 1; i >= 0; i--) {
-    const s = samples[i]!;
-    if (last.t - s.t > 100) break;
-    first = s;
+export class SampleRing {
+  private readonly buf: Float64Array;
+  private head = 0;
+  private n = 0;
+  constructor(private readonly cap = 32) {
+    this.buf = new Float64Array(cap * 3);
   }
-  const dt = last.t - first.t;
-  if (dt <= 0) return [0, 0];
-  return [((last.x - first.x) / dt) * 1000, ((last.y - first.y) / dt) * 1000];
+
+  get size(): number {
+    return this.n;
+  }
+
+  clear(): void {
+    this.n = 0;
+  }
+
+  push(x: number, y: number, t: number): void {
+    const o = this.head * 3;
+    this.buf[o] = x;
+    this.buf[o + 1] = y;
+    this.buf[o + 2] = t;
+    this.head = (this.head + 1) % this.cap;
+    if (this.n < this.cap) this.n++;
+  }
+
+  /** The `i`th newest sample's field (0 x, 1 y, 2 t). */
+  private at(i: number, f: number): number {
+    return this.buf[((this.head - 1 - i + this.cap * 2) % this.cap) * 3 + f]!;
+  }
+
+  /**
+   * Release velocity in px/s (per second of whatever x and y are). Lifted at
+   * `at` (the release's time stamp) more than STOP_MS after the last move,
+   * the pointer had stopped: no velocity.
+   */
+  velocity(at?: number): [number, number] {
+    if (this.n === 0) return [0, 0];
+    const tl = this.at(0, 2);
+    if (at !== undefined && at - tl > STOP_MS) return [0, 0];
+    // Weighted means, then the weighted slope, in one pass each.
+    let sw = 0;
+    let st = 0;
+    let sx = 0;
+    let sy = 0;
+    let m = 0;
+    for (; m < this.n; m++) {
+      const age = tl - this.at(m, 2);
+      if (age > VELOCITY_WINDOW) break;
+      const w = 1 - (0.5 * age) / VELOCITY_WINDOW;
+      sw += w;
+      st += w * age;
+      sx += w * this.at(m, 0);
+      sy += w * this.at(m, 1);
+    }
+    if (m < 2) return [0, 0];
+    const mt = st / sw;
+    const mx = sx / sw;
+    const my = sy / sw;
+    let stt = 0;
+    let stx = 0;
+    let sty = 0;
+    for (let i = 0; i < m; i++) {
+      const age = tl - this.at(i, 2);
+      const w = 1 - (0.5 * age) / VELOCITY_WINDOW;
+      // Time runs backwards with age: the slope over -age is the velocity.
+      const dt = mt - age;
+      stt += w * dt * dt;
+      stx += w * dt * (this.at(i, 0) - mx);
+      sty += w * dt * (this.at(i, 1) - my);
+    }
+    if (stt <= 0) return [0, 0];
+    return [(stx / stt) * 1000, (sty / stt) * 1000];
+  }
+}
+
+/**
+ * How far a fling released at (vx, vy) px/s travels before it comes to rest
+ * (below REST_SPEED): exponential decay keeps its direction and has a closed
+ * form, so the landing point is known the moment the finger lifts.
+ */
+export function flingOffset(vx: number, vy: number, rate = DECELERATION, rest = REST_SPEED): [number, number] {
+  const sp = Math.hypot(vx, vy);
+  if (sp <= rest) return [0, 0];
+  const k = (1 - rest / sp) / (-1000 * Math.log(rate));
+  return [vx * k, vy * k];
+}
+
+/** The same for a pinch's zoom momentum (log scale per second): the log zoom it still adds. */
+export function zoomFlingOffset(v: number, rate = ZOOM_DECELERATION, rest = ZOOM_REST): number {
+  return flingOffset(v, 0, rate, rest)[0];
+}
+
+/** How far past the world's edge a pan can stretch at most, in CSS px. */
+export const EDGE_RUBBER = 72;
+
+interface Centred {
+  cx: number;
+  cz: number;
+  /** CSS px per metre. */
+  scale: number;
+}
+
+/**
+ * A view whose centre may stretch past a disc of `radius` metres, ever more
+ * stiffly and never more than EDGE_RUBBER px: a pan or a fling into the
+ * world's edge gives a little and springs back instead of stopping dead.
+ */
+export function bandCentre<V extends Centred>(v: V, radius: number): V {
+  const r = Math.hypot(v.cx, v.cz) * v.scale;
+  const edge = radius * v.scale;
+  if (r <= edge) return v;
+  const k = rubberBand(r, -Infinity, edge, EDGE_RUBBER) / r;
+  return { ...v, cx: v.cx * k, cz: v.cz * k };
+}
+
+/** The centre the finger asked for behind a banded one (bandCentre undone): a pan goes on from there. */
+export function unbandCentre<V extends Centred>(v: V, radius: number): V {
+  const r = Math.hypot(v.cx, v.cz) * v.scale;
+  const edge = radius * v.scale;
+  if (r <= edge) return v;
+  // rubberBand's band, b = (1 - 1 / (0.55 o / d + 1)) d, solved for the overshoot o.
+  const b = Math.min(r - edge, EDGE_RUBBER * 0.999);
+  const o = (EDGE_RUBBER / 0.55) * (1 / (1 - b / EDGE_RUBBER) - 1);
+  const k = (edge + o) / r;
+  return { ...v, cx: v.cx * k, cz: v.cz * k };
 }

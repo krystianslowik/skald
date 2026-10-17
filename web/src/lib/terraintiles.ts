@@ -279,13 +279,16 @@ export class ByteLRU<V> {
  * low priority: one of them runs at a time, so they trickle in behind the
  * keys that matter (a server that works one tile at a time never has more
  * than one of them ahead of those). `start` begins a load and returns its
- * cancel; the owner calls `finish` when it ends either way.
+ * cancel; the owner calls `finish` when it ends either way. `starts` caps
+ * the loads begun until the next update (none or two a frame while the map
+ * moves: OpenLayers' rule, so a busy frame never also starts loads).
  */
 export class TileScheduler {
   private running = new Map<string, () => void>();
   private lows = new Set<string>();
   private wanted: string[] = [];
   private low = 0;
+  private starts = Infinity;
   constructor(
     private readonly concurrency: number,
     private readonly start: (key: string, low: boolean) => () => void,
@@ -295,10 +298,11 @@ export class TileScheduler {
     return new Set(this.running.keys());
   }
 
-  /** The keys still needed, most important first; from `low` on, low priority. */
-  update(wanted: readonly string[], low = wanted.length): void {
+  /** The keys still needed, most important first; from `low` on, low priority. At most `starts` new loads begin until the next update. */
+  update(wanted: readonly string[], low = wanted.length, starts = Infinity): void {
     this.wanted = [...wanted];
     this.low = low;
+    this.starts = starts;
     const keep = new Set(wanted);
     for (const [k, cancel] of this.running) {
       if (!keep.has(k)) {
@@ -325,10 +329,11 @@ export class TileScheduler {
     for (let i = 0; i < this.wanted.length; i++) {
       const k = this.wanted[i]!;
       if (this.running.has(k)) continue;
-      if (this.running.size >= this.concurrency) return;
+      if (this.running.size >= this.concurrency || this.starts <= 0) return;
       const low = i >= this.low;
       if (low && this.lows.size > 0) return;
       if (low) this.lows.add(k);
+      this.starts--;
       this.running.set(k, this.start(k, low));
     }
   }

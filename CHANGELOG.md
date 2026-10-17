@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Changed
+
+- The map feels steadier under the finger. A fling now starts at the speed your finger had when you let go, worked out from every touch sample the browser records rather than the last two, so it no longer lurches or stalls at release. Panning into the edge of the world gives a little and springs back instead of stopping dead, and a pinch stretched past the closest or farthest zoom now springs back to it smoothly instead of jumping. With "reduce motion" on, the map still stops where you let go and never stretches.
+- When you fling the map, or jump somewhere with search or a zoom button, the terrain where it will come to rest starts loading the moment you let go, instead of only once the map gets there. On a slow connection the landing spot is sharp sooner: in a test with 0.6 s per tile, about a third fewer blurry tiles were left when a fling stopped, and the rest sharpened in about 40 % less time. While the map is moving, new tile requests wait for frames that have time to spare, so loading never makes a gesture stutter (#68).
+
 ### Fixed
 
 - A chest, cart, ship or grave holding items the game no longer knows (items without a prefab) now shows the rest of its contents on the map, instead of nothing (a chest, cart or ship was marked unreadable). The game drops such items when it loads the inventory, and the map now does the same (#110).
