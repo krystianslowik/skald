@@ -5,6 +5,7 @@ import { useI18n } from "../../i18n";
 import { Sheet } from "../Sheet";
 import { useAdmin, type AdminView } from "./AdminContext";
 import { AdminPanel } from "./AdminPanel";
+import { ChestSheet } from "./ChestSheet";
 import { ItemPicker } from "./ItemPicker";
 import { CreatureSheet, PointSheet } from "./PointSheet";
 import { PlayerSheet } from "./PlayerSheet";
@@ -23,6 +24,7 @@ export default function AdminSheets({ view, unlocking }: { view: AdminView | nul
       {view?.kind === "items" && <ItemPicker target={view.picked ? { at: view.picked, label: "map" } : view.target} lines={view.lines} onClose={admin.close} />}
       {view?.kind === "creatures" && <CreatureSheet target={view.picked ? { at: view.picked, label: "map" } : view.target} onClose={admin.close} />}
       {view?.kind === "point" && <PointSheet x={view.x} z={view.z} onClose={admin.close} />}
+      {view?.kind === "chest" && <ChestSheet key={view.chest.id} chest={view.chest} onClose={admin.close} />}
       {view?.kind === "restore" && <RestoreSheet backup={view.backup} onClose={() => admin.open({ kind: "panel" })} />}
       {unlocking && <UnlockSheet onDone={unlocking} />}
     </>

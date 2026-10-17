@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Added
+
+- Admins can put items into a chest from the map: open a chest, tap **Add item**, pick the item from the same search as Give items, choose how many (up to what still fits) and confirm. The items land in that chest in the running game, the Saga records it ("added 20 Iron to a chest at 208, -352"), and the chest on the map shows them at once, marked as added just now until the next world save shows them for good. The game refuses while a player has the chest open or stands at it, and says how many fit when there is not enough room; carts, ships and graves cannot take items this way (#100).
+- **Operators:** Add item needs the new bridge plugin **v0.4.0** (the `skald-bridge` image of this release), which means a game restart to deploy. With an older bridge the button is shown greyed out.
+
 ## [2026.10.5] - 2026-10-17
 
 ### Added
