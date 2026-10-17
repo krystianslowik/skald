@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { MapContainer } from "../../types";
 import { stackSize } from "../../lib/admin";
 import { chestRoom, MAX_CHEST_ADD, notePending, usePendingItems, type ChestAddResult } from "../../lib/chestadd";
+import { failText } from "../../lib/refusal";
 import { itemLabel } from "../../lib/storage";
 import { useI18n } from "../../i18n";
 import { Sheet } from "../Sheet";
@@ -19,7 +20,8 @@ import { AdminHead, Btn, Stepper } from "./parts";
  * save (lib/chestadd).
  */
 export function ChestSheet({ chest, onClose }: { chest: MapContainer; onClose: () => void }) {
-  const { t, lookup, number } = useI18n();
+  const i18n = useI18n();
+  const { t, lookup, number } = i18n;
   const admin = useAdmin();
   const items = usePendingItems(chest) ?? chest.items;
   const [item, setItem] = useState<string | null>(null);
@@ -53,7 +55,7 @@ export function ChestSheet({ chest, onClose }: { chest: MapContainer; onClose: (
     if (res.needsAdmin) return;
     if (!res.ok) {
       const timedOut = res.status === 504;
-      const msg = timedOut ? t("admin.chest.timeout") : res.status === 0 || res.status === 502 ? t("admin.unreachable") : res.error || t("admin.failed");
+      const msg = timedOut ? t("admin.chest.timeout") : failText(i18n, res);
       setUncertain(timedOut);
       setError(msg);
       navigator.vibrate?.([30, 40, 30]);

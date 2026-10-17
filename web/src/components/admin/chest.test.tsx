@@ -108,9 +108,33 @@ describe("add item to a chest", () => {
     const go = within(sheet).getByRole("button", { name: "Add 10× Wood" });
     await waitFor(() => expect(go).toBeEnabled());
     fireEvent.click(go);
-    expect(await within(sheet).findByRole("alert")).toHaveTextContent("a player has that chest open; try again once it is closed");
+    expect(await within(sheet).findByRole("alert")).toHaveTextContent("Someone has this chest open. Try again once they close it.");
     expect(onClose).not.toHaveBeenCalled();
     expect(pendingItems(CHEST)).toBeNull();
+  });
+
+  it("names the player standing at the chest, in Polish too", async () => {
+    api(status(), () => Response.json({ ok: false, error: "Ragnar is standing at that chest; try again once they step away" }, { status: 409 }));
+    wrap(<ChestSheet chest={CHEST} onClose={() => {}} />, "pl");
+    const sheet = screen.getByRole("dialog", { name: "Do skrzyni" });
+    fireEvent.change(within(sheet).getByRole("searchbox"), { target: { value: "drewno" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Drewno" }));
+    const go = within(sheet).getByRole("button", { name: "Dodaj 10× Drewno" });
+    await waitFor(() => expect(go).toBeEnabled());
+    fireEvent.click(go);
+    expect(await within(sheet).findByRole("alert")).toHaveTextContent("Ragnar stoi przy skrzyni. Spróbuj, gdy odejdzie.");
+  });
+
+  it("passes an unknown refusal through as the bridge wrote it", async () => {
+    api(status(), () => Response.json({ ok: false, error: "the chest is haunted" }, { status: 409 }));
+    wrap(<ChestSheet chest={CHEST} onClose={() => {}} />);
+    const sheet = screen.getByRole("dialog", { name: "Add item" });
+    fireEvent.change(within(sheet).getByRole("searchbox"), { target: { value: "wood" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Wood" }));
+    const go = within(sheet).getByRole("button", { name: "Add 10× Wood" });
+    await waitFor(() => expect(go).toBeEnabled());
+    fireEvent.click(go);
+    expect(await within(sheet).findByRole("alert")).toHaveTextContent("the chest is haunted");
   });
 
   it("guesses the room, and leaves the exact count to the bridge", async () => {
@@ -129,7 +153,7 @@ describe("add item to a chest", () => {
     const go = within(sheet).getByRole("button", { name: "Add 1× Stone" });
     await waitFor(() => expect(go).toBeEnabled());
     fireEvent.click(go);
-    expect(await within(sheet).findByRole("alert")).toHaveTextContent("that chest has no room for Stone");
+    expect(await within(sheet).findByRole("alert")).toHaveTextContent("This chest has no room left for Stone.");
     expect(calls.filter((c) => c.url === "/api/admin/chest-add")).toHaveLength(1);
   });
 
@@ -185,6 +209,6 @@ describe("the saga line", () => {
     const ev = { actor: "Sigrun", command: "chest-add", result: "ok", item: "Iron", amount: 20, prefab: "piece_chest_wood", at: { x: 208, z: -352 }, loaded: true };
     expect(describeAdmin(makeI18n("en"), ev)).toBe("Sigrun added 20 Iron to a chest at 208, -352");
     expect(describeAdmin(makeI18n("pl"), ev)).toBe("Sigrun dodał 20 Żelazo do skrzyni na 208, -352");
-    expect(describeAdmin(makeI18n("en"), { actor: "k", command: "chest-add", result: "error", error: "only 13 Wood fit in that chest" })).toBe("k: adding to a chest failed (only 13 Wood fit in that chest)");
+    expect(describeAdmin(makeI18n("en"), { actor: "k", command: "chest-add", result: "error", error: "only 13 Wood fit in that chest" })).toBe("k: adding to a chest failed (Only 13 fit in this chest: Wood)");
   });
 });

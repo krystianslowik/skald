@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AccessEntry, AccessListName, AccessState, AgentEvent, RestoreBackup, RestoreInfo, RestoreStep } from "../../types";
 import { accessPath, getAccess, getRestoreInfo, PLATFORM_ID } from "../../lib/admin";
+import { failText } from "../../lib/refusal";
 import { useI18n, type TextKey } from "../../i18n";
 import { PlatformGlyph } from "../PlatformGlyph";
 import { Sheet } from "../Sheet";
@@ -20,7 +21,8 @@ const APPLIES: Record<string, TextKey> = {
  * this sheet is for admins only.
  */
 export function AccessLists() {
-  const { t } = useI18n();
+  const i18n = useI18n();
+  const { t } = i18n;
   const admin = useAdmin()!;
   const [state, setState] = useState<AccessState | null>(null);
   const [failed, setFailed] = useState(false);
@@ -42,7 +44,7 @@ export function AccessLists() {
     if (r.ok) {
       const applies = (r.data as { applies?: string } | undefined)?.applies ?? "restart";
       admin.toast(true, t(APPLIES[applies] ?? "admin.access.applies.restart"));
-    } else if (!r.needsAdmin) admin.toast(false, r.error || t("admin.failed"));
+    } else if (!r.needsAdmin) admin.toast(false, failText(i18n, r));
     reload();
     return r.ok;
   };

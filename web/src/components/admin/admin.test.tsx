@@ -357,6 +357,19 @@ describe("admin", () => {
     expect(await screen.findByRole("dialog", { name: "Admin" })).toBeInTheDocument();
   });
 
+  it("says in the panel's words why the bridge refused a fill", async () => {
+    api(status(), (url) => (url === "/api/admin/fill-smelters" ? Response.json({ ok: false, error: "no connected player 'Ragnar'" }, { status: 404 }) : Response.json({ ok: true, data: {} })));
+    renderDashboard();
+    const panel = await openAdmin();
+    fireEvent.click(within(panel).getByRole("button", { name: "Fill smelters" }));
+    const flow = await screen.findByRole("dialog", { name: "Fill smelters" });
+    fireEvent.click(within(await within(flow).findByRole("list", { name: "Which metal?" })).getByRole("button", { name: /Scrap iron/ }));
+    fireEvent.click(within(flow).getByRole("button", { name: "With coal" }));
+    fireEvent.click(within(flow).getByRole("button", { name: "Fill smelters" }));
+    expect(await screen.findByText("Ragnar is not in the game any more.")).toBeInTheDocument();
+    expect(screen.queryByText(/no connected player/)).not.toBeInTheDocument();
+  });
+
   it("sends coal only without an ore, and keeps the current ore", async () => {
     const calls = api(status());
     renderDashboard();
@@ -564,7 +577,8 @@ describe("admin lines in the saga", () => {
     expect(describeAdmin(en, { actor: "dashboard-1a2b3c", command: "spawn", result: "ok", items: [{ item: "Wood", amount: 20 }, { item: "SwordIron", amount: 1, quality: 3 }] })).toBe("An admin spawned 20 Wood, Iron Sword ★★★");
     expect(describeAdmin(en, { actor: "k", command: "kick", result: "ok", player: "Freya" })).toBe("k kicked Freya");
     expect(describeAdmin(en, { actor: "k", command: "time", result: "ok", dayFraction: 0.25 })).toBe("k set the time to 06:00");
-    expect(describeAdmin(en, { actor: "k", command: "ban", result: "error", error: "no connected player 'X'" })).toBe("k: a ban failed (no connected player 'X')");
+    expect(describeAdmin(en, { actor: "k", command: "ban", result: "error", error: "no connected player 'Ragnar'" })).toBe("k: a ban failed (Ragnar is not in the game any more)");
+    expect(describeAdmin(en, { actor: "k", command: "ban", result: "error", error: "something new" })).toBe("k: a ban failed (something new)");
     expect(describeAdmin(pl, { actor: "Sigrun", command: "spawn", result: "ok", item: "Wood", amount: 20, player: "Ragnar" })).toBe("Sigrun przywołał 20 Drewno dla: Ragnar");
     expect(describeAdmin(pl, { actor: "k", command: "event-start", result: "ok", name: "wolves" })).toMatch(/^k sprowadził najazd: /);
   });

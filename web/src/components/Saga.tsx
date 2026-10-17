@@ -4,6 +4,7 @@ import type { AgentEvent, Platform } from "../types";
 import { gameVersion } from "../lib/format";
 import { sagaRows, type SagaRow } from "../lib/saga";
 import { gameClock } from "../lib/admin";
+import { refusalReason } from "../lib/refusal";
 import { itemLabel } from "../lib/storage";
 import { useI18n, type I18n, type TextKey } from "../i18n";
 import { PlayerName } from "./PlayerName";
@@ -102,7 +103,8 @@ export function describeAdmin(i: I18n, d: Record<string, unknown>): string {
   }
   if (d.result !== "ok") {
     const what = lookup(`saga.admin.cmd.${command}`) ?? command;
-    return d.result === "error" ? t("saga.admin.failed", { actor, what, error: String(d.error ?? "") }) : t("saga.admin.timeout", { actor, what });
+    const error = String(d.error ?? "");
+    return d.result === "error" ? t("saga.admin.failed", { actor, what, error: refusalReason(i, error) ?? error }) : t("saga.admin.timeout", { actor, what });
   }
   const vars: Record<string, string | number> = { actor, player };
   switch (command) {
