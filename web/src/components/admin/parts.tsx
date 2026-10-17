@@ -3,7 +3,7 @@ import type { Platform } from "../../types";
 import { useI18n, type TextKey } from "../../i18n";
 import { PlatformGlyph } from "../PlatformGlyph";
 import { SheetClose } from "../Sheet";
-import { useAdmin, type Blocker, type Target } from "./AdminContext";
+import { BLOCKER_TEXT, useAdmin, type Target } from "./AdminContext";
 import { HoldButton } from "./HoldButton";
 
 /** A titled block inside an admin sheet. */
@@ -54,6 +54,7 @@ export function Btn({
   primary = false,
   className = "",
   title,
+  describedBy,
 }: {
   children: ReactNode;
   onClick: () => void;
@@ -61,6 +62,8 @@ export function Btn({
   primary?: boolean;
   className?: string;
   title?: string;
+  /** Id of the visible line that says why the button is off. */
+  describedBy?: string;
 }) {
   return (
     <button
@@ -68,6 +71,7 @@ export function Btn({
       onClick={onClick}
       disabled={disabled}
       title={title}
+      aria-describedby={describedBy}
       className={`press flex min-h-11 items-center justify-center gap-2 rounded-[3px] px-4 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40 ${
         primary ? "border border-white/20 bg-[linear-gradient(180deg,#7aaedc,#5e97cc_60%,#4c82b5)] text-[#10161d]" : "plaque"
       } ${className}`}
@@ -152,18 +156,6 @@ export function TargetChips({ value, onChange, allowBase = true, allowMap = true
     </div>
   );
 }
-
-const BLOCKER_TEXT: Record<Exclude<Blocker, null>, TextKey> = {
-  off: "admin.blocker.off",
-  unreachable: "admin.blocker.unreachable",
-  disabled: "admin.blocker.disabled",
-  token: "admin.blocker.token",
-  loading: "admin.blocker.loading",
-  restarting: "admin.blocker.restarting",
-  agent: "admin.blocker.agent",
-  untested: "admin.blocker.untested",
-  offline: "admin.blocker.offline",
-};
 
 /** Why the controls are off, with the one thing that can be done about it. */
 export function BridgeBanner({ compact = false }: { compact?: boolean }) {

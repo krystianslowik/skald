@@ -453,6 +453,10 @@ export const MapCanvas = forwardRef<
     [glideTo, onGroup],
   );
 
+  // A touch the map answered as a tap or long press, between its pointerup and its touchend.
+  // Kept outside the gesture effect, which re-runs when the answer changes its props.
+  const answered = useRef(false);
+
   // Pointers: one pans, two pinch; a double tap zooms in, a two-finger tap out. Wheel zooms around the cursor.
   useEffect(() => {
     const el = canvas.current;
@@ -473,6 +477,19 @@ export const MapCanvas = forwardRef<
     // A finger resting on one spot: after LONG_PRESS_MS it is a long press, and its release is not a tap.
     let press: ReturnType<typeof setTimeout> | null = null;
     let pressed = false;
+    // The map answered this touch (often by opening a sheet over itself): its touchend cancels the
+    // click the browser would send next, which is hit-tested again and would land on that sheet.
+    const answer = (e: PointerEvent) => {
+      if (e.pointerType === "touch") answered.current = true;
+    };
+    const touchEnd = (e: TouchEvent) => {
+      if (!answered.current || e.touches.length > 0) return;
+      answered.current = false;
+      if (e.cancelable) e.preventDefault();
+    };
+    const touchStart = () => {
+      answered.current = false;
+    };
     const cancelPress = () => {
       if (press) clearTimeout(press);
       press = null;
@@ -598,7 +615,10 @@ export const MapCanvas = forwardRef<
       cancelPress();
       if (pressed) {
         // The long press already answered; this release is not a tap.
-        if (pts.size === 0) pressed = false;
+        if (pts.size === 0) {
+          pressed = false;
+          if (e.type === "pointerup") answer(e);
+        }
         el.style.cursor = "grab";
         return;
       }
@@ -630,6 +650,7 @@ export const MapCanvas = forwardRef<
         return;
       }
       if (!moved) {
+        answer(e);
         const touch = e.pointerType !== "mouse";
         const hit = renderer.current ? pickItem(renderer.current.visible, p.x, p.y, touch ? 28 : 16) : null;
         if (hit) {
@@ -686,6 +707,8 @@ export const MapCanvas = forwardRef<
       onLongPress(toWorld(local(e as PointerEvent)));
     };
     el.addEventListener("contextmenu", context);
+    el.addEventListener("touchstart", touchStart, { passive: true });
+    el.addEventListener("touchend", touchEnd, { passive: false });
     el.addEventListener("pointerdown", down);
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", up);
@@ -695,6 +718,8 @@ export const MapCanvas = forwardRef<
     return () => {
       cancelPress();
       el.removeEventListener("contextmenu", context);
+      el.removeEventListener("touchstart", touchStart);
+      el.removeEventListener("touchend", touchEnd);
       el.removeEventListener("pointerdown", down);
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);

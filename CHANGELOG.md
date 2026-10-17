@@ -9,6 +9,12 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- On a phone, **Pick on map** in an admin sheet works again: tapping the map brings the sheet back on its last step with the chosen point. Before, the tap also landed on the sheet as it reappeared, so Fill smelters and Fill fermenters fell back to the Admin panel and Give items closed. The same goes for a long press on the map: lifting the finger no longer presses whatever button of the point sheet ends up under it (#111).
+- With a bridge plugin older than 0.3.0, Fill kilns and Fill smelters are greyed out with a line saying which bridge version they need (fermenters need 0.4.0), instead of running and ending in "unknown command" in English. Fill smelters no longer offers "Keep the current ore" when the bridge sent no ore list. A command the installed plugin does not know now says "This needs a newer bridge plugin" in your language, and one the Skald agent does not know yet (the web updated ahead of the agent) greys the fill button out and says to update the agent (#114).
+- A greyed-out **Add item** on a chest now says why right under it, on phones too: the bridge version it needs, or why admin actions are off (game build not tested yet, bridge not answering, and so on). Before, the reason was only a tooltip, which touch screens never show, or missing (#115).
+
 ## [2026.10.7] - 2026-10-17
 
 ### Fixed

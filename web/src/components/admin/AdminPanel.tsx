@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import type { AdminCatalog } from "../../types";
 import { BROADCAST_MAX, gameClock, getCatalog, lockAdmin, storeActorName, storedActorName, testNotify, WORLD_KEYS } from "../../lib/admin";
 import { useLivePositions } from "../../lib/live";
@@ -6,7 +6,7 @@ import { useI18n, type TextKey } from "../../i18n";
 import { ItemIcon } from "../storage/ItemIcon";
 import { PlatformGlyph } from "../PlatformGlyph";
 import { Sheet } from "../Sheet";
-import { targetBody, useAdmin, type Done, type Target } from "./AdminContext";
+import { pluginBelow, targetBody, useAdmin, type Done, type Target } from "./AdminContext";
 import { fillResult } from "./FillSheet";
 import { AdminGlyph } from "./glyphs";
 import { HoldButton } from "./HoldButton";
@@ -496,21 +496,32 @@ function BaseHelpers({ catalog, picked }: { catalog: AdminCatalog | null; picked
   const admin = useAdmin()!;
   const [target, setTarget] = useState<Target | null>(picked ?? (admin.mainBase ? { at: admin.mainBase, label: "base" } : admin.players[0] ? { player: admin.players[0].name } : null));
   const off = !!admin.blocker || !target;
+  // Kilns and smelters fill from bridge 0.3.0, fermenters from 0.4.0; an older plugin answers "unknown command".
+  const bridge = admin.status?.bridge;
+  const oldFill = pluginBelow(admin.status, "0.3.0");
+  const oldFerment = pluginBelow(admin.status, "0.4.0");
+  // An agent that lists its commands but not these predates them (a web update ahead of the agent).
+  const agentLacks = (c: string) => !!bridge && bridge.commands.length > 0 && !bridge.commands.includes(c);
+  const noKilns = oldFill || agentLacks("fill-kilns");
+  const noSmelters = oldFill || agentLacks("fill-smelters");
+  const noFermenters = oldFerment || agentLacks("fill-fermenters");
+  const whyId = useId();
+  const reason = oldFerment ? t(oldFill ? "admin.base.oldFill" : "admin.base.oldFerment", { plugin: bridge?.plugin ?? "?" }) : noKilns || noSmelters || noFermenters ? t("admin.base.oldAgent") : null;
   const go = (command: "repair" | "fill-kilns" | "grow" | "map-reveal", done: Done) => target && void admin.run(command, { radius: command === "map-reveal" ? 60 : 50, ...targetBody(target) }, { done });
   const fill = (station: "smelters" | "fermenters") => target && admin.open({ kind: "fill", station, target, catalog });
   return (
     <Section title={t("admin.base.title")}>
       <TargetChips value={target} onChange={setTarget} />
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <Btn disabled={off} onClick={() => go("fill-kilns", (data) => fillResult(i18n, "fill-kilns", data))} className="justify-start pl-2.5 text-left">
+        <Btn disabled={off || noKilns} describedBy={noKilns ? whyId : undefined} onClick={() => go("fill-kilns", (data) => fillResult(i18n, "fill-kilns", data))} className="justify-start pl-2.5 text-left">
           <ItemIcon name="Wood" size={20} iconSize={28} className="text-label" />
           {t("admin.base.fillKilns")}
         </Btn>
-        <Btn disabled={off} onClick={() => fill("smelters")} className="justify-start pl-2.5 text-left">
+        <Btn disabled={off || noSmelters} describedBy={noSmelters ? whyId : undefined} onClick={() => fill("smelters")} className="justify-start pl-2.5 text-left">
           <ItemIcon name="CopperOre" size={20} iconSize={28} className="text-label" />
           {t("admin.fill.title")}
         </Btn>
-        <Btn disabled={off} onClick={() => fill("fermenters")} className="justify-start pl-2.5 text-left">
+        <Btn disabled={off || noFermenters} describedBy={noFermenters ? whyId : undefined} onClick={() => fill("fermenters")} className="justify-start pl-2.5 text-left">
           <ItemIcon name="MeadBaseTasty" size={20} iconSize={28} className="text-label" />
           {t("admin.ferment.title")}
         </Btn>
@@ -524,6 +535,11 @@ function BaseHelpers({ catalog, picked }: { catalog: AdminCatalog | null; picked
           {t("admin.base.reveal")}
         </Btn>
       </div>
+      {reason && (
+        <p id={whyId} className="mt-2 text-xs text-flame">
+          {reason}
+        </p>
+      )}
       <p className="mt-2 text-xs text-ash">{t("admin.base.note")}</p>
     </Section>
   );

@@ -131,5 +131,10 @@ describe("bridge refusals", () => {
     expect(failText(en, { status: 409 })).toBe("That did not work.");
     expect(failText(en, { status: 0, error: "offline" })).toBe("The bridge did not answer. Try again in a moment.");
     expect(failText(en, { status: 502, error: "bridge unavailable" })).toBe("The bridge did not answer. Try again in a moment.");
+    // A plugin older than the command (bridge/plugin/HttpServer.cs answers 404).
+    expect(failText(en, { status: 404, error: "unknown command POST /v1/build/fill-smelters" })).toBe("This needs a newer bridge plugin.");
+    expect(failText(pl, { status: 404, error: "unknown command POST /v1/build/fill-kilns" })).toBe("To wymaga nowszej wersji mostka.");
+    // The agent's own allow-list says it without a method and path: the agent is the one to update.
+    expect(failText(en, { status: 404, error: "unknown command fill-fermenters" })).toBe("This needs a newer Skald agent.");
   });
 });
