@@ -140,6 +140,16 @@ describe("InventoryGrid", () => {
     // Width as given: the caller (the agent) already grew it. 5 x 2 here.
     expect(grid.children).toHaveLength(10);
   });
+
+  it("shows both the stack and the quality of an item that has both", () => {
+    inLocale(<InventoryGrid items={[{ name: "ArrowFire", type: "Ammo", stack: 37, quality: 3, x: 0, y: 0 }]} width={5} height={2} />);
+    const slot = screen.getByRole("button", { name: "Fire Arrow, 37" });
+    expect(within(slot).getByText("37")).toBeInTheDocument();
+    expect(within(slot).getByText("★★★")).toBeInTheDocument();
+    fireEvent.click(slot);
+    expect(screen.getByText("Fire Arrow × 37")).toBeInTheDocument();
+    expect(screen.getByText(/Quality 3/)).toBeInTheDocument();
+  });
 });
 
 describe("VillageStores", () => {

@@ -10,32 +10,43 @@ import (
 )
 
 // A container's inventory is the byte array under ZDO key "items" (the 0x80
-// map). Valheim 1.0 writes it compactly (inventory version 109):
+// map). Valheim 1.0 writes it compactly (inventory version 109), in the order
+// the game's own inventory and item save code writes it:
 //
 //	i32 version (109) | u16 count | count x item
 //
 //	item: i32 durability x 100 (10000 for anything without wear)
 //	      u8 slot x | u8 slot y
-//	      u8 reserved (0 in every save seen)
-//	      u8 flags
-//	      flags&0x08: u16 stack       (absent: a stack of 1)
-//	      flags&0x04: u16 quality     (absent: quality 1)
-//	      flags&0x20: i64 crafter id, string crafter name (.NET 7-bit length)
-//	      i32 item prefab hash (GetStableHashCode of the prefab name)
 //	      u8 world level (0, or the world level the item was made at)
+//	      u8 flags
+//	      flags&0x04: u16 quality     (absent: quality 1)
+//	      flags&0x08: u16 stack       (absent: a stack of 1)
+//	      flags&0x20: i64 crafter id, string crafter name (.NET 7-bit length)
+//	      flags&0x40: i32 item prefab hash (GetStableHashCode of the prefab name)
+//	      u8 extra flags (0x01: spawned by a cheat); read past unchecked,
+//	         since nothing here depends on it and a cheat-spawned item is
+//	         still an item
 //
 //	flags: 0x01 picked up by a player (set on everything a player has held;
 //	            clear on the loot the game puts into world chests)
 //	       0x04 quality follows      0x08 stack follows
-//	       0x20 crafter follows      0x40 set on every item seen
-//	       0x02, 0x10, 0x80 never seen: a blob with any of them is refused
-//	            rather than guessed at (equipped, variant and custom data,
-//	            which the pre-1.0 format carried, are the likely owners)
+//	       0x20 crafter follows      0x40 prefab hash follows
+//	       0x02 equipped, 0x10 variant (i32) follows, 0x80 custom data
+//	            (count, then key/value strings) follows: never seen in a
+//	            container, so a blob with any of them is refused rather than
+//	            decoded on an untested path. So is an item without 0x40,
+//	            which has no prefab and which the game itself drops on load.
 //
-// Derived from 647 real inventories (41 player chests, a cart, 5 graves, 600
+// Quality is written before stack. Both are u16, so a blob reads to its last
+// byte in either order; only items with both a quality and a stack above 1
+// show the difference.
+//
+// Checked against 647 real inventories (41 player chests, a cart, 5 graves, 600
 // world treasure chests): flag sets 0x40 0x41 0x48 0x49 0x61 0x65 0x69, every
-// blob read to its last byte and every prefab hash resolved. The quality
-// field may as well be u8 quality + u8 (0); no save tells the two apart.
+// blob read to its last byte and every prefab hash resolved.
+//
+// Version 109 is the only one the game writes; an older one (pre-1.0 saves,
+// which carried a different item layout) is refused.
 //
 // The crafter id is a platform id: it is read past and never kept.
 
@@ -47,8 +58,8 @@ const (
 	itemQuality  = 0x04
 	itemStack    = 0x08
 	itemCrafter  = 0x20
-	itemAlways   = 0x40
-	itemKnown    = itemPickedUp | itemQuality | itemStack | itemCrafter | itemAlways
+	itemPrefab   = 0x40
+	itemKnown    = itemPickedUp | itemQuality | itemStack | itemCrafter | itemPrefab
 )
 
 // rawItem is one decoded stack; the crafter name is gated at assembly.
@@ -82,27 +93,27 @@ func parseInventory(blob []byte) ([]rawItem, error) {
 	for i := 0; i < n; i++ {
 		dur := r.i32()
 		x, y := r.u8(), r.u8()
-		r.u8()
+		r.u8() // world level
 		flags := r.u8()
 		if r.err != nil {
 			return nil, r.err
 		}
-		if flags&^itemKnown != 0 || flags&itemAlways == 0 {
+		if flags&^itemKnown != 0 || flags&itemPrefab == 0 {
 			return nil, fmt.Errorf("%w: item flags %#02x", errInventory, flags)
 		}
 		it := rawItem{stack: 1, quality: 1, durability: float32(dur) / 100, x: int(x), y: int(y)}
-		if flags&itemStack != 0 {
-			it.stack = int(r.u16())
-		}
 		if flags&itemQuality != 0 {
 			it.quality = int(r.u16())
+		}
+		if flags&itemStack != 0 {
+			it.stack = int(r.u16())
 		}
 		if flags&itemCrafter != 0 {
 			r.i64() // crafter id: platform id, dropped
 			it.crafter = r.str(maxNameBytes)
 		}
 		hash := r.i32()
-		r.u8() // world level
+		r.u8() // extra flags
 		if r.err != nil {
 			return nil, r.err
 		}

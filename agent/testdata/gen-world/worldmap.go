@@ -295,19 +295,19 @@ func inventory(items ...item) []byte {
 			dur = 10000
 		}
 		i32(&b, dur)
-		b.Write([]byte{it.x, it.y, 0, it.flags})
-		if it.flags&0x08 != 0 {
-			_ = binary.Write(&b, binary.LittleEndian, it.stack)
-		}
+		b.Write([]byte{it.x, it.y, it.worldLevel, it.flags})
 		if it.flags&0x04 != 0 {
 			_ = binary.Write(&b, binary.LittleEndian, it.quality)
+		}
+		if it.flags&0x08 != 0 {
+			_ = binary.Write(&b, binary.LittleEndian, it.stack)
 		}
 		if it.flags&0x20 != 0 {
 			i64(&b, it.crafterID)
 			str(&b, it.crafter)
 		}
 		i32(&b, stableHash(it.name))
-		b.WriteByte(it.worldLevel)
+		b.WriteByte(0) // extra flags
 	}
 	return b.Bytes()
 }
@@ -384,9 +384,10 @@ func writeMapWorld(dir string) {
 				item{name: "CopperOre", x: 5, y: 2, flags: 0x41},
 			)}}},
 		// Storage: a wood chest with one item per flag set seen in real
-		// saves, an empty one (no items key), a reinforced chest whose
-		// inventory has a flag bit nobody has seen, a chest nobody built
-		// and two world chests. Only the first three may be exported.
+		// saves plus one with both a stack and a quality, an empty one (no
+		// items key), a reinforced chest whose inventory has a flag bit
+		// nobody has seen, a chest nobody built and two world chests. Only
+		// the first three may be exported.
 		chest("piece_chest_wood", 110, -200, true, inventory(
 			item{name: "SwordBronze", flags: 0x65, quality: 2, durability: 25000, crafterID: fakeCrafterID, crafter: "Hakon"},
 			item{name: "Stone", x: 1, flags: 0x41},
@@ -395,6 +396,7 @@ func writeMapWorld(dir string) {
 			item{name: "Torch", x: 4, flags: 0x61, durability: 444, crafterID: -1, crafter: "Sigrun"},
 			item{name: "AxeHead1", y: 1, flags: 0x40},
 			item{name: "ArrowWood", x: 1, y: 1, flags: 0x69, stack: 65, crafterID: fakeCrafterID, crafter: "Ulfgar"},
+			item{name: "ArrowFire", x: 2, y: 1, flags: 0x4c, stack: 37, quality: 3},
 		)),
 		chest("piece_chest_wood", 112, -200, true, nil),
 		chest("piece_chest", 114, -200, true, inventory(item{name: "Iron", flags: 0x49 | 0x10, stack: 30})),

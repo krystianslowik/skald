@@ -11,7 +11,8 @@ import (
 	"testing"
 )
 
-// invItem is one item for the test encoder; zero stack/quality mean 1.
+// invItem is one item for the test encoder; zero stack/quality mean 1. It
+// writes the fields in the order ItemDrop.ItemData.Save does.
 type invItem struct {
 	name       string
 	x, y       byte
@@ -22,6 +23,7 @@ type invItem struct {
 	crafterID  int64
 	crafter    string
 	worldLevel byte
+	cheated    byte
 }
 
 func encodeInventory(items []invItem) []byte {
@@ -37,13 +39,13 @@ func encodeInventory(items []invItem) []byte {
 		w(dur)
 		b.WriteByte(it.x)
 		b.WriteByte(it.y)
-		b.WriteByte(0)
+		b.WriteByte(it.worldLevel)
 		b.WriteByte(it.flags)
-		if it.flags&itemStack != 0 {
-			w(it.stack)
-		}
 		if it.flags&itemQuality != 0 {
 			w(it.quality)
+		}
+		if it.flags&itemStack != 0 {
+			w(it.stack)
 		}
 		if it.flags&itemCrafter != 0 {
 			w(it.crafterID)
@@ -51,7 +53,7 @@ func encodeInventory(items []invItem) []byte {
 			b.WriteString(it.crafter)
 		}
 		w(stableHash(it.name))
-		b.WriteByte(it.worldLevel)
+		b.WriteByte(it.cheated)
 	}
 	return b.Bytes()
 }
@@ -66,6 +68,11 @@ func TestParseInventoryFlagSets(t *testing.T) {
 		{name: "Torch", x: 4, y: 0, flags: 0x61, durability: 444, crafterID: -1, crafter: "Sigrun"},
 		{name: "SwordBronze", x: 0, y: 0, flags: 0x65, quality: 2, durability: 25000, crafterID: 76561190000000099, crafter: "Hakon"},
 		{name: "ArrowWood", x: 1, y: 1, flags: 0x69, stack: 65, crafterID: 42, crafter: "Ulfgar"},
+		// Stack and quality together: no save seen so far holds one (vanilla
+		// stackables have a max quality of 1, mods can differ), but the
+		// format allows it and quality comes first.
+		{name: "ArrowFire", x: 2, y: 1, flags: 0x4c, stack: 37, quality: 3},
+		{name: "SpearBronze", x: 3, y: 1, flags: 0x6d, stack: 2, quality: 4, crafterID: 42, crafter: "Freya", cheated: 1},
 	}
 	got, err := parseInventory(encodeInventory(in))
 	if err != nil {
@@ -149,7 +156,7 @@ func TestStorageFixture(t *testing.T) {
 		}
 	}
 	full := byID["piece_chest_wood@110,-200"]
-	if full.Width != 5 || full.Height != 2 || len(full.Items) != 7 || full.Unreadable {
+	if full.Width != 5 || full.Height != 2 || len(full.Items) != 8 || full.Unreadable {
 		t.Fatalf("wood chest = %+v", full)
 	}
 	if it := full.Items[0]; it.Name != "SwordBronze" || it.Quality != 2 || it.Durability == nil || *it.Durability != 250 || it.Crafter != "Hakon" {
@@ -157,6 +164,9 @@ func TestStorageFixture(t *testing.T) {
 	}
 	if it := full.Items[1]; it.Name != "Stone" || it.Durability != nil || it.Quality != 0 || it.Stack != 1 {
 		t.Errorf("second slot = %+v", it)
+	}
+	if it := full.Items[7]; it.Name != "ArrowFire" || it.Stack != 37 || it.Quality != 3 || it.X != 2 || it.Y != 1 {
+		t.Errorf("stack and quality = %+v", it)
 	}
 	if c := byID["piece_chest_wood@112,-200"]; len(c.Items) != 0 || c.Unreadable {
 		t.Errorf("empty chest = %+v", c)
