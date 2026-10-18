@@ -44,7 +44,6 @@ import {
   type Box,
 } from "./mapgeo";
 import { bandCentre, bounceGlide, EDGE_RUBBER, flingOffset, glideStep, inertiaStep, intoBand, REST_SPEED, RUBBER, rubberBand, SampleRing, springStep, unbandCentre, unrubberBand, ZOOM_DECELERATION, ZOOM_REST, zoomFlingOffset } from "./mapmotion";
-import { mapUrlAt, terrainUrl } from "./world";
 
 const snap = mockMap({ now: Date.parse("2026-10-10T20:00:00Z") });
 const lookup = makeI18n("en").lookup;
@@ -725,15 +724,6 @@ describe("motion", () => {
       v = s.v;
     }
     expect(zoomFlingOffset(3)).toBeCloseTo(d, 2);
-  });
-});
-
-describe("valheim-map.world links", () => {
-  it("centres on a world point (offset = x,z under the centre, smaller zoom is closer)", () => {
-    // Loaded in Chromium: the site's own readout under the centre showed (1000, -503).
-    expect(mapUrlAt("ZbzIWkK5KK", 1000, -500)).toBe("https://valheim-map.world/?seed=ZbzIWkK5KK&offset=1000,-500&zoom=0.100&ver=1.0.7");
-    expect(mapUrlAt("a b", 12.4, -0.6, 0.6)).toBe("https://valheim-map.world/?seed=a%20b&offset=12,-1&zoom=0.600&ver=1.0.7");
-    expect(terrainUrl("ZbzIWkK5KK")).toBe("https://valheim-map.world/?seed=ZbzIWkK5KK&ver=1.0.7");
   });
 });
 

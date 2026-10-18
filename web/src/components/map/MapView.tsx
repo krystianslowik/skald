@@ -8,7 +8,6 @@ import { COARSE, PHONE, useMedia } from "../../lib/useMedia";
 import { useTerrain } from "../../lib/useTerrain";
 import { useTerrainTiles } from "../../lib/terraintiles";
 import { useWorldMap } from "../../lib/useWorldMap";
-import { terrainUrl } from "../../lib/world";
 import { Sheet, SheetClose } from "../Sheet";
 import { useAdmin } from "../admin/AdminContext";
 import { LiveLayer, type LiveLayerHandle } from "./LiveLayer";
@@ -49,20 +48,18 @@ function storedLayers(): Record<LayerId, boolean> {
 }
 
 /**
- * The full-screen world map: the save's map on parchment (Map) or the seed's
- * terrain from valheim-map.world (Terrain). Opened from the header or the
+ * The full-screen world map: the save's map on parchment, with the world's
+ * terrain under it when there is any. Opened from the header or the
  * dashboard's map board; Escape, the close button or Back closes it. On
  * phones it is the Map tab: it stops above the tab bar and has no back button.
  */
 export default function MapView({
-  seedName,
   saveKey,
   onClose,
   asTab = false,
   focus = null,
   onFocusClear,
 }: {
-  seedName: string;
   saveKey: string;
   onClose: () => void;
   asTab?: boolean;
@@ -71,8 +68,6 @@ export default function MapView({
 }) {
   const { t } = useI18n();
   const [load, retry] = useWorldMap(saveKey);
-  const [tab, setTab] = useState<"map" | "terrain">("map");
-  const [terrainSeen, setTerrainSeen] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -85,7 +80,6 @@ export default function MapView({
   }, []);
 
   const map = load.status === "ready" ? load.map : null;
-  const seed = map?.meta.seedName || seedName;
 
   return (
     <motion.div
@@ -107,39 +101,13 @@ export default function MapView({
         <h2 id="worldmap-h" className="plank-title min-w-0 truncate text-base sm:text-lg">
           {t("map.title")}
         </h2>
-        <div role="tablist" aria-label={t("map.tabs")} className="ml-auto flex shrink-0 gap-1.5">
-          {(["map", "terrain"] as const).map((id) => (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={tab === id}
-              aria-controls={`map-panel-${id}`}
-              onClick={() => {
-                setTab(id);
-                if (id === "terrain") setTerrainSeen(true);
-              }}
-              className="plaque press px-3 py-1.5 text-xs font-bold coarse:min-h-11 coarse:px-4 coarse:text-sm sm:text-sm"
-            >
-              {t(id === "map" ? "map.tab.map" : "map.tab.terrain")}
-            </button>
-          ))}
-        </div>
       </header>
 
       <div className="relative min-h-0 flex-1">
-        <div id="map-panel-map" role="tabpanel" hidden={tab !== "map"} className="absolute inset-0">
-          {map ? (
-            <SaveMap map={map} stale={load.status === "ready" && load.stale} seed={seed} focus={focus} onFocusClear={onFocusClear} />
-          ) : (
-            <MapMessage load={load.status} onRetry={retry} />
-          )}
-        </div>
-        {/* The third-party page loads only once someone opens this tab. */}
-        {terrainSeen && (
-          <div id="map-panel-terrain" role="tabpanel" hidden={tab !== "terrain"} className="absolute inset-0">
-            <TerrainFrame seedName={seed} />
-          </div>
+        {map ? (
+          <SaveMap map={map} stale={load.status === "ready" && load.stale} focus={focus} onFocusClear={onFocusClear} />
+        ) : (
+          <MapMessage load={load.status} onRetry={retry} />
         )}
       </div>
       <EscapeCloses onClose={onClose} />
@@ -183,13 +151,11 @@ type Selection = { m: Marker; group?: readonly Marker[]; level?: number };
 function SaveMap({
   map,
   stale,
-  seed,
   focus,
   onFocusClear,
 }: {
   map: import("../../types").ApiMap;
   stale: boolean;
-  seed: string;
   focus: MapFocus | null;
   onFocusClear?: () => void;
 }) {
@@ -612,7 +578,7 @@ function SaveMap({
             onClose={onSheetClosed}
             header={(close) => <DetailsHead marker={sel.m} group={sel.group} onClose={close} headingId="map-details-h" />}
           >
-            <DetailsBody marker={sel.m} group={sel.group} seedName={seed} onGo={goTo} onPick={pickFromGroup} level={sel.level} roomy />
+            <DetailsBody marker={sel.m} group={sel.group} onGo={goTo} onPick={pickFromGroup} level={sel.level} roomy />
           </Sheet>
         )
       ) : (
@@ -630,7 +596,7 @@ function SaveMap({
                 exit={{ opacity: 0, scale: 0.96 }}
                 transition={{ type: "spring", bounce: 0, visualDuration: 0.2 }}
               >
-                <MapDetails marker={sel.m} group={sel.group} seedName={seed} onGo={goTo} onPick={pickFromGroup} level={sel.level} onClose={() => setSel(null)} />
+                <MapDetails marker={sel.m} group={sel.group} onGo={goTo} onPick={pickFromGroup} level={sel.level} onClose={() => setSel(null)} />
               </motion.div>
             )}
           </AnimatePresence>
@@ -647,47 +613,5 @@ function ZoomButton({ label, onClick, d }: { label: string; onClick: () => void;
         <path d={d} />
       </svg>
     </button>
-  );
-}
-
-/**
- * valheim-map.world's own page for the seed, embedded. The site sends no
- * X-Frame-Options or frame-ancestors today, but that can change, and a
- * cross-origin frame cannot be inspected: the link to open it in a new tab is
- * always there, and a note appears if the frame has not loaded after a while.
- */
-export function TerrainFrame({ seedName }: { seedName: string }) {
-  const { t } = useI18n();
-  const [loaded, setLoaded] = useState(false);
-  const [slow, setSlow] = useState(false);
-  useEffect(() => {
-    const timer = setTimeout(() => setSlow(true), 20_000);
-    return () => clearTimeout(timer);
-  }, []);
-  if (!seedName) return <p className="p-6 text-center text-bone">{t("map.terrain.noSeed")}</p>;
-  const url = terrainUrl(seedName);
-  return (
-    <div className="flex h-full flex-col">
-      <div className="material z-10 flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 text-xs">
-        <span className="font-bold text-flame">{t("map.terrain.attribution")}</span>
-        {/* On a phone the note takes a full line under the credit and the link; side by side it would wrap a word per line. */}
-        <span className="order-last min-w-0 basis-full text-ash sm:order-none sm:flex-1 sm:basis-0">{t("map.terrain.note")}</span>
-        <a href={url} target="_blank" rel="noopener noreferrer" className="ml-auto inline-flex items-center gap-1 font-bold text-flame underline decoration-flame/40 underline-offset-4 hover:text-gold sm:ml-0">
-          {t("map.terrain.openNew")}
-          <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
-            <path d="M4 2h6v6M10 2L3 9" />
-          </svg>
-        </a>
-      </div>
-      {slow && !loaded && <p className="bg-black/40 px-4 py-2 text-xs text-bone">{t("map.terrain.slow")}</p>}
-      <iframe
-        src={url}
-        title={t("map.terrain.attribution")}
-        className="min-h-0 w-full flex-1 border-0 bg-black"
-        referrerPolicy="no-referrer"
-        sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-downloads"
-        onLoad={() => setLoaded(true)}
-      />
-    </div>
   );
 }

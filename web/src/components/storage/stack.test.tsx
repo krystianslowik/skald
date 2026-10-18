@@ -55,7 +55,7 @@ describe("StackLevel", () => {
 describe("a stack on the map", () => {
   it("is one mark, opened as its chests stand, top first, with the picked one marked", () => {
     expect(stackOf3.data.type === "storage" && stackOf3.data.stack!.map((c) => c.y)).toEqual([31.7, 32.6, 33.5]);
-    inLocale(<MapDetails marker={stackOf3} level={2} seedName="s" onClose={() => {}} />);
+    inLocale(<MapDetails marker={stackOf3} level={2} onClose={() => {}} />);
     expect(screen.getByRole("heading", { name: "Stack of 3 chests" })).toBeInTheDocument();
     const rows = screen.getAllByRole("listitem").filter((li) => li.parentElement?.tagName === "OL");
     expect(rows).toHaveLength(3);
@@ -64,8 +64,8 @@ describe("a stack on the map", () => {
     expect(within(rows[2]!).getByText("1st from the bottom of 3")).toBeInTheDocument();
     // Each chest's own slots.
     expect(screen.getAllByRole("list", { name: "Contents" })).toHaveLength(3);
-    // Like every other mark, the stack opens on the full map.
-    expect(screen.getByRole("link", { name: /Open on full map/ })).toHaveAttribute("href", expect.stringContaining(`offset=${stackOf3.x},${stackOf3.z}`));
+    // Like every other mark, no link off the panel (#151).
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 
   it("puts the lowest of two chests last, labelled 1st from the bottom, whatever order they arrive in", () => {
@@ -75,7 +75,7 @@ describe("a stack on the map", () => {
     const bottom = chest("piece_chest_wood@40,-12", 40.1, -12.05, 31.85, "Stone");
     const map = { ...snap, storage: [top, bottom] };
     const mark = buildMarkers(map, makeI18n("pl").lookup).find((m) => m.data.type === "storage" && m.data.stack)!;
-    inLocale(<MapDetails marker={mark} seedName="s" onClose={() => {}} />, "pl");
+    inLocale(<MapDetails marker={mark} onClose={() => {}} />, "pl");
     const rows = screen.getAllByRole("listitem").filter((li) => li.parentElement?.tagName === "OL");
     expect(rows.map((r) => within(r).getByText(/od dołu/).textContent)).toEqual(["2. od dołu z 2", "1. od dołu z 2"]);
     expect(within(rows[1]!).getByRole("list", { name: "Zawartość" })).toHaveTextContent(/Kamień|10/);

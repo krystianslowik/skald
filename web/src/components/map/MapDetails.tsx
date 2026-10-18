@@ -4,8 +4,6 @@ import { markerItems, markerStore, type Marker } from "../../lib/mapgeo";
 import { topDown } from "../../lib/stacks";
 import { countItems } from "../../lib/storage";
 import { gameVersion } from "../../lib/format";
-import { mapUrlAt } from "../../lib/world";
-import { useLinkTarget } from "../../lib/useMedia";
 import type { MapContainer, MapItem } from "../../types";
 import { canAddTo, usePendingItems } from "../../lib/chestadd";
 import { BLOCKER_TEXT, pluginBelow, useAdmin } from "../admin/AdminContext";
@@ -263,35 +261,14 @@ function AddItemButton({ chest, roomy, className = "" }: { chest: MapContainer; 
   );
 }
 
-/** The same spot on valheim-map.world: a new tab on desktop, the same tab on a phone. */
-function FullMapLink({ seedName, marker, roomy }: { seedName: string; marker: Marker; roomy: boolean }) {
-  const { t } = useI18n();
-  const target = useLinkTarget();
-  return (
-    <a
-      href={mapUrlAt(seedName, marker.x, marker.z)}
-      target={target}
-      rel="noopener noreferrer"
-      title={t("map.openFullHint")}
-      className={`inline-flex items-center gap-1 font-bold text-flame underline decoration-flame/40 underline-offset-4 hover:text-gold ${roomy ? "min-h-11 text-sm" : "text-xs"}`}
-    >
-      {t("map.openFull")}
-      <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
-        <path d="M4 2h6v6M10 2L3 9" />
-      </svg>
-    </a>
-  );
-}
-
 /**
- * The facts the save holds about a mark, "Go to the other end" for a portal
- * and a link to the same spot on valheim-map.world; for a pile of marks too
- * close to zoom apart, the list of them to pick from.
+ * The facts the save holds about a mark and "Go to the other end" for a
+ * portal; for a pile of marks too close to zoom apart, the list of them to
+ * pick from.
  */
 export function DetailsBody({
   marker,
   group,
-  seedName,
   onGo,
   onPick,
   level,
@@ -299,7 +276,6 @@ export function DetailsBody({
 }: {
   marker: Marker;
   group?: readonly Marker[];
-  seedName: string;
   onGo?: (x: number, z: number) => void;
   onPick?: (m: Marker) => void;
   /** For a stack of chests: the one to pick out, 0 for the bottom. */
@@ -311,17 +287,7 @@ export function DetailsBody({
   const store = markerStore(marker);
   const live = usePendingItems(marker.data.type === "storage" ? store : undefined);
   if (group) return <ClusterList group={group} onPick={onPick} />;
-  if (marker.data.type === "storage" && marker.data.stack)
-    return (
-      <>
-        <StackList chests={marker.data.stack} level={level} names={roomy} />
-        {seedName && (
-          <div className="mt-3">
-            <FullMapLink seedName={seedName} marker={marker} roomy={roomy} />
-          </div>
-        )}
-      </>
-    );
+  if (marker.data.type === "storage" && marker.data.stack) return <StackList chests={marker.data.stack} level={level} names={roomy} />;
   const lines = marksLines(marker, t, tn, lookup, live);
   const d = marker.data;
   const items = live ?? markerItems(marker);
@@ -344,15 +310,16 @@ export function DetailsBody({
         </div>
       )}
       {live && <PendingNote />}
-      <div className={`mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 ${roomy ? "gap-x-3" : ""}`}>
-        {d.type === "storage" && store && <AddItemButton chest={store} roomy={roomy} />}
-        {partner && onGo && (
-          <button type="button" onClick={() => onGo(partner.x, partner.z)} className={`plaque press font-bold ${action}`}>
-            {t("map.portal.goOther")}
-          </button>
-        )}
-        {seedName && <FullMapLink seedName={seedName} marker={marker} roomy={roomy} />}
-      </div>
+      {((d.type === "storage" && store) || (partner && onGo)) && (
+        <div className={`mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 ${roomy ? "gap-x-3" : ""}`}>
+          {d.type === "storage" && store && <AddItemButton chest={store} roomy={roomy} />}
+          {partner && onGo && (
+            <button type="button" onClick={() => onGo(partner.x, partner.z)} className={`plaque press font-bold ${action}`}>
+              {t("map.portal.goOther")}
+            </button>
+          )}
+        </div>
+      )}
     </>
   );
 }
@@ -361,7 +328,6 @@ export function DetailsBody({
 export function MapDetails({
   marker,
   group,
-  seedName,
   onGo,
   onPick,
   level,
@@ -369,7 +335,6 @@ export function MapDetails({
 }: {
   marker: Marker;
   group?: readonly Marker[];
-  seedName: string;
   /** Moves the map to a world point (the other end of a portal). */
   onGo?: (x: number, z: number) => void;
   onPick?: (m: Marker) => void;
@@ -380,7 +345,7 @@ export function MapDetails({
   return (
     <div className={`${stack ? "scroll-quiet max-h-[min(30rem,70vh)] w-80 overflow-y-auto" : !group && markerItems(marker)?.length ? "w-76" : "w-66"} max-w-[calc(100vw-2rem)] text-sm`}>
       <DetailsHead marker={marker} group={group} onClose={onClose} />
-      <DetailsBody marker={marker} group={group} seedName={seedName} onGo={onGo} onPick={onPick} level={level} />
+      <DetailsBody marker={marker} group={group} onGo={onGo} onPick={onPick} level={level} />
     </div>
   );
 }

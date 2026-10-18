@@ -309,7 +309,7 @@ export function Dashboard({ live, onLogout, onUnauthorized = () => {} }: { live:
         {mapOpen && (
           <ChunkBoundary overlay onClose={closeMap}>
             <Suspense fallback={null}>
-              <MapView seedName={state.world.meta?.seedName ?? ""} saveKey={saveKey} onClose={closeMap} asTab={phone} focus={mapFocus} onFocusClear={clearFocus} />
+              <MapView saveKey={saveKey} onClose={closeMap} asTab={phone} focus={mapFocus} onFocusClear={clearFocus} />
             </Suspense>
           </ChunkBoundary>
         )}

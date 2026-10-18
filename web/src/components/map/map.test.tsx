@@ -9,7 +9,7 @@ import { WorldClock } from "../WorldClock";
 import { MapDetails } from "./MapDetails";
 import { MapLayers } from "./MapLayers";
 import { OrePopover } from "./OrePopover";
-import MapView, { TerrainFrame } from "./MapView";
+import MapView from "./MapView";
 import { mapStatsOn } from "./MapCanvas";
 
 const inLocale = (ui: ReactElement, locale: "en" | "pl" = "en") => render(<I18nProvider locale={locale}>{ui}</I18nProvider>);
@@ -22,17 +22,16 @@ afterEach(() => vi.unstubAllGlobals());
 describe("MapDetails", () => {
   it("tells how someone fell", () => {
     const grave = find((m) => m.data.type === "grave" && m.data.owner === "Bjorn");
-    inLocale(<MapDetails marker={grave} seedName="ZbzIWkK5KK" onClose={() => {}} />);
+    inLocale(<MapDetails marker={grave} onClose={() => {}} />);
     expect(screen.getByText("Bjorn fell on day 36")).toBeInTheDocument();
-    const link = screen.getByRole("link", { name: /Open on full map/ });
-    expect(link).toHaveAttribute("href", `https://valheim-map.world/?seed=ZbzIWkK5KK&offset=${grave.x},${grave.z}&zoom=0.100&ver=1.0.7`);
-    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    // The details sit on our own map already: no way off the panel (#151).
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 
   it("says where a portal leads and goes there", () => {
     const portal = find((m) => m.data.type === "portal" && m.data.tag === "mountain" && m.x < 1000);
     const onGo = vi.fn();
-    inLocale(<MapDetails marker={portal} seedName="s" onGo={onGo} onClose={() => {}} />);
+    inLocale(<MapDetails marker={portal} onGo={onGo} onClose={() => {}} />);
     expect(screen.getByText("Leads to mountain")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Go to the other end" }));
     expect(onGo).toHaveBeenCalledWith(1570, 1700);
@@ -40,7 +39,7 @@ describe("MapDetails", () => {
 
   it("names a portal without a partner and works in Polish", () => {
     const lone = find((m) => m.data.type === "portal" && !m.data.pairedWith);
-    inLocale(<MapDetails marker={lone} seedName="s" onClose={() => {}} />, "pl");
+    inLocale(<MapDetails marker={lone} onClose={() => {}} />, "pl");
     expect(screen.getByText("Niepołączony z żadnym portalem")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Przejdź na drugi koniec" })).not.toBeInTheDocument();
   });
@@ -48,7 +47,7 @@ describe("MapDetails", () => {
   it("does not need names", () => {
     const hidden = buildMarkers(gateMap(mockMap({ showNames: false }), false), makeI18n("en").lookup);
     const grave = hidden.find((m) => m.data.type === "grave")!;
-    inLocale(<MapDetails marker={grave} seedName="s" onClose={() => {}} />);
+    inLocale(<MapDetails marker={grave} onClose={() => {}} />);
     expect(screen.getByText(/^Someone fell on day/)).toBeInTheDocument();
   });
 });
@@ -91,24 +90,6 @@ describe("MapLayers", () => {
   });
 });
 
-describe("TerrainFrame", () => {
-  it("always offers the site in a new tab and credits it", () => {
-    inLocale(<TerrainFrame seedName="ZbzIWkK5KK" />);
-    expect(screen.getByText("Terrain by valheim-map.world")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Open in a new tab/ })).toHaveAttribute("href", "https://valheim-map.world/?seed=ZbzIWkK5KK&ver=1.0.7");
-    expect(screen.getByTitle("Terrain by valheim-map.world").tagName).toBe("IFRAME");
-  });
-
-  it("gives the note a full line of its own on a phone", () => {
-    // jsdom has no layout, so this pins the classes: below `sm` the note takes the whole width under the
-    // credit and the link instead of a word-per-line column between them (#58).
-    inLocale(<TerrainFrame seedName="s" />, "pl");
-    const note = screen.getByText(/^Zewnętrzna strona/);
-    expect(note).toHaveClass("basis-full", "order-last", "sm:basis-0", "sm:flex-1", "sm:order-none");
-    expect(note).not.toHaveClass("flex-1");
-  });
-});
-
 describe("WorldClock", () => {
   it("shows the day, the phase and a sleeping world", () => {
     inLocale(<WorldClock clock={{ netTime: 1800 * 7 + 1500, day: 7, dayFraction: 0.83, daylight: false, advancing: false, rate: 0 }} />);
@@ -127,14 +108,13 @@ describe("MapView", () => {
   it("loads the map and closes on Escape", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(snap)));
     const onClose = vi.fn();
-    inLocale(<MapView seedName="ZbzIWkK5KK" saveKey="a" onClose={onClose} />);
+    inLocale(<MapView saveKey="a" onClose={onClose} />);
     expect(screen.getByRole("dialog", { name: "World map" })).toBeInTheDocument();
     expect(await screen.findAllByRole("button", { name: "Portals: shown" })).not.toHaveLength(0);
     expect(screen.getByRole("img", { name: /World map. Drag to move/ })).toBeInTheDocument();
-    // The terrain frame is not loaded until its tab is opened.
-    expect(screen.queryByTitle("Terrain by valheim-map.world")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Terrain" }));
-    expect(screen.getByTitle("Terrain by valheim-map.world")).toBeInTheDocument();
+    // One map, ours: no tabs, no third-party frame (#151).
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+    expect(document.querySelector("iframe")).toBeNull();
     act(() => {
       fireEvent.keyDown(document, { key: "Escape" });
     });
@@ -143,7 +123,7 @@ describe("MapView", () => {
 
   it("names the layers sheet's close button after the sheet, not the map", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(snap)));
-    inLocale(<MapView seedName="ZbzIWkK5KK" saveKey="a" onClose={vi.fn()} />, "pl");
+    inLocale(<MapView saveKey="a" onClose={vi.fn()} />, "pl");
     await screen.findAllByRole("button", { name: /Portale/ });
     fireEvent.click(screen.getByRole("button", { name: "Warstwy" }));
     const sheet = await screen.findByRole("dialog", { name: "Warstwy" });
@@ -162,7 +142,7 @@ describe("MapView", () => {
     const mounted = async () => {
       const ui = (
         <I18nProvider locale="en">
-          <MapView seedName="ZbzIWkK5KK" saveKey="a" onClose={onClose} />
+          <MapView saveKey="a" onClose={onClose} />
         </I18nProvider>
       );
       const r = render(ui);
@@ -188,7 +168,7 @@ describe("MapView", () => {
 
   it("explains a missing map", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })));
-    inLocale(<MapView seedName="" saveKey="b" onClose={() => {}} />);
+    inLocale(<MapView saveKey="b" onClose={() => {}} />);
     expect(await screen.findByText(/No world map/)).toBeInTheDocument();
   });
 });
