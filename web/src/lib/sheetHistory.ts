@@ -148,5 +148,5 @@ export const isTopSheet = (h: SheetHandle) => !stack.includes(h) || stack.at(-1)
 
 /** Sheet entries on top of history (tests). */
 export const sheetDepth = () => depth;
-/** Whether a traversal of ours is still on its way (tests). */
+/** Whether a traversal of ours is still on its way, or a reconcile about to start one. */
 export const sheetPending = () => pending || scheduled;
