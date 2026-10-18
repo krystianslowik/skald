@@ -168,6 +168,9 @@ type Checker struct {
 	// checked is the build the loop last started a check for; "" until the
 	// first, so the first build seen after a start is always checked.
 	checked string
+	// saveSeen is the save the loop last re-checked after, so one save
+	// starts at most one check.
+	saveSeen time.Time
 	// base is Run's context, for checks started from the panel.
 	base context.Context
 }
@@ -250,8 +253,9 @@ func (c *Checker) Tick(ctx context.Context) {
 			trigger = TriggerUpdate
 		}
 		c.checked = snap.Version
-	case r != nil && r.AwaitingSave && r.Build == snap.Version && savedByThisBuild(snap):
+	case r != nil && r.AwaitingSave && r.Build == snap.Version && savedByThisBuild(snap) && !snap.LastSaveAt.Equal(c.saveSeen):
 		trigger = TriggerSave
+		c.saveSeen = *snap.LastSaveAt
 	}
 	if trigger == "" {
 		c.mu.Unlock()
@@ -342,6 +346,9 @@ func (c *Checker) check(ctx context.Context, trigger string, prev *Result) *Resu
 	case prev == nil || prev.Build == "":
 	case prev.Build != r.Build:
 		r.PreviousBuild, r.PreviousNetworkVersion, r.Updated = prev.Build, prev.NetworkVersion, true
+		// The first check of a new build is the update's, however it started
+		// (an admin may have pressed Check again before the loop saw it).
+		r.Trigger, needSave = TriggerUpdate, true
 	default:
 		// The same build again: keep what it replaced.
 		r.PreviousBuild, r.PreviousNetworkVersion, r.Updated = prev.PreviousBuild, prev.PreviousNetworkVersion, prev.Updated
@@ -373,7 +380,9 @@ func (c *Checker) check(ctx context.Context, trigger string, prev *Result) *Resu
 			// A failed build has nothing more to wait for.
 			mapReady = h.Current() && h.Generation > minGen || h.Failure != ""
 		}
-		if loaded && joined && mapReady {
+		// The plugin reports the world a moment after the log does.
+		bridgeReady := c.opt.Bridge == nil || !loaded || c.bridgeStatus(ctx).Reason != "loading"
+		if loaded && joined && mapReady && bridgeReady {
 			break
 		}
 		if !c.opt.Now().Before(deadline) {
@@ -396,7 +405,7 @@ func (c *Checker) check(ctx context.Context, trigger string, prev *Result) *Resu
 		logsCheck(snap, crossplay, c.opt.LogWindow, c.opt.Now()),
 	}
 	r.Status = Overall(r.Checks)
-	if s := r.Check(CheckSave); s != nil && s.Status == StatusPending {
+	if s := r.Check(CheckSave); s != nil && s.Reason == "save_before_update" {
 		r.AwaitingSave = true
 	}
 	r.CheckedAt = c.opt.Now().UTC()
@@ -516,15 +525,19 @@ func sameBuild(a, b string) bool {
 	return buildPrefix.ReplaceAllString(a, "") == buildPrefix.ReplaceAllString(b, "")
 }
 
+func (c *Checker) bridgeStatus(ctx context.Context) bridge.Status {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return c.opt.Bridge.Status(ctx)
+}
+
 func (c *Checker) bridgeCheck(ctx context.Context, logBuild string) Check {
 	ch := Check{Name: CheckBridge, Status: StatusOK}
 	if c.opt.Bridge == nil {
 		ch.Status, ch.Reason = StatusSkipped, "not_configured"
 		return ch
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	st := c.opt.Bridge.Status(ctx)
+	st := c.bridgeStatus(ctx)
 	ch.Detail = map[string]any{"tested": st.Tested, "acknowledged": st.Acknowledged}
 	if st.Plugin != "" {
 		ch.Detail["plugin"] = st.Plugin
@@ -548,14 +561,15 @@ func (c *Checker) bridgeCheck(ctx context.Context, logBuild string) Check {
 	return ch
 }
 
-// logsCheck: the lines Skald reads at a game start came within the window.
+// logsCheck: the lines Skald reads at a game start came. Lines that have not
+// come yet are pending within the window after the version line, missing after.
 func logsCheck(s state.Snapshot, crossplay bool, window time.Duration, now time.Time) Check {
 	ch := Check{Name: CheckLogs, Status: StatusOK, Detail: map[string]any{"crossplay": crossplay}}
 	if s.VersionAt == nil {
 		ch.Status, ch.Reason = StatusSkipped, "not_seen"
 		return ch
 	}
-	within := func(t *time.Time) bool { return after(t, s.VersionAt) && t.Sub(*s.VersionAt) <= window }
+	within := func(t *time.Time) bool { return after(t, s.VersionAt) }
 	loaded := within(s.WorldLoadedAt)
 	ch.Detail["worldLoaded"] = loaded
 	if loaded {

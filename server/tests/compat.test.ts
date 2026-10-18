@@ -105,6 +105,12 @@ describe("compat notifications", () => {
     expect(d.sent).toHaveLength(0);
   });
 
+  it("counts the unreadable chunks for a chunk failure", () => {
+    const r = failed();
+    r.checks[1] = { name: "save", status: "fail", reason: "chunks_unreadable", detail: { chunksUnreadable: 37, containersUnreadable: 0 } };
+    expect(formatBatch([{ kind: "compat", result: r, followUp: false }], "en")[1]).toBe("- Save: 37 parts of the world unreadable");
+  });
+
   it("is in Polish too, with player-proof markdown", () => {
     const r = { ...failed(), build: "l-1.0.20*", previousBuild: "l-1.0.16_" };
     const lines = formatBatch([{ kind: "compat", result: r, followUp: false }], "pl");

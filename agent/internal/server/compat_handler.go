@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -15,6 +16,15 @@ func (s *Server) compatView() *compat.View {
 	}
 	v := s.opt.Compat.View()
 	return &v
+}
+
+// EffectiveArgs is the SERVER_ARGS the running server started with: the
+// saved settings it read at its start, else the environment's.
+func (s *Server) EffectiveArgs(ctx context.Context) string {
+	if st := s.opt.Settings; st != nil {
+		return st.EffectiveSettings(s.cachedProcesses(ctx, metricsProcMaxAge).serverStart).Args
+	}
+	return s.opt.ServerArgs
 }
 
 // compatGet is GET /compat: the last compatibility check and whether one runs.

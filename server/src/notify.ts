@@ -277,7 +277,7 @@ function compatLines(r: CompatResult, followUp: boolean, locale: Locale): string
     if (c.status !== "warn" && c.status !== "fail") continue;
     const d = c.detail ?? {};
     const reason = c.reason ?? "";
-    const n = String(d.containersUnreadable ?? d.chunksUnreadable ?? "");
+    const n = String((reason === "chunks_unreadable" ? d.chunksUnreadable : d.containersUnreadable) ?? "");
     const text = s[`compat.reason.${reason}`] ? fill(s[`compat.reason.${reason}`]!, { n, why: escapeMd(String(d.containerReason ?? "")) }) : escapeMd(reason);
     lines.push(`- ${s[`compat.check.${c.name}`] ?? escapeMd(c.name)}: ${text}`);
   }

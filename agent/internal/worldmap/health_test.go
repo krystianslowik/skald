@@ -61,6 +61,16 @@ func TestHealthCountsTheWholeSave(t *testing.T) {
 	if h := b.Health(); h.Failure != FailIndex || !h.Built() {
 		t.Errorf("failed build: %+v", h)
 	}
+	// The marker goes away again: the failure is over, the last build stands.
+	if err := os.Remove(filepath.Join(dir, "_main.9.ok")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	if h := b.Health(); h.Failure != "" || !h.Current() || h.Generation != 5 {
+		t.Errorf("after the failure: %+v", h)
+	}
 }
 
 func TestHealthWithoutASave(t *testing.T) {

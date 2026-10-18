@@ -136,24 +136,19 @@ func main() {
 	if br != nil {
 		compatBridge = br
 	}
+	var srv *server.Server // set below; the checker starts after it
 	checker := compat.New(compat.Options{
 		State:   tracker.Snapshot,
 		Map:     worldMap,
 		Terrain: terr.Info,
 		Bridge:  compatBridge,
 		Crossplay: func() bool {
-			args := cfg.ServerArgs
-			if store != nil {
-				args = store.EffectiveSettings(nil).Args
-			}
-			return slices.Contains(strings.Fields(args), "-crossplay")
+			return slices.Contains(strings.Fields(srv.EffectiveArgs(ctx)), "-crossplay")
 		},
 		Path:    compatPath,
 		Publish: func(typ string, data map[string]any) { hub.Publish(typ, data) },
 		Logger:  logger,
 	})
-	go checker.Run(ctx, 5*time.Second)
-
 	s := server.New(server.Options{
 		Token:      cfg.AgentToken,
 		ConfigDir:  cfg.ConfigDir,
@@ -174,6 +169,8 @@ func main() {
 		Logger:     logger,
 		Version:    version,
 	})
+	srv = s
+	go checker.Run(ctx, 5*time.Second)
 	go s.RunSettingsWatcher(ctx)
 	if br != nil {
 		// Live positions only while a browser has the map or a player list

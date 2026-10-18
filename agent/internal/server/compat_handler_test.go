@@ -111,6 +111,14 @@ func TestCompatRoutes(t *testing.T) {
 	}
 }
 
+func TestEffectiveArgs(t *testing.T) {
+	h := newHarness(t)
+	h.s.opt.ServerArgs = "-public 1 -crossplay"
+	if got := h.s.EffectiveArgs(context.Background()); got != "-public 1 -crossplay" {
+		t.Errorf("args = %q", got)
+	}
+}
+
 func TestCompatMetrics(t *testing.T) {
 	h := newHarness(t)
 	h.tr.HandleLine(`<14>Oct  9 22:28:11 supervisord: valheim-server 10/09/2026 22:28:11: Valheim version: l-1.0.20 (network version 41)`)

@@ -80,6 +80,8 @@ type Builder struct {
 	buildMu sync.Mutex
 	cache   map[chunkID]*cacheEntry
 	lastDB2 *db2Data
+	// next is the health of the build in progress, published with its snapshot.
+	next Health
 	// failed is the chunks of the current index whose file did not parse
 	// (they keep their last good contents, if any).
 	failed map[chunkID]bool
@@ -157,6 +159,8 @@ func (b *Builder) Refresh() (bool, error) {
 		return false, errors.New("no finished save generation")
 	}
 	if cur := b.Current(); cur != nil && cur.Generation == gen {
+		// A failure before (a save marker missing for a moment) is over.
+		b.setFailure("")
 		return false, nil
 	}
 	start := time.Now()
@@ -174,7 +178,7 @@ func (b *Builder) Refresh() (bool, error) {
 	b.mu.Lock()
 	b.cur = enc
 	b.lastBuild = time.Since(start).Seconds()
-	b.health.Failure = ""
+	b.health = b.next
 	b.mu.Unlock()
 	b.opt.Logger.Info("world map built", "generation", gen, "seconds", snap.Stats.BuildSeconds,
 		"chunksParsed", snap.Stats.ChunksParsed, "chunksFailed", snap.Stats.ChunksFailed, "zdos", snap.Stats.ZDOs)
@@ -333,11 +337,10 @@ func (b *Builder) build(gen int) (*Snapshot, *Pieces, *Nature, error) {
 		chunks = append(chunks, e.data)
 	}
 	found := assemble(snap, chunks, b.lastDB2, b.opt.ShowNames)
-	h.ContainersUnreadable, h.ContainerReason = unreadableContainers(chunks)
+	h.ContainersUnreadable, h.ContainerReason = snap.Stats.ContainersUnreadable, containerReason(chunks)
 	h.BuiltAt = b.opt.Now().UTC()
-	b.mu.Lock()
-	b.health = h
-	b.mu.Unlock()
+	// Published by Refresh with the snapshot, never for a build that failed to encode.
+	b.next = h
 	return snap, buildPieces(chunks), buildNature(chunks, found), nil
 }
 

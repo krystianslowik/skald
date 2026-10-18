@@ -185,7 +185,10 @@ worst of ok, warn and fail.
 
 The last result is kept in `SETTINGS_DIR/compat.json` with the build before
 it, so an agent restart keeps "updated from 1.0.17 to 1.0.20". Without a
-writable `SETTINGS_DIR` it is kept in memory only. Everyone signed in to the
+writable `SETTINGS_DIR` it is kept in memory only, and an agent restart
+forgets the build before: a game update that comes with a pod restart (the
+usual case when the agent runs next to the game) is then checked as a first
+start, without "updated from", the Discord summary or the second save check. Everyone signed in to the
 panel sees the result: a section in the admin sheet, and after a check that
 warns or fails, a notice at the top of the dashboard that each device can
 dismiss until the next check. Running it again needs an admin (with

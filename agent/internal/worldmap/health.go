@@ -67,12 +67,11 @@ func (b *Builder) setFailure(reason string) {
 	b.mu.Unlock()
 }
 
-// unreadableContainers totals the refused inventories over every chunk of the
-// save and picks one reason, the same one on every build.
-func unreadableContainers(chunks []*chunkData) (int, string) {
-	n, reason := 0, ""
+// containerReason picks one reason among the refused inventories of the
+// save, the same one on every build.
+func containerReason(chunks []*chunkData) string {
+	reason := ""
 	for _, c := range chunks {
-		n += c.badInventory
 		if c.badInventoryErr != nil {
 			r := strings.TrimPrefix(c.badInventoryErr.Error(), "worldmap: ")
 			if reason == "" || r < reason {
@@ -80,5 +79,5 @@ func unreadableContainers(chunks []*chunkData) (int, string) {
 			}
 		}
 	}
-	return n, reason
+	return reason
 }

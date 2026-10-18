@@ -401,7 +401,7 @@ func TestLogsCheck(t *testing.T) {
 		{"loaded and joined", state.Snapshot{VersionAt: &v, WorldLoadedAt: plus(25 * time.Second), JoinCodeSeenAt: plus(28 * time.Second)}, true, late, StatusOK, ""},
 		{"still loading", state.Snapshot{VersionAt: &v}, false, v.Add(time.Minute), StatusPending, "world_loading"},
 		{"never loaded", state.Snapshot{VersionAt: &v}, false, late, StatusWarn, "world_loaded_missing"},
-		{"loaded too late", state.Snapshot{VersionAt: &v, WorldLoadedAt: plus(10 * time.Minute)}, false, late, StatusWarn, "world_loaded_missing"},
+		{"loaded slowly", state.Snapshot{VersionAt: &v, WorldLoadedAt: plus(10 * time.Minute)}, false, late, StatusOK, ""},
 		{"loaded by the game before", state.Snapshot{VersionAt: &v, WorldLoadedAt: plus(-time.Hour)}, false, late, StatusWarn, "world_loaded_missing"},
 		{"join code waiting", state.Snapshot{VersionAt: &v, WorldLoadedAt: plus(25 * time.Second)}, true, v.Add(time.Minute), StatusPending, "join_code_waiting"},
 		{"no join code", state.Snapshot{VersionAt: &v, WorldLoadedAt: plus(25 * time.Second), JoinCodeSeenAt: plus(-time.Hour)}, true, late, StatusWarn, "join_code_missing"},
@@ -487,5 +487,71 @@ func TestPersistence(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "worlds_local") {
 		t.Error("a path in the stored result")
+	}
+}
+
+func TestOneSaveStartsOneCheck(t *testing.T) {
+	// A world whose saves never reach the map (no finished generation): the
+	// save check stays pending, and the loop must not check again and again.
+	w := started("l-1.0.20", 41, 0)
+	w.h = worldmap.Health{Failure: worldmap.FailNoSave}
+	c, events := newChecker(t, w, "")
+	c.result = &Result{Build: "l-1.0.17"}
+	ctx := context.Background()
+	c.Tick(ctx)
+	if r := c.View().Result; r.Trigger != TriggerUpdate || r.AwaitingSave {
+		t.Fatalf("update = %+v", r)
+	}
+	// Even a result that waits for a save re-checks once per save.
+	w.set(func(s *state.Snapshot, _ *worldmap.Health) { s.LastSaveAt = at(time.Now()) })
+	c.mu.Lock()
+	c.result.AwaitingSave = true
+	c.mu.Unlock()
+	c.Tick(ctx)
+	n := len(events.all())
+	c.mu.Lock()
+	c.result.AwaitingSave = true
+	c.mu.Unlock()
+	for range 3 {
+		c.Tick(ctx)
+	}
+	if got := len(events.all()); got != n {
+		t.Errorf("checked %d more times after one save", (got-n)/2)
+	}
+}
+
+func TestManualCheckOfANewBuildIsTheUpdate(t *testing.T) {
+	w := started("l-1.0.20", 41, 3)
+	w.snap.LastSaveAt = at(time.Now().Add(-5 * time.Minute)) // the old game's save
+	c, _ := newChecker(t, w, "")
+	r := c.check(context.Background(), TriggerManual, &Result{Build: "l-1.0.17", NetworkVersion: 40})
+	if r.Trigger != TriggerUpdate || !r.Updated || !r.AwaitingSave || r.PreviousBuild != "l-1.0.17" {
+		t.Errorf("manual first check of a new build = %+v", r)
+	}
+}
+
+type slowBridge struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (b *slowBridge) Status(context.Context) bridge.Status {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.calls++
+	if b.calls < 3 {
+		return bridge.Status{Reason: "loading", GameBuild: "l-1.0.20"}
+	}
+	return bridge.Status{Available: true, Plugin: "0.2.0", GameBuild: "l-1.0.20", WorldLoaded: true, Tested: true}
+}
+
+func TestWaitsForTheBridgeToLoad(t *testing.T) {
+	w := started("l-1.0.20", 41, 3)
+	c, _ := newChecker(t, w, "")
+	c.opt.WaitFor = 5 * time.Second
+	c.opt.Bridge = &slowBridge{}
+	r := c.check(context.Background(), TriggerStart, nil)
+	if ch := r.Check(CheckBridge); ch.Status != StatusOK {
+		t.Errorf("bridge = %+v", ch)
 	}
 }
