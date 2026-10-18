@@ -22,9 +22,23 @@ export type DraftAction =
   | { type: "key"; key: string; on: boolean }
   | { type: "saveInterval"; value: number }
   | { type: "password"; value: string | null }
-  | { type: "reset"; to: SettingsCurrent };
+  /** `world`: the modifiers the world save was created with, folded in as in draftFrom. */
+  | { type: "reset"; to: SettingsCurrent; world?: Record<string, string> | null };
 
-export function draftFrom(cur: SettingsCurrent): Draft {
+/**
+ * What the form starts from and what Save compares against: the saved
+ * settings plus the modifiers the world was created with (see worldOnly).
+ * Both must use the same baseline, or the sheet opens with unsaved changes
+ * nobody made.
+ */
+export function baseline(saved: SettingsCurrent, world?: Record<string, string> | null): SettingsCurrent {
+  const extra = worldOnly(saved, world);
+  if (Object.keys(extra).length === 0) return saved;
+  return { ...saved, modifiers: { ...saved.modifiers, ...extra } };
+}
+
+export function draftFrom(saved: SettingsCurrent, world?: Record<string, string> | null): Draft {
+  const cur = baseline(saved, world);
   const modifiers: Partial<Record<ModifierName, string>> = {};
   for (const m of MODIFIER_NAMES) if (cur.modifiers[m]) modifiers[m] = cur.modifiers[m];
   return {
@@ -63,7 +77,7 @@ export function draftReducer(d: Draft, a: DraftAction): Draft {
     case "password":
       return { ...d, password: a.value };
     case "reset":
-      return draftFrom(a.to);
+      return draftFrom(a.to, a.world);
   }
 }
 
@@ -92,9 +106,19 @@ export function passwordChanged(d: Draft, known: string | null): boolean {
   return d.password !== null && d.password !== "" && d.password !== known;
 }
 
-/** What Save would change, in the agent's settings_changed vocabulary. */
-export function diff(saved: SettingsCurrent, d: Draft, knownPassword: string | null): string[] {
-  return changedKeys(saved, d, passwordChanged(d, knownPassword));
+/**
+ * What Save would change, in the agent's settings_changed vocabulary.
+ * Compared with the baseline (`world` as in draftFrom), but a modifier only
+ * counts when it also differs from the saved settings: turning a world's own
+ * modifier back to normal would save what is already saved, and the world
+ * keeps it anyway.
+ */
+export function diff(saved: SettingsCurrent, d: Draft, knownPassword: string | null, world?: Record<string, string> | null): string[] {
+  return changedKeys(baseline(saved, world), d, passwordChanged(d, knownPassword)).filter((k) => {
+    if (!k.startsWith("modifier.")) return true;
+    const m = k.slice("modifier.".length) as ModifierName;
+    return (saved.modifiers[m] ?? "") !== (d.modifiers[m] ?? "");
+  });
 }
 
 export function toInput(d: Draft, knownPassword: string | null): SettingsInput {

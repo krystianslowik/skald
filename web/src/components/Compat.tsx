@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { CompatCheck, CompatResult, CompatStatus, CompatView } from "../types";
 import { useI18n, type I18n, type TextKey } from "../i18n";
 import { RelativeTime } from "./RelativeTime";
+import { useAdmin, viewOnly } from "./admin/AdminContext";
 
 /** Valheim reports its build as "l-1.0.20"; people know it as 1.0.20. */
 export const shortBuild = (b: string | undefined) => (b ?? "").replace(/^[a-z]-/, "");
@@ -126,18 +127,25 @@ function dismissedAt(): string {
 
 /**
  * The notice everyone with the panel sees when the last check warns or
- * fails: what changed, which parts, and a way to the details. Dismissed per
- * device until the next check.
+ * fails: what changed, which parts, and a way to the details. A view-only
+ * session gets one plain line instead: the parts and the details are the
+ * admin's. Dismissed per device until the next check.
  */
 export function CompatNotice({ view, onDetails, className = "" }: { view: CompatView | null | undefined; onDetails?: () => void; className?: string }) {
   const i18n = useI18n();
   const { t } = i18n;
   const [dismissed, setDismissed] = useState(dismissedAt);
+  const viewer = viewOnly(useAdmin());
   const r = view?.result;
   if (!r || (r.status !== "warn" && r.status !== "fail") || dismissed === r.checkedAt) return null;
-  const parts = r.checks.filter((c) => c.status === r.status).map((c) => t(`compat.check.${c.name}` as TextKey));
   const to = shortBuild(r.build);
-  const head = r.updated ? t(r.status === "fail" ? "compat.notice.fail" : "compat.notice.warn", { to }) : t(r.status === "fail" ? "compat.notice.failBuild" : "compat.notice.warnBuild", { to });
+  const fail = r.status === "fail";
+  const parts = viewer ? [] : r.checks.filter((c) => c.status === r.status).map((c) => t(`compat.check.${c.name}` as TextKey));
+  const head = viewer
+    ? t(r.updated ? (fail ? "compat.notice.viewerFail" : "compat.notice.viewerWarn") : fail ? "compat.notice.viewerFailBuild" : "compat.notice.viewerWarnBuild", { to })
+    : r.updated
+      ? t(r.status === "fail" ? "compat.notice.fail" : "compat.notice.warn", { to })
+      : t(r.status === "fail" ? "compat.notice.failBuild" : "compat.notice.warnBuild", { to });
   const dismiss = () => {
     try {
       localStorage.setItem(DISMISS_KEY, r.checkedAt);
@@ -151,10 +159,10 @@ export function CompatNotice({ view, onDetails, className = "" }: { view: Compat
       <StatusMark status={r.status} size={22} />
       <div className="min-w-0 flex-1">
         <p className="font-bold text-bone">{head}</p>
-        <p className="mt-0.5 text-xs text-ash">{t("compat.notice.parts", { parts: new Intl.ListFormat(i18n.intl, { type: "conjunction" }).format(parts) })}</p>
+        {!viewer && <p className="mt-0.5 text-xs text-ash">{t("compat.notice.parts", { parts: new Intl.ListFormat(i18n.intl, { type: "conjunction" }).format(parts) })}</p>}
       </div>
       <div className="flex basis-full justify-end gap-2 sm:basis-auto">
-        {onDetails && (
+        {onDetails && !viewer && (
           <button type="button" onClick={onDetails} className="plaque press min-h-11 px-4 text-sm font-bold">
             {t("compat.notice.details")}
           </button>

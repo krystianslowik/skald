@@ -416,7 +416,13 @@ describe("Server settings", () => {
     expect(await within(dialog).findByText("This world was created with: resources much more, portals casual. They are selected below so a save keeps them.")).toBeInTheDocument();
     const resources = within(dialog).getByRole("radiogroup", { name: "resources" });
     expect(within(resources).getByRole("radio", { name: "much more" })).toHaveAttribute("aria-checked", "true");
-    expect(within(dialog).getByText("2 changes")).toBeInTheDocument();
+    // They are the world's baseline, not edits: the sheet opens clean.
+    expect(within(dialog).queryByText(/^\d+ changes?$/)).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Reset" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+    // Any real edit saves them along with it.
+    fireEvent.change(within(dialog).getByLabelText("Server name"), { target: { value: "Hall of Ash" } });
+    expect(within(dialog).getByText("1 change")).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(puts).toHaveLength(1));
     expect((puts[0] as { modifiers: Record<string, string> }).modifiers).toEqual({ raids: "less", resources: "muchmore", portals: "casual" });
@@ -517,6 +523,8 @@ describe("App", () => {
       expect(document.documentElement.lang).toBe("en");
     });
     expect(screen.getByRole("button", { name: "Kindle" })).toBeInTheDocument();
+    // Says what it wants and who has it.
+    expect(screen.getByPlaceholderText("Speak the word")).toHaveAccessibleDescription("The server's admin gives out the panel password.");
   });
 
   it("starts in Polish when SKALD_LOCALE=pl and the viewer has no choice stored", async () => {

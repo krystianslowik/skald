@@ -116,7 +116,7 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
             placeholder={t("login.placeholder")}
             disabled={busy || lit}
             aria-invalid={error ? true : undefined}
-            aria-describedby={error ? "word-err" : undefined}
+            aria-describedby={error ? "word-hint word-err" : "word-hint"}
             className="slot w-full border border-transparent px-4 py-3 text-center text-lg font-bold tracking-[0.2em] text-flame placeholder:font-normal placeholder:tracking-wider placeholder:text-ash/90 focus:border-select-hi focus:shadow-[inset_0_2px_7px_rgba(0,0,0,0.65),0_0_0_1px_rgba(140,188,230,0.5)] focus:outline-hidden"
           />
           <button
@@ -126,7 +126,10 @@ export function Login({ onSuccess }: { onSuccess: () => void }) {
           >
             {busy ? t("login.busy") : t("login.submit")}
           </button>
-          <p id="word-err" role="alert" className="mt-3 min-h-5 text-sm text-blood">
+          <p id="word-hint" className="mt-3 text-xs leading-relaxed text-ash">
+            {t("login.hint")}
+          </p>
+          <p id="word-err" role="alert" className="mt-2 min-h-5 text-sm text-blood">
             {error}
           </p>
         </motion.form>

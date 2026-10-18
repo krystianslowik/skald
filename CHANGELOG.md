@@ -9,6 +9,16 @@ above them.
 
 ## [Unreleased]
 
+### Changed
+
+- The login screen now says what it asks for: the panel password, which the server's admin hands out.
+- With an admin password set, players who have not unlocked admin no longer see eye and copy buttons next to the server password that only led to the admin prompt. They see "Ask an admin for the password" instead. Admins see the buttons as before.
+- Players who have not unlocked admin get a short compatibility notice after a game update, without the admin's list of checks and the Details button they could not use.
+
+### Fixed
+
+- The server settings sheet no longer opens with "2 changes" before anything was touched. The modifiers the world was created with are now the starting point, so only real edits count, and Reset keeps them selected.
+
 ## [2026.10.12] - 2026-10-18
 
 ### Added
