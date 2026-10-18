@@ -18,7 +18,8 @@ import type { FogField, SeaMask } from "./fogfield";
 import { COAST, PAPER, PAPER_DARK, PAPER_INK, VOID, type Textures } from "./paper";
 import type { TileFeed } from "./terraindata";
 import { FOREST_DARKEN, paletteOf, RELIEF, SWAMP, WATER_DEEP, WATER_SHALLOW } from "./terrainpaint";
-import { loadLimit, pinnedTiles, planView, tileKey, tilesIn, type TileRef, type TilesDoc } from "./terraintiles";
+import { levelFor, loadLimit, pinnedTiles, planView, tileKey, tilesIn, type TileRef, type TilesDoc } from "./terraintiles";
+import { CHUNK, chunkFrame, rasterChunk } from "./woodsraster";
 import type { View } from "./mapgeo";
 
 /** The most device pixels per CSS pixel the terrain is drawn at: finer than the data on any phone, and a third of the fill on a 3x screen. */
@@ -26,12 +27,12 @@ const MAX_DPR = 2;
 /** The most pixels the drawing buffer may have (Safari refuses bigger canvases). */
 const MAX_PIXELS = 16_000_000;
 const FLOATS = 16;
-/** Woods and floor plans are rasterized in chunks of this many pixels a side. */
-const CHUNK = 256;
 /** Chunk levels: the finest has a chunk pixel at about 2 cm, a device pixel at the closest zoom. */
 const CHUNK_LEVELS = 13;
 /** Time a frame may spend rasterizing chunks (at least one is always done). */
 const CHUNK_MS = 6;
+/** Chunks asked of an off-thread rasterizer at once: enough to keep it busy, few enough that a pinch's old levels are not queued up. */
+const REMOTE_MAX = 2;
 /** The tile edge the shader is built for (tileSize 256 plus a two-sample apron each side), as the agent serves. */
 export const TILE_EDGE = 260;
 
@@ -335,19 +336,32 @@ export interface GLStats {
   /** Woods and floor-plan chunks rasterized this frame, and still to do. */
   chunks: number;
   chunksPending: number;
+  /** Chunks being drawn off the main thread. */
+  chunksInflight: number;
+  /** Since the map opened, per raster (woods, floor plans): chunks rasterized, those of them drawn again over an older drawing, and the main thread's time spent on them (ms). */
+  rastered: [number, number];
+  redrawn: [number, number];
+  rasterMs: [number, number];
+  /** Since the map opened: chunks drawn off the main thread. */
+  remote: number;
 }
 
 /**
  * Something Canvas2D draws over the terrain (woods, floor plans), in world
  * units: `draw` gets a context whose transform maps the world (y up) onto a
- * chunk, the chunk's box, and the zoom (CSS px per metre) to draw for.
- * `gen` names what it shows: a chunk drawn for another gen is redrawn (and
- * shown as it was meanwhile); a change of `kind` drops every chunk at once.
+ * chunk, the chunk's box, and the chunk's own scale (CSS px per metre): a
+ * chunk is drawn once for its level and scaled with the view after that.
+ * `gen(box)` names what the chunk over `box` shows: a chunk drawn for
+ * another gen is redrawn (and shown as it was meanwhile), so a gen changes
+ * only where something changed; a change of `kind` drops every chunk at
+ * once. `remote`, when set, draws a chunk off the main thread instead and
+ * answers its premultiplied pixels, or null (it is then drawn here).
  */
 export interface RasterSource {
   kind: string;
-  gen: string;
+  gen(box: readonly [number, number, number, number]): string;
   draw(g: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D, box: readonly [number, number, number, number], scale: number): void;
+  remote?: ((t: TileRef, R: number, k: number) => Promise<Uint8ClampedArray<ArrayBuffer> | null>) | null;
 }
 
 type Programs = {
@@ -450,6 +464,16 @@ export class GLMap {
   private chunkLevel: number | undefined;
   private readonly chunkFades = new Fades(FADE_MS);
   private readonly chunkBudget = new UploadBudget(16, CHUNK_MS);
+  /** Chunks being drawn off the main thread, and the gen each was asked for. */
+  private readonly inflight = new Map<string, string>();
+  /** Chunks drawn off the main thread, to upload in the next frame. */
+  private arrived: { i: 0 | 1; t: TileRef; key: string; gen: string; fresh: boolean; px: Uint8ClampedArray<ArrayBuffer>; epoch: number }[] = [];
+  /** Chunks the off-thread rasterizer could not draw: drawn here instead. */
+  private readonly local = new Set<string>();
+  /** Bumped when a raster's chunks are dropped, so drawings asked for before are thrown away. */
+  private epochs: [number, number] = [0, 0];
+  /** Called when a chunk drawn off the main thread is in, so a frame uploads it. */
+  onRaster: (() => void) | null = null;
   private scratch: OffscreenCanvas | HTMLCanvasElement | null = null;
   private pal = new Float32Array(48);
   private palN = 1;
@@ -458,7 +482,7 @@ export class GLMap {
   private cssH = 1;
   private maxTex = 4096;
   private maxLayers = 256;
-  stats: GLStats = { level: 0, wanted: 0, quads: 0, own: 0, ancestor: 0, descendant: 0, blank: 0, fading: 0, uploads: 0, pending: 0, pool: 0, capacity: 0, chunks: 0, chunksPending: 0 };
+  stats: GLStats = { level: 0, wanted: 0, quads: 0, own: 0, ancestor: 0, descendant: 0, blank: 0, fading: 0, uploads: 0, pending: 0, pool: 0, capacity: 0, chunks: 0, chunksPending: 0, chunksInflight: 0, rastered: [0, 0], redrawn: [0, 0], rasterMs: [0, 0], remote: 0 };
   /** Called when the context comes back, and when it goes. */
   onRestored: (() => void) | null = null;
   onLost: (() => void) | null = null;
@@ -626,6 +650,17 @@ export class GLMap {
     this.chunkGen.clear();
     this.fades.clear();
     this.chunkFades.clear();
+    this.dropRemote(0);
+    this.dropRemote(1);
+  }
+
+  /** Forgets raster `i`'s drawings in flight or waiting to go up: their chunks are gone. */
+  private dropRemote(i: 0 | 1) {
+    this.epochs[i]++;
+    const pre = `${i}:`;
+    for (const k of [...this.inflight.keys()]) if (k.startsWith(pre)) this.inflight.delete(k);
+    for (const k of [...this.local]) if (k.startsWith(pre)) this.local.delete(k);
+    this.arrived = this.arrived.filter((a) => a.i !== i);
   }
 
   private init() {
@@ -716,6 +751,8 @@ export class GLMap {
       this.chunks = new TexturePool(ccap);
       this.chunkGen.clear();
       this.chunkFades.clear();
+      this.dropRemote(0);
+      this.dropRemote(1);
     }
   }
 
@@ -785,6 +822,7 @@ export class GLMap {
       const pre = `${i}:`;
       this.chunks?.deleteWhere((k) => k.startsWith(pre));
       for (const k of [...this.chunkGen.keys()]) if (k.startsWith(pre)) this.chunkGen.delete(k);
+      this.dropRemote(i);
     }
     if (src && !this.chunks) this.alloc();
   }
@@ -870,7 +908,7 @@ export class GLMap {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     };
     // Chunks are rasterized before anything is drawn: uploads between draws would stall the pipeline.
-    const chunks = this.prepareChunks(v, k, fr.now);
+    const chunks = this.prepareChunks(v, k, fr.now, fr.moving ?? false, fr.ahead ?? null);
     sheet(0, 0.9);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -992,8 +1030,8 @@ export class GLMap {
     for (const k of sel.used) pool.touch(k);
     this.lastUsed = sel.used;
     feed.keep = new Set([...sel.used, ...this.pinned, ...ahead]);
-    const { chunks, chunksPending } = this.stats;
-    this.stats = { level: z, wanted: plan.slots.length, quads: sel.quads.length, own: sel.own, ancestor: sel.ancestor, descendant: sel.descendant, blank: sel.blank, fading: sel.fading, uploads: this.budget.used, pending, pool: pool.size, capacity: pool.capacity, chunks, chunksPending };
+    const { chunks, chunksPending, chunksInflight, rastered, redrawn, rasterMs, remote } = this.stats;
+    this.stats = { level: z, wanted: plan.slots.length, quads: sel.quads.length, own: sel.own, ancestor: sel.ancestor, descendant: sel.descendant, blank: sel.blank, fading: sel.fading, uploads: this.budget.used, pending, pool: pool.size, capacity: pool.capacity, chunks, chunksPending, chunksInflight, rastered, redrawn, rasterMs, remote };
     if (sel.quads.length) {
       this.fillInstances(sel.quads, v, R, doc.tileSize, doc.apron - 0.5, (t) => pool.layer(tileKey(t)) ?? 0);
       gl.useProgram(r.p.tile);
@@ -1015,10 +1053,12 @@ export class GLMap {
   /**
    * Plans both rasters' chunks for this view (planView over a chunk pyramid
    * of the world, a chunk pixel about a device pixel) and rasterizes what is
-   * missing or out of date, nearest first, within CHUNK_MS. Chunks of other
-   * zooms stand in meanwhile, and new ones fade in, as tiles do.
+   * missing or out of date, nearest first, within CHUNK_MS (or asks a
+   * raster's `remote` for them, a few at a time). While the view moves only
+   * its missing chunks are drawn. Chunks of other zooms stand in meanwhile,
+   * and new ones fade in, as tiles do.
    */
-  private prepareChunks(v: View, k: number, now: number): { 0: Quad[] | null; 1: Quad[] | null; busy: boolean } {
+  private prepareChunks(v: View, k: number, now: number, moving: boolean, ahead: View | null): { 0: Quad[] | null; 1: Quad[] | null; busy: boolean } {
     const out: { 0: Quad[] | null; 1: Quad[] | null; busy: boolean } = { 0: null, 1: null, busy: false };
     const pool = this.chunks;
     const r = this.res!;
@@ -1033,8 +1073,8 @@ export class GLMap {
     const hh = v.h / 2 / v.scale;
     const box = { x0: v.cx - hw, z0: v.cz - hh, x1: v.cx + hw, z1: v.cz + hh };
     const used = new Set<string>();
-    const todo: { i: 0 | 1; t: TileRef; fresh: boolean }[] = [];
-    const plans: ({ slots: ReturnType<typeof planView>["slots"] } | null)[] = [null, null];
+    const todo: { i: 0 | 1; t: TileRef; fresh: boolean; gen: string }[] = [];
+    const plans: (ReturnType<typeof planView> | null)[] = [null, null];
     for (const i of [0, 1] as const) {
       const src = this.rasters[i];
       if (!src) continue;
@@ -1048,34 +1088,93 @@ export class GLMap {
       // Missing chunks at this zoom first (view, then the ring round it), then ones drawn for an older gen.
       plan.want.forEach((t, n) => {
         if (t.z !== plan.z || pool.has(chunkKey(i, t))) return;
-        todo.push({ i, t, fresh: n < plan.low });
+        todo.push({ i, t, fresh: n < plan.low, gen: src.gen(chunkFrame(t, R).box) });
       });
-      for (const s of plan.slots) if (pool.has(chunkKey(i, s.tile)) && this.chunkGen.get(chunkKey(i, s.tile)) !== src.gen) todo.push({ i, t: s.tile, fresh: false });
+      for (const s of plan.slots) {
+        const key = chunkKey(i, s.tile);
+        if (!pool.has(key)) continue;
+        const gen = src.gen(chunkFrame(s.tile, R).box);
+        if (this.chunkGen.get(key) !== gen) todo.push({ i, t: s.tile, fresh: false, gen });
+      }
     }
     this.chunkLevel = plans[0] || plans[1] ? heldLevel(v.scale, k, CHUNK_LEVELS, R, CHUNK, this.chunkLevel) : undefined;
     // Only what is drawn now fades in, as with tiles.
     const slotted = new Set<string>();
     for (const i of [0, 1] as const) for (const s of plans[i]?.slots ?? []) slotted.add(chunkKey(i, s.tile));
-    // The view's missing chunks of both rasters before anything else.
-    todo.sort((a, b) => Number(b.fresh) - Number(a.fresh));
-    const keep = (key: string) => this.chunkUsed.has(key) || used.has(key);
-    this.chunkBudget.begin(performance.now());
-    let done = 0;
-    for (const { i, t } of todo) {
-      if (!this.chunkBudget.take(performance.now())) break;
-      const key = chunkKey(i, t);
+    // A chunk of the view never evicts another of the view, and one of the ring round it never evicts
+    // any chunk of this level: a pool smaller than what the view wants would otherwise draw them in turn
+    // for ever (stand-ins show where it runs out).
+    const level = new Set(([0, 1] as const).flatMap((i) => (plans[i] ? [`${i}:${plans[i].z}/`] : [])));
+    const ofLevel = (key: string) => level.has(key.slice(0, key.indexOf("/") + 1));
+    const keepFor = (inView: boolean) => (inView ? (key: string) => this.chunkUsed.has(key) || slotted.has(key) : (key: string) => this.chunkUsed.has(key) || ofLevel(key));
+    const put = (i: 0 | 1, key: string, gen: string, px: Uint8ClampedArray, inView: boolean) => {
       const fresh = !pool.has(key);
-      const got = pool.acquire(key, keep);
-      if (!got) continue;
+      const got = pool.acquire(key, keepFor(inView));
+      if (!got) return;
       if (got.evicted) {
         this.chunkGen.delete(got.evicted);
         this.chunkFades.drop(got.evicted);
       }
-      const px = this.rasterize(this.rasters[i]!, t, R, k);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, r.chunks);
       gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, got.layer, CHUNK, CHUNK, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-      this.chunkGen.set(key, this.rasters[i]!.gen);
+      this.chunkGen.set(key, gen);
       if (fresh && slotted.has(key)) this.chunkFades.begin(key, now);
+      this.stats.rastered[i]++;
+      if (!fresh) this.stats.redrawn[i]++;
+    };
+    // Chunks drawn off the main thread go up first: anything beats a missing chunk, and an out-of-date one is asked for again below.
+    for (const a of this.arrived) {
+      const src = this.rasters[a.i];
+      if (a.epoch !== this.epochs[a.i] || !src) continue;
+      if (pool.has(a.key) && a.gen !== src.gen(chunkFrame(a.t, R).box)) continue;
+      // A drawing for a level the view has left only takes room a ring chunk could.
+      put(a.i, a.key, a.gen, a.px, a.fresh && slotted.has(a.key));
+      this.stats.remote++;
+    }
+    this.arrived = [];
+    // The view's missing chunks of both rasters before anything else.
+    todo.sort((a, b) => Number(b.fresh) - Number(a.fresh));
+    this.chunkBudget.begin(performance.now());
+    let done = 0;
+    let waiting = 0;
+    let blocked = 0;
+    // A glide or fling to another zoom: chunks of the levels it passes are not drawn, their stand-ins scale meanwhile.
+    const landing = moving && ahead ? levelFor(ahead.scale, k, CHUNK_LEVELS, R, CHUNK) : undefined;
+    for (const { i, t, gen, fresh } of todo) {
+      const key = chunkKey(i, t);
+      const src = this.rasters[i]!;
+      // Went up above, drawn off the main thread.
+      if (pool.has(key) && this.chunkGen.get(key) === gen) continue;
+      // Mid-gesture only the view's missing chunks: the ring and out-of-date ones would be stale again before the view rests.
+      if (moving && (!fresh || (landing !== undefined && t.z !== landing))) continue;
+      if (!pool.has(key) && !pool.room(keepFor(fresh))) {
+        // No room until the view changes: nothing to wait for.
+        blocked++;
+        continue;
+      }
+      if (src.remote && !this.local.has(key)) {
+        if (this.inflight.get(key) === gen) {
+          waiting++;
+          continue;
+        }
+        if (this.inflight.size >= REMOTE_MAX) continue;
+        this.inflight.set(key, gen);
+        waiting++;
+        const epoch = this.epochs[i];
+        void src.remote(t, R, k).then((px) => {
+          if (this.inflight.get(key) === gen) this.inflight.delete(key);
+          if (!px) this.local.add(key);
+          else if (epoch === this.epochs[i]) this.arrived.push({ i, t, key, gen, fresh, px, epoch });
+          this.onRaster?.();
+        });
+        continue;
+      }
+      if (!this.chunkBudget.take(performance.now())) break;
+      const t0 = performance.now();
+      const px = this.rasterize(src, t, R, k);
+      this.stats.rasterMs[i] += performance.now() - t0;
+      put(i, key, gen, px, fresh);
+      this.local.delete(key);
       done++;
     }
     for (const i of [0, 1] as const) {
@@ -1093,12 +1192,12 @@ export class GLMap {
     }
     this.chunkUsed = used;
     this.stats.chunks = done;
-    this.stats.chunksPending = todo.length - done;
-    out.busy = todo.length > done || this.chunkFades.busy(now);
+    this.stats.chunksPending = todo.length - done - waiting - blocked;
+    this.stats.chunksInflight = this.inflight.size;
+    out.busy = todo.length - blocked > done || this.inflight.size > 0 || this.chunkFades.busy(now);
     return out;
   }
 
-  /** Draws chunk `t` of a raster into the scratch canvas, world north-west at its top left. */
   /**
    * Draws chunk `t` of a raster on a CPU canvas (world north-west at its top
    * left) and returns its pixels. Uploading the pixels, rather than handing
@@ -1108,20 +1207,7 @@ export class GLMap {
   private rasterize(src: RasterSource, t: TileRef, R: number, k: number): Uint8ClampedArray {
     this.scratch ??= typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(CHUNK, CHUNK) : Object.assign(document.createElement("canvas"), { width: CHUNK, height: CHUNK });
     const g = this.scratch.getContext("2d", { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    g.clearRect(0, 0, CHUNK, CHUNK);
-    const span = (2 * R) / 2 ** t.z;
-    const west = -R + t.x * span;
-    const north = R - t.y * span;
-    const s = CHUNK / span;
-    g.setTransform(s, 0, 0, -s, -west * s, north * s);
-    g.save();
-    g.beginPath();
-    g.arc(0, 0, R, 0, Math.PI * 2);
-    g.clip();
-    src.draw(g, [west, north - span, west + span, north], s / k);
-    g.restore();
-    return premultiply(g.getImageData(0, 0, CHUNK, CHUNK).data);
+    return rasterChunk(g, t, R, k, (c, box, scale) => src.draw(c, box, scale));
   }
 
   private drawChunks(i: 0 | 1, quads: Quad[] | null, v: View) {

@@ -34,9 +34,12 @@ import { GLMap, TILE_EDGE, type GLStats } from "./mapgl";
 import { fogField, seaMask, type FogField, type SeaMask } from "./fogfield";
 import { CLOUD_TILE, COAST, PAPER, PAPER_DARK, PAPER_TILE, textures as paperTextures, VOID, type Textures } from "./paper";
 import { natureTint, wobble, type NatureItem } from "./nature";
-import { NatureLayer, natureAlpha } from "./naturerender";
+import { NATURE_BANDS, NatureLayer, natureAlpha } from "./naturerender";
+import { padBox, StampGrid, tierZoom } from "./gltiles";
+import { drawHeat, drawUnderFog } from "./woodsraster";
+import { WoodsWorker } from "./woodsworker";
 import type { ChunkKey, Piece } from "./pieces";
-import { FloorPlan, PLAN_FULL_SCALE, PLAN_MIN_SCALE, planAlpha, STOREY_SCALE, viewBox, type StoreyInfo, type StoreyPick } from "./planrender";
+import { FloorPlan, PLAN_BANDS, PLAN_FULL_SCALE, PLAN_MIN_SCALE, planAlpha, STOREY_SCALE, viewBox, type StoreyInfo, type StoreyPick } from "./planrender";
 
 const LAND = "#b79b69";
 const SEA = "rgba(58, 82, 92, 0.62)";
@@ -124,6 +127,11 @@ class SpriteAtlas {
   }
 }
 const ctx2d = (c: HTMLCanvasElement | OffscreenCanvas): Ctx2D | null => c.getContext("2d") as Ctx2D | null;
+
+/** The same terrain edits, though in a new snapshot. */
+function sameHeat(a: readonly { x: number; z: number; cells: number }[], b: readonly { x: number; z: number; cells: number }[]): boolean {
+  return a === b || (a.length === b.length && a.every((e, i) => e.x === b[i]!.x && e.z === b[i]!.z && e.cells === b[i]!.cells));
+}
 
 /** A tile from its pixels, or null without a 2D context. */
 function tileOf(px: Uint8ClampedArray<ArrayBuffer>, size: number): HTMLCanvasElement | OffscreenCanvas | null {
@@ -397,6 +405,16 @@ export class MapRenderer {
    */
   private gl: GLMap | null = null;
   private glFailed = false;
+  /** Draws the WebGL map's woods off the main thread, once it says it can. */
+  private woods: WoodsWorker | null = null;
+  /** Where floor plans last changed, so the WebGL map redraws only its chunks over them. */
+  private readonly planStamps = new StampGrid();
+  /** Bumped when every floor plan looks different (material tones). */
+  private planLook = 0;
+  /** The base the floor switcher was for, and the storey picked, when the plans were last drawn: a change redraws those bases only. */
+  private planPick: { active: string | null; storey: StoreyPick | null } = { active: null, storey: null };
+  /** Bumped when the terrain edits change (not with every snapshot, as `version` is). */
+  private heatVersion = 0;
   private feed: TileFeed | null = null;
   private tilesDoc: TilesDoc | null = null;
   /** The fog's distance field and the generated zones, for the WebGL map; `all`: explored is known and nothing is. */
@@ -427,6 +445,7 @@ export class MapRenderer {
     this.spoilers = map.spoilers;
     const key = `${map.land.size}:${map.land.data}|${map.explored.available ? `${map.explored.size}:${map.explored.rle}` : ""}`;
     if (this.prep) {
+      if (!sameHeat(this.prep.terrain, map.terrainEdits)) this.heatVersion++;
       this.prep = { ...this.prep, links: portalLinks(map), terrain: map.terrainEdits };
       this.version++;
     }
@@ -438,6 +457,7 @@ export class MapRenderer {
       if (tex) setTextures(tex);
       if (textures) this.gl?.setPaper(textures.raw);
       if (req !== this.shapesReq) return;
+      if (!sameHeat(this.prep?.terrain ?? [], map.terrainEdits)) this.heatVersion++;
       this.prep = prepare(shapes, map);
       if (fields) this.setFields({ ...fields, all: shapes.fog !== null && !fields.fog });
       this.version++;
@@ -536,6 +556,13 @@ export class MapRenderer {
       this.version++;
       this.onChange?.();
     };
+    gl.onRaster = () => this.onChange?.();
+    // The woods are drawn in a worker where the browser can (see woodsworker.ts); until then, and without, here.
+    if (!this.woods) {
+      this.woods = new WoodsWorker();
+      this.woods.onReady = () => this.onChange?.();
+      if (this.natureOf) this.woods.setNature(this.natureOf);
+    }
     gl.onRestored = () => {
       this.tiles?.dispose();
       this.tiles = null;
@@ -574,6 +601,8 @@ export class MapRenderer {
     this.setTiles(null);
     this.gl?.dispose();
     this.gl = null;
+    this.woods?.dispose();
+    this.woods = null;
   }
 
   /** Traces the relief's coast in a worker, once per image; no worker, no coast line. */
@@ -607,8 +636,10 @@ export class MapRenderer {
   setPieces(pieces: readonly Piece[]): void {
     if (!this.ctx || pieces === this.planOf) return;
     this.planOf = pieces;
+    const was = this.plan;
     this.plan = pieces.length ? new FloorPlan(pieces) : null;
     this.plan?.setTones(this.tones);
+    for (const b of FloorPlan.changes(was, this.plan)) this.planStamps.mark(b);
     this.planVersion++;
     this.markStorey.clear();
   }
@@ -618,6 +649,7 @@ export class MapRenderer {
     if (!this.ctx || loaded === this.natureOf) return;
     this.natureOf = loaded;
     this.nature.set(loaded);
+    this.woods?.setNature(loaded);
   }
 
   /** The ore deposit drawn under a screen point, within `slop` px of its edge. */
@@ -652,6 +684,7 @@ export class MapRenderer {
     this.tones = icons ? materialTones(icons.img, icons.sheet) : new Map();
     this.plan?.setTones(this.tones);
     this.planVersion++;
+    this.planLook++;
   }
 
   resize(w: number, h: number, dpr: number): void {
@@ -819,7 +852,11 @@ export class MapRenderer {
   /**
    * What the WebGL map rasterizes in chunks over its terrain: terrain edits
    * and woods under the fog (0), floor plans over it (1). A chunk is drawn
-   * at its own zoom, once per change of what it shows, a few per frame.
+   * at its own level's scale and styled for the view's zoom tier (what shows
+   * from which zoom, pickables from 8 px/m, tree detail, the fades, switches
+   * where the Canvas2D map switches it, see tierZoom), a few per frame; it
+   * is drawn again only when the tier changes or data arrives over it, and
+   * scaled with the view in between.
    */
   private setRasters(f: FrameState) {
     const gl = this.gl!;
@@ -827,35 +864,39 @@ export class MapRenderer {
     const L = f.layers;
     const heat = L.terrain && p.terrain.length > 0;
     const woods = (L.nature || L.resources) && !this.nature.empty && natureAlpha(f.view.scale) > 0;
-    // Chunks draw at the view's zoom, not their own level's: what shows from
-    // which zoom (pickables from 8 px/m, tree detail, the woods' and floor
-    // plans' fade) then switches where the Canvas2D map switches it. A chunk
-    // is drawn again, a few a frame, once the zoom has moved a quarter octave.
-    const zoom = f.view.scale;
-    const step = Math.round(Math.log2(zoom) * 4);
+    const at = tierZoom(f.view.scale, NATURE_BANDS);
+    const layers = { nature: L.nature, pickables: L.resources };
+    const remote = this.woods?.ready ? this.woods : null;
+    if (heat) remote?.setHeat(p.terrain, this.heatVersion);
     gl.setRaster(
       0,
       heat || woods
         ? {
             kind: `${heat ? 1 : 0}${woods && L.nature ? 1 : 0}${woods && L.resources ? 1 : 0}`,
-            gen: `${this.nature.version}:${this.version}:${step}`,
-            draw: (g, box) => {
-              const c = g as CanvasRenderingContext2D;
-              if (heat) this.drawTerrain(c, f.view, p);
-              if (woods) this.nature.draw(c, [box[0] - 4, box[1] - 4, box[2] + 4, box[3] + 4], zoom, { nature: L.nature, pickables: L.resources }, false);
-            },
+            gen: (box) => `${heat ? this.heatVersion : ""}:${woods ? `${at}:${this.nature.genFor(box)}` : ""}`,
+            draw: (g, box, scale) => drawUnderFog(g, box, scale, { heat: heat ? p.terrain : null, nature: woods ? this.nature : null, layers, at }),
+            remote: remote && ((t, R, k) => remote.draw({ t, R, k, at, woods, heat, layers })),
           }
         : null,
     );
     const storey = f.storey ?? null;
     const active = this.activeBase;
+    const was = this.planPick;
+    if (was.active !== active || was.storey?.base !== storey?.base || was.storey?.level !== storey?.level) {
+      for (const key of [was.active, active, was.storey?.base, storey?.base]) {
+        const box = this.plan?.boxOf(key);
+        if (box) this.planStamps.mark(box);
+      }
+      this.planPick = { active, storey };
+    }
+    const planAt = tierZoom(f.view.scale, PLAN_BANDS);
     gl.setRaster(
       1,
       this.plan && L.buildings && planAlpha(f.view.scale) > 0
         ? {
             kind: "plan",
-            gen: `${this.planVersion}:${storey ? `${storey.base}/${storey.level}` : ""}:${active ?? ""}:${step}`,
-            draw: (g, box) => this.plan?.draw(g as CanvasRenderingContext2D, [box[0] - 4, box[1] - 4, box[2] + 4, box[3] + 4], zoom, planAlpha(zoom), storey, active),
+            gen: (box) => `${this.planLook}:${planAt}:${this.planStamps.stampIn(padBox(box))}`,
+            draw: (g, box, scale) => this.plan?.draw(g as CanvasRenderingContext2D, padBox(box), scale, planAlpha(planAt), storey, active),
           }
         : null,
     );
@@ -948,7 +989,7 @@ export class MapRenderer {
       tiles.draw(g, { x0, z0, x1, z1 }, seen, v.scale, dpr, only);
       this.drawPaper(g, v, 0.28);
       g.restore();
-      if (layers.terrain) this.drawTerrain(g, v, p);
+      if (layers.terrain) drawHeat(g, p.terrain);
       this.drawNature(g, v, layers);
       this.drawFog(g, v, p, layers);
     } else if (p && relief) {
@@ -989,7 +1030,7 @@ export class MapRenderer {
         g.globalAlpha = 1;
       }
       g.restore();
-      if (layers.terrain) this.drawTerrain(g, v, p);
+      if (layers.terrain) drawHeat(g, p.terrain);
       this.drawNature(g, v, layers);
       this.drawFog(g, v, p, layers);
     } else if (p) {
@@ -1015,7 +1056,7 @@ export class MapRenderer {
       g.strokeStyle = COAST;
       g.lineWidth = Math.max(1.1, Math.min(2.2, v.scale * 6)) / v.scale;
       g.stroke(p.coast);
-      if (layers.terrain) this.drawTerrain(g, v, p);
+      if (layers.terrain) drawHeat(g, p.terrain);
       this.drawNature(g, v, layers);
       this.drawFog(g, v, p, layers);
     }
@@ -1154,19 +1195,6 @@ export class MapRenderer {
       g.fillRect(-WORLD_RADIUS, -WORLD_RADIUS, WORLD_RADIUS * 2, WORLD_RADIUS * 2);
     }
     g.globalAlpha = 1;
-  }
-
-  private drawTerrain(g: CanvasRenderingContext2D, v: View, p: Prepared) {
-    for (const e of p.terrain) {
-      const r = 46;
-      const a = Math.min(0.75, 0.12 + Math.log2(1 + e.cells) / 16);
-      const grad = g.createRadialGradient(e.x, e.z, 0, e.x, e.z, r);
-      grad.addColorStop(0, `rgba(196, 70, 22, ${a})`);
-      grad.addColorStop(1, "rgba(196, 70, 22, 0)");
-      g.fillStyle = grad;
-      g.fillRect(e.x - r, e.z - r, r * 2, r * 2);
-    }
-    void v;
   }
 
   private drawGrid(g: CanvasRenderingContext2D, v: View) {

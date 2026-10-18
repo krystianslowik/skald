@@ -7,6 +7,7 @@
 // tapped.
 
 import type { ChunkKey } from "./pieces";
+import { padBox, StampGrid } from "./gltiles";
 import { closeRing } from "./mapgeo";
 import { chunkBox } from "./pieces";
 import { NATURE_CHUNK, NATURE_FADE_FROM, NATURE_FADE_FULL, natureTint, PICKABLE_SCALE, TREE_DETAIL_SCALE, treeStyle, wobble, type NatureItem, type TreeStyle } from "./nature";
@@ -191,6 +192,17 @@ export function natureAlpha(scale: number): number {
   return t * t * (3 - 2 * t);
 }
 
+/**
+ * The zooms over which nature's look changes (see tierZoom): its fade-in,
+ * and the switches to tree detail and to pickables. How dark the trees'
+ * rims are follows the drawing's own scale, as line widths do.
+ */
+export const NATURE_BANDS = [
+  [NATURE_FADE_FROM, NATURE_FADE_FULL],
+  [TREE_DETAIL_SCALE, TREE_DETAIL_SCALE],
+  [PICKABLE_SCALE, PICKABLE_SCALE],
+] as const;
+
 /** Time a draw may spend building chunks' paths; the rest are built in later tasks. */
 const BUILD_MS = 6;
 
@@ -204,6 +216,8 @@ export class NatureLayer {
   private chunks = new Map<ChunkKey, Chunk>();
   /** Bumped whenever a chunk arrives or leaves or its paths are built, for the renderer's cache key. */
   version = 0;
+  /** Where chunks arrived, left or got their paths: the WebGL map redraws only its chunks over those places. */
+  private readonly stamps = new StampGrid();
   private scratch: HTMLCanvasElement | OffscreenCanvas | null = null;
   /** Chunks a draw wanted but left unbuilt, built one per task. */
   private pending = new Set<ChunkKey>();
@@ -211,15 +225,38 @@ export class NatureLayer {
   /** Called when chunks left out of a draw have been built and the woods should be drawn again. */
   onBuilt: (() => void) | null = null;
 
+  /** `buildMs`: the time a draw may spend building chunks' paths (unbounded off the main thread). */
+  constructor(private readonly buildMs = BUILD_MS) {}
+
   /** The loaded chunks; paths are kept for chunks whose items did not change. */
   set(loaded: ReadonlyMap<ChunkKey, readonly NatureItem[]>): void {
     const next = new Map<ChunkKey, Chunk>();
     for (const [k, items] of loaded) {
       const had = this.chunks.get(k);
-      next.set(k, had && had.items === items ? had : { items, paths: null, ores: null });
+      if (had && had.items === items) next.set(k, had);
+      else {
+        next.set(k, { items, paths: null, ores: null });
+        this.mark(k);
+      }
     }
+    for (const k of this.chunks.keys()) if (!next.has(k)) this.mark(k);
     this.chunks = next;
     this.version++;
+  }
+
+  /** Stamps the ground a chunk's marks can reach. */
+  private mark(k: ChunkKey) {
+    const b = chunkBox(k, NATURE_CHUNK);
+    this.stamps.mark([b[0] - SPILL, b[1] - SPILL, b[2] + SPILL, b[3] + SPILL]);
+  }
+
+  /**
+   * What a chunk of the WebGL map over `box` shows of nature: it changes
+   * when a nature chunk whose marks reach into it arrives, leaves or is
+   * built, and nowhere else.
+   */
+  genFor(box: readonly [number, number, number, number]): number {
+    return this.stamps.stampIn(padBox(box));
   }
 
   get empty(): boolean {
@@ -240,11 +277,13 @@ export class NatureLayer {
       const b = chunkBox(k, NATURE_CHUNK);
       if (b[2] + SPILL < box[0] || b[0] - SPILL > box[2] || b[3] + SPILL < box[1] || b[1] - SPILL > box[3]) continue;
       if (!c.paths) {
-        if (performance.now() - t0 > BUILD_MS) {
+        if (performance.now() - t0 > this.buildMs) {
           this.pending.add(k);
           continue;
         }
         c.paths = build(k, c.items);
+        // Left out of an earlier draw: what was drawn without it is out of date.
+        if (this.pending.delete(k)) this.mark(k);
       }
       out.push(c.paths);
     }
@@ -259,6 +298,7 @@ export class NatureLayer {
       const c = this.chunks.get(k);
       if (!c || c.paths) continue;
       c.paths = build(k, c.items);
+      this.mark(k);
       break;
     }
     if (this.pending.size) this.timer = setTimeout(() => this.buildPending(), 0);
@@ -284,15 +324,18 @@ export class NatureLayer {
   /**
    * Draws what the view's box holds under a world transform (x right, z up)
    * for view scale `scale`: `nature` the woods, rocks and the rest, `pickables`
-   * the small things to gather (from PICKABLE_SCALE on).
+   * the small things to gather (from PICKABLE_SCALE on). Line widths (and
+   * the rims' darkness) are for `scale`; how strongly things show and which
+   * detail shows follow the zoom `at` (a chunk of the WebGL map is drawn at its own
+   * scale and styled for the view's zoom, see tierZoom).
    */
-  draw(g: Ctx, box: readonly [number, number, number, number], scale: number, layers: { nature: boolean; pickables: boolean }, rough = false): void {
-    const alpha = natureAlpha(scale);
+  draw(g: Ctx, box: readonly [number, number, number, number], scale: number, layers: { nature: boolean; pickables: boolean }, rough = false, at = scale): void {
+    const alpha = natureAlpha(at);
     if (alpha <= 0) return;
     const list = this.visible(box);
     if (!list.length) return;
     const px = 1 / scale;
-    const detail = scale >= TREE_DETAIL_SCALE;
+    const detail = at >= TREE_DETAIL_SCALE;
     g.save();
     g.lineJoin = "round";
     g.lineCap = "round";
@@ -330,7 +373,7 @@ export class NatureLayer {
         g.fill(c.bushes);
         if (detail) g.stroke(c.bushes);
       }
-      this.drawWoods(g, list, scale, alpha, rough);
+      this.drawWoods(g, list, scale, at, alpha, rough);
       if (detail) {
         // Close in, every tree its own trunk; the rim is the wood's outline, drawn with the woods.
         g.globalAlpha = alpha * 0.85;
@@ -339,7 +382,7 @@ export class NatureLayer {
         for (const c of list) g.stroke(c.trunks);
       }
     }
-    if (layers.pickables && scale >= PICKABLE_SCALE) {
+    if (layers.pickables && at >= PICKABLE_SCALE) {
       // Small dots with a dark edge: a wider dark stroke under the colour.
       const w = Math.max(5 * px, 0.45);
       g.globalAlpha = alpha;
@@ -362,7 +405,7 @@ export class NatureLayer {
    * tint's crowns as one shape (see paintWoods), so a forest reads as one
    * mass rather than a heap of circles.
    */
-  private drawWoods(g: Ctx, list: readonly ChunkPaths[], scale: number, alpha: number, rough: boolean) {
+  private drawWoods(g: Ctx, list: readonly ChunkPaths[], scale: number, at: number, alpha: number, rough: boolean) {
     if (!list.some((c) => c.trees > 0)) return;
     // While the map moves, the layer is drawn at half resolution (a quarter of
     // the pixels; nobody sees it) into its top-left corner.
@@ -383,7 +426,7 @@ export class NatureLayer {
     // The shadow is the wood's own shape a little down and right, in ink, as
     // a woodland is shaded on a drawn map.
     const off = (1.5 * m.a) / scale;
-    const detail = scale >= TREE_DETAIL_SCALE;
+    const detail = at >= TREE_DETAIL_SCALE;
     const tints = new Set<string>();
     for (const c of list) for (const tint of c.crowns.keys()) tints.add(tint);
     const groups: WoodGroup[] = [];

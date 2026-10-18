@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mockTerrainTile } from "@server/mocktiles";
 import { fogField } from "./fogfield";
-import { closeColour, Fades, FADE_MS, flatColour, heldLevel, HYSTERESIS, LOAD_GATE_MS, loadAllowance, MOVING_STARTS, premultiply, selfTestTile, slotQuads, subRect, TexturePool, UploadBudget, Watchdog } from "./gltiles";
+import { closeColour, Fades, FADE_MS, flatColour, heldLevel, HYSTERESIS, LOAD_GATE_MS, loadAllowance, MOVING_STARTS, premultiply, selfTestTile, slotQuads, StampGrid, subRect, TexturePool, tierZoom, UploadBudget, Watchdog } from "./gltiles";
 import { chunkCapacity, poolCapacity, TILE_EDGE } from "./mapgl";
 import { boldFaceReady, canvasForced, RENDERER_KEY } from "./maprender";
 import { TileFeed } from "./terraindata";
@@ -323,5 +323,61 @@ describe("WebGL safety", () => {
     expect(d.frame(1, false, { ok: 0, errors: 8 })).toMatch(/decode/);
     // Some tiles fine: a few errors are not a broken pipeline.
     expect(new Watchdog(5000, 8).frame(0, false, { ok: 3, errors: 20 })).toBeNull();
+  });
+});
+
+describe("StampGrid", () => {
+  it("changes the stamp only of boxes over the marked ground", () => {
+    const g = new StampGrid(64);
+    const near: [number, number, number, number] = [0, 0, 100, 100];
+    const far: [number, number, number, number] = [1000, 1000, 1100, 1100];
+    expect(g.stampIn(near)).toBe(0);
+    g.mark([50, 50, 60, 60]);
+    const a = g.stampIn(near);
+    expect(a).toBeGreaterThan(0);
+    expect(g.stampIn(far)).toBe(0);
+    g.mark([1050, -500, 1060, -400]);
+    expect(g.stampIn(near)).toBe(a);
+    expect(g.stampIn(far)).toBe(0);
+    g.mark([90, 90, 300, 300]);
+    expect(g.stampIn(near)).toBeGreaterThan(a);
+  });
+
+  it("works on both sides of the world's centre", () => {
+    const g = new StampGrid(64);
+    g.mark([-10_000, -10_000, -9_990, -9_990]);
+    expect(g.stampIn([-10_020, -10_020, -10_000, -10_000])).toBeGreaterThan(0);
+    expect(g.stampIn([9_990, 9_990, 10_000, 10_000])).toBe(0);
+  });
+});
+
+describe("tierZoom", () => {
+  const bands = [
+    [0.8, 1.5],
+    [4, 4],
+    [8, 8],
+  ] as const;
+  it("stays put between bands, so a pinch there redraws nothing", () => {
+    const zs = [1.5, 1.8, 2.2, 2.9, 3.5, 3.99];
+    expect(new Set(zs.map((z) => tierZoom(z, bands)))).toEqual(new Set([1.5]));
+    expect(new Set([4, 4.7, 5.5, 6.6, 7.9].map((z) => tierZoom(z, bands)))).toEqual(new Set([4]));
+    expect(new Set([8, 11, 24].map((z) => tierZoom(z, bands)))).toEqual(new Set([8]));
+  });
+
+  it("changes at the hard switches, never across one", () => {
+    expect(tierZoom(3.99, bands)).toBeLessThan(4);
+    expect(tierZoom(4, bands)).toBe(4);
+    expect(tierZoom(7.99, bands)).toBeLessThan(8);
+    expect(tierZoom(8, bands)).toBe(8);
+  });
+
+  it("moves in quarter octaves inside a fade band, within the band", () => {
+    const steps = new Set([0.8, 0.85, 0.95, 1.05, 1.2, 1.3, 1.45].map((z) => tierZoom(z, bands)));
+    expect(steps.size).toBeGreaterThan(2);
+    for (const z of steps) expect(z).toBeGreaterThanOrEqual(0.8);
+    for (const z of steps) expect(z).toBeLessThan(1.5);
+    expect(tierZoom(0.5, bands)).toBe(0);
+    // Just past the band's start the layer shows on the Canvas2D map: never styled as off.
+    expect(tierZoom(0.81, bands)).toBeGreaterThan(0.8);
   });
 });

@@ -83,6 +83,13 @@ export class TexturePool {
     return { layer, evicted };
   }
 
+  /** Whether `acquire` would find a layer for a new key. */
+  room(keep: (key: string) => boolean): boolean {
+    if (this.free.length) return true;
+    for (const k of this.layers.keys()) if (!keep(k)) return true;
+    return false;
+  }
+
   delete(key: string): void {
     const l = this.layers.get(key);
     if (l === undefined) return;
@@ -308,4 +315,68 @@ export function premultiply<T extends Uint8ClampedArray | Uint8Array>(px: T): T 
     px[i + 2] = Math.round((px[i + 2]! * a) / 255);
   }
   return px;
+}
+
+/** How far past its own box a chunk of woods or floor plans is drawn (metres), so shapes over its edge are not cut. */
+export const RASTER_PAD = 4;
+
+/** A chunk's box as it is drawn and stamped: RASTER_PAD wider each side. Drawing and gens must pad alike. */
+export const padBox = (box: readonly [number, number, number, number]): [number, number, number, number] => [box[0] - RASTER_PAD, box[1] - RASTER_PAD, box[2] + RASTER_PAD, box[3] + RASTER_PAD];
+
+/** World box: west, south, east, north (metres, z up). */
+type Box = readonly [number, number, number, number];
+
+/**
+ * When each part of the world last changed, on a grid of `cell` metre
+ * squares: `mark` stamps every cell a box touches with a new number, and
+ * `stampIn` is the newest stamp in a box. A chunk drawn with the stamp its
+ * box had then is out of date once that differs, so data arriving in one
+ * place redraws only the chunks over it.
+ */
+export class StampGrid {
+  private cells = new Map<number, number>();
+  private next = 0;
+
+  constructor(private readonly cell = 64) {}
+
+  private span(box: Box): [number, number, number, number] {
+    const c = this.cell;
+    return [Math.floor(box[0] / c), Math.floor(box[1] / c), Math.floor(box[2] / c), Math.floor(box[3] / c)];
+  }
+
+  // Cell rows and columns are within +-2^15 of the origin: a world is 21 km across.
+  private static key = (i: number, j: number) => (i + 32768) * 65536 + (j + 32768);
+
+  mark(box: Box): void {
+    const [i0, j0, i1, j1] = this.span(box);
+    const s = ++this.next;
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) this.cells.set(StampGrid.key(i, j), s);
+  }
+
+  stampIn(box: Box): number {
+    const [i0, j0, i1, j1] = this.span(box);
+    let s = 0;
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) s = Math.max(s, this.cells.get(StampGrid.key(i, j)) ?? 0);
+    return s;
+  }
+}
+
+/**
+ * The zoom a chunk of woods or floor plans is styled for, standing in for
+ * every zoom that looks the same. Inside a fade band (`bands`, from..to, in
+ * CSS px per metre) the look changes with the zoom, so it moves in quarter
+ * octaves; between bands it does not, and the band edge below stands for
+ * the whole gap (0 below the first band). Hard switches (tree detail, pickables) must be band edges.
+ * A chunk is redrawn when this changes, and only scaled in between.
+ */
+export function tierZoom(zoom: number, bands: readonly (readonly [number, number])[]): number {
+  for (const [a, b] of bands) {
+    if (zoom < a || zoom >= b) continue;
+    // The middle of the part of the zoom's quarter octave inside the band: never at its start, where the layer is off.
+    const q = Math.floor(Math.log2(zoom) * 4);
+    return Math.sqrt(Math.max(a, 2 ** (q / 4)) * Math.min(b, 2 ** ((q + 1) / 4)));
+  }
+  let lo = 0;
+  for (const [, b] of bands) if (b <= zoom && b > lo) lo = b;
+  return lo;
 }

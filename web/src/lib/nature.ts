@@ -18,7 +18,9 @@ export interface NatureItem {
   size: number;
 }
 
-const CATEGORIES = new Set<NatureCategory>(["tree", "stump", "log", "rock", "bush", "ore", "pickable"]);
+/** Every category, in a fixed order (packNature numbers them by it). */
+const CATEGORY_LIST: readonly NatureCategory[] = ["tree", "stump", "log", "rock", "bush", "ore", "pickable"];
+const CATEGORIES = new Set<NatureCategory>(CATEGORY_LIST);
 
 /** The answer's items, or null when it is not a nature answer (an older server, a proxy page). */
 export function decodeNature(body: unknown): NatureItem[] | null {
@@ -34,6 +36,32 @@ export function decodeNature(body: unknown): NatureItem[] | null {
     if (![x, z, yaw, scale].every((n) => typeof n === "number" && Number.isFinite(n))) continue;
     out.push({ category: k.category, species: k.species, x, z, yaw, size: Math.max(0.1, k.size * (scale > 0 ? scale : 1)) });
   }
+  return out;
+}
+
+/** A chunk's items as numbers, to hand to a worker without copying thousands of objects: six per item, species by index into `species`. */
+export interface PackedNature {
+  species: string[];
+  /** Per item: category index (CATEGORY_LIST), species index, x, z, yaw, size. */
+  data: Float64Array<ArrayBuffer>;
+}
+
+export function packNature(items: readonly NatureItem[]): PackedNature {
+  const species: string[] = [];
+  const index = new Map<string, number>();
+  const data = new Float64Array(items.length * 6);
+  items.forEach((it, i) => {
+    let s = index.get(it.species);
+    if (s === undefined) index.set(it.species, (s = species.push(it.species) - 1));
+    data.set([CATEGORY_LIST.indexOf(it.category), s, it.x, it.z, it.yaw, it.size], i * 6);
+  });
+  return { species, data };
+}
+
+export function unpackNature(p: PackedNature): NatureItem[] {
+  const out: NatureItem[] = [];
+  const d = p.data;
+  for (let i = 0; i < d.length; i += 6) out.push({ category: CATEGORY_LIST[d[i]!]!, species: p.species[d[i + 1]!]!, x: d[i + 2]!, z: d[i + 3]!, yaw: d[i + 4]!, size: d[i + 5]! });
   return out;
 }
 
