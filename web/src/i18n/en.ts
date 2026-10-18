@@ -68,6 +68,10 @@ export const en = {
   "embers.label": "Embers",
   "embers.on": "Embers: on",
   "embers.off": "Embers: off",
+  "mapPerf.label": "Map performance mode",
+  "mapPerf.hint": "Plainer close-up map for weaker phones",
+  "mapPerf.on": "Map performance mode: on",
+  "mapPerf.off": "Map performance mode: off",
   "offline.title": "The fire has dimmed.",
   "offline.body": "Lost contact with the server. Showing the last known state and retrying; actions are paused.",
 
@@ -540,6 +544,7 @@ export const en = {
   "map.layer.locations": "Places",
   "map.layer.terrain": "Terrain edits",
   "map.layer.relief": "Terrain",
+  "map.layer.contours": "Contour lines",
   "map.relief.stale": "The terrain was drawn for an older game build; run the terrain job again.",
   "map.relief.spoilers": "Terrain shows only where the world has been visited, unless map spoilers are on.",
   "map.layer.grid": "Grid",

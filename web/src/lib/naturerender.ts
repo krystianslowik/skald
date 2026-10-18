@@ -10,6 +10,7 @@ import type { ChunkKey } from "./pieces";
 import { padBox, StampGrid } from "./gltiles";
 import { closeRing } from "./mapgeo";
 import { chunkBox } from "./pieces";
+import { DETAIL_FROM, DETAIL_TO } from "./terraindetail";
 import { NATURE_CHUNK, NATURE_FADE_FROM, NATURE_FADE_FULL, natureTint, PICKABLE_SCALE, TREE_DETAIL_SCALE, treeStyle, wobble, type NatureItem, type TreeStyle } from "./nature";
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
@@ -22,6 +23,8 @@ interface ChunkPaths {
   /** Crowns by tint, in the order they are laid down; `coarse` the same as plain polygons, for mid zoom. */
   crowns: Map<string, Path2D>;
   coarse: Map<string, Path2D>;
+  /** Each crown's centre and radius (x, z, r, ...) by tint, for the canopy's lit domes. */
+  domes: Map<string, Float32Array>;
   trunks: Path2D;
   stumps: Path2D;
   logs: Path2D;
@@ -41,7 +44,7 @@ const bucket = (m: Map<string, Path2D>, k: string) => {
 
 /** A crown for mid zoom, where a few pixels across cannot show lobes: a plain polygon, far cheaper to fill. */
 function crownCoarse(path: Path2D, it: NatureItem, style: TreeStyle) {
-  const r = (it.size / 2) * style.crown * (1 + 0.07 * wobble(it, 99));
+  const r = crownRadius(it, style);
   const a0 = (it.yaw * Math.PI) / 180;
   for (let i = 0; i < 11; i++) {
     const a = a0 + (i / 11) * Math.PI * 2;
@@ -56,8 +59,11 @@ function crownCoarse(path: Path2D, it: NatureItem, style: TreeStyle) {
  * A crown in its species' style, turned by the tree's yaw: a soft lobed ring,
  * each lobe a little in or out, or for a conifer a low star of points.
  */
+/** A crown's radius in metres: the tree's reach, its species' share of it, and a small stable variation. */
+const crownRadius = (it: NatureItem, style: TreeStyle) => (it.size / 2) * style.crown * (1 + 0.07 * wobble(it, 99));
+
 function crown(path: Path2D, it: NatureItem, style: TreeStyle) {
-  const r = (it.size / 2) * style.crown * (1 + 0.07 * wobble(it, 99));
+  const r = crownRadius(it, style);
   const n = style.lobes;
   const a0 = (it.yaw * Math.PI) / 180;
   if (style.spiky) {
@@ -130,16 +136,21 @@ const dot = (path: Path2D, x: number, z: number) => {
 };
 
 function build(key: ChunkKey, items: readonly NatureItem[]): ChunkPaths {
-  const out: ChunkPaths = { box: chunkBox(key, NATURE_CHUNK), crowns: new Map(), coarse: new Map(), trunks: new Path2D(), stumps: new Path2D(), logs: new Path2D(), rocks: new Map(), cliffs: new Path2D(), bushes: new Path2D(), pickables: new Map(), trees: 0 };
+  const out: ChunkPaths = { box: chunkBox(key, NATURE_CHUNK), crowns: new Map(), coarse: new Map(), domes: new Map(), trunks: new Path2D(), stumps: new Path2D(), logs: new Path2D(), rocks: new Map(), cliffs: new Path2D(), bushes: new Path2D(), pickables: new Map(), trees: 0 };
   // The big crowns first, so smaller trees sit on top of them.
   const trees = items.filter((it) => it.category === "tree").sort((a, b) => b.size - a.size);
+  const domes = new Map<string, number[]>();
   for (const it of trees) {
     const tint = natureTint("tree", it.species);
     const style = treeStyle(it.species);
     crown(bucket(out.crowns, tint), it, style);
     crownCoarse(bucket(out.coarse, tint), it, style);
+    let d = domes.get(tint);
+    if (!d) domes.set(tint, (d = []));
+    d.push(it.x, it.z, crownRadius(it, style));
     dot(out.trunks, it.x, it.z);
   }
+  for (const [tint, d] of domes) out.domes.set(tint, Float32Array.from(d));
   out.trees = trees.length;
   for (const it of items) {
     switch (it.category) {
@@ -179,6 +190,13 @@ function build(key: ChunkKey, items: readonly NatureItem[]): ChunkPaths {
   return out;
 }
 
+/** A tint with every channel times k. */
+function scaled(hex: string, k: number): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  const ch = (s: number) => Math.round(((n >> s) & 255) * k);
+  return `rgb(${ch(16)}, ${ch(8)}, ${ch(0)})`;
+}
+
 /** A tint darkened towards the ink, for rims and outlines. */
 function darker(hex: string, k = 0.55): string {
   const n = Number.parseInt(hex.slice(1), 16);
@@ -194,14 +212,16 @@ export function natureAlpha(scale: number): number {
 
 /**
  * The zooms over which nature's look changes (see tierZoom): its fade-in,
- * and the switches to tree detail and to pickables. How dark the trees'
+ * the switches to tree detail and to pickables, and the canopy's fade-in. How dark the trees'
  * rims are follows the drawing's own scale, as line widths do.
  */
-export const NATURE_BANDS = [
+export const NATURE_BANDS_PLAIN = [
   [NATURE_FADE_FROM, NATURE_FADE_FULL],
   [TREE_DETAIL_SCALE, TREE_DETAIL_SCALE],
   [PICKABLE_SCALE, PICKABLE_SCALE],
 ] as const;
+/** With the canopy, which comes in with the terrain's close-zoom detail (not in performance mode: its woods would be redrawn for nothing). */
+export const NATURE_BANDS = [...NATURE_BANDS_PLAIN, [DETAIL_FROM, DETAIL_TO]] as const;
 
 /** Time a draw may spend building chunks' paths; the rest are built in later tasks. */
 const BUILD_MS = 6;
@@ -327,9 +347,11 @@ export class NatureLayer {
    * the small things to gather (from PICKABLE_SCALE on). Line widths (and
    * the rims' darkness) are for `scale`; how strongly things show and which
    * detail shows follow the zoom `at` (a chunk of the WebGL map is drawn at its own
-   * scale and styled for the view's zoom, see tierZoom).
+   * scale and styled for the view's zoom, see tierZoom). `canopy` (0..1)
+   * is how far close-zoom woods are drawn as a canopy: crowns lit as domes
+   * from the north-west over soft shadows, rather than a flat wash.
    */
-  draw(g: Ctx, box: readonly [number, number, number, number], scale: number, layers: { nature: boolean; pickables: boolean }, rough = false, at = scale): void {
+  draw(g: Ctx, box: readonly [number, number, number, number], scale: number, layers: { nature: boolean; pickables: boolean }, rough = false, at = scale, canopy = 0): void {
     const alpha = natureAlpha(at);
     if (alpha <= 0) return;
     const list = this.visible(box);
@@ -373,10 +395,10 @@ export class NatureLayer {
         g.fill(c.bushes);
         if (detail) g.stroke(c.bushes);
       }
-      this.drawWoods(g, list, scale, at, alpha, rough);
+      this.drawWoods(g, list, scale, at, alpha, rough, canopy);
       if (detail) {
-        // Close in, every tree its own trunk; the rim is the wood's outline, drawn with the woods.
-        g.globalAlpha = alpha * 0.85;
+        // Close in, every tree its own trunk (mostly hidden under a canopy); the rim is the wood's outline, drawn with the woods.
+        g.globalAlpha = alpha * 0.85 * (1 - CANOPY.trunkHide * canopy);
         g.strokeStyle = "#4a3320";
         g.lineWidth = Math.max(2.2 * px, 0.4);
         for (const c of list) g.stroke(c.trunks);
@@ -405,7 +427,7 @@ export class NatureLayer {
    * tint's crowns as one shape (see paintWoods), so a forest reads as one
    * mass rather than a heap of circles.
    */
-  private drawWoods(g: Ctx, list: readonly ChunkPaths[], scale: number, at: number, alpha: number, rough: boolean) {
+  private drawWoods(g: Ctx, list: readonly ChunkPaths[], scale: number, at: number, alpha: number, rough: boolean, canopy: number) {
     if (!list.some((c) => c.trees > 0)) return;
     // While the map moves, the layer is drawn at half resolution (a quarter of
     // the pixels; nobody sees it) into its top-left corner.
@@ -424,19 +446,23 @@ export class NatureLayer {
     const t = g.getTransform();
     const m = new DOMMatrix([t.a * k, t.b * k, t.c * k, t.d * k, t.e * k, t.f * k]);
     // The shadow is the wood's own shape a little down and right, in ink, as
-    // a woodland is shaded on a drawn map.
-    const off = (1.5 * m.a) / scale;
+    // a woodland is shaded on a drawn map: 1.5 px, and as a canopy comes in,
+    // a fixed distance on the ground, as the trees cast it.
+    const off = (1.5 / scale + (CANOPY.shadow - 1.5 / scale) * canopy) * m.a;
     const detail = at >= TREE_DETAIL_SCALE;
     const tints = new Set<string>();
     for (const c of list) for (const tint of c.crowns.keys()) tints.add(tint);
     const groups: WoodGroup[] = [];
     for (const tint of tints) {
       const paths: Path2D[] = [];
+      const domes: Float32Array[] = [];
       for (const c of list) {
         const p = (detail ? c.crowns : c.coarse).get(tint);
         if (p) paths.push(p);
+        const d = c.domes.get(tint);
+        if (d) domes.push(d);
       }
-      groups.push({ tint, paths });
+      groups.push({ tint, paths, domes });
     }
     // Close in, the outline of each wood, darker as the trees come closer. Its
     // stroke is one pixel wide (half of it shows): wider strokes round
@@ -447,22 +473,63 @@ export class NatureLayer {
     // their first edge again: plain caps and joins close both (and cost less).
     s.lineJoin = "miter";
     s.lineCap = "butt";
-    paintWoods(s, groups, rim, (shadow) => (shadow ? s.setTransform(m.a, m.b, m.c, m.d, m.e + off, m.f + off) : s.setTransform(m)));
+    let lit: CanvasGradient | null = null;
+    const dome = (x: number, z: number, r: number) => {
+      // One gradient for every crown, in a unit circle placed on each: light from the north-west, shade to the south-east rim.
+      lit ??= domeGradient(s);
+      s.setTransform(m.a * r, m.b * r, m.c * r, m.d * r, m.a * x + m.c * z + m.e, m.b * x + m.d * z + m.f);
+      s.fillStyle = lit;
+      s.beginPath();
+      s.arc(0, 0, 1.05, 0, Math.PI * 2);
+      s.fill();
+    };
+    paintWoods(s, groups, rim, (shadow, k = 1) => (shadow ? s.setTransform(m.a, m.b, m.c, m.d, m.e + off * k, m.f + off * k) : s.setTransform(m)), canopy > 0 ? { amount: canopy, dome } : null);
+    s.globalCompositeOperation = "source-over";
+    s.globalAlpha = 1;
     g.save();
     g.setTransform(1, 0, 0, 1, 0, 0);
-    g.globalAlpha = alpha * 0.62;
+    g.globalAlpha = alpha * (0.62 + (CANOPY.alpha - 0.62) * canopy);
     g.drawImage(this.scratch as CanvasImageSource, 0, 0, W, H, 0, 0, FW, FH);
     g.restore();
   }
 }
 
-/** One colour of woods: every crown of that tint in the view, chunk by chunk. */
+/** One colour of woods: every crown of that tint in the view, chunk by chunk, and their centres and radii (x, z, r, ...) for the canopy. */
 export interface WoodGroup {
   tint: string;
   paths: readonly Path2D[];
+  domes?: readonly Float32Array[];
 }
 
-type Paint = Pick<CanvasRenderingContext2D, "fill" | "stroke" | "fillStyle" | "strokeStyle" | "lineWidth" | "globalAlpha">;
+/**
+ * The canopy's look at full strength (canopy 1), for tuning: `light` and
+ * `shade` the dome's highlight and its dark south-east rim (alpha over the
+ * crown), `shadow` how far the trees cast their shadow (metres, to the
+ * south-east), `alpha` the woods' opacity over the terrain (a wash is 0.62),
+ * `tone` how much darker the crowns are than the wash's tint (1 the same),
+ * `trunkHide` how much of the trunk dots the crowns hide.
+ */
+export const CANOPY = { light: 0.28, shade: 0.42, shadow: 0.45, alpha: 0.85, tone: 0.8, trunkHide: 0.75 };
+
+/** A unit crown's light: a highlight up and left (north-west, the world's y is up), shade towards the far rim. */
+function domeGradient(s: Ctx): CanvasGradient {
+  const g = s.createRadialGradient(-0.38, 0.38, 0, -0.12, 0.12, 1.17);
+  // The shade fades out again at the circle's edge, so where it spills onto a neighbouring crown no arc shows.
+  g.addColorStop(0, `rgba(255, 248, 214, ${CANOPY.light})`);
+  g.addColorStop(0.4, "rgba(255, 248, 214, 0)");
+  g.addColorStop(0.6, "rgba(14, 18, 8, 0)");
+  g.addColorStop(0.86, `rgba(14, 18, 8, ${CANOPY.shade})`);
+  g.addColorStop(1, "rgba(14, 18, 8, 0)");
+  return g;
+}
+
+type Paint = Pick<CanvasRenderingContext2D, "fill" | "stroke" | "fillStyle" | "strokeStyle" | "lineWidth" | "globalAlpha" | "globalCompositeOperation">;
+
+/** A canopy: how far it is in, and how one crown's dome is painted (x, z, radius in metres) over what is drawn. */
+export interface CanopyPaint {
+  amount: number;
+  dome: (x: number, z: number, r: number) => void;
+}
 
 /**
  * Each group of woods as one shape: its shadow (placed by `place(true)`),
@@ -470,13 +537,27 @@ type Paint = Pick<CanvasRenderingContext2D, "fill" | "stroke" | "fillStyle" | "s
  * crown filled over it. The fills cover the inner half of every stroke and
  * all of the strokes where crowns overlap, so only the outer edge of the
  * wood keeps a line: one outline round a forest, not one round each tree.
- * Strokes and fills of a group never interleave.
+ * Strokes and fills of a group never interleave. With a `canopy`, the shadow
+ * is laid three times, a third, two thirds and all the way out, so it is
+ * soft, the crowns are a little darker, and every crown gets its lit dome
+ * over the fill (clipped to what is painted: source-atop), all fading in
+ * with the canopy's amount.
  */
-export function paintWoods(s: Paint, groups: readonly WoodGroup[], rim: { width: number; alpha: number } | null, place: (shadow: boolean) => void): void {
-  for (const { tint, paths } of groups) {
-    place(true);
+export function paintWoods(s: Paint, groups: readonly WoodGroup[], rim: { width: number; alpha: number } | null, place: (shadow: boolean, k?: number) => void, canopy: CanopyPaint | null = null): void {
+  for (const { tint, paths, domes } of groups) {
     s.fillStyle = darker(tint, 0.4);
-    for (const p of paths) s.fill(p);
+    if (canopy) {
+      // Three steps a third as strong each: a shadow that fades out away from the wood.
+      s.globalAlpha = 1 - (2 / 3) * canopy.amount;
+      for (const k of [1 / 3, 2 / 3, 1]) {
+        place(true, k);
+        for (const p of paths) s.fill(p);
+      }
+      s.globalAlpha = 1;
+    } else {
+      place(true);
+      for (const p of paths) s.fill(p);
+    }
     place(false);
     if (rim) {
       s.globalAlpha = rim.alpha;
@@ -485,7 +566,15 @@ export function paintWoods(s: Paint, groups: readonly WoodGroup[], rim: { width:
       for (const p of paths) s.stroke(p);
       s.globalAlpha = 1;
     }
-    s.fillStyle = tint;
+    s.fillStyle = canopy ? scaled(tint, 1 - (1 - CANOPY.tone) * canopy.amount) : tint;
     for (const p of paths) s.fill(p);
+    if (canopy && domes?.length) {
+      s.globalCompositeOperation = "source-atop";
+      s.globalAlpha = canopy.amount;
+      for (const d of domes) for (let i = 0; i + 2 < d.length; i += 3) canopy.dome(d[i]!, d[i + 1]!, d[i + 2]!);
+      s.globalCompositeOperation = "source-over";
+      s.globalAlpha = 1;
+      place(false);
+    }
   }
 }

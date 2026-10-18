@@ -7,6 +7,7 @@ import { markerKind, markerTitle } from "./MapDetails";
 import { ItemIcon } from "../storage/ItemIcon";
 import { StackLevel } from "../storage/StackLevel";
 import { MapIcon } from "./MapIcon";
+import { useMapPerf } from "../../lib/mapperf";
 import { RelativeTime } from "../RelativeTime";
 
 /** The mark each layer row shows; the fog and grid get small drawn swatches instead. */
@@ -28,6 +29,13 @@ function Swatch({ layer }: { layer: LayerId }) {
         <circle cx="11" cy="11" r="10" fill="#7c9cab" />
         <path d="M4 12c2-4 5-6 8-5s4 3 6 2v6a10 10 0 0 1-14-1z" fill="#9cac5c" />
         <path d="M9 9l2-3 2 3z" fill="#e2e2e6" />
+      </svg>
+    );
+  if (layer === "contours")
+    return (
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden className="shrink-0">
+        <circle cx="11" cy="11" r="10" fill="#9cac5c" />
+        <path d="M4 15c3-1 4-5 7-5s4 3 7 2M6 18c2-1 3-3 5-3s4 2 6 1M7 8c1-2 3-3 5-2" stroke="#2b1d12" strokeOpacity="0.55" strokeWidth="1" fill="none" strokeLinecap="round" />
       </svg>
     );
   if (layer === "fog")
@@ -85,7 +93,7 @@ function Swatch({ layer }: { layer: LayerId }) {
 }
 
 /** Layers without a count: drawn from what loads as the map is zoomed, or nothing to count. */
-const NO_COUNT = new Set<LayerId>(["grid", "fog", "relief", "nature", "resources"]);
+const NO_COUNT = new Set<LayerId>(["grid", "fog", "relief", "contours", "nature", "resources"]);
 
 const LEGEND: { icon: IconId; key: TextKey }[] = [
   { icon: "loc-start", key: "map.locKind.start" },
@@ -121,6 +129,7 @@ export function MapLayers({
   onPick: (m: Marker, level?: number) => void;
 }) {
   const { t, tn, lookup, number } = useI18n();
+  const { on: perf } = useMapPerf();
   const [query, setQuery] = useState("");
   const searchId = useId();
   // Item names in every language match; the other dictionaries load once a query is typed.
@@ -192,10 +201,11 @@ export function MapLayers({
       <div>
         <h3 className="label-caps">{t("map.layers")}</h3>
         <ul className="mt-1.5 space-y-0.5">
-          {LAYERS.filter((l) => l !== "relief" || relief !== "none").map((l) => {
+          {LAYERS.filter((l) => (l !== "relief" && l !== "contours") || relief !== "none").map((l) => {
             const label = t(`map.layer.${l}` as TextKey);
             const on = layers[l];
-            const disabled = l === "fog" && !map.explored.available;
+            // Contour lines are drawn on the terrain, and not in performance mode.
+            const disabled = (l === "fog" && !map.explored.available) || (l === "contours" && (!layers.relief || perf));
             return (
               <li key={l}>
                 <button

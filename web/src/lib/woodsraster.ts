@@ -20,12 +20,14 @@ export interface UnderFog {
   nature: NatureLayer | null;
   layers: { nature: boolean; pickables: boolean };
   at: number;
+  /** How far the woods are drawn as a canopy (0..1, see NatureLayer.draw). */
+  canopy: number;
 }
 
 /** A chunk under the fog, as rasterChunk's `draw`: terrain edits, then nature over them. */
 export function drawUnderFog(g: Ctx, box: readonly [number, number, number, number], scale: number, o: UnderFog): void {
   if (o.heat) drawHeat(g, o.heat);
-  o.nature?.draw(g, padBox(box), scale, o.layers, false, o.at);
+  o.nature?.draw(g, padBox(box), scale, o.layers, false, o.at, o.canopy);
 }
 
 /** A chunk's world box (west, south, east, north) and its pixels per metre, in a world of radius `R`. */

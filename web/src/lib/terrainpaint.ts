@@ -319,21 +319,47 @@ export function paintTile(t: DecodedTile, o: PaintOptions): Uint8ClampedArray<Ar
 
 /**
  * A decoded tile as the WebGL map's texture data: one RGBA texel per sample,
- * apron included, rows north first. R is the biome index, G the forest
- * (0..255; a tile without a forest channel gets its biome's mean, as
- * paintTile uses), B and A the height's high and low byte. The GPU shades
- * from this with paintTile's colours and light (mapgl.ts TILE_FS).
+ * apron included, rows north first. R's low four bits are the biome index
+ * (a biome past 15 is drawn as None, as the palette would), its high four
+ * the sample's biome leak; G the forest (0..255; a tile without a forest
+ * channel gets its biome's mean, as paintTile uses), B and A the height's
+ * high and low byte. The GPU shades from this with paintTile's colours and
+ * light (mapgl.ts TILE_FS).
+ *
+ * The leak is how much of the ground round a sample is another biome: one
+ * minus the share of its 3 x 3 neighbours (binomial weights, 1 2 1, the edge
+ * repeated past the apron) with its own biome, in fifteenths. Close up the
+ * shader spreads that much of the sample's vote to its neighbours' biomes,
+ * which smooths a border as a wider kernel would (no beads along a diagonal)
+ * at no extra texture read. 0 everywhere is the plain vote.
  */
 export function packTile(t: DecodedTile, meanForest: readonly number[]): Uint8Array<ArrayBuffer> {
-  const nn = t.n * t.n;
+  const n = t.n;
+  const nn = n * n;
   const out = new Uint8Array(nn * 4);
-  for (let i = 0; i < nn; i++) {
+  const bio = (i: number) => {
     const b = t.biomes[i]!;
-    const h = t.heights[i]!;
-    out[4 * i] = b;
-    out[4 * i + 1] = t.forest ? t.forest[i]! : Math.round((meanForest[b] ?? 0) * 255);
-    out[4 * i + 2] = h >> 8;
-    out[4 * i + 3] = h & 255;
+    return b < 16 ? b : 0;
+  };
+  const W = [1, 2, 1];
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      const i = y * n + x;
+      const b = bio(i);
+      let own = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        const yy = Math.min(n - 1, Math.max(0, y + dy));
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = Math.min(n - 1, Math.max(0, x + dx));
+          if (bio(yy * n + xx) === b) own += W[dx + 1]! * W[dy + 1]!;
+        }
+      }
+      const h = t.heights[i]!;
+      out[4 * i] = b | (Math.round(((16 - own) / 16) * 15) << 4);
+      out[4 * i + 1] = t.forest ? t.forest[i]! : Math.round((meanForest[b] ?? 0) * 255);
+      out[4 * i + 2] = h >> 8;
+      out[4 * i + 3] = h & 255;
+    }
   }
   return out;
 }

@@ -31,6 +31,7 @@ import type { TilesDoc } from "../../lib/terraintiles";
 import { NATURE_CHUNK, NATURE_MIN_SCALE, natureLoader, type NatureItem } from "../../lib/nature";
 import { chunksFor } from "../../lib/pieces";
 import { Lanes, PieceLoader, type LoaderStats } from "../../lib/pieceload";
+import { useMapPerf } from "../../lib/mapperf";
 import { PLAN_MIN_SCALE, viewBox, type StoreyInfo, type StoreyPick } from "../../lib/planrender";
 import type { ApiMap } from "../../types";
 
@@ -185,8 +186,9 @@ export const MapCanvas = forwardRef<
   // Fingers (or the mouse button) are down on the map.
   const gesturing = useRef(false);
   const last = useRef(0);
-  const props = useRef({ markers, layers, selected, highlighted, onAnchor, onFrame, coarse, reduced, remember, storey, onStoreys, interactive, save: `${map.meta.seed}:${map.meta.generation}` });
-  props.current = { markers, layers, selected, highlighted, onAnchor, onFrame, coarse, reduced, remember, storey, onStoreys, interactive, save: `${map.meta.seed}:${map.meta.generation}` };
+  const { on: lite } = useMapPerf();
+  const props = useRef({ markers, layers, selected, highlighted, onAnchor, onFrame, coarse, reduced, remember, storey, onStoreys, interactive, lite, save: `${map.meta.seed}:${map.meta.generation}` });
+  props.current = { markers, layers, selected, highlighted, onAnchor, onFrame, coarse, reduced, remember, storey, onStoreys, interactive, lite, save: `${map.meta.seed}:${map.meta.generation}` };
   const reported = useRef<string | null>(null);
 
   const asked = useRef({ at: -Infinity, key: "" });
@@ -232,7 +234,7 @@ export const MapCanvas = forwardRef<
     const moving = gesturing.current || fling.current !== null || zfling.current !== null || glide.current !== null;
     askOverlays();
     const animating = r.draw(
-      { view: v, layers: p.layers, markers: p.markers, selected: p.selected?.id ?? null, highlighted: p.highlighted, hovered: hovered.current, cluster: p.coarse ? 30 : 24, labels, reduced: p.reduced, storey: p.storey, ahead: ahead.current, moving, t0 },
+      { view: v, layers: p.layers, markers: p.markers, selected: p.selected?.id ?? null, highlighted: p.highlighted, hovered: hovered.current, cluster: p.coarse ? 30 : 24, labels, reduced: p.reduced, storey: p.storey, ahead: ahead.current, moving, t0, lite: p.lite },
       quality,
     );
     // A mark leaving its cluster keeps the frames coming; through tick, so motion started meanwhile (a fling) is not left waiting.
@@ -490,7 +492,7 @@ export const MapCanvas = forwardRef<
   // Anything drawn that is not the view.
   useEffect(() => {
     schedule();
-  }, [markers, layers, selected, highlighted, storey, schedule]);
+  }, [markers, layers, selected, highlighted, storey, lite, schedule]);
 
   // Size: follow the box; the first size fits the view to what people made.
   useEffect(() => {

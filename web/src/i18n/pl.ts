@@ -57,6 +57,10 @@ export const pl: Dict = {
   "embers.label": "Iskry",
   "embers.on": "Iskry: włączone",
   "embers.off": "Iskry: wyłączone",
+  "mapPerf.label": "Tryb wydajności mapy",
+  "mapPerf.hint": "Prostsza mapa z bliska dla słabszych telefonów",
+  "mapPerf.on": "Tryb wydajności mapy: włączony",
+  "mapPerf.off": "Tryb wydajności mapy: wyłączony",
   "offline.title": "Ogień przygasł.",
   "offline.body": "Nie mam łączności z serwerem. Pokazuję ostatni znany stan i próbuję połączyć się ponownie. Akcje są wstrzymane.",
 
@@ -529,6 +533,7 @@ export const pl: Dict = {
   "map.layer.locations": "Miejsca",
   "map.layer.terrain": "Zmiany terenu",
   "map.layer.relief": "Teren",
+  "map.layer.contours": "Poziomice",
   "map.relief.stale": "Teren narysowano dla starszej wersji gry; uruchom ponownie zadanie generowania terenu.",
   "map.relief.spoilers": "Teren widać tylko tam, gdzie ktoś już był, chyba że włączono pokazywanie nieodkrytych miejsc.",
   "map.layer.grid": "Siatka",

@@ -712,13 +712,15 @@ export function fitBounds(w: number, h: number, box: readonly [number, number, n
 
 // ---- markers ---------------------------------------------------------------
 
-export type LayerId = "relief" | "fog" | "nature" | "resources" | "buildings" | "bases" | "portals" | "graves" | "beds" | "vehicles" | "storage" | "pins" | "locations" | "terrain" | "grid";
+export type LayerId = "relief" | "contours" | "fog" | "nature" | "resources" | "buildings" | "bases" | "portals" | "graves" | "beds" | "vehicles" | "storage" | "pins" | "locations" | "terrain" | "grid";
 
-export const LAYERS: readonly LayerId[] = ["relief", "fog", "nature", "resources", "buildings", "bases", "portals", "graves", "beds", "vehicles", "storage", "pins", "locations", "terrain", "grid"];
+export const LAYERS: readonly LayerId[] = ["relief", "contours", "fog", "nature", "resources", "buildings", "bases", "portals", "graves", "beds", "vehicles", "storage", "pins", "locations", "terrain", "grid"];
 
 export const DEFAULT_LAYERS: Record<LayerId, boolean> = {
   // The world generator's terrain, under everything; only drawn when the server has one.
   relief: true,
+  // Contour lines on the terrain, close up (the WebGL map only).
+  contours: true,
   fog: true,
   // Trees, rocks and the like at close zoom; ore deposits and, closer still, pickables.
   nature: true,

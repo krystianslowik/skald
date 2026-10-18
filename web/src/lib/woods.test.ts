@@ -11,6 +11,7 @@ function recorder() {
     strokeStyle: "" as string | CanvasGradient | CanvasPattern,
     lineWidth: 1,
     globalAlpha: 1,
+    globalCompositeOperation: "source-over" as GlobalCompositeOperation,
     fill(p: unknown) {
       ops.push(`fill ${String(p)} ${String(this.fillStyle)}`);
     },
@@ -60,6 +61,42 @@ describe("paintWoods", () => {
       "fill b2 #5c5a3b",
     ]);
     expect(ctx.globalAlpha).toBe(1);
+  });
+
+  it("as a canopy, lays a soft shadow in three steps, darkens the crowns and lights one dome per real tree over what is drawn", () => {
+    const { ctx, ops } = recorder();
+    const domes: string[] = [];
+    const lit: WoodGroup[] = [{ tint: "#7c9440", paths: [path("a1")], domes: [Float32Array.of(10, 20, 3, 12, 22, 2)] }];
+    const shadows: number[] = [];
+    paintWoods(
+      ctx as never,
+      lit,
+      null,
+      (shadow, k = 1) => {
+        if (shadow) shadows.push(k);
+      },
+      {
+        amount: 1,
+        dome: (x, z, r) => domes.push(`${x},${z},${r} ${ctx.globalCompositeOperation} ${ctx.globalAlpha}`),
+      },
+    );
+    // Three shadow steps, a third as strong each, out to the full distance.
+    expect(shadows).toEqual([1 / 3, 2 / 3, 1]);
+    // Three shadow fills, then the crown.
+    expect(ops.filter((o) => o.startsWith("fill a1 rgb"))).toHaveLength(4);
+    // The crown darker than the wash's tint, and one dome per real tree, painted only over what is drawn.
+    const crown = ops.at(-1)!;
+    expect(crown).toMatch(/^fill a1 rgb\(/);
+    expect(crown).not.toContain("#7c9440");
+    expect(domes).toEqual(["10,20,3 source-atop 1", "12,22,2 source-atop 1"]);
+    expect(ctx.globalCompositeOperation).toBe("source-over");
+    expect(ctx.globalAlpha).toBe(1);
+  });
+
+  it("paints no domes without a canopy", () => {
+    const { ctx, ops } = recorder();
+    paintWoods(ctx as never, [{ ...groups[0]!, domes: [Float32Array.of(1, 2, 3)] }], null, () => {});
+    expect(ops.at(-1)).toBe("fill a3 #7c9440");
   });
 
   it("draws no outline at all from mid zoom out", () => {
@@ -167,5 +204,26 @@ describe("NatureLayer, a chunk left out of a draw", () => {
     expect(visible(box)).toHaveLength(1);
     expect(n.genFor(box)).not.toBe(before);
     vi.unstubAllGlobals();
+  });
+});
+
+describe("nature's zoom tiers", () => {
+  it("bring the canopy in with the terrain's detail, in steps, without moving the hard switches", async () => {
+    const { tierZoom } = await import("./gltiles");
+    const { NATURE_BANDS } = await import("./naturerender");
+    const { detailAt } = await import("./terraindetail");
+    const { PICKABLE_SCALE, TREE_DETAIL_SCALE } = await import("./nature");
+    const at = (z: number) => tierZoom(z, NATURE_BANDS);
+    // Tree detail and pickables switch exactly where they did.
+    expect(at(TREE_DETAIL_SCALE - 0.01)).toBeLessThan(TREE_DETAIL_SCALE);
+    expect(at(TREE_DETAIL_SCALE)).toBeGreaterThanOrEqual(TREE_DETAIL_SCALE);
+    expect(at(PICKABLE_SCALE - 0.01)).toBeLessThan(PICKABLE_SCALE);
+    expect(at(PICKABLE_SCALE)).toBeGreaterThanOrEqual(PICKABLE_SCALE);
+    // The canopy: none at mid zoom, in quarter-octave steps between, full close up.
+    expect(detailAt(at(2.5))).toBe(0);
+    const steps = new Set([3.2, 4.5, 6, 8.5, 11].map((z) => detailAt(at(z))));
+    expect(steps.size).toBe(5);
+    expect(detailAt(at(13))).toBe(1);
+    expect(detailAt(at(24))).toBe(1);
   });
 });

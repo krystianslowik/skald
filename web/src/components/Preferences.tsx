@@ -6,27 +6,28 @@ import { Plank } from "./Plank";
 import { preloadSettingsSheet, SettingsGlyph } from "./SettingsGlyph";
 import { SkaldVersion } from "./SkaldVersion";
 import { useEmbers } from "../lib/embers";
+import { useMapPerf } from "../lib/mapperf";
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
+function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <div className="flex min-h-14 items-center justify-between gap-4 border-b border-iron/25 py-2 last:border-0">
-      <span className="text-bone">{label}</span>
+      <span className="text-bone">
+        {label}
+        {hint && <span className="block text-xs text-ash">{hint}</span>}
+      </span>
       {children}
     </div>
   );
 }
 
-/** The rising embers behind the page: pretty, but they cost battery. */
-function EmbersSwitch() {
-  const { t } = useI18n();
-  const { on, toggle } = useEmbers();
+function Switch({ on, toggle, label, title }: { on: boolean; toggle: () => void; label: string; title: string }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={on}
-      aria-label={t("embers.label")}
-      title={on ? t("embers.on") : t("embers.off")}
+      aria-label={label}
+      title={title}
       onClick={toggle}
       className={`press relative h-8 w-14 shrink-0 rounded-full border transition-colors coarse:h-11 coarse:w-18 ${on ? "border-select-hi/70 bg-select/50" : "border-iron/60 bg-black/40"}`}
     >
@@ -35,10 +36,24 @@ function EmbersSwitch() {
   );
 }
 
+/** The rising embers behind the page: pretty, but they cost battery. */
+function EmbersSwitch() {
+  const { t } = useI18n();
+  const { on, toggle } = useEmbers();
+  return <Switch on={on} toggle={toggle} label={t("embers.label")} title={on ? t("embers.on") : t("embers.off")} />;
+}
+
+/** The map's performance mode: plainer close-up terrain and woods, for weak phones. */
+function MapPerfSwitch() {
+  const { t } = useI18n();
+  const { on, toggle } = useMapPerf();
+  return <Switch on={on} toggle={toggle} label={t("mapPerf.label")} title={on ? t("mapPerf.on") : t("mapPerf.off")} />;
+}
+
 /**
  * The phone's Settings tab opens with what the desktop header carries: the
  * server settings, language, the campfire sound and logging out, plus the
- * embers switch.
+ * embers switch and the map's performance mode.
  */
 export const Preferences = memo(function Preferences({
   onServerSettings,
@@ -78,6 +93,9 @@ export const Preferences = memo(function Preferences({
       </Row>
       <Row label={t("embers.label")}>
         <EmbersSwitch />
+      </Row>
+      <Row label={t("mapPerf.label")} hint={t("mapPerf.hint")}>
+        <MapPerfSwitch />
       </Row>
       <button type="button" onClick={() => void logout()} aria-busy={busy} className="plaque press mt-3 min-h-12 w-full font-bold">
         {t("header.logout")}

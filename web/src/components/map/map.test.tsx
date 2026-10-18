@@ -11,6 +11,7 @@ import { MapLayers } from "./MapLayers";
 import { OrePopover } from "./OrePopover";
 import MapView from "./MapView";
 import { mapStatsOn } from "./MapCanvas";
+import { setMapPerf } from "../../lib/mapperf";
 
 const inLocale = (ui: ReactElement, locale: "en" | "pl" = "en") => render(<I18nProvider locale={locale}>{ui}</I18nProvider>);
 const snap = gateMap(mockMap({ now: Date.parse("2026-10-10T20:00:00Z") }), false);
@@ -53,21 +54,53 @@ describe("MapDetails", () => {
 });
 
 describe("MapLayers", () => {
-  function setup() {
+  function setup(relief?: "none" | "ready", locale: "en" | "pl" = "en") {
     const toggles: LayerId[] = [];
     const picks: Marker[] = [];
     inLocale(
       <MapLayers
         map={snap}
         markers={markers}
+        relief={relief}
         layers={DEFAULT_LAYERS}
         counts={layerCounts(markers, snap)}
         onToggle={(l) => toggles.push(l)}
         onPick={(m) => picks.push(m)}
       />,
+      locale,
     );
     return { toggles, picks };
   }
+
+  it("has contour lines on by default, under the terrain, and only when there is terrain", () => {
+    const { toggles } = setup("ready");
+    const contours = screen.getByRole("button", { name: "Contour lines: shown" });
+    expect(contours).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(contours);
+    expect(toggles).toEqual(["contours"]);
+    const rows = screen.getAllByRole("button", { name: /: (shown|hidden)$/ }).map((b) => b.getAttribute("aria-label"));
+    expect(rows.indexOf("Contour lines: shown")).toBe(rows.indexOf("Terrain: shown") + 1);
+  });
+
+  it("names contour lines in Polish", () => {
+    setup("ready", "pl");
+    expect(screen.getAllByRole("button", { name: /^Poziomice/ })).toHaveLength(1);
+  });
+
+  it("greys out contour lines in performance mode, where they are not drawn", () => {
+    setMapPerf(true);
+    try {
+      setup("ready");
+      expect(screen.getByRole("button", { name: "Contour lines: shown" })).toBeDisabled();
+    } finally {
+      setMapPerf(false);
+    }
+  });
+
+  it("has no contour row without terrain", () => {
+    setup("none");
+    expect(screen.queryByRole("button", { name: /Contour lines/ })).not.toBeInTheDocument();
+  });
 
   it("lists layers with counts and toggles them", () => {
     const { toggles } = setup();

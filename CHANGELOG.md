@@ -9,6 +9,16 @@ above them.
 
 ## [Unreleased]
 
+### Added
+
+- Close up, the map shows the ground itself: grass, forest floor, combed plains, swamp puddles, sparkling snow and cracked ash, bare rock with faint layers on steep slopes, and contour lines every 2 m and 10 m that fade out before they crowd. Contour lines have their own switch in the map's layers, on by default.
+- Close up, woods are drawn as a canopy: every tree from the Nature layer gets a crown lit from the north-west with a soft shadow, so the trees you see are the trees in the world. Where trees are not loaded (or Nature is off), forests keep their plain tint.
+- A map performance mode in Settings (phone), off by default and remembered on each device: it skips the close-up ground detail, contour lines and canopy, for weaker phones.
+
+### Changed
+
+- Borders between biomes are smooth close up, without the row of rounded bumps along diagonal borders.
+
 ## [2026.10.17] - 2026-10-18
 
 ## [2026.10.16] - 2026-10-18
