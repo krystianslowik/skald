@@ -32,9 +32,9 @@ import { lazyChunk } from "../lib/chunks";
 import { ChunkBoundary } from "./ErrorBoundary";
 
 // Opened on demand; the chunk is preloaded as soon as a pointer reaches a player name.
-const ProfileSheet = lazyChunk(() => import("./ProfileSheet"), "ProfileSheet");
-const SettingsSheet = lazyChunk(() => import("./SettingsSheet"), "SettingsSheet");
-const MapView = lazyChunk(() => import("./map/MapView"), "MapView");
+export const ProfileSheet = lazyChunk(() => import("./ProfileSheet"), "ProfileSheet");
+export const SettingsSheet = lazyChunk(() => import("./SettingsSheet"), "SettingsSheet");
+export const MapView = lazyChunk(() => import("./map/MapView"), "MapView");
 const MapPreview = lazyChunk(() => import("./map/MapPreview"), "MapPreview");
 
 // onUnauthorized: App sends the viewer to the login screen; without it (tests) nothing happens.

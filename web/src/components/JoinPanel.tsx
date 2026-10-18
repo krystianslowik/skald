@@ -9,11 +9,12 @@ const INCLUDE_KEY = "skald.share.password";
 const SHARE_PATH = "M12 3.5v11M8 7.5l4-4 4 4M5.5 11.5v7a1.5 1.5 0 0 0 1.5 1.5h10a1.5 1.5 0 0 0 1.5-1.5v-7";
 const COPY_PATH = "M8.5 8.5h10v11h-10zM5.5 15.5v-10a1 1 0 0 1 1-1h9";
 
-function storedInclude(): boolean {
+function storedInclude(key: string, fallback: boolean): boolean {
   try {
-    return localStorage.getItem(INCLUDE_KEY) !== "0";
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : v !== "0";
   } catch {
-    return true;
+    return fallback;
   }
 }
 
@@ -36,6 +37,9 @@ export const JoinPanel = memo(function JoinPanel({
   hasPassword,
   stamp,
   sticky,
+  compact = false,
+  includeKey = INCLUDE_KEY,
+  includeDefault = true,
 }: {
   code: string;
   codeAt: string | null;
@@ -47,10 +51,15 @@ export const JoinPanel = memo(function JoinPanel({
   stamp: unknown;
   /** Show the compact bar when the code scrolls out of view (phones). */
   sticky: boolean;
+  /** A board-sized code instead of the hero digits (the Atlas prototype). */
+  compact?: boolean;
+  /** Where "Include password" is remembered, and its value before anyone touched it. */
+  includeKey?: string;
+  includeDefault?: boolean;
 }) {
   const { t } = useI18n();
   const pw = useServerPassword(stamp);
-  const [include, setInclude] = useState(storedInclude);
+  const [include, setInclude] = useState(() => storedInclude(includeKey, includeDefault));
   const [note, setNote] = useState<Note>(null);
   const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ready = /^\d{6}$/.test(code);
@@ -70,14 +79,14 @@ export const JoinPanel = memo(function JoinPanel({
   const toggleInclude = useCallback(() => {
     const next = !include;
     try {
-      localStorage.setItem(INCLUDE_KEY, next ? "1" : "0");
+      localStorage.setItem(includeKey, next ? "1" : "0");
     } catch {
       // not remembered; fine
     }
     setInclude(next);
     // Turned on by hand: fetch it now, so the next Share needs no wait.
     if (next) void load();
-  }, [include, load]);
+  }, [include, load, includeKey]);
 
   // Pressing Share starts the password request, so the share sheet can open
   // while the tap still counts as the person's own action.
@@ -134,7 +143,7 @@ export const JoinPanel = memo(function JoinPanel({
   return (
     <>
       <div ref={codeBox}>
-        <JoinCode code={code} codeAt={codeAt} status={status} />
+        {compact ? <CompactCode code={code} ready={ready} status={status} onCopy={() => void copyCode()} /> : <JoinCode code={code} codeAt={codeAt} status={status} />}
       </div>
       {hasPassword && <ServerPassword pw={pw} />}
       {ready && (
@@ -196,6 +205,29 @@ export const JoinPanel = memo(function JoinPanel({
     </>
   );
 });
+
+/** The code at board size: one press copies it; the note line below says so. */
+function CompactCode({ code, ready, status, onCopy }: { code: string; ready: boolean; status: string; onCopy: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="flex flex-col items-center text-center">
+      <p className="label-caps">{t("joinCode.title")}</p>
+      <button
+        type="button"
+        onClick={onCopy}
+        disabled={!ready}
+        aria-label={ready ? t("joinCode.aria", { digits: code.split("").join(" ") }) : t("joinCode.notReady")}
+        className="press-soft mt-1 inline-flex min-h-14 items-center gap-3 rounded-[3px] px-3"
+      >
+        <span className={`digit type-display text-[2.75rem] leading-none tracking-[0.06em] sm:text-5xl ${ready ? "digit-lit" : "digit-cold"}`}>
+          {ready ? `${code.slice(0, 3)}\u2009${code.slice(3)}` : "\u00b7 \u00b7 \u00b7"}
+        </span>
+        {ready && <span className="text-flame"><Glyph d={COPY_PATH} size={22} /></span>}
+      </button>
+      {!ready && <p className="on-world mt-1 text-xs text-ash">{status === "running" ? t("joinCode.waitPlayfab") : t("joinCode.starting")}</p>}
+    </div>
+  );
+}
 
 function Glyph({ d, size }: { d: string; size: number }) {
   return (

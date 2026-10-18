@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, MotionConfig } from "motion/react";
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { Dashboard } from "./components/Dashboard";
 import { Login } from "./components/Login";
 import { ChunkBoundary } from "./components/ErrorBoundary";
@@ -7,12 +7,24 @@ import { I18nProvider, loadLocale, serverLocale, storedLocale, type Locale } fro
 import { dropTerrainTiles, getConfig, logout, me, type LogoutResult } from "./lib/api";
 import { setIconBuild } from "./lib/itemicons";
 import { useValheim } from "./lib/useValheim";
+import { chosenLayout } from "./lib/layout";
+import { lazyChunk } from "./lib/chunks";
+
+// The Atlas prototype, only for browsers that opted in with ?layout=atlas.
+const AtlasDashboard = lazyChunk(() => import("./components/atlas/AtlasDashboard"), "AtlasDashboard");
+const layout = chosenLayout();
 
 function Panel({ onUnauthorized, onLogout }: { onUnauthorized: () => void; onLogout: () => Promise<LogoutResult> }) {
   const live = useValheim(onUnauthorized);
   const icons = live.state?.icons;
   // Item icons follow the agent's sheet: loaded once per game build.
   useEffect(() => setIconBuild(icons), [icons]);
+  if (layout === "atlas")
+    return (
+      <Suspense fallback={null}>
+        <AtlasDashboard live={live} onLogout={onLogout} onUnauthorized={onUnauthorized} />
+      </Suspense>
+    );
   return <Dashboard live={live} onLogout={onLogout} onUnauthorized={onUnauthorized} />;
 }
 

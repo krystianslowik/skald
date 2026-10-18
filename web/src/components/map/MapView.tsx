@@ -57,12 +57,15 @@ export default function MapView({
   saveKey,
   onClose,
   asTab = false,
+  embedded = false,
   focus = null,
   onFocusClear,
 }: {
   saveKey: string;
   onClose: () => void;
   asTab?: boolean;
+  /** In the page's flow, filling its box: a tab's board, not an overlay (the Atlas prototype). */
+  embedded?: boolean;
   focus?: MapFocus | null;
   onFocusClear?: () => void;
 }) {
@@ -71,29 +74,30 @@ export default function MapView({
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
+    if (embedded) return;
     closeRef.current?.focus({ preventScroll: true });
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = overflow;
     };
-  }, []);
+  }, [embedded]);
 
   const map = load.status === "ready" ? load.map : null;
 
   return (
     <motion.div
-      role="dialog"
-      aria-modal="true"
+      role={embedded ? "region" : "dialog"}
+      aria-modal={embedded ? undefined : "true"}
       aria-labelledby="worldmap-h"
-      className={`fixed inset-x-0 top-0 flex flex-col bg-coal ${asTab ? "z-30 h-[calc(100dvh-var(--tabbar-h))]" : "z-50 h-dvh"}`}
+      className={embedded ? "relative flex h-full flex-col overflow-hidden rounded-[3px] bg-coal" : `fixed inset-x-0 top-0 flex flex-col bg-coal ${asTab ? "z-30 h-[calc(100dvh-var(--tabbar-h))]" : "z-50 h-dvh"}`}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.18 }}
     >
       <header className="plank plank-smooth relative z-20 flex shrink-0 items-center gap-3 rounded-none py-2 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-[max(0.5rem,env(safe-area-inset-top))] sm:gap-5 sm:pl-[max(1.25rem,env(safe-area-inset-left))] sm:pr-[max(1.25rem,env(safe-area-inset-right))]">
-        <button ref={closeRef} type="button" onClick={onClose} aria-label={t("map.close")} title={t("map.close")} className={`plaque press grid h-9 w-9 shrink-0 place-items-center coarse:h-11 coarse:w-11 ${asTab ? "hidden" : ""}`}>
+        <button ref={closeRef} type="button" onClick={onClose} aria-label={t("map.close")} title={t("map.close")} className={`plaque press grid h-9 w-9 shrink-0 place-items-center coarse:h-11 coarse:w-11 ${asTab || embedded ? "hidden" : ""}`}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M10 3L5 8l5 5" />
           </svg>
@@ -110,7 +114,7 @@ export default function MapView({
           <MapMessage load={load.status} onRetry={retry} />
         )}
       </div>
-      <EscapeCloses onClose={onClose} />
+      {!embedded && <EscapeCloses onClose={onClose} />}
     </motion.div>
   );
 }
