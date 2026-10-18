@@ -81,7 +81,7 @@ describe("map storage", () => {
 
   it("shows a cart's load and its slots, and names a slot when tapped", () => {
     const cart = find((m) => m.data.type === "vehicle" && m.data.kind === "Cart");
-    inLocale(<MapDetails marker={cart} seedName="s" onClose={() => {}} />);
+    inLocale(<MapDetails marker={cart} onClose={() => {}} />);
     const total = markerStore(cart)!.items.reduce((n, i) => n + i.stack, 0);
     expect(screen.getByText(`Loaded with ${total} items`)).toBeInTheDocument();
     const grid = screen.getByRole("list", { name: "Contents" });
@@ -93,7 +93,7 @@ describe("map storage", () => {
 
   it("shows quality, durability and the crafter of gear", () => {
     const chest = find((m) => m.data.type === "storage" && m.data.store.prefab === "piece_chest_private");
-    inLocale(<MapDetails marker={chest} seedName="s" onClose={() => {}} />);
+    inLocale(<MapDetails marker={chest} onClose={() => {}} />);
     expect(screen.getByRole("heading", { name: "Personal Chest" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Bronze Sword, 1/ }));
     expect(screen.getByText(/Quality 3/)).toBeInTheDocument();
@@ -103,19 +103,19 @@ describe("map storage", () => {
 
   it("lists what a grave holds and says when a raft has no hold", () => {
     const grave = find((m) => m.data.type === "grave" && m.data.owner === "Ragnar");
-    inLocale(<MapDetails marker={grave} seedName="s" onClose={() => {}} />);
+    inLocale(<MapDetails marker={grave} onClose={() => {}} />);
     expect(screen.getByText("27 items left behind")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Contents" }).children).toHaveLength(32);
   });
 
   it("names the hold of a raft and an empty chest", () => {
     const raft = find((m) => m.data.type === "vehicle" && m.data.kind === "Raft");
-    const { unmount } = inLocale(<MapDetails marker={raft} seedName="s" onClose={() => {}} />);
+    const { unmount } = inLocale(<MapDetails marker={raft} onClose={() => {}} />);
     expect(screen.getByText("No hold")).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "Contents" })).not.toBeInTheDocument();
     unmount();
     const empty = find((m) => m.data.type === "storage" && m.data.store.items.length === 0);
-    inLocale(<MapDetails marker={empty} seedName="s" onClose={() => {}} />);
+    inLocale(<MapDetails marker={empty} onClose={() => {}} />);
     expect(screen.getByText("Empty")).toBeInTheDocument();
   });
 
@@ -230,7 +230,7 @@ describe("MapView focus", () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(snap)));
     const iron = snap.storage.filter((c) => c.items.some((i) => i.name === "Iron"));
     const onClear = vi.fn();
-    inLocale(<MapView seedName="s" saveKey="f" onClose={() => {}} focus={{ ids: iron.map((c) => c.id), open: iron[0]!.id, label: "Iron", key: 1 }} onFocusClear={onClear} />);
+    inLocale(<MapView saveKey="f" onClose={() => {}} focus={{ ids: iron.map((c) => c.id), open: iron[0]!.id, label: "Iron", key: 1 }} onFocusClear={onClear} />);
     expect(await screen.findByText(`Iron: ${iron.length} places`)).toBeInTheDocument();
     expect(await screen.findByRole("list", { name: "Contents" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Stop highlighting" }));

@@ -129,10 +129,8 @@ describe("Dashboard", () => {
     expect(dl).toHaveAttribute("download", "worlds-20261009-180000.zip");
     expect(screen.getByText("Najazd: Eikthyr gromadzi leśne stworzenia")).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Świat" })).getByText("Dzień 1")).toBeInTheDocument();
-    const map = screen.getByRole("link", { name: /Mapa świata/ });
-    expect(map).toHaveAttribute("href", "https://valheim-map.world/?seed=ZbzIWkK5KK&offset=0,0&zoom=0.600&ver=1.0.7");
-    expect(map).toHaveAttribute("target", "_blank");
-    expect(map.getAttribute("rel")).toContain("noopener");
+    expect(document.querySelector('a[href*="valheim-map"], iframe')).toBeNull();
+    expect(within(screen.getByRole("region", { name: "Świat" })).queryByRole("link")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Skopiuj ziarno ZbzIWkK5KK" })).toBeInTheDocument();
     expect(screen.getByText("Obiekty w świecie")).toBeInTheDocument();
     expect(screen.getAllByText("nieznane")).toHaveLength(7);
@@ -676,14 +674,14 @@ describe("On a phone", () => {
     return writeText;
   };
 
-  it("opens the outside world map in the same tab on a phone and a touch screen", () => {
-    const cases: Record<string, boolean>[] = [{ [PHONE]: true, [COARSE]: true }, { [COARSE]: true }, { [PHONE]: true }];
+  it("never sends anyone to an outside world map, on a phone, a touch screen or a desktop (#151)", () => {
+    const cases: Record<string, boolean>[] = [{ [PHONE]: true, [COARSE]: true }, { [COARSE]: true }, { [PHONE]: true }, {}];
     for (const m of cases) {
       media.__media = m;
       const { unmount } = render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
-      const map = screen.getByRole("link", { name: /World map/ });
-      expect(map).toHaveAttribute("href", expect.stringContaining("valheim-map.world"));
-      expect(map).not.toHaveAttribute("target");
+      expect(screen.queryByRole("link", { name: /World map/ })).not.toBeInTheDocument();
+      expect(within(screen.getByRole("region", { name: "World" })).queryByRole("link")).not.toBeInTheDocument();
+      expect(document.querySelector('a[href*="valheim-map"], iframe')).toBeNull();
       unmount();
     }
   });

@@ -207,7 +207,7 @@ describe("add item to a chest", () => {
 describe("the chest on the map", () => {
   it("offers Add item to an admin and shows pending items", async () => {
     api(status(), () => Response.json({ ok: true, data: {} }));
-    wrap(<DetailsBody marker={marker} seedName="" roomy />);
+    wrap(<DetailsBody marker={marker} roomy />);
     const add = await screen.findByRole("button", { name: "Add item" });
     expect(add).toBeEnabled();
     expect(screen.queryByText(/Includes items added just now/)).not.toBeInTheDocument();
@@ -215,21 +215,21 @@ describe("the chest on the map", () => {
 
   it("hides Add item when the agent does not know the command, and disables it on an old bridge", async () => {
     api(status({ commands: ["spawn"] }), () => Response.json({ ok: true, data: {} }));
-    const { unmount } = wrap(<DetailsBody marker={marker} seedName="" roomy />);
+    const { unmount } = wrap(<DetailsBody marker={marker} roomy />);
     await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled());
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.queryByRole("button", { name: "Add item" })).not.toBeInTheDocument();
     unmount();
     vi.unstubAllGlobals();
     api(status({ plugin: "0.3.0" }), () => Response.json({ ok: true, data: {} }));
-    wrap(<DetailsBody marker={marker} seedName="" roomy />);
+    wrap(<DetailsBody marker={marker} roomy />);
     expect(await screen.findByRole("button", { name: "Add item" })).toBeDisabled();
   });
 
   // Phones never show a title: the reason is a line next to the button.
   it("says next to a greyed-out Add item why, in both languages", async () => {
     api(status({ plugin: "0.3.0" }), () => Response.json({ ok: true, data: {} }));
-    const { unmount } = wrap(<DetailsBody marker={marker} seedName="" roomy />);
+    const { unmount } = wrap(<DetailsBody marker={marker} roomy />);
     const add = await screen.findByRole("button", { name: "Add item" });
     await waitFor(() => expect(add).toBeDisabled());
     expect(add).not.toHaveAttribute("title");
@@ -238,7 +238,7 @@ describe("the chest on the map", () => {
     unmount();
     vi.unstubAllGlobals();
     api(status({ tested: false, acknowledged: false, gameBuild: "l-1.0.18" }), () => Response.json({ ok: true, data: {} }));
-    wrap(<DetailsBody marker={marker} seedName="" roomy />, "pl");
+    wrap(<DetailsBody marker={marker} roomy />, "pl");
     const dodaj = await screen.findByRole("button", { name: "Dodaj przedmiot" });
     await waitFor(() => expect(dodaj).toBeDisabled());
     expect(dodaj).toHaveAccessibleDescription(makeI18n("pl").t("admin.blocker.untested", { build: "1.0.18" }));
@@ -246,7 +246,7 @@ describe("the chest on the map", () => {
 
   it("gives an enabled Add item no reason line", async () => {
     api(status(), () => Response.json({ ok: true, data: {} }));
-    wrap(<DetailsBody marker={marker} seedName="" roomy />);
+    wrap(<DetailsBody marker={marker} roomy />);
     const add = await screen.findByRole("button", { name: "Add item" });
     await waitFor(() => expect(add).toBeEnabled());
     expect(add).not.toHaveAttribute("aria-describedby");

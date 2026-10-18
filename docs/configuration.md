@@ -441,11 +441,10 @@ explored area or within 64 m of a built piece. The web tier drops everything
 else unless `MAP_SPOILERS=true`. The seed alone tells where every boss is, so
 this is off by default.
 
-With a [terrain run](#terrain), the map's land comes from the game's own
-world generator instead. The Terrain tab embeds [valheim-map.world](https://valheim-map.world/), a
-third-party site, for the seed's terrain. It loads only when that tab is
-opened; the "Open on full map" links in the map's popovers go there too,
-centred on the point (`offset=x,z`, `zoom=0.100`, `ver=1.0.7`).
+With a [terrain run](#terrain) or [terrain tiles](#terrain-tiles) from the
+admin bridge, the map's land comes from the game's own world generator
+instead. Without either, the map inks land and sea from the save's 64 m
+zones. The panel shows only its own map and links to no outside map site.
 
 ## Item icons
 
