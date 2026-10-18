@@ -89,6 +89,9 @@ spec:
               value: "true"
             - name: SERVER_ARGS
               value: ""
+            # Same as the game's CROSSPLAY.
+            - name: CROSSPLAY
+              value: "true"
             # Server settings: written here, read by the game's pre-run hook.
             - name: SETTINGS_DIR
               value: /settings

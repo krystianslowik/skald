@@ -42,8 +42,9 @@ const (
 	// KindAbandoned is "Destroying abandoned non persistent zdo U:N owner U":
 	// the owner's peer is gone. Logged once per object, in bursts.
 	KindAbandoned = "abandoned"
-	// KindWorldLoaded is "Loading: Done. Total seconds sinze ZNet start": the
-	// world is loaded and the server takes players.
+	// KindWorldLoaded is "Loading: Done. Total seconds sinze ZNet start" (up
+	// to l-1.0.17) or "ZDOMan.LoadChunks done" (l-1.0.20): the world is
+	// loaded and the server takes players.
 	KindWorldLoaded = "world_loaded"
 )
 
@@ -132,9 +133,11 @@ var table = []rule{
 		n, _ := strconv.Atoi(s[2])
 		return []Match{{Kind: KindVersion, Version: s[1], NetworkVersion: n}}
 	}},
-	// The end of world loading (the game's own spelling, "sinze"); the
-	// world's name is on an earlier line and never kept.
-	{regexp.MustCompile(`Loading: Done\. Total seconds sin[cz]e ZNet start`), func([]string) []Match {
+	// The end of world loading: "Loading: Done. Total seconds sinze ZNet
+	// start" (the game's own spelling) up to l-1.0.17; l-1.0.20 dropped that
+	// line, and its last world loading line is "ZDOMan.LoadChunks done [N ms]".
+	// The world's name is on an earlier line and never kept.
+	{regexp.MustCompile(`Loading: Done\. Total seconds sin[cz]e ZNet start|ZDOMan\.LoadChunks done \[`), func([]string) []Match {
 		return []Match{{Kind: KindWorldLoaded}}
 	}},
 	{regexp.MustCompile(`Session ".*" registered with join code (\d{6})`), func(s []string) []Match {

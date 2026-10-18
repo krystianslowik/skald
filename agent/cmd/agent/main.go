@@ -143,7 +143,7 @@ func main() {
 		Terrain: terr.Info,
 		Bridge:  compatBridge,
 		Crossplay: func() bool {
-			return slices.Contains(strings.Fields(srv.EffectiveArgs(ctx)), "-crossplay")
+			return cfg.Crossplay || slices.Contains(strings.Fields(srv.EffectiveArgs(ctx)), "-crossplay")
 		},
 		Path:    compatPath,
 		Publish: func(typ string, data map[string]any) { hub.Publish(typ, data) },
