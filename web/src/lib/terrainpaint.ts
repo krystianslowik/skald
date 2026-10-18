@@ -322,7 +322,7 @@ export function paintTile(t: DecodedTile, o: PaintOptions): Uint8ClampedArray<Ar
  * apron included, rows north first. R is the biome index, G the forest
  * (0..255; a tile without a forest channel gets its biome's mean, as
  * paintTile uses), B and A the height's high and low byte. The GPU shades
- * from this exactly as paintTile does on the CPU.
+ * from this with paintTile's colours and light (mapgl.ts TILE_FS).
  */
 export function packTile(t: DecodedTile, meanForest: readonly number[]): Uint8Array<ArrayBuffer> {
   const nn = t.n * t.n;
