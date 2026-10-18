@@ -53,7 +53,7 @@
 | `METRICS_BIND` | (empty = off) | Prometheus listener, e.g. `0.0.0.0:9465`, serving `GET /metrics` with `skald_build_info`. No session, like the agent's `METRICS_ADDR`: restrict it with a NetworkPolicy or firewall. The panel port never serves `/metrics` |
 | `WEB_ROOT` | `../web/dist` | Built SPA, relative to the working directory |
 | `DISCORD_WEBHOOK_URL` | (empty) | A Discord channel webhook for notifications. Optional: an admin can set the webhook in the admin sheet instead. Set, it wins over the panel, which then shows it read-only. A secret: it is never logged or sent to the browser. See [Discord notifications](#discord-notifications) |
-| `DISCORD_NOTIFY` | all | Which notifications `DISCORD_WEBHOOK_URL` sends, comma-separated: `join`, `leave`, `death`, `raid`, `server`, `join_code`, `version`, `failure`. Without `DISCORD_WEBHOOK_URL` it is only the panel's starting choice. An unknown name stops skald-web at startup |
+| `DISCORD_NOTIFY` | all | Which notifications `DISCORD_WEBHOOK_URL` sends, comma-separated: `join`, `leave`, `death`, `raid`, `server`, `join_code`, `version`, `compat`, `failure`. Without `DISCORD_WEBHOOK_URL` it is only the panel's starting choice. An unknown name stops skald-web at startup |
 | `MAP_SPOILERS` | `false` | `true` shows every boss altar, trader and dungeon of the seed on the world map. Off, only places someone has been to are sent to the browser |
 | `MOCK_AGENT` | (unset) | `1` runs against a built-in fake server (development, `bun run dev` from a source checkout; release images have no mock and exit at startup). It also turns `COOKIE_SECURE` off and keeps the history in memory unless `DB_PATH` is set |
 | `MOCK_BRIDGE` | `on` | With `MOCK_AGENT=1`: the fake bridge's state, `on`, `off`, `untested` or `disabled` |
@@ -129,6 +129,7 @@ The kinds:
 | `server` | The server stopped, is starting, or runs again. A state has to hold for 30 seconds, so a quick stop and start says nothing |
 | `join_code` | A new join code. A restart or a game update rotates it, so this is the one to keep |
 | `version` | The game was updated, "Game updated to 1.0.20" |
+| `compat` | Skald checked itself after a game update: the build change, the outcome and every part that warns or fails, a few minutes after the update. A second message follows only when the check after the new build's first save finds a problem. See [Compatibility check](#compatibility-check) |
 | `failure` | An admin command, a backup, restart or update, or applying new settings failed |
 
 Routine world saves and backups are never sent. Joins, leaves and deaths wait
@@ -146,6 +147,52 @@ that was deleted in Discord.
 skald-web needs outbound HTTPS (TCP 443) to `discord.com` for notifications,
 whichever way the webhook is set. On Kubernetes, the example `skald-web`
 NetworkPolicy allows no internet egress; uncomment its internet rule.
+
+A kind list saved in the panel before `compat` existed does not include it:
+tick it in the admin sheet to get the compatibility summaries.
+
+## Compatibility check
+
+The game updates itself on every restart, and a new build can change a save
+format or a log line without notice. Game build l-1.0.20 did: it saves chest
+inventories with a new version number, the agent refused them, and the chests
+showed as unreadable on the map until a player noticed. So the agent checks
+itself:
+
+- when the log reports a game build it has not checked yet (the
+  `Valheim version: ...` line at every game start);
+- once after the agent starts, for the build it sees first;
+- again after the first save by an updated build: right after an update the
+  newest save on disk is still the old build's, so the save check waits for
+  it (default `-saveinterval` is 30 minutes; a `save` from the admin bridge
+  and **Check again** speed it up);
+- whenever an admin presses **Check again** in the admin sheet.
+
+A check first waits, up to 5 minutes, for the world to load (and with
+`-crossplay` for the join code) and for the map to be built from the newest
+finished save. A wait that runs out is reported, not hung on. Each part gets
+a status: **ok**, **warn**, **fail**, **pending** (waits for something that
+comes on its own) or **skipped** (not set up). The overall status is the
+worst of ok, warn and fail.
+
+| Part | Checks | What to do when it is not ok |
+|---|---|---|
+| Version | The game build and network version from the log, and the build before it | `not_seen`: the agent started after the game, so it saw no version line; restart the server. A changed network version means players must update their game too |
+| World save | The map was built from the newest save; chunks read; containers whose inventory did not decode (count and first reason); the `.db2` locations and the `.fwl` read | `containers_unreadable` or `chunks_unreadable`: the game changed its save format. Nothing is lost in the save itself, Skald just cannot read it: open an issue with the reason shown and update Skald when a fix is out. `save_before_update` (pending): wait for the first save on the new build. `map_behind`: the map did not catch up within the wait; check the agent log for `world map` lines |
+| Terrain | The terrain image belongs to this world and game build | `gameBuild` (pending): the terrain job renders again for the new build on its own. `missing`, `seed`: run the terrain job. Skipped without `TERRAIN_DIR` |
+| Admin bridge | The plugin answers, its version, the build it reports matches the log, and the build is in `BRIDGE_TESTED_BUILDS` | `untested`: commands wait until an admin confirms the build at the top of the admin sheet (see [Admin bridge](#admin-bridge)), or add it to `BRIDGE_TESTED_BUILDS`. `disabled`: the plugin turned itself off, usually after a patch; update the bridge. `unreachable`: BepInEx or the plugin is not loaded. Skipped without `BRIDGE_TOKEN` |
+| Server log | The lines Skald reads at a start came within 5 minutes of the version line: the world loaded (`Loading: Done ...`) and, with `-crossplay`, a join code | `world_loaded_missing`, `join_code_missing`: the game changed a log line Skald matches, or the server did not finish starting; look at the server log |
+
+The last result is kept in `SETTINGS_DIR/compat.json` with the build before
+it, so an agent restart keeps "updated from 1.0.17 to 1.0.20". Without a
+writable `SETTINGS_DIR` it is kept in memory only. Everyone signed in to the
+panel sees the result: a section in the admin sheet, and after a check that
+warns or fails, a notice at the top of the dashboard that each device can
+dismiss until the next check. Running it again needs an admin (with
+`ADMIN_PASSWORD_HASH`, an unlocked admin session) and is written to the Saga.
+Discord gets a summary under the `compat` kind. The agent exports the result
+as metrics (`skald_compat_*`, see [metrics](metrics.md)) and serves it at
+`GET /compat`; `POST /compat/run` starts a check.
 
 ## Versions and the update check
 
