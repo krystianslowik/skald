@@ -175,13 +175,17 @@ type Item struct {
 }
 
 type Stats struct {
-	ZDOs            int     `json:"zdos"`
-	Chunks          int     `json:"chunks"`
-	ChunksParsed    int     `json:"chunksParsed"`
-	ChunksFailed    int     `json:"chunksFailed"`
-	Pieces          int     `json:"pieces"`
-	GeneratedZones  int     `json:"generatedZones"`
-	LocationsTotal  int     `json:"locationsTotal"`
-	LocationsPlaced int     `json:"locationsPlaced"`
-	BuildSeconds    float64 `json:"buildSeconds"`
+	ZDOs            int `json:"zdos"`
+	Chunks          int `json:"chunks"`
+	ChunksParsed    int `json:"chunksParsed"`
+	ChunksFailed    int `json:"chunksFailed"`
+	Pieces          int `json:"pieces"`
+	GeneratedZones  int `json:"generatedZones"`
+	LocationsTotal  int `json:"locationsTotal"`
+	LocationsPlaced int `json:"locationsPlaced"`
+	// ContainersUnreadable is the containers whose inventory did not decode
+	// (a game update that changed the format), in the whole save: they show
+	// with no contents.
+	ContainersUnreadable int     `json:"containersUnreadable"`
+	BuildSeconds         float64 `json:"buildSeconds"`
 }

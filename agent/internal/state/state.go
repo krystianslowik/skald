@@ -60,6 +60,14 @@ type Snapshot struct {
 	LastSaveMs      float64
 	LastLogAt       *time.Time
 	NetStats        *NetStats
+	// VersionAt is when the game last logged its version line, also when the
+	// version stayed the same: the start of the game process as the log tells
+	// it. WorldLoadedAt is the last "Loading: Done" line, JoinCodeSeenAt the
+	// last line carrying a join code. They are for the compatibility check
+	// and are not part of /state.
+	VersionAt      *time.Time
+	WorldLoadedAt  *time.Time
+	JoinCodeSeenAt *time.Time
 }
 
 type Tracker struct {
@@ -104,11 +112,15 @@ func (t *Tracker) HandleLine(raw string) {
 	for _, m := range matches {
 		switch m.Kind {
 		case logparse.KindVersion:
+			t.s.VersionAt = &now
 			if m.Version != t.s.Version || m.NetworkVersion != t.s.NetworkVersion {
 				t.s.Version, t.s.NetworkVersion = m.Version, m.NetworkVersion
 				t.hub.Publish("version", map[string]any{"version": m.Version, "networkVersion": m.NetworkVersion})
 			}
+		case logparse.KindWorldLoaded:
+			t.s.WorldLoadedAt = &now
 		case logparse.KindJoinCode:
+			t.s.JoinCodeSeenAt = &now
 			if m.Code != t.s.JoinCode {
 				t.s.JoinCode = m.Code
 				t.s.JoinCodeAt = &now

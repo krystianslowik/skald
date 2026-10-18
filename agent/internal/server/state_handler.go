@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/krystianslowik/skald/agent/internal/compat"
 	"github.com/krystianslowik/skald/agent/internal/files"
 	"github.com/krystianslowik/skald/agent/internal/icons"
 	"github.com/krystianslowik/skald/agent/internal/settings"
@@ -30,6 +31,9 @@ type stateResponse struct {
 	// Terrain is null without TERRAIN_DIR and a readable save; its request
 	// says what a terrain run must sample for this world.
 	Terrain *terrain.Info `json:"terrain"`
+	// Compat is the last compatibility check with the game build; null
+	// without a checker.
+	Compat *compat.View `json:"compat"`
 }
 
 type serverState struct {
@@ -113,6 +117,7 @@ func (s *Server) stateHandler(w http.ResponseWriter, r *http.Request) {
 		Settings: sum,
 		Icons:    s.opt.Icons.Info(),
 		Terrain:  terrainInfo(s.opt.Terrain),
+		Compat:   s.compatView(),
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

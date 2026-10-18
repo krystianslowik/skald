@@ -7,11 +7,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/krystianslowik/skald/agent/internal/access"
 	"github.com/krystianslowik/skald/agent/internal/bridge"
+	"github.com/krystianslowik/skald/agent/internal/compat"
 	"github.com/krystianslowik/skald/agent/internal/config"
 	"github.com/krystianslowik/skald/agent/internal/events"
 	"github.com/krystianslowik/skald/agent/internal/icons"
@@ -124,6 +127,33 @@ func main() {
 	})
 	go tiles.Run(ctx)
 
+	// The compatibility check with the game build, on every new build.
+	var compatPath string
+	if store != nil {
+		compatPath = filepath.Join(cfg.SettingsDir, "compat.json")
+	}
+	var compatBridge compat.BridgeSource
+	if br != nil {
+		compatBridge = br
+	}
+	checker := compat.New(compat.Options{
+		State:   tracker.Snapshot,
+		Map:     worldMap,
+		Terrain: terr.Info,
+		Bridge:  compatBridge,
+		Crossplay: func() bool {
+			args := cfg.ServerArgs
+			if store != nil {
+				args = store.EffectiveSettings(nil).Args
+			}
+			return slices.Contains(strings.Fields(args), "-crossplay")
+		},
+		Path:    compatPath,
+		Publish: func(typ string, data map[string]any) { hub.Publish(typ, data) },
+		Logger:  logger,
+	})
+	go checker.Run(ctx, 5*time.Second)
+
 	s := server.New(server.Options{
 		Token:      cfg.AgentToken,
 		ConfigDir:  cfg.ConfigDir,
@@ -140,6 +170,7 @@ func main() {
 		Tiles:      tiles,
 		Bridge:     br,
 		Access:     access.New(cfg.ConfigDir),
+		Compat:     checker,
 		Logger:     logger,
 		Version:    version,
 	})

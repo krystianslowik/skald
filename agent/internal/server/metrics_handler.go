@@ -137,7 +137,14 @@ func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
 		p.sample("valheim_map_build_seconds", s.opt.Map.LastBuildSeconds())
 		p.family("valheim_map_generation", "gauge", "Save generation the world map was last built from.")
 		p.sample("valheim_map_generation", float64(enc.Generation))
+		h := s.opt.Map.Health()
+		p.family("valheim_map_containers_unreadable", "gauge", "Containers in the save whose inventory the agent could not read (a changed save format shows here).")
+		p.sample("valheim_map_containers_unreadable", float64(h.ContainersUnreadable))
+		p.family("valheim_map_chunks_unreadable", "gauge", "Chunk files of the newest save that did not parse.")
+		p.sample("valheim_map_chunks_unreadable", float64(h.ChunksUnreadable))
 	}
+
+	s.compatMetrics(&p)
 
 	s.terrainTileMetrics(&p)
 
