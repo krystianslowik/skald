@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.14] - 2026-10-18
+
 ### Removed
 
 - The panel no longer sends anyone to the outside site valheim-map.world. The map's Terrain tab, the "Open on full map" link in a map spot's details and "World map" under the world are gone: Skald's own map (the map board, the header's map button, the Map tab on a phone) already shows the world's terrain from the admin plugin or a terrain run. Without either, the map shows land and sea from the save, as its Map tab always did.
