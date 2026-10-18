@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- Clearer wording in the admin sheet. The notice for an untested game build no longer asks for a test broadcast (commands, broadcast included, stay off until you allow the build): it says to join the game and check the server works first. A plugin that switched itself off now says what to do next, with the raw reason as a small detail line. The compatibility check explains in words why chests could not be read. The admin plugin has one name everywhere ("wtyczka admina" in Polish), game builds show without the "l-" prefix, and Polish fixes: Karve, "portale: łagodne" and other modifier levels that now agree with their modifier, the backups section's unlock hint, and sentence-case item names such as "Kilof z brązu" and "Idol bitwy z żelaza".
+
 ## [2026.10.12] - 2026-10-18
 
 ### Added

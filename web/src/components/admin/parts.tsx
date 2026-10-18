@@ -5,6 +5,7 @@ import { PlatformGlyph } from "../PlatformGlyph";
 import { SheetClose } from "../Sheet";
 import { BLOCKER_TEXT, useAdmin, type Target } from "./AdminContext";
 import { HoldButton } from "./HoldButton";
+import { gameVersion } from "../../lib/format";
 
 /** A titled block inside an admin sheet. */
 export function Section({ title, aside, children, id }: { title: string; aside?: ReactNode; children: ReactNode; id?: string }) {
@@ -163,16 +164,23 @@ export function BridgeBanner({ compact = false }: { compact?: boolean }) {
   const admin = useAdmin();
   if (!admin?.blocker) return null;
   const b = admin.status?.bridge;
+  // The raw build goes to the agent; people read it without the "l-" prefix.
   const build = b?.gameBuild ?? "?";
+  const shown = gameVersion(b?.gameBuild);
   return (
     <div role="status" className={`rounded-[3px] border border-ember/50 bg-black/35 ${compact ? "px-3 py-2" : "px-4 py-3"} text-sm`}>
-      <p className="font-bold text-flame">{t(BLOCKER_TEXT[admin.blocker], { build })}</p>
-      {!compact && admin.blocker === "disabled" && b?.message && <p className="mt-1 wrap-break-word font-mono text-xs text-ash">{b.message}</p>}
+      <p className="font-bold text-flame">{t(BLOCKER_TEXT[admin.blocker], { build: shown })}</p>
+      {!compact && admin.blocker === "disabled" && (
+        <>
+          <p className="mt-1 text-xs text-bone">{t("admin.disabled.body")}</p>
+          {b?.message && <p className="mt-1 wrap-break-word font-mono text-[11px] text-ash/80">{t("admin.disabled.detail", { message: b.message })}</p>}
+        </>
+      )}
       {!compact && admin.blocker === "untested" && (
         <div className="mt-2">
-          <p className="mb-2 text-xs text-ash">{t("admin.untested.body", { tested: (b?.testedBuilds ?? []).join(", ") || "-" })}</p>
-          <HoldButton danger={false} onConfirm={() => void admin.run("ack-build", { build }, { done: t("admin.untested.done", { build }) }).then(() => admin.refresh())}>
-            {t("admin.untested.allow", { build })}
+          <p className="mb-2 text-xs text-ash">{t("admin.untested.body", { tested: (b?.testedBuilds ?? []).map(gameVersion).join(", ") || "-" })}</p>
+          <HoldButton danger={false} onConfirm={() => void admin.run("ack-build", { build }, { done: t("admin.untested.done", { build: shown }) }).then(() => admin.refresh())}>
+            {t("admin.untested.allow", { build: shown })}
           </HoldButton>
         </div>
       )}

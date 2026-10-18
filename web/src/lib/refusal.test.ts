@@ -33,7 +33,7 @@ const KNOWN: [string, string, string][] = [
   ["no connected player 'Ragnar'", "Ragnar is not in the game any more.", "Ragnar nie jest już w grze."],
   ["no connected player 'O'Freya'", "O'Freya is not in the game any more.", "O'Freya nie jest już w grze."],
   ["no connected player 'Ragnar'; to ban an offline player pass a platform id like Steam_<id> or Xbox_<id>", "Ragnar is not in the game. To ban a player who is offline, use their platform id (Steam_... or Xbox_...).", "Ragnar nie ma w grze. Gracza, który jest offline, zbanujesz po identyfikatorze platformy (Steam_... albo Xbox_...)."],
-  ["more than one player is called 'Freya', use the uid", "Two players are called Freya, so the bridge cannot tell which one is meant.", "Dwóch graczy nazywa się Freya, więc mostek nie wie, o którego chodzi."],
+  ["more than one player is called 'Freya', use the uid", "Two players are called Freya, so the admin plugin cannot tell which one is meant.", "Dwóch graczy nazywa się Freya, więc wtyczka admina nie wie, o którego chodzi."],
   ["player has no character yet (still loading or dead)", "That player has no character yet: still loading or dead. Try again in a moment.", "Ten gracz nie ma jeszcze postaci: wczytuje się albo nie żyje. Spróbuj za chwilę."],
   ["player has no platform id to ban", "That player has no platform id, so they cannot be banned.", "Ten gracz nie ma identyfikatora platformy, więc nie da się go zbanować."],
   ["player and toPlayer are the same", "A player cannot be teleported to themselves.", "Nie można przenieść gracza do niego samego."],
@@ -54,9 +54,9 @@ const KNOWN: [string, string, string][] = [
   ["world not loaded yet", "The world is still loading. Try again in a moment.", "Świat jeszcze się wczytuje. Spróbuj za chwilę."],
   ["EnvMan not available", "The world is still loading. Try again in a moment.", "Świat jeszcze się wczytuje. Spróbuj za chwilę."],
   ["untested game build l-1.0.18: confirm it in the admin panel first", "Game build l-1.0.18 is not allowed yet. Allow it in the admin panel first.", "Wersja gry l-1.0.18 nie jest jeszcze dozwolona. Najpierw zezwól na nią w panelu admina."],
-  ["the bridge did not answer in time", "The bridge did not answer in time. It may have worked anyway: check before you try again.", "Mostek nie odpowiedział na czas. Mogło się jednak udać: sprawdź, zanim spróbujesz jeszcze raz."],
+  ["the bridge did not answer in time", "The admin plugin did not answer in time. It may have worked anyway: check before you try again.", "Wtyczka admina nie odpowiedziała na czas. Mogło się jednak udać: sprawdź, zanim spróbujesz jeszcze raz."],
   ["game main thread did not pick up the command in time", "The game was busy and did not take the command, so nothing was done. Try again in a moment.", "Gra była zajęta i nie przyjęła polecenia, więc nic się nie stało. Spróbuj za chwilę."],
-  ["command did not finish in time", "The bridge did not answer in time. It may have worked anyway: check before you try again.", "Mostek nie odpowiedział na czas. Mogło się jednak udać: sprawdź, zanim spróbujesz jeszcze raz."],
+  ["command did not finish in time", "The admin plugin did not answer in time. It may have worked anyway: check before you try again.", "Wtyczka admina nie odpowiedziała na czas. Mogło się jednak udać: sprawdź, zanim spróbujesz jeszcze raz."],
   ["agent unreachable", "No contact with the agent. Try again in a moment.", "Brak kontaktu z agentem. Spróbuj za chwilę."],
 ];
 
@@ -133,11 +133,11 @@ describe("bridge refusals", () => {
     expect(failText(pl, { status: 409, error: "Ragnar is standing at that chest; try again once they step away" })).toBe("Ragnar stoi przy skrzyni. Spróbuj, gdy odejdzie.");
     expect(failText(en, { status: 409, error: "the chest is haunted" })).toBe("the chest is haunted");
     expect(failText(en, { status: 409 })).toBe("That did not work.");
-    expect(failText(en, { status: 0, error: "offline" })).toBe("The bridge did not answer. Try again in a moment.");
-    expect(failText(en, { status: 502, error: "bridge unavailable" })).toBe("The bridge did not answer. Try again in a moment.");
+    expect(failText(en, { status: 0, error: "offline" })).toBe("The admin plugin did not answer. Try again in a moment.");
+    expect(failText(en, { status: 502, error: "bridge unavailable" })).toBe("The admin plugin did not answer. Try again in a moment.");
     // A plugin older than the command (bridge/plugin/HttpServer.cs answers 404).
-    expect(failText(en, { status: 404, error: "unknown command POST /v1/build/fill-smelters" })).toBe("This needs a newer bridge plugin.");
-    expect(failText(pl, { status: 404, error: "unknown command POST /v1/build/fill-kilns" })).toBe("To wymaga nowszej wersji mostka.");
+    expect(failText(en, { status: 404, error: "unknown command POST /v1/build/fill-smelters" })).toBe("This needs a newer admin plugin.");
+    expect(failText(pl, { status: 404, error: "unknown command POST /v1/build/fill-kilns" })).toBe("To wymaga nowszej wersji wtyczki admina.");
     // The agent's own allow-list says it without a method and path: the agent is the one to update.
     expect(failText(en, { status: 404, error: "unknown command fill-fermenters" })).toBe("This needs a newer Skald agent.");
   });

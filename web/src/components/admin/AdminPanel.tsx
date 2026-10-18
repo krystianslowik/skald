@@ -2,9 +2,10 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { NOTIFY_KINDS, type AdminCatalog, type NotifyChange, type NotifyConfig, type NotifyKind } from "../../types";
 import { BROADCAST_MAX, changeNotify, gameClock, getCatalog, getNotify, lockAdmin, storeActorName, storedActorName, testNotify, WORLD_KEYS } from "../../lib/admin";
 import { isOriginRefusal } from "../../lib/api";
+import { gameVersion } from "../../lib/format";
 import { failText, notifyTestText } from "../../lib/refusal";
 import { useLivePositions } from "../../lib/live";
-import { useI18n, type TextKey } from "../../i18n";
+import { modLevel, useI18n, type TextKey } from "../../i18n";
 import { ItemIcon } from "../storage/ItemIcon";
 import { PlatformGlyph } from "../PlatformGlyph";
 import { Sheet } from "../Sheet";
@@ -57,7 +58,7 @@ export function AdminPanel({ picked, onClose }: { picked?: { x: number; z: numbe
           kicker={t("admin.kicker")}
           title={t("admin.title")}
           emblem={<AdminGlyph size={34} className="text-flame" />}
-          sub={st?.bridge.gameBuild ? t("admin.sub", { plugin: st.bridge.plugin ?? "?", build: st.bridge.gameBuild }) : admin.bridgeOn ? t("admin.subOff") : t("admin.subFiles")}
+          sub={st?.bridge.gameBuild ? t("admin.sub", { plugin: st.bridge.plugin ?? "?", build: gameVersion(st.bridge.gameBuild) }) : admin.bridgeOn ? t("admin.subOff") : t("admin.subFiles")}
           onClose={close}
         />
       )}
@@ -619,7 +620,7 @@ export function describeKey(key: string, t: (k: TextKey, v?: Record<string, stri
       const mod = pair.slice(0, cut);
       const level = pair.slice(cut + 1);
       if (level === "default") return [];
-      return [`${lookup(`mod.${mod}`) ?? mod}: ${lookup(`modv.${level}`) ?? level}`];
+      return [`${lookup(`mod.${mod}`) ?? mod}: ${modLevel(lookup, mod, level)}`];
     });
     return { title: t("admin.keys.preset"), detail: parts.length ? parts.join(", ") : t("admin.keys.presetDefault") };
   }

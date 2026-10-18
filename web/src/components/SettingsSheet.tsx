@@ -5,7 +5,7 @@ import type { SettingsCurrent, SettingsSummary, SettingsView } from "../types";
 import { applySettings, cancelApply, getServerPassword, getSettings, isOriginRefusal, putSettings, type SettingsFailure } from "../lib/api";
 import { crackle } from "../lib/campfire";
 import { diff, draftErrors, draftReducer, generatePassword, isCustom, strength, toInput, worldOnly, type Draft } from "../lib/settingsForm";
-import { useI18n, type TextKey } from "../i18n";
+import { modLevel, useI18n, type TextKey } from "../i18n";
 import { SETTINGS_PATH, SettingsGlyph } from "./SettingsGlyph";
 import { useAdmin } from "./admin/AdminContext";
 import { Sheet, SheetClose, SETTLE } from "./Sheet";
@@ -640,7 +640,7 @@ const WorldModifiers = memo(function WorldModifiers({
   edit: Edit;
 }) {
   const { t, lookup } = useI18n();
-  const noted = Object.entries(worldNote).map(([k, v]) => `${lookup(`mod.${k}`) ?? k} ${lookup(`modv.${v}`) ?? v}`);
+  const noted = Object.entries(worldNote).map(([k, v]) => `${lookup(`mod.${k}`) ?? k} ${modLevel(lookup, k, v)}`);
   const custom = isCustom({ modifiers });
   const presetName = lookup(`preset.${preset}`) ?? preset;
   const description = custom

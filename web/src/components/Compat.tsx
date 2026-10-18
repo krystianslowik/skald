@@ -51,6 +51,25 @@ export function StatusMark({ status, size = 18 }: { status: CompatStatus; size?:
   );
 }
 
+// The agent's reasons for an unreadable container inventory (worldmap's
+// parseInventory, "worldmap: " already stripped), each with its one value.
+const CONTAINER_WHY: [RegExp, TextKey][] = [
+  [/^unreadable inventory: version (-?\d+)$/, "compat.why.version"],
+  [/^unreadable inventory: (\d+) items$/, "compat.why.items"],
+  [/^unreadable inventory: item flags (0x[0-9a-f]+)$/i, "compat.why.flags"],
+  [/^unreadable inventory: (\d+) trailing bytes$/, "compat.why.trailing"],
+  [/^truncated data$/, "compat.why.truncated"],
+];
+
+/** Why containers did not read, in words; the agent's own text when it is a new shape. */
+export function containerWhy(i: I18n, raw: string): string {
+  for (const [re, key] of CONTAINER_WHY) {
+    const m = re.exec(raw);
+    if (m) return i.t(key, { v: m[1] ?? "" });
+  }
+  return raw;
+}
+
 /** What one check found, as a sentence; the reason code when no text knows it. */
 export function checkText(i: I18n, c: CompatCheck): string {
   const d = c.detail ?? {};
@@ -61,7 +80,7 @@ export function checkText(i: I18n, c: CompatCheck): string {
     plugin: String(d.plugin ?? "?"),
     bridge: shortBuild(String(d.gameBuild ?? "")),
     n: c.name === "save" && c.reason === "chunks_unreadable" ? num("chunksUnreadable") : num("containersUnreadable"),
-    why: String(d.containerReason ?? ""),
+    why: containerWhy(i, String(d.containerReason ?? "")),
     gen: num("generation"),
     chunks: num("chunks"),
     s: num("worldLoadedSeconds"),

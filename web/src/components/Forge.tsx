@@ -1,6 +1,6 @@
 import { memo, useMemo } from "react";
 import type { ApiState, SeriesPoint } from "../types";
-import { useI18n } from "../i18n";
+import { modLevel, useI18n } from "../i18n";
 import { processRows, type ProcessTone } from "../lib/processes";
 import { Chart } from "./Chart";
 import { RelativeTime } from "./RelativeTime";
@@ -152,7 +152,7 @@ export const Forge = memo(function Forge({
     if (!worldMods) return modifiers(server.args);
     const args = server.args.split(/\s+/);
     const out = args.includes("-crossplay") ? ["crossplay"] : [];
-    for (const [k, v] of Object.entries(worldMods)) out.push(`${lookup(`mod.${k}`) ?? k}: ${lookup(`modv.${v}`) ?? v}`);
+    for (const [k, v] of Object.entries(worldMods)) out.push(`${lookup(`mod.${k}`) ?? k}: ${modLevel(lookup, k, v)}`);
     // resourcerate mirrors the resources modifier; the rest are plain keys.
     const keys = new Set((worldKeys ?? []).filter((k) => !k.startsWith("resourcerate")));
     args.forEach((w, i) => w === "-setkey" && args[i + 1] && keys.add(args[i + 1]!.toLowerCase()));

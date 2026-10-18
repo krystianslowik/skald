@@ -599,6 +599,8 @@ describe("i18n", () => {
     expect(i.ago(new Date(Date.now() - 5 * 60_000).toISOString())).toBe("5 min temu");
     expect(i.ago(new Date(Date.now() - 3 * 86_400_000).toISOString())).toBe("3 dni temu");
     expect(i.modifiers("-crossplay -modifier raids less")).toEqual(["crossplay", "najazdy: rzadziej"]);
+    // Each modifier's level agrees with it in gender and number.
+    expect(i.modifiers("-modifier portals casual -modifier deathpenalty casual -modifier combat easy")).toEqual(["portale: łagodne", "kara za śmierć: łagodna", "walka: łatwa"]);
     expect(i.raidLabel("foresttrolls")).toBe("Ziemia drży");
     expect(i.raidLabel("hildirboss2")).toBe("Przechodzą cię ciarki");
     expect(i.raidLabel("army_new_thing")).toBe("army_new_thing");
