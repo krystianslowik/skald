@@ -152,11 +152,24 @@ describe("compatibility in the dashboard", () => {
         return new Response("{}", { status: 404 });
       }),
     );
-    render(<Dashboard live={{ state: fixture(view("fail")), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
-    const notice = await screen.findByText("Something broke after the game update to 1.0.20.");
-    fireEvent.click(within(notice.closest("[role=status]") as HTMLElement).getByRole("button", { name: "Details" }));
-    const dialog = await screen.findByRole("dialog", { name: "Admin" });
-    const section = within(dialog).getByRole("region", { name: "Game compatibility" });
+    // The section sits far down the sheet: 900 px below the top of its scrolling body.
+    const rect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.id === "admin-compat-h" ? new DOMRect(0, 900, 100, 20) : rect.call(this);
+    });
+    let dialog: HTMLElement;
+    let section: HTMLElement;
+    try {
+      render(<Dashboard live={{ state: fixture(view("fail")), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
+      const notice = await screen.findByText("Something broke after the game update to 1.0.20.");
+      fireEvent.click(within(notice.closest("[role=status]") as HTMLElement).getByRole("button", { name: "Details" }));
+      dialog = await screen.findByRole("dialog", { name: "Admin" });
+      section = within(dialog).getByRole("region", { name: "Game compatibility" });
+      // Opened at the section, not at the top of the sheet.
+      expect(section.closest<HTMLElement>("[data-sheet-body]")!.scrollTop).toBe(888);
+    } finally {
+      vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockRestore();
+    }
     expect(section).toHaveTextContent("something broke");
     expect(section).toHaveTextContent("41 containers cannot be read");
     await act(async () => {

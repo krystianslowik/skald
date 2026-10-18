@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- The phone's Back button now closes the open sheet (a profile, the admin sheet, server settings, map details) instead of switching the tab under it or leaving the panel. Nested sheets close one per Back, and a sheet closed with its X or a swipe no longer leaves a Back that does nothing.
+- "Details" on the compatibility notice now opens the admin sheet at the compatibility section instead of at the top.
+
 ## [2026.10.12] - 2026-10-18
 
 ### Added

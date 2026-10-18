@@ -2,6 +2,7 @@ import { animate, motion, useMotionValue, useReducedMotion, useTransform, type A
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { dragOffset, FLICK_VELOCITY, pickDetent, shouldDismiss, travelFor, velocityFrom, VELOCITY_WINDOW_MS, type Sample } from "../lib/sheet";
+import { holdSheet, isTopSheet, releaseSheet, type SheetHandle } from "../lib/sheetHistory";
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
 /** Phones get a bottom sheet (swipe down), wider screens a side sheet (drag right). */
@@ -19,6 +20,9 @@ const FADE = { duration: 0.2, ease: "easeOut" as const };
  * button (`header` gets the close function) or the scrim. Every close is
  * interruptible: grab the sheet while it is leaving and it follows the pointer
  * again. Focus goes to the element marked `data-autofocus` and stays inside.
+ * An open sheet holds a history entry: Back closes it (the top one first), and
+ * closing it any other way (button, scrim, Escape, swipe) steps back over the
+ * entry as it starts to leave (lib/sheetHistory).
  *
  * `peek` (phones): the sheet first shows only as tall as its content, up to
  * half the screen, and is dragged up to full height or down to dismiss.
@@ -83,6 +87,11 @@ export function Sheet({
   const scrimPress = useRef(false);
   const done = useRef(onClose);
   done.current = onClose;
+  // Back closes the sheet: its entry is already gone, so it just leaves.
+  const fromHistory = useRef<() => void>(() => undefined);
+  const entry = useRef<SheetHandle | null>(null);
+  entry.current ??= { close: () => fromHistory.current() };
+  const mounted = useRef(false);
   const scrim = useTransform(() => fade.get() * (1 - Math.min(1, Math.max(0, offset.get() / size.current))));
 
   const measure = () => {
@@ -120,6 +129,9 @@ export function Sheet({
       if (closing.current) done.current();
     };
     const target = to === "open" ? restAt() : size.current;
+    // Leaving gives up the history entry (stepped back over right away, so the next Back is a
+    // real step); grabbed back, the sheet holds a new one.
+    if (mounted.current) (to === "open" ? holdSheet : releaseSheet)(entry.current!);
     if (to === "open") heightCb.current?.(size.current - target);
     else dismissCb.current?.();
     if (reduced) {
@@ -131,6 +143,9 @@ export function Sheet({
     // A flick that throws the sheet back open earns a little bounce; everything else lands softly.
     const bounce = to === "open" && Math.abs(velocity) >= FLICK_VELOCITY ? 0.2 : 0;
     motionAnim.current = animate(offset, target, { ...SETTLE, bounce, velocity, onComplete: finish });
+  };
+  fromHistory.current = () => {
+    if (!closing.current) settle("closed");
   };
   const requestClose = () => {
     if (!closing.current) settle("closed");
@@ -165,11 +180,21 @@ export function Sheet({
   }, [peeks]);
 
   useEffect(() => {
+    const h = entry.current!;
+    mounted.current = true;
+    holdSheet(h);
+    return () => {
+      mounted.current = false;
+      releaseSheet(h);
+    };
+  }, []);
+
+  useEffect(() => {
     panel.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus({ preventScroll: true });
     const overflow = document.body.style.overflow;
     if (modal) document.body.style.overflow = "hidden";
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") requestClose();
+      if (e.key === "Escape" && isTopSheet(entry.current!)) requestClose();
     };
     // Every press starts unowned; the scrim's own handler (later, on the way back up) claims it.
     const onPress = () => {
@@ -308,6 +333,7 @@ export function Sheet({
 
         <div
           ref={body}
+          data-sheet-body
           // A peeking sheet scrolls only once it is pulled up; until then a drag on it moves the sheet.
           onPointerDown={peeks && !expanded ? grab : undefined}
           onClickCapture={swallowDragClick}

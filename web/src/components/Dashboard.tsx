@@ -329,7 +329,7 @@ export function Dashboard({ live, onLogout, onUnauthorized = () => {} }: { live:
 /** The compatibility notice, with a way into the admin sheet's details. */
 function DashboardCompatNotice({ className }: { className?: string }) {
   const admin = useAdmin();
-  return <CompatNotice view={admin?.compat} onDetails={admin?.present ? () => admin.open({ kind: "panel" }) : undefined} className={className} />;
+  return <CompatNotice view={admin?.compat} onDetails={admin?.present ? () => admin.open({ kind: "panel", section: "compat" }) : undefined} className={className} />;
 }
 
 /** A first state this late with the link down is an outage, not a slow load. */

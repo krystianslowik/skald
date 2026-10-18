@@ -26,13 +26,16 @@ export interface FillChoice {
   coal: "both" | "ore" | "coal" | null;
 }
 
+/** A part of the admin sheet it can open at (the compatibility notice's details). */
+export type PanelSection = "compat";
+
 /**
  * A sheet the admin layer shows; only one at a time, the unlock sheet over
  * any. `picked` is a point just picked on the map for it (the sheet steps
  * aside while the map is open, then comes back with it).
  */
 export type AdminView = (
-  | { kind: "panel" }
+  | { kind: "panel"; section?: PanelSection }
   | { kind: "player"; name: string }
   | { kind: "items"; target: Target; lines?: KitLine[] }
   | { kind: "creatures"; target: Target }
@@ -215,7 +218,8 @@ export function AdminProvider({
   const startPick = useCallback(
     (req: PickRequest) => {
       setView((v) => {
-        pickFrom.current = v;
+        // Coming back from the map returns to the tools, not to the section the sheet first opened at.
+        pickFrom.current = v?.kind === "panel" ? { ...v, section: undefined } : v;
         return null;
       });
       setPick(req);

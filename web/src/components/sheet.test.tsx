@@ -1,4 +1,4 @@
-import { fireEvent, render } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Sheet } from "./Sheet";
 
@@ -24,11 +24,13 @@ describe("Sheet scrim", () => {
     expect(onDismiss).not.toHaveBeenCalled();
   });
 
-  it("closes on a press that starts and ends on the scrim", () => {
+  it("closes on a press that starts and ends on the scrim", async () => {
     const { onDismiss } = mount();
+    // Once the sheet holds its history entry, the scrim steps back over it and the popstate closes it.
+    await new Promise((r) => setTimeout(r, 0));
     fireEvent.pointerDown(scrimOf());
     fireEvent.click(scrimOf());
-    expect(onDismiss).toHaveBeenCalledOnce();
+    await waitFor(() => expect(onDismiss).toHaveBeenCalledOnce());
   });
 
   it("does not let a press that left the scrim arm a later click", () => {
