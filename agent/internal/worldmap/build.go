@@ -287,6 +287,9 @@ func (b *Builder) build(gen int) (*Snapshot, *Pieces, *Nature, error) {
 		if cd.noPrefab > 0 {
 			b.opt.Logger.Debug("world map: inventory items without a prefab skipped", "chunk", filepath.Base(chunkFile(dir, row)), "items", cd.noPrefab)
 		}
+		if cd.badInventory > 0 {
+			b.opt.Logger.Warn("world map: container inventories unreadable", "chunk", filepath.Base(chunkFile(dir, row)), "containers", cd.badInventory, "err", cd.badInventoryErr.Error())
+		}
 		b.cache[row.id] = &cacheEntry{rev: row.rev, count: row.count, data: cd}
 	}
 	for id := range b.cache {

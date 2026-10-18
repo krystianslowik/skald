@@ -117,6 +117,7 @@ func TestParseInventoryRefuses(t *testing.T) {
 		"truncated":   good[:len(good)-2],
 		"trailing":    append(append([]byte{}, good...), 0),
 		"old version": append([]byte{106, 0, 0, 0}, good[4:]...),
+		"new version": append([]byte{111, 0, 0, 0}, good[4:]...),
 	}
 	for _, bit := range []byte{0x02, 0x10, 0x80} {
 		b := encodeInventory([]invItem{{name: "Wood", flags: 0x49 | bit, stack: 3}})
@@ -133,6 +134,18 @@ func TestParseInventoryRefuses(t *testing.T) {
 	}
 	if _, _, err := parseInventory([]byte{1}); !errors.Is(err, errShort) {
 		t.Errorf("short blob err = %v", err)
+	}
+}
+
+func TestParseInventoryVersions(t *testing.T) {
+	// 109 (Valheim 1.0) and 110 (game build l-1.0.20) share one layout.
+	for _, v := range []byte{109, 110} {
+		b := encodeInventory([]invItem{{name: "Wood", flags: 0x49, stack: 3}})
+		b[0] = v
+		items, _, err := parseInventory(b)
+		if err != nil || len(items) != 1 || items[0].name != "Wood" || items[0].stack != 3 {
+			t.Errorf("version %d = %v %v", v, items, err)
+		}
 	}
 }
 
