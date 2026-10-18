@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { leaveSheets, traverse } from "./sheetHistory";
+import { leaveSheets, sheetPending, traverse } from "./sheetHistory";
 
 /** The phone's tabs; on wider screens only `map` (the full-screen map) means anything. */
 export type Tab = "fire" | "map" | "saga" | "settings";
@@ -24,8 +24,15 @@ const ours = () => {
  */
 export function useRoute(): [Tab, (t: Tab) => void] {
   const [tab, setTab] = useState<Tab>(() => (typeof location === "undefined" ? "fire" : fromHash(location.hash)));
+  // A tab tapped while sheets are still being stepped over; a later tap supersedes it.
+  const deferred = useRef<Tab | null>(null);
   useEffect(() => {
-    const sync = () => setTab(fromHash(location.hash));
+    // While a tap steps back over sheets, the hash is the tab under them: showing it
+    // would close the map for a render (dropping its focus). The tap lands the tab itself.
+    const sync = () => {
+      if (deferred.current !== null && sheetPending()) return;
+      setTab(fromHash(location.hash));
+    };
     window.addEventListener("popstate", sync);
     window.addEventListener("hashchange", sync);
     return () => {
@@ -33,8 +40,6 @@ export function useRoute(): [Tab, (t: Tab) => void] {
       window.removeEventListener("hashchange", sync);
     };
   }, []);
-  // A tab tapped while sheets are still being stepped over; a later tap supersedes it.
-  const deferred = useRef<Tab | null>(null);
   const go = useCallback((next: Tab) => {
     if (next === (deferred.current ?? fromHash(location.hash))) return;
     const move = () => {
