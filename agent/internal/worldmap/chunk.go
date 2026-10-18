@@ -115,6 +115,10 @@ type chunkData struct {
 	// noPrefab is the inventory items left out for having no prefab, as
 	// the game leaves them out on load.
 	noPrefab int
+	// badInventory is the containers whose inventory did not decode, and
+	// badInventoryErr the first reason, so a new game format shows in the log.
+	badInventory    int
+	badInventoryErr error
 }
 
 func newChunkData() *chunkData {
@@ -348,6 +352,12 @@ func (cd *chunkData) inventory(blob []byte) ([]rawItem, error) {
 	}
 	items, skipped, err := parseInventory(blob)
 	cd.noPrefab += skipped
+	if err != nil {
+		cd.badInventory++
+		if cd.badInventoryErr == nil {
+			cd.badInventoryErr = err
+		}
+	}
 	return items, err
 }
 

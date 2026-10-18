@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- Chests, carts and ships the game saved after its update to build l-1.0.20 showed as unreadable on the map. That build saves inventories with a new version number (110) but the same layout, and the map now reads both. The agent also logs a warning naming the reason when a container cannot be read, so a future format change shows up in the log instead of only on the map.
+- **Operators:** this fix is in the agent, so deploying it restarts the game.
+
 ## [2026.10.11] - 2026-10-17
 
 ### Changed
