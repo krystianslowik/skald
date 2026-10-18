@@ -153,7 +153,7 @@ export function CompatNotice({ view, onDetails, className = "" }: { view: Compat
         <p className="font-bold text-bone">{head}</p>
         <p className="mt-0.5 text-xs text-ash">{t("compat.notice.parts", { parts: new Intl.ListFormat(i18n.intl, { type: "conjunction" }).format(parts) })}</p>
       </div>
-      <div className="flex gap-2">
+      <div className="flex basis-full justify-end gap-2 sm:basis-auto">
         {onDetails && (
           <button type="button" onClick={onDetails} className="plaque press min-h-11 px-4 text-sm font-bold">
             {t("compat.notice.details")}
