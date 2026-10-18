@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import type { Platform } from "../../types";
 import { useI18n, type TextKey } from "../../i18n";
 import { PlatformGlyph } from "../PlatformGlyph";
@@ -99,17 +99,52 @@ export function Chip({ on, onClick, children, disabled, title }: { on: boolean; 
   );
 }
 
-/** - n + with bounds, finger sized. */
-export function Stepper({ value, min, max, onChange, label, step = 1, format }: { value: number; min: number; max: number; onChange: (n: number) => void; label: string; step?: number; format?: (n: number) => string }) {
+/**
+ * - n + with bounds, finger sized. `editable`: the number is a field too, so
+ * an exact amount can be typed (committed on Enter or leaving the field).
+ */
+export function Stepper({ value, min, max, onChange, label, step = 1, format, editable = false }: { value: number; min: number; max: number; onChange: (n: number) => void; label: string; step?: number; format?: (n: number) => string; editable?: boolean }) {
   const clamp = (n: number) => Math.max(min, Math.min(max, n));
+  // What is being typed; null while the field shows the value itself.
+  const [draft, setDraft] = useState<string | null>(null);
+  // A change from elsewhere (a button, a kit) wins over half-typed digits.
+  useEffect(() => setDraft(null), [value]);
+  const commit = () => {
+    if (draft === null) return;
+    const n = parseInt(draft, 10);
+    setDraft(null);
+    if (Number.isFinite(n) && clamp(n) !== value) onChange(clamp(n));
+  };
   return (
     <div role="group" aria-label={label} className="inline-flex items-center">
       <button type="button" aria-label={`${label} -`} disabled={value <= min} onClick={() => onChange(clamp(value - step))} className="plaque press grid h-11 w-11 place-items-center rounded-r-none text-lg font-bold disabled:opacity-40">
         −
       </button>
-      <output aria-live="polite" className="slot grid h-11 min-w-10 place-items-center px-1.5 font-bold tabular-nums text-bone">
-        {format ? format(value) : value}
-      </output>
+      {editable ? (
+        <input
+          type="text"
+          inputMode="numeric"
+          enterKeyHint="done"
+          aria-label={label}
+          value={draft ?? String(value)}
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => setDraft(e.target.value.replace(/\D/g, "").slice(0, 6))}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            else if (e.key === "Escape" && draft !== null) {
+              // Drop the typing, not the sheet.
+              e.stopPropagation();
+              setDraft(null);
+            }
+          }}
+          className="slot h-11 w-12 px-1 text-center font-bold tabular-nums text-bone underline decoration-iron decoration-dotted underline-offset-4 outline-none focus:decoration-flame"
+        />
+      ) : (
+        <output aria-live="polite" className="slot grid h-11 min-w-10 place-items-center px-1.5 font-bold tabular-nums text-bone">
+          {format ? format(value) : value}
+        </output>
+      )}
       <button type="button" aria-label={`${label} +`} disabled={value >= max} onClick={() => onChange(clamp(value + step))} className="plaque press grid h-11 w-11 place-items-center rounded-l-none text-lg font-bold disabled:opacity-40">
         +
       </button>

@@ -10,7 +10,7 @@ import { createLogStore } from "../../lib/useValheim";
 import { preloadLazyChunks } from "../../test-preload";
 import { emptyAgentState, NOTIFY_KINDS, type AccessState, type AdminStatus, type AgentEvent, type ApiState, type NotifyConfig, type RestoreInfo } from "../../types";
 import { restoreProgress, RestoreSheet } from "./WorldTools";
-import { AdminProvider } from "./AdminContext";
+import { AdminProvider, toastTop } from "./AdminContext";
 import { BRIDGE_PLUGIN_VERSION } from "@server/bridgeplugin";
 
 function fixture(): ApiState {
@@ -106,6 +106,37 @@ afterEach(() => {
 });
 
 describe("admin", () => {
+
+  it("tile taps and the stepper move a stackable amount by the same ten, and an exact amount can be typed", () => {
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() });
+    api(status());
+    render(<I18nProvider locale="en"><ItemPicker target={{ at: { x: 0, z: 0 } }} onClose={() => {}} /></I18nProvider>);
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "iron" } });
+    fireEvent.click(within(screen.getByRole("list", { name: "Items" })).getByRole("button", { name: /^Iron$/ }));
+    const amount = screen.getByRole("textbox", { name: "Amount" });
+    expect(amount).toHaveValue("10");
+    fireEvent.click(screen.getByRole("button", { name: "Amount +" }));
+    expect(amount).toHaveValue("20");
+    fireEvent.focus(amount);
+    fireEvent.change(amount, { target: { value: "37" } });
+    fireEvent.blur(amount);
+    expect(amount).toHaveValue("37");
+    fireEvent.change(amount, { target: { value: "1500" } });
+    fireEvent.blur(amount);
+    expect(amount).toHaveValue("999");
+    fireEvent.change(amount, { target: { value: "" } });
+    fireEvent.blur(amount);
+    expect(amount).toHaveValue("999");
+  });
+
+  it("starts the toast stack under an open sheet's header, so its close button stays in view", () => {
+    expect(toastTop([], 844)).toBeNull();
+    expect(toastTop([{ top: 24, bottom: 140 }], 844)).toBe(148);
+    // Two stacked sheets (items over the admin sheet): the lower header wins.
+    expect(toastTop([{ top: 24, bottom: 140 }, { top: 24, bottom: 152 }], 844)).toBe(160);
+    // A peeking sheet low on the screen leaves the default top alone.
+    expect(toastTop([{ top: 600, bottom: 700 }], 844)).toBeNull();
+  });
 
   it("updates default kit names when the language changes", () => {
     vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() });
@@ -593,7 +624,7 @@ describe("admin", () => {
     fireEvent.click(within(picker).getByRole("button", { name: "Amount +" }));
     fireEvent.click(within(picker).getByRole("button", { name: "Give" }));
     await waitFor(() => expect(calls.find((c) => c.url === "/api/admin/spawn")).toBeTruthy());
-    expect(calls.find((c) => c.url === "/api/admin/spawn")!.body).toEqual({ item: "Wood", amount: 11, quality: 1, player: "Ragnar" });
+    expect(calls.find((c) => c.url === "/api/admin/spawn")!.body).toEqual({ item: "Wood", amount: 20, quality: 1, player: "Ragnar" });
   });
 
   it("asks for the admin password when the panel password is view-only, then retries", async () => {

@@ -9,6 +9,12 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- Admin results no longer cover the open sheet's title and close button: when several actions run in a row (repair, grow, reveal the map, save), their messages stack below the sheet's header.
+- The two raids the game announces with the same swamp message are now told apart in the raid list, the saga and Discord: "A foul smell from the swamp... (Bonemass's army)" and "(blobs)", in Polish "Stęchlizna z bagien (armia Kościoszlamu)" and "(flegmy)".
+- Give items: the + and − next to an amount now move by 10 for items that stack, the same as tapping the item again, instead of by 1 below 20. The amount itself can be tapped to type an exact number.
+
 ## [2026.10.12] - 2026-10-18
 
 ### Added

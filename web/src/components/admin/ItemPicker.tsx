@@ -17,6 +17,11 @@ const MAX_STACKS = 60;
 const CONFIRM_STACKS = 10;
 const SHOWN = 72;
 
+/** A tile tap adds a handful of what stacks, one of what does not. */
+const tileStep = (item: string) => (stackSize(item) > 1 ? 10 : 1);
+/** The stepper moves by the same handful as the tile, and faster once the amount is large. */
+const amountStep = (item: string, amount: number) => (amount >= 100 ? 50 : amount >= 20 ? 10 : tileStep(item));
+
 /**
  * Give items: search every item the server's icon sheet knows (names in
  * English and Polish), build a list with amounts and quality, keep it as a
@@ -40,9 +45,9 @@ export function ItemPicker({ target: initial, lines: initialLines, onClose }: { 
     setConfirm(false);
     setLines((ls) => {
       const i = ls.findIndex((l) => l.item === item);
-      if (i >= 0) return ls.map((l, j) => (j === i ? { ...l, amount: Math.min(999, l.amount + (stackSize(item) > 1 ? 10 : 1)) } : l));
+      if (i >= 0) return ls.map((l, j) => (j === i ? { ...l, amount: Math.min(999, l.amount + tileStep(item)) } : l));
       if (ls.length >= MAX_LINES) return ls;
-      return [...ls, { item, amount: stackSize(item) > 1 ? 10 : 1, quality: 1 }];
+      return [...ls, { item, amount: tileStep(item), quality: 1 }];
     });
   };
   const update = (i: number, patch: Partial<KitLine>) => {
@@ -121,7 +126,7 @@ export function ItemPicker({ target: initial, lines: initialLines, onClose }: { 
                       <ItemIcon name={l.item} size={22} iconSize={34} className="text-label" />
                     </span>
                     <span className="min-w-0 flex-1 truncate text-sm font-bold leading-tight text-bone">{itemLabel(l.item, lookup)}</span>
-                    <Stepper label={t("admin.items.amount")} value={l.amount} min={1} max={999} step={l.amount >= 100 ? 50 : l.amount >= 20 ? 10 : 1} onChange={(n) => update(i, { amount: n })} />
+                    <Stepper editable label={t("admin.items.amount")} value={l.amount} min={1} max={999} step={amountStep(l.item, l.amount)} onChange={(n) => update(i, { amount: n })} />
                     <button
                       type="button"
                       onClick={() => update(i, { quality: (l.quality % 4) + 1 })}
