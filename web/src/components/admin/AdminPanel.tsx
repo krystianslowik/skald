@@ -9,7 +9,7 @@ import { modLevel, useI18n, type TextKey } from "../../i18n";
 import { ItemIcon } from "../storage/ItemIcon";
 import { PlatformGlyph } from "../PlatformGlyph";
 import { Sheet } from "../Sheet";
-import { pluginBelow, targetBody, useAdmin, type Done, type Target } from "./AdminContext";
+import { pluginBelow, targetBody, useAdmin, type Done, type PanelSection, type Target } from "./AdminContext";
 import { fillResult } from "./FillSheet";
 import { AdminGlyph } from "./glyphs";
 import { HoldButton } from "./HoldButton";
@@ -29,7 +29,7 @@ const PRESETS = ["admin.preset.restart5", "admin.preset.boss21", "admin.preset.s
  * the unlock. Bridge controls are off (with the reason on top) while it
  * cannot take commands.
  */
-export function AdminPanel({ picked, onClose }: { picked?: { x: number; z: number }; onClose: () => void }) {
+export function AdminPanel({ picked, section, onClose }: { picked?: { x: number; z: number }; section?: PanelSection; onClose: () => void }) {
   const { t } = useI18n();
   const admin = useAdmin();
   const [catalog, setCatalog] = useState<AdminCatalog | null>(null);
@@ -43,6 +43,7 @@ export function AdminPanel({ picked, onClose }: { picked?: { x: number; z: numbe
   useEffect(() => {
     if (canRead) reload();
   }, [canRead, reload]);
+  useScrollToSection(section);
   if (!admin) return null;
   const st = admin.status;
   const pickedTarget: Target | null = picked ? { at: picked, label: "map" } : null;
@@ -109,6 +110,43 @@ export function AdminPanel({ picked, onClose }: { picked?: { x: number; z: numbe
       </div>
     </Sheet>
   );
+}
+
+/** Where each section's heading is, for opening the sheet at it. */
+const SECTION_HEADING: Record<PanelSection, string> = { compat: "admin-compat-h" };
+/** Content above a section still loads (the catalog) for about this long; the section is kept in place meanwhile. */
+const ANCHOR_MS = 2000;
+
+/**
+ * Opens the sheet scrolled to `section`, and keeps it there while the content
+ * above it is still settling, until the reader scrolls on their own.
+ */
+function useScrollToSection(section: PanelSection | undefined) {
+  useEffect(() => {
+    if (!section) return;
+    const heading = document.getElementById(SECTION_HEADING[section]);
+    const scroller = heading?.closest<HTMLElement>("[data-sheet-body]");
+    if (!heading || !scroller) return;
+    const align = () => {
+      scroller.scrollTop += heading.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 12;
+    };
+    align();
+    const content = scroller.firstElementChild;
+    const ro = typeof ResizeObserver === "undefined" || !content ? null : new ResizeObserver(align);
+    if (content) ro?.observe(content);
+    // Any scrolling of their own (wheel, finger, scrollbar, keys) lets go.
+    const own = ["wheel", "touchstart", "pointerdown"] as const;
+    const stop = () => {
+      ro?.disconnect();
+      clearTimeout(timer);
+      for (const e of own) scroller.removeEventListener(e, stop);
+      document.removeEventListener("keydown", stop);
+    };
+    const timer = setTimeout(stop, ANCHOR_MS);
+    for (const e of own) scroller.addEventListener(e, stop, { passive: true });
+    document.addEventListener("keydown", stop);
+    return stop;
+  }, [section]);
 }
 
 /**

@@ -33,6 +33,8 @@ above them.
 - Give items: the + and − next to an amount now move by 10 for items that stack, the same as tapping the item again, instead of by 1 below 20. The amount itself can be tapped to type an exact number.
 - Clearer wording in the admin sheet. The notice for an untested game build no longer asks for a test broadcast (commands, broadcast included, stay off until you allow the build): it says to join the game and check the server works first. A plugin that switched itself off now says what to do next, with the raw reason as a small detail line. The compatibility check explains in words why chests could not be read. The admin plugin has one name everywhere ("wtyczka admina" in Polish), game builds show without the "l-" prefix, and Polish fixes: Karve, "portale: łagodne" and other modifier levels that now agree with their modifier, the backups section's unlock hint, and sentence-case item names such as "Kilof z brązu" and "Idol bitwy z żelaza".
 - The server settings sheet no longer opens with "2 changes" before anything was touched. The modifiers the world was created with are now the starting point, so only real edits count, and Reset keeps them selected.
+- The phone's Back button now closes the open sheet (a profile, the admin sheet, server settings, map details) instead of switching the tab under it or leaving the panel. Nested sheets close one per Back, and a sheet closed with its X or a swipe no longer leaves a Back that does nothing.
+- "Details" on the compatibility notice now opens the admin sheet at the compatibility section instead of at the top.
 
 ## [2026.10.12] - 2026-10-18
 
