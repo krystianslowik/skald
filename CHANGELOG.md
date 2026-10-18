@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.15] - 2026-10-18
+
 ### Fixed
 
 - "Show on map" in the village stores highlights the chest again. Since 2026.10.13 the button and the place rows in an item's details opened the map on the general area, with no chest opened and no highlight.
