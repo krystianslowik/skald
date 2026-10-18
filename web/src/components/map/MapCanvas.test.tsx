@@ -3,13 +3,29 @@ import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { gateMap } from "@server/mapgate";
 import { mockMap } from "@server/mapmock";
+import { mockNature, natureIn } from "@server/mocknature";
+import { mockPieces, piecesIn } from "@server/mockpieces";
 import { I18nProvider } from "../../i18n";
 import { DEFAULT_LAYERS, MAX_SCALE, WORLD_RADIUS } from "../../lib/mapgeo";
+import { MapRenderer } from "../../lib/maprender";
+import { NATURE_MIN_SCALE } from "../../lib/nature";
+import type { ApiMap } from "../../types";
 import { MapCanvas, type MapCanvasHandle } from "./MapCanvas";
 
 const map = gateMap(mockMap({ now: Date.parse("2026-10-10T20:00:00Z") }), false);
 const W = 390;
 const H = 844;
+
+const pieces = mockPieces(mockMap().storage!);
+const nature = mockNature();
+const boxOf = (url: string) => ["x0", "z0", "x1", "z1"].map((k) => Number(new URL(url, "http://x").searchParams.get(k))) as [number, number, number, number];
+/** The agent's floor plans and nature, answered at once. */
+function agent() {
+  return vi.fn(async (url: string | URL | Request) => {
+    const u = String(url);
+    return Response.json(u.startsWith("/api/pieces") ? piecesIn(pieces, boxOf(u), 1, 20_000) : natureIn(nature, boxOf(u), 1, false, 30_000));
+  });
+}
 
 // jsdom has no layout: give every box a phone's size, and pointers somewhere to be captured.
 beforeEach(() => {
@@ -17,17 +33,19 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(W);
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(H);
   HTMLElement.prototype.setPointerCapture = () => {};
+  vi.stubGlobal("fetch", agent());
 });
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
-function mount() {
+function mount(world: ApiMap = map) {
   const ref = createRef<MapCanvasHandle>();
   const ui = () => (
     <I18nProvider locale="en">
-      <MapCanvas ref={ref} map={map} mask={null} markers={[]} layers={DEFAULT_LAYERS} selected={null} onSelect={() => {}} />
+      <MapCanvas ref={ref} map={world} mask={null} markers={[]} layers={DEFAULT_LAYERS} selected={null} onSelect={() => {}} />
     </I18nProvider>
   );
   const view = render(ui());
@@ -58,7 +76,16 @@ function mount() {
     // Screen distance of the world's centre from the view's, against the world's radius on screen.
     return Math.hypot(x0 - W / 2, y0 - H / 2) - WORLD_RADIUS * scale();
   };
-  return { ref, fire, run, scale, pastEdge, view, rerender };
+  /** Frames, with the requests they started answered in between. */
+  const settle = async (ms: number) => {
+    for (let i = 0; i < ms / 16; i++) {
+      t += 16;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(16);
+      });
+    }
+  };
+  return { ref, fire, run, settle, scale, pastEdge, view, rerender };
 }
 
 describe("MapCanvas spring back", () => {
@@ -133,5 +160,61 @@ describe("MapCanvas spring back", () => {
     m.run(1000);
     expect(m.pastEdge()).toBeLessThan(0.5);
     m.view.unmount();
+  });
+});
+
+describe("MapCanvas floor plans and nature (#160)", () => {
+  const asked = (f: ReturnType<typeof agent>, path: string) => f.mock.calls.filter(([u]) => String(u).startsWith(path)).length;
+
+  it("asks as the fingers lift, for where the view lands, while the terrain is still fading in", async () => {
+    // The terrain never stops fading in: every frame asks for the next.
+    vi.spyOn(MapRenderer.prototype, "draw").mockReturnValue(true);
+    const f = agent();
+    vi.stubGlobal("fetch", f);
+    // A save of its own: the loaders outlive a map, and earlier tests may have filled them for the shared one.
+    const m = mount({ ...map, meta: { ...map.meta, generation: map.meta.generation + 500 } });
+    m.ref.current!.flyTo(220, -340, NATURE_MIN_SCALE * 0.9, NATURE_MIN_SCALE * 0.9);
+    m.run(1500);
+    expect(f).not.toHaveBeenCalled();
+    // Pinch to twice the zoom: nothing is asked while the fingers are down...
+    m.fire("pointerdown", 1, 195, 400);
+    m.fire("pointerdown", 2, 195, 460);
+    for (let i = 1; i <= 10; i++) {
+      m.fire("pointermove", 1, 195, 400 - i * 3);
+      m.fire("pointermove", 2, 195, 460 + i * 3);
+      m.run(16);
+    }
+    m.run(200);
+    expect(m.scale()).toBeGreaterThan(1.2);
+    expect(f).not.toHaveBeenCalled();
+    // ...and both layers are, a frame after they lift.
+    m.fire("pointerup", 1, 195, 370);
+    m.fire("pointerup", 2, 195, 490);
+    await m.settle(32);
+    expect(asked(f, "/api/pieces")).toBeGreaterThan(0);
+    expect(asked(f, "/api/nature")).toBeGreaterThan(0);
+    m.view.unmount();
+  });
+
+  it("keeps what loaded when the map is opened again", async () => {
+    const f = agent();
+    vi.stubGlobal("fetch", f);
+    const world = { ...map, meta: { ...map.meta, generation: map.meta.generation + 1000 } };
+    const first = mount(world);
+    first.ref.current!.flyTo(220, -340, 3, 3);
+    await first.settle(1500);
+    const calls = f.mock.calls.length;
+    expect(calls).toBeGreaterThan(0);
+    first.view.unmount();
+    const setNature = vi.spyOn(MapRenderer.prototype, "setNature");
+    const setPieces = vi.spyOn(MapRenderer.prototype, "setPieces");
+    const again = mount(world);
+    await again.settle(160);
+    expect(setNature.mock.calls.some(([loaded]) => loaded.size > 0)).toBe(true);
+    expect(setPieces.mock.calls.some(([p]) => p.length > 0)).toBe(true);
+    again.ref.current!.flyTo(220, -340, 3, 3);
+    await again.settle(1500);
+    expect(f.mock.calls.length).toBe(calls);
+    again.view.unmount();
   });
 });

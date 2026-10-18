@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { mockNature, natureIn } from "@server/mocknature";
 import { en } from "../i18n/en";
 import { pl } from "../i18n/pl";
-import { decodeNature, NATURE_CHUNK, natureLayer, natureLoader, natureTint, ORE_YIELD, oreKey, wobble } from "./nature";
+import { decodeNature, NATURE_CHUNK, NATURE_FADE_FROM, NATURE_MIN_SCALE, natureLayer, natureLoader, natureTint, ORE_YIELD, oreKey, wobble } from "./nature";
 import { NatureLayer, natureAlpha } from "./naturerender";
 
 const all = mockNature();
@@ -80,6 +80,11 @@ describe("tints and names", () => {
     expect(natureAlpha(1.1)).toBeLessThan(1);
     expect(natureAlpha(1.5)).toBe(1);
   });
+
+  it("is fetched before it starts to show, so a zoom that lands in the fade never shows bare land", () => {
+    expect(NATURE_MIN_SCALE).toBeLessThanOrEqual(NATURE_FADE_FROM);
+    expect(natureAlpha(NATURE_MIN_SCALE)).toBe(0);
+  });
 });
 
 describe("the nature loader", () => {
@@ -87,7 +92,7 @@ describe("the nature loader", () => {
     const fetchImpl = agent();
     const l = natureLoader(fetchImpl as typeof fetch);
     const changed = vi.fn();
-    l.onChange = changed;
+    l.subscribe(changed);
     l.want([260, -150, 300, -120], "1");
     await settle();
     await settle();

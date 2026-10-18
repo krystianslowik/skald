@@ -969,7 +969,8 @@ export class GLMap {
         return;
       }
       if (this.budget.take(performance.now()) && this.upload(k, data, keep)) {
-        this.fades.begin(k, now);
+        // Only a tile drawn now fades in: a fade on a landing's, ring or pinned tile is unseen and would keep the map busy.
+        if (slotKeys.has(k)) this.fades.begin(k, now);
         went++;
       } else pending++;
     };
@@ -1052,6 +1053,9 @@ export class GLMap {
       for (const s of plan.slots) if (pool.has(chunkKey(i, s.tile)) && this.chunkGen.get(chunkKey(i, s.tile)) !== src.gen) todo.push({ i, t: s.tile, fresh: false });
     }
     this.chunkLevel = plans[0] || plans[1] ? heldLevel(v.scale, k, CHUNK_LEVELS, R, CHUNK, this.chunkLevel) : undefined;
+    // Only what is drawn now fades in, as with tiles.
+    const slotted = new Set<string>();
+    for (const i of [0, 1] as const) for (const s of plans[i]?.slots ?? []) slotted.add(chunkKey(i, s.tile));
     // The view's missing chunks of both rasters before anything else.
     todo.sort((a, b) => Number(b.fresh) - Number(a.fresh));
     const keep = (key: string) => this.chunkUsed.has(key) || used.has(key);
@@ -1071,7 +1075,7 @@ export class GLMap {
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, r.chunks);
       gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, got.layer, CHUNK, CHUNK, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
       this.chunkGen.set(key, this.rasters[i]!.gen);
-      if (fresh) this.chunkFades.begin(key, now);
+      if (fresh && slotted.has(key)) this.chunkFades.begin(key, now);
       done++;
     }
     for (const i of [0, 1] as const) {
