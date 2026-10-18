@@ -773,7 +773,7 @@ const Stepper = memo(function Stepper({ name, value, preset, edit }: { name: Mod
               tabIndex={on ? 0 : -1}
               onClick={() => edit({ type: "modifier", name, value: v })}
               onKeyDown={(e) => onKey(e, i)}
-              className={`press-soft relative min-h-9 rounded-[2px] px-0.5 text-[0.6875rem] font-bold leading-tight ${on ? "text-[#10161d]" : v === null ? "text-ash hover:text-flame" : "text-label hover:text-flame"}`}
+              className={`press-soft relative min-h-9 rounded-[2px] px-0.5 coarse:min-h-11 text-[0.6875rem] font-bold leading-tight ${on ? "text-[#10161d]" : v === null ? "text-ash hover:text-flame" : "text-label hover:text-flame"}`}
             >
               {on && <motion.span layoutId={`seg-${name}`} transition={SWAP} className="slot-selected absolute inset-0 rounded-[2px]" />}
               <span className="relative">{label(v)}</span>

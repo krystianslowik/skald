@@ -184,7 +184,7 @@ export const Header = memo(function Header({
   );
 });
 
-/** Opens the admin sheet. A dot says the bridge cannot act. */
+/** Opens the admin sheet, labelled like the phone's Admin board. A dot says the bridge cannot act. */
 function AdminButton() {
   const { t } = useI18n();
   const admin = useAdmin();
@@ -196,11 +196,10 @@ function AdminButton() {
       onPointerEnter={preloadAdmin}
       onFocus={preloadAdmin}
       aria-haspopup="dialog"
-      aria-label={t("admin.open")}
-      title={t("admin.open")}
-      className="plaque press relative grid h-8 w-8 place-items-center coarse:h-11 coarse:w-11"
+      className="plaque press relative flex h-8 items-center gap-1.5 whitespace-nowrap pl-2 pr-3 text-xs font-bold coarse:h-11 coarse:pl-3 coarse:pr-4"
     >
-      <AdminGlyph size={18} />
+      <AdminGlyph size={16} />
+      {t("admin.open")}
       {admin.bridgeOn && admin.blocker && <span aria-hidden className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-ember" />}
     </button>
   );

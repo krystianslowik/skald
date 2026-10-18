@@ -106,6 +106,14 @@ afterEach(() => {
 });
 
 describe("admin", () => {
+  it("labels the desktop header's Admin button with visible text", async () => {
+    api(status());
+    renderDashboard();
+    const button = await screen.findByRole("button", { name: "Admin" });
+    expect(button.closest("header")).not.toBeNull();
+    expect(button).toHaveTextContent(/^Admin$/);
+    expect(button).not.toHaveAttribute("aria-label");
+  });
 
   it("tile taps and the stepper move a stackable amount by the same ten, and an exact amount can be typed", () => {
     vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() });

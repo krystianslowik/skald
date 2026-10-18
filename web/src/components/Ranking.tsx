@@ -49,8 +49,8 @@ export const Ranking = memo(function Ranking({ players }: { players: PlayerStats
             <motion.li key={p.name} layout={!reduced} transition={SETTLE} className="grid grid-cols-[1.25rem_1fr_auto] items-center gap-x-3">
               <span className="text-sm font-bold text-select-hi/80">{i + 1}</span>
               <div className="min-w-0">
-                <div className="flex items-baseline gap-2">
-                  <PlayerName name={p.name} className="truncate text-left text-[0.9375rem] font-bold text-bone" />
+                <div className="flex items-center gap-2">
+                  <PlayerName name={p.name} truncate className="min-w-0 text-left text-[0.9375rem] font-bold text-bone" />
                   {p.online && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-gold shadow-[0_0_6px_#ecc212]" title={t("ranking.onlineNow")} />}
                 </div>
                 <div className={`meter mt-1 h-2 ${by === "playtime" ? "meter-stamina" : "meter-hp"}`}>

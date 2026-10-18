@@ -23,6 +23,9 @@ above them.
 - World keys (no map, no portals and the rest) and raids now take a second tap to confirm, like summoning a boss: they change the game for everyone at once.
 - Banning from a player's sheet no longer asks you to type their name. Every ban (player sheet and Admins and bans) is now the same press and hold, 2 s, longer than kick's, so a hold meant for Kick cannot ban. A ban can be lifted in Admins and bans.
 - The admin password prompt has a shorter title that fits on a phone and closes by itself once unlocked, without the extra Continue.
+- On a phone, the player names under the shields and in the Saga and ranking now react to a full fingertip (44 px), and so do the world modifier choices in Server settings. The names under the shields used to answer only on the text itself. On a phone the Saga's lines are a little taller for this.
+- The Admin button in the desktop header now says "Admin" instead of showing only an icon, like the Admin board on a phone.
+- On a phone, a touch screen or a narrow window, "Open on full map" in a map spot's details and "World map" under the world open valheim-map.world in the same tab, so Back returns to the panel (it loads again; an open map spot is not kept). In a wider desktop window they still open in a new tab.
 
 ### Fixed
 
