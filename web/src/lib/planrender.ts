@@ -242,6 +242,29 @@ export class FloorPlan {
     this.byKey = new Map(this.bases.map((b) => [b.key, b]));
   }
 
+  /**
+   * Where `next` draws differently from `prev`: the box of every base that
+   * is in one and not the other, a base being the same when it is made of
+   * the very same pieces. A base that grows (its pieces arrive chunk by
+   * chunk) changes its key and box, so both boxes are in.
+   */
+  static changes(prev: FloorPlan | null, next: FloorPlan | null): [number, number, number, number][] {
+    const out: [number, number, number, number][] = [];
+    const same = (a: FloorPlan, b: Base, o: FloorPlan | null) => {
+      const ob = o?.byKey.get(b.key);
+      return !!o && !!ob && ob.members.length === b.members.length && ob.members.every((i, n) => o.pieces[i] === a.pieces[b.members[n]!]);
+    };
+    for (const b of prev?.bases ?? []) if (!same(prev!, b, next)) out.push(b.box);
+    for (const b of next?.bases ?? []) if (!same(next!, b, prev)) out.push(b.box);
+    return out;
+  }
+
+  /** A base's box, padded by how far its marks reach past it (the floor switcher's corner marks), or null for an unknown key. */
+  boxOf(key: string | null | undefined): [number, number, number, number] | null {
+    const b = key ? this.byKey.get(key) : undefined;
+    return b ? [b.box[0] - 6, b.box[1] - 6, b.box[2] + 6, b.box[3] + 6] : null;
+  }
+
   /** Material tones from the item icons; an empty map draws the fixed colours. */
   setTones(tones: ReadonlyMap<Material, Rgb>): void {
     this.palettes = new Map([...tones].map(([m, t]) => [m, tonePalette(t)]));
@@ -413,6 +436,9 @@ export class FloorPlan {
     g.lineCap = "butt";
   }
 }
+
+/** The zooms over which floor plans' look changes (see tierZoom): their fade-in, up to STOREY_SCALE. The roofs fade by the drawing's own scale, as line widths do. */
+export const PLAN_BANDS = [[PLAN_MIN_SCALE, PLAN_FULL_SCALE]] as const;
 
 /** How strongly floor plans show at this scale. */
 export function planAlpha(scale: number): number {
