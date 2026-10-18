@@ -10,7 +10,7 @@ person or AI agent, and the next one can carry on from where it stops.
 Every release has two tracks, run side by side:
 
 1. **Build.** Fix and build from the top of the backlog plus what the owner
-   asked for.
+   asked for. Skip issues labelled `hold`.
 2. **Recon.** Hunt for new bugs by running the code. Findings are filed as
    issues for the *next* release, not squeezed into the one in progress.
 
@@ -31,6 +31,9 @@ One issue per problem. Use the templates. Labels:
 | `recon` | found by a recon round |
 | `review` | found by a code review |
 | `question` | suspected, not reproduced yet |
+| `hold` | plan only: the improvement loop and agents skip it until the owner removes the label |
+| `redesign` | UX redesign work (main screen, tabs, admin sheet) |
+| `effort:xhigh` | very large: several days across many components |
 
 A good issue has:
 
