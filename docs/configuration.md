@@ -16,6 +16,7 @@
 | `WORLD_NAME` | (empty) | Must match the game's `WORLD_NAME` |
 | `SERVER_NAME` | (empty) | Shown in the header and page title; seeds the server settings |
 | `SERVER_ARGS` | (empty) | The game's `SERVER_ARGS`; shown as modifier chips; seeds the server settings |
+| `CROSSPLAY` | `false` | The game's `CROSSPLAY` (`true`/`false`). The compatibility check then expects a join code after an update |
 | `SERVER_PUBLIC` | (empty = public) | The game's `SERVER_PUBLIC` (`true`/`false`/`1`/`0`); seeds the server settings |
 | `SETTINGS_DIR` | `/settings` | Where server settings are written (`server.json`, `server.env`). The feature is off (API 404, UI hidden) unless this directory exists and the agent can write to it |
 | `PASSWORD_FILE` | (empty) | The game's server password secret, mounted read-only; seeds the password shown on the dashboard before the first save |

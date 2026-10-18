@@ -23,6 +23,9 @@ type Config struct {
 	ServerName     string
 	ServerArgs     string
 	ServerPublic   string
+	// Crossplay is the game's CROSSPLAY (the community image adds
+	// -crossplay itself, so it is not in SERVER_ARGS).
+	Crossplay bool
 	// SettingsDir is where the settings feature writes server.env for the
 	// game's pre-run hook; the feature is off when it is missing or read-only.
 	SettingsDir string
@@ -72,6 +75,7 @@ func Load() (Config, error) {
 		ServerName:         os.Getenv("SERVER_NAME"),
 		ServerArgs:         os.Getenv("SERVER_ARGS"),
 		ServerPublic:       os.Getenv("SERVER_PUBLIC"),
+		Crossplay:          parseBool(os.Getenv("CROSSPLAY"), false),
 		SettingsDir:        getenv("SETTINGS_DIR", "/settings"),
 		PasswordFile:       os.Getenv("PASSWORD_FILE"),
 		MapShowNames:       parseBool(os.Getenv("MAP_SHOW_NAMES"), true),

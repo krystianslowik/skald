@@ -179,6 +179,7 @@ services:
       WORLD_NAME: ${WORLD_NAME:-Midgard}
       SERVER_PUBLIC: "true"
       SERVER_ARGS: ${SERVER_ARGS:-}
+      CROSSPLAY: "true"
       SETTINGS_DIR: /settings
       PASSWORD_FILE: /run/secrets/server_pass
       # Empty until the icons service has written a sheet; harmless without it.

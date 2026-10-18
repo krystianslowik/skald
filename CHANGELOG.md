@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- The compatibility check reported "world not loaded" on game build l-1.0.20, which no longer writes the "Loading: Done. Total seconds since ZNet start" line. The agent now also recognises the line that build ends world loading with.
+- The compatibility check did not know a server ran with crossplay when it was switched on with the image's `CROSSPLAY` setting, so it never checked for a join code. **Operators:** set `CROSSPLAY` on the agent the same as on the game (the deploy examples now do). This is in the agent, so deploying it restarts the game.
+
 ## [2026.10.12] - 2026-10-18
 
 ### Added
