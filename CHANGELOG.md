@@ -9,6 +9,14 @@ above them.
 
 ## [Unreleased]
 
+### Changed
+
+- Holding a rune (backup, update check, restart) before unlocking admin now asks for the admin password and then runs the rune, instead of showing "admin session required" in English.
+- Every hold button (kick, ban, unban, stop a raid, remove a key) now says "Hold" on phones too, and a quick tap tells you to press and hold instead of doing nothing.
+- World keys (no map, no portals and the rest) and raids now take a second tap to confirm, like summoning a boss: they change the game for everyone at once.
+- Banning from a player's sheet no longer asks you to type their name. Every ban (player sheet and Admins and bans) is now the same press and hold, 2 s, longer than kick's, so a hold meant for Kick cannot ban. A ban can be lifted in Admins and bans.
+- The admin password prompt has a shorter title that fits on a phone and closes by itself once unlocked, without the extra Continue.
+
 ## [2026.10.12] - 2026-10-18
 
 ### Added

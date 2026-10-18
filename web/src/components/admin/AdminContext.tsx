@@ -178,13 +178,19 @@ export function AdminProvider({
     setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== id)), ok ? 3500 : 6000);
   }, []);
 
+  // Everyone waiting on the one unlock sheet (a rune and the settings sheet can
+  // both ask) hears its answer; a second ask must not orphan the first.
+  const waiting = useRef<((ok: boolean) => void)[]>([]);
   const unlock = useCallback(
     () =>
       new Promise<boolean>((resolve) => {
+        waiting.current.push(resolve);
         setUnlocking(() => (ok: boolean) => {
           setUnlocking(null);
           if (ok) refresh();
-          resolve(ok);
+          const all = waiting.current;
+          waiting.current = [];
+          for (const w of all) w(ok);
         });
       }),
     [refresh],

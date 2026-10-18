@@ -2,9 +2,11 @@ import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } fr
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { ActionName, AgentEvent } from "../types";
 import { isOriginRefusal, runAction } from "../lib/api";
+import { isAdminRequired } from "../lib/admin";
 import { crackle } from "../lib/campfire";
 import { useI18n, type TextKey } from "../i18n";
 import { actionStatus, actionTitle } from "./Saga";
+import { useAdmin } from "./admin/AdminContext";
 
 const HOLD_MS = 1500;
 
@@ -188,10 +190,18 @@ const Rune = memo(function Rune({ def, disabled, onFire }: { def: RuneDef; disab
 export const Runes = memo(function Runes({ online, lastAction }: { online: boolean; lastAction: AgentEvent | null }) {
   const i18n = useI18n();
   const { t } = i18n;
+  // Stable across renders, unlike the whole admin context.
+  const unlock = useAdmin()?.unlock;
   const fire = useCallback<Fire>(
     async (name) => {
       try {
-        const r = await runAction(name);
+        let r = await runAction(name);
+        // A view-only session: the same unlock prompt as the admin sheet, then once more.
+        if (isAdminRequired(r.status, r.body)) {
+          if (!unlock || !(await unlock())) return { ok: false, message: t("rune.locked") };
+          r = await runAction(name);
+          if (isAdminRequired(r.status, r.body)) return { ok: false, message: t("rune.locked") };
+        }
         if (r.status === 409) return { ok: false, message: t("rune.busy") };
         if (isOriginRefusal(r.status, r.body)) return { ok: false, message: t("login.refused") };
         if (r.status === 503 || r.status === 502) return { ok: false, message: t("rune.offline") };
@@ -200,7 +210,7 @@ export const Runes = memo(function Runes({ online, lastAction }: { online: boole
         return { ok: false, message: t("rune.failed") };
       }
     },
-    [t],
+    [t, unlock],
   );
   return (
     <div className="flex flex-1 flex-col">

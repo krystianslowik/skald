@@ -1,10 +1,24 @@
-import { useId, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import type { Platform } from "../../types";
 import { useI18n, type TextKey } from "../../i18n";
 import { PlatformGlyph } from "../PlatformGlyph";
 import { SheetClose } from "../Sheet";
 import { BLOCKER_TEXT, useAdmin, type Target } from "./AdminContext";
 import { HoldButton } from "./HoldButton";
+
+/**
+ * The second-tap confirm's state: armed by the first tap, disarmed by itself
+ * after `ms` so a switch left armed cannot fire on a much later stray tap.
+ */
+export function useArmed<T>(idle: T, ms = 6000): [T, (v: T) => void] {
+  const [armed, setArmed] = useState(idle);
+  useEffect(() => {
+    if (armed === idle) return;
+    const timer = setTimeout(() => setArmed(idle), ms);
+    return () => clearTimeout(timer);
+  }, [armed, idle, ms]);
+  return [armed, setArmed];
+}
 
 /** A titled block inside an admin sheet. */
 export function Section({ title, aside, children, id }: { title: string; aside?: ReactNode; children: ReactNode; id?: string }) {

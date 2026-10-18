@@ -68,9 +68,12 @@ export async function lockAdmin(): Promise<void> {
   await fetch("/api/admin/lock", { method: "POST", credentials: "same-origin" });
 }
 
+/** The server's answer when ADMIN_PASSWORD_HASH is set and this session has not unlocked. */
+export const isAdminRequired = (status: number, body: unknown): boolean => status === 403 && (body as { error?: string } | null)?.error === "admin_required";
+
 function outcome(status: number, body: AdminResult | null, fallback: string): AdminOutcome {
   const b = body ?? { ok: false, error: fallback };
-  const needsAdmin = status === 403 && (b as { error?: string }).error === "admin_required";
+  const needsAdmin = isAdminRequired(status, b);
   return { ...b, ok: status >= 200 && status < 300 && b.ok !== false, status, needsAdmin };
 }
 
@@ -514,7 +517,7 @@ export const CREATURES: { prefab: string; boss?: boolean }[] = [
 ];
 
 /** World keys the panel explains; others can still be removed from the list. */
-export const WORLD_KEYS: { key: string; boss?: boolean; risky?: boolean }[] = [
+export const WORLD_KEYS: { key: string; boss?: boolean }[] = [
   { key: "defeated_eikthyr", boss: true },
   { key: "defeated_gdking", boss: true },
   { key: "defeated_bonemass", boss: true },
@@ -525,10 +528,10 @@ export const WORLD_KEYS: { key: string; boss?: boolean; risky?: boolean }[] = [
   { key: "killedtroll" },
   { key: "killed_surtling" },
   { key: "killed_bat" },
-  { key: "nobuildcost", risky: true },
-  { key: "nocraftcost", risky: true },
-  { key: "noworkbench", risky: true },
-  { key: "allpiecesunlocked", risky: true },
+  { key: "nobuildcost" },
+  { key: "nocraftcost" },
+  { key: "noworkbench" },
+  { key: "allpiecesunlocked" },
   { key: "teleportall" },
   { key: "nomap" },
   { key: "noportals" },

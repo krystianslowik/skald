@@ -10,7 +10,7 @@ import { createLogStore } from "../../lib/useValheim";
 import { preloadLazyChunks } from "../../test-preload";
 import { emptyAgentState, NOTIFY_KINDS, type AccessState, type AdminStatus, type AgentEvent, type ApiState, type NotifyConfig, type RestoreInfo } from "../../types";
 import { restoreProgress, RestoreSheet } from "./WorldTools";
-import { AdminProvider } from "./AdminContext";
+import { AdminProvider, useAdmin, type Admin } from "./AdminContext";
 import { BRIDGE_PLUGIN_VERSION } from "@server/bridgeplugin";
 
 function fixture(): ApiState {
@@ -328,7 +328,7 @@ describe("admin", () => {
     expect(within(sheet).getByText("View only").compareDocumentPosition(within(sheet).getByRole("textbox", { name: "Broadcast" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(sheet).getByText(/the first action asks for it/)).toBeInTheDocument();
     fireEvent.click(unlock);
-    expect(await screen.findByRole("dialog", { name: "Admin password" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Unlock" })).toBeInTheDocument();
   });
 
   it("says view-only first without the bridge too", async () => {
@@ -604,10 +604,9 @@ describe("admin", () => {
     const sheet = await openAdmin();
     expect(within(sheet).getByText("View only")).toBeInTheDocument();
     fireEvent.click(within(sheet).getByRole("button", { name: "Save the world now" }));
-    const unlock = await screen.findByRole("dialog", { name: "Admin password" });
+    const unlock = await screen.findByRole("dialog", { name: "Unlock" });
     fireEvent.change(within(unlock).getByLabelText("Admin password"), { target: { value: "jarl" } });
     fireEvent.click(within(unlock).getByRole("button", { name: "Unlock" }));
-    fireEvent.click(await within(unlock).findByRole("button", { name: "Continue" }));
     await waitFor(() => expect(calls.filter((c) => c.url === "/api/admin/save")).toHaveLength(2));
     expect(calls.find((c) => c.url === "/api/admin/unlock")!.body).toEqual({ password: "jarl" });
   });
@@ -621,16 +620,145 @@ describe("admin", () => {
     expect(within(sheet).getByRole("button", { name: "Send" })).toBeDisabled();
   });
 
-  it("needs the player's name typed before a ban can be held", async () => {
+  it("bans with the same hold as kick, no name to type", async () => {
     api(status());
     renderDashboard();
     const sheet = await openAdmin();
     fireEvent.click(within(sheet).getAllByRole("button", { name: /Freya/ })[0]!);
     const player = await screen.findByRole("dialog", { name: "Freya" });
-    const ban = within(player).getByRole("button", { name: /Ban Freya/ });
-    expect(ban).toBeDisabled();
-    fireEvent.change(within(player).getByLabelText("To ban, type Freya"), { target: { value: "Freya" } });
-    expect(ban).toBeEnabled();
+    expect(within(player).queryByRole("textbox")).not.toBeInTheDocument();
+    for (const name of [/Kick Freya/, /Ban Freya/]) {
+      const button = within(player).getByRole("button", { name });
+      expect(button).toBeEnabled();
+      // The hold chip shows on phones too.
+      expect(within(button).getByText("Hold")).toBeInTheDocument();
+    }
+  });
+
+  it("says to hold when a hold button is only tapped, and does nothing else", async () => {
+    const calls = api(status());
+    renderDashboard();
+    const sheet = await openAdmin();
+    fireEvent.click(within(sheet).getAllByRole("button", { name: /Freya/ })[0]!);
+    const player = await screen.findByRole("dialog", { name: "Freya" });
+    const kick = within(player).getByRole("button", { name: /Kick Freya/ });
+    fireEvent.pointerDown(kick, { pointerId: 1 });
+    fireEvent.pointerUp(kick, { pointerId: 1 });
+    fireEvent.pointerLeave(kick, { pointerId: 1 });
+    expect(await screen.findAllByText("Press and hold “Kick Freya” to confirm.")).toHaveLength(1);
+    expect(calls.find((c) => c.url === "/api/admin/kick")).toBeUndefined();
+  });
+
+  it("explains the ban in the access list as a hold, not a tap", async () => {
+    api(status());
+    renderDashboard();
+    const sheet = await openAdmin();
+    expect(await within(sheet).findByText(/Make admin \(a tap\) and Ban \(a hold\)/)).toBeInTheDocument();
+  });
+
+  it("sets a world key only on a second tap", async () => {
+    const calls = api(status());
+    renderDashboard();
+    const sheet = await openAdmin();
+    const nomap = await within(sheet).findByRole("switch", { name: "No map" });
+    await waitFor(() => expect(nomap).toBeEnabled());
+    fireEvent.click(nomap);
+    expect(within(sheet).getByText("This changes the game for everyone at once. Tap again to confirm.")).toBeInTheDocument();
+    expect(calls.find((c) => c.url === "/api/admin/globalkey-set")).toBeUndefined();
+    fireEvent.click(nomap);
+    await waitFor(() => expect(calls.find((c) => c.url === "/api/admin/globalkey-set")?.body).toEqual({ key: "nomap" }));
+  });
+
+  it("starts a raid only on a second tap", async () => {
+    const calls = api(status());
+    renderDashboard();
+    const sheet = await openAdmin();
+    fireEvent.click(await within(sheet).findByRole("button", { name: "You are being hunted..." }));
+    const start = within(sheet).getByRole("button", { name: /^Start / });
+    fireEvent.click(start);
+    expect(calls.find((c) => c.url === "/api/admin/event-start")).toBeUndefined();
+    expect(within(sheet).getByRole("button", { name: /^Really start / })).toBe(start);
+    fireEvent.click(start);
+    await waitFor(() => expect(calls.find((c) => c.url === "/api/admin/event-start")?.body).toMatchObject({ name: "wolves" }));
+  });
+
+  it("answers everyone who asked for the one unlock prompt", async () => {
+    api(status({ required: true, unlocked: false }));
+    let admin: Admin | null = null;
+    const Grab = () => {
+      admin = useAdmin();
+      return null;
+    };
+    render(
+      <AdminProvider state={fixture()} online onUnauthorized={() => {}} onShowMap={() => {}}>
+        <Grab />
+      </AdminProvider>,
+    );
+    let first: Promise<boolean>, second: Promise<boolean>;
+    act(() => {
+      first = admin!.unlock();
+      second = admin!.unlock();
+    });
+    const unlock = await screen.findByRole("dialog", { name: "Unlock" });
+    fireEvent.change(within(unlock).getByLabelText("Admin password"), { target: { value: "jarl" } });
+    fireEvent.click(within(unlock).getByRole("button", { name: "Unlock" }));
+    await expect(Promise.all([first!, second!])).resolves.toEqual([true, true]);
+  });
+
+  it("holds a ban longer than a kick, so a kick hold cannot ban", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const calls = api(status());
+      renderDashboard();
+      const sheet = await openAdmin();
+      fireEvent.click(within(sheet).getAllByRole("button", { name: /Freya/ })[0]!);
+      const player = await screen.findByRole("dialog", { name: "Freya" });
+      const ban = within(player).getByRole("button", { name: /Ban Freya/ });
+      fireEvent.pointerDown(ban, { pointerId: 1 });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500);
+      });
+      fireEvent.pointerUp(ban, { pointerId: 1 });
+      expect(calls.find((c) => c.url === "/api/admin/ban")).toBeUndefined();
+      fireEvent.pointerDown(ban, { pointerId: 1 });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2300);
+      });
+      await waitFor(() => expect(calls.find((c) => c.url === "/api/admin/ban")?.body).toEqual({ player: "Freya" }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("asks a view-only session to unlock when a rune is held, then runs it", async () => {
+    let actions = 0;
+    const calls = api(status({ required: true, unlocked: false }));
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn<(url: string, init?: RequestInit) => Promise<Response>>>;
+    const inner = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url, init) => {
+      if (String(url) === "/api/action/restart") {
+        calls.push({ url: String(url), method: "POST", body: undefined, headers: {} });
+        return actions++ === 0 ? Response.json({ ok: false, error: "admin_required", message: "admin session required" }, { status: 403 }) : Response.json({ ok: true, message: "" });
+      }
+      return inner(url, init);
+    });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderDashboard();
+      const rune = await screen.findByRole("button", { name: /Restart server\. Hold/ });
+      fireEvent.pointerDown(rune, { pointerId: 1 });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1700);
+      });
+      const unlock = await screen.findByRole("dialog", { name: "Unlock" });
+      expect(screen.queryByText("admin session required")).not.toBeInTheDocument();
+      fireEvent.change(within(unlock).getByLabelText("Admin password"), { target: { value: "jarl" } });
+      fireEvent.click(within(unlock).getByRole("button", { name: "Unlock" }));
+      await waitFor(() => expect(calls.filter((c) => c.url === "/api/action/restart")).toHaveLength(2));
+      expect(await screen.findAllByText("Accepted")).not.toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

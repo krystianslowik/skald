@@ -13,7 +13,7 @@ import { fillResult } from "./FillSheet";
 import { AdminGlyph } from "./glyphs";
 import { HoldButton } from "./HoldButton";
 import { SkaldVersion } from "../SkaldVersion";
-import { AdminHead, BridgeBanner, Btn, Chip, HealthBar, Section, TargetChips } from "./parts";
+import { AdminHead, BridgeBanner, Btn, Chip, HealthBar, Section, TargetChips, useArmed } from "./parts";
 import { AccessLists, RestoreSection } from "./WorldTools";
 import { CompatRows } from "../Compat";
 
@@ -567,7 +567,15 @@ function Raids({ catalog, picked, onChange }: { catalog: AdminCatalog | null; pi
   const admin = useAdmin()!;
   const [raid, setRaid] = useState<string | null>(null);
   const [target, setTarget] = useState<Target | null>(picked ?? (admin.players[0] ? { player: admin.players[0].name } : null));
+  // A raid hits everyone near the target at once: the first tap arms, the second starts (like a boss spawn).
+  const [confirm, setConfirm] = useArmed(false);
   const off = !!admin.blocker;
+  const start = () => {
+    if (!raid || !target) return;
+    if (!confirm) return setConfirm(true);
+    setConfirm(false);
+    void admin.run("event-start", { name: raid, ...targetBody(target) }, { done: t("admin.raids.started", { raid: raidLabel(raid) }) }).then(onChange);
+  };
   const events = catalog?.events ?? [];
   const cur = catalog?.currentEvent;
   return (
@@ -584,20 +592,20 @@ function Raids({ catalog, picked, onChange }: { catalog: AdminCatalog | null; pi
       )}
       <div className="flex flex-wrap gap-2">
         {events.map((e) => (
-          <Chip key={e} on={raid === e} onClick={() => setRaid(e)}>
+          <Chip key={e} on={raid === e} onClick={() => (setRaid(e), setConfirm(false))}>
             {raidLabel(e)}
           </Chip>
         ))}
       </div>
       <p className="label-caps mb-2 mt-3">{t("admin.raids.near")}</p>
-      <TargetChips value={target} onChange={setTarget} />
-      <Btn
-        primary
-        className="mt-3 w-full"
-        disabled={off || !raid || !target}
-        onClick={() => raid && target && void admin.run("event-start", { name: raid, ...targetBody(target) }, { done: t("admin.raids.started", { raid: raidLabel(raid) }) }).then(onChange)}
-      >
-        {raid ? t("admin.raids.start", { raid: raidLabel(raid) }) : t("admin.raids.pick")}
+      <TargetChips value={target} onChange={(v) => (setTarget(v), setConfirm(false))} />
+      {confirm && (
+        <p role="status" className="mt-3 text-sm text-flame">
+          {t("admin.raids.warn")}
+        </p>
+      )}
+      <Btn primary className={`mt-3 w-full ${confirm ? "ring-2 ring-flame" : ""}`} disabled={off || !raid || !target} onClick={start}>
+        {raid ? (confirm ? t("admin.raids.confirm", { raid: raidLabel(raid) }) : t("admin.raids.start", { raid: raidLabel(raid) })) : t("admin.raids.pick")}
       </Btn>
     </Section>
   );
@@ -626,11 +634,14 @@ export function describeKey(key: string, t: (k: TextKey, v?: Record<string, stri
   return { title: lookup(`gkey.${name}`) ?? name, detail: value };
 }
 
-/** Global keys as switches, explained; boss keys are held to remove, risky ones confirmed. */
+/**
+ * Global keys as switches, explained. Each one changes the live game for
+ * everyone at once, so every switch takes a second tap; boss keys are held to remove.
+ */
 function WorldKeys({ catalog, onChange }: { catalog: AdminCatalog | null; onChange: () => void }) {
   const { t, lookup } = useI18n();
   const admin = useAdmin()!;
-  const [confirm, setConfirm] = useState<string | null>(null);
+  const [confirm, setConfirm] = useArmed<string | null>(null);
   const keys = useMemo(() => new Set((catalog?.globalKeys ?? []).map((k) => k.toLowerCase())), [catalog]);
   const off = !!admin.blocker || !catalog;
   const set = (key: string, on: boolean) => void admin.run(on ? "globalkey-set" : "globalkey-remove", { key }, { done: t(on ? "admin.keys.setDone" : "admin.keys.removed", { key }) }).then(onChange);
@@ -638,7 +649,7 @@ function WorldKeys({ catalog, onChange }: { catalog: AdminCatalog | null; onChan
   return (
     <Section title={t("admin.keys.title")}>
       <ul className="divide-y divide-iron/25">
-        {WORLD_KEYS.map(({ key, boss, risky }) => {
+        {WORLD_KEYS.map(({ key, boss }) => {
           const on = keys.has(key);
           const label = boss ? (lookup(`boss.${key}`) ?? key) : (lookup(`gkey.${key}`) ?? key);
           const why = lookup(`gkey.${key}.why`) ?? (boss ? t("admin.keys.bossWhy", { boss: label }) : "");
@@ -649,7 +660,7 @@ function WorldKeys({ catalog, onChange }: { catalog: AdminCatalog | null; onChan
                   {label} <span className="font-mono text-[0.6875rem] font-normal text-ash">{key}</span>
                 </p>
                 {why && <p className="text-xs leading-snug text-ash">{why}</p>}
-                {confirm === key && <p className="mt-1 text-xs font-bold text-flame">{t("admin.keys.riskyConfirm")}</p>}
+                {confirm === key && <p role="status" className="mt-1 text-xs font-bold text-flame">{t("admin.keys.riskyConfirm")}</p>}
               </div>
               {on && boss ? (
                 <HoldButton disabled={off} onConfirm={() => set(key, false)}>
@@ -663,11 +674,11 @@ function WorldKeys({ catalog, onChange }: { catalog: AdminCatalog | null; onChan
                   aria-label={label}
                   disabled={off}
                   onClick={() => {
-                    if (!on && risky && confirm !== key) return setConfirm(key);
+                    if (confirm !== key) return setConfirm(key);
                     setConfirm(null);
                     set(key, !on);
                   }}
-                  className={`press relative h-8 w-14 shrink-0 rounded-full border transition-colors disabled:opacity-40 coarse:h-11 coarse:w-18 ${on ? "border-select-hi/70 bg-select/50" : confirm === key ? "border-flame bg-ember/30" : "border-iron/60 bg-black/40"}`}
+                  className={`press relative h-8 w-14 shrink-0 rounded-full border transition-colors disabled:opacity-40 coarse:h-11 coarse:w-18 ${confirm === key ? "ring-2 ring-flame" : ""} ${on ? "border-select-hi/70 bg-select/50" : confirm === key ? "border-flame bg-ember/30" : "border-iron/60 bg-black/40"}`}
                 >
                   <span className={`absolute top-1/2 h-6 w-6 -translate-y-1/2 rounded-full bg-bone shadow-sm transition-[left] coarse:h-8 coarse:w-8 ${on ? "left-[calc(100%-1.75rem)] coarse:left-[calc(100%-2.25rem)]" : "left-1"}`} />
                 </button>
