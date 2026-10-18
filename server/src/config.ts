@@ -42,6 +42,8 @@ export interface Config {
   mapSpoilers: boolean;
   /** Mock mode only: how the fake bridge behaves (on, off, disabled, untested). */
   mockBridge: string;
+  /** MOCK_COMPAT: the mock's compatibility check, ok, warn, fail, pending or none. */
+  mockCompat: string;
   /** Discord webhook for notifications; empty means off. A secret: never logged. */
   discordWebhookUrl: string;
   /** Which notifications go to Discord (DISCORD_NOTIFY); all when unset. */
@@ -159,6 +161,7 @@ export function loadConfig(env: Env = process.env): Config {
     publicOrigins: parsePublicOrigins(opt("PUBLIC_ORIGIN", "")),
     mapSpoilers: ["1", "true", "yes", "on"].includes(opt("MAP_SPOILERS", "false").toLowerCase()),
     mockBridge: opt("MOCK_BRIDGE", "on").toLowerCase(),
+    mockCompat: opt("MOCK_COMPAT", "ok").toLowerCase(),
     discordWebhookUrl,
     discordNotify,
     metricsBind: opt("METRICS_BIND", "").trim(),

@@ -19,8 +19,9 @@ cd ../server && bun install && bun run dev   # mock server, password "ognisko"
 
 `bun run dev` sets `MOCK_AGENT=1`: a fake agent with a month of history,
 players walking around the map, and a fake bridge (`MOCK_BRIDGE=off`,
-`untested` or `disabled` shows the other panel states). No game files are
-needed. For UI work, `cd web && npm run dev` runs Vite against it.
+`untested` or `disabled` shows the other panel states), and a compatibility
+check after a game update (`MOCK_COMPAT=warn`, `fail`, `pending` or `none`;
+`ok` by default). No game files are needed. For UI work, `cd web && npm run dev` runs Vite against it.
 
 | Directory | What it is |
 |---|---|

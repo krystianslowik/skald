@@ -42,6 +42,9 @@ const (
 	// KindAbandoned is "Destroying abandoned non persistent zdo U:N owner U":
 	// the owner's peer is gone. Logged once per object, in bursts.
 	KindAbandoned = "abandoned"
+	// KindWorldLoaded is "Loading: Done. Total seconds sinze ZNet start": the
+	// world is loaded and the server takes players.
+	KindWorldLoaded = "world_loaded"
 )
 
 // Platform types. The raw platform user ID is never kept.
@@ -128,6 +131,11 @@ var table = []rule{
 	{regexp.MustCompile(`Valheim version: (\S+) \(network version (\d+)\)`), func(s []string) []Match {
 		n, _ := strconv.Atoi(s[2])
 		return []Match{{Kind: KindVersion, Version: s[1], NetworkVersion: n}}
+	}},
+	// The end of world loading (the game's own spelling, "sinze"); the
+	// world's name is on an earlier line and never kept.
+	{regexp.MustCompile(`Loading: Done\. Total seconds sin[cz]e ZNet start`), func([]string) []Match {
+		return []Match{{Kind: KindWorldLoaded}}
 	}},
 	{regexp.MustCompile(`Session ".*" registered with join code (\d{6})`), func(s []string) []Match {
 		return []Match{{Kind: KindJoinCode, Code: s[1]}, {Kind: KindPlayfab, State: PlayfabOK}}

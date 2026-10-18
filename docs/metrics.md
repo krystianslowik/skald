@@ -28,6 +28,13 @@ The agent serves the Prometheus text format on `:9464/metrics`:
 | `valheim_agent_last_log_timestamp_seconds` | gauge | | Last log line the agent received |
 | `valheim_map_build_seconds` | gauge | | How long the last world map build took. Only once a map was built |
 | `valheim_map_generation` | gauge | | Save generation the world map was last built from |
+| `valheim_map_containers_unreadable` | gauge | | Containers in the save whose inventory the agent could not read; above 0 after a game update means the save format changed |
+| `valheim_map_chunks_unreadable` | gauge | | Chunk files of the newest save that did not parse |
+| `skald_compat_running` | gauge | | 1 while a [compatibility check](configuration.md#compatibility-check) waits for the world or the map |
+| `skald_compat_status` | gauge | `status`, `build` | Overall result of the last check: `ok`, `warn` or `fail` (current only). Only once a check has run |
+| `skald_compat_check_status` | gauge | `check`, `status`, `reason` | One per part (`version`, `save`, `terrain`, `bridge`, `logs`) with its status (`ok`, `warn`, `fail`, `pending`, `skipped`) and reason code (current only) |
+| `skald_compat_checked_timestamp_seconds` | gauge | | When the last check finished |
+| `skald_compat_updated_from_info` | gauge | `build`, `previous` | Always 1; the game build the current one replaced. Only after an update |
 | `valheim_terrain_tiles_total` | counter | `result` | Terrain tiles answered since agent start: `cache`, `bridge` (sampled by the bridge), `grid` (cut from the Job's grid), `derived` (downsampled from the level below), `error`, `dropped` (the viewer left or moved on before the bridge sampled it) |
 | `valheim_terrain_bridge_sample_seconds_total` | counter | | Time the bridge plugin spent sampling terrain tiles (its own measurement, without rests) |
 | `valheim_terrain_cache_bytes` | gauge | | Bytes of terrain tiles in the agent's cache |
@@ -42,6 +49,27 @@ panel run different releases:
 
 ```promql
 count(count by (version) (skald_build_info)) > 1
+```
+
+An alert when the check after a game update finds something broken, or when
+the map cannot read containers any more:
+
+```yaml
+- alert: SkaldCompatibilityFailing
+  expr: skald_compat_status{status="fail"} == 1
+  for: 10m
+  labels:
+    severity: warning
+  annotations:
+    summary: "Skald does not fully work with game build {{ $labels.build }}"
+    description: "A part of the compatibility check fails; the admin sheet shows which and what to do."
+- alert: ValheimContainersUnreadable
+  expr: valheim_map_containers_unreadable > 0
+  for: 30m
+  labels:
+    severity: warning
+  annotations:
+    summary: "{{ $value }} containers cannot be read from the save"
 ```
 
 [`deploy/kubernetes/servicemonitor.yaml`](../deploy/kubernetes/servicemonitor.yaml)

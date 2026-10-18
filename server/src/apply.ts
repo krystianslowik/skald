@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentState, Platform } from "./types";
+import type { AgentEvent, AgentState, CompatResult, Platform } from "./types";
 
 /**
  * Applies one live agent event to the last known state. Used by the hub (so
@@ -39,6 +39,11 @@ export function applyEvent<S extends AgentState>(s: S, ev: AgentEvent): S {
           netStats: { connections: Number(d.connections) || 0, zdos: Number(d.zdos) || 0, sent: Number(d.sent) || 0, recv: Number(d.recv) || 0 },
         },
       };
+    case "compat": {
+      // The agent sends the last result with every step: the one before while it runs.
+      const result = d.result && typeof d.result === "object" ? (d.result as CompatResult) : (s.compat?.result ?? null);
+      return { ...s, compat: { running: d.running === true, result } };
+    }
     case "playfab":
       return { ...s, server: { ...s.server, playfab: String(d.state) as AgentState["server"]["playfab"] } };
     case "settings_changed":

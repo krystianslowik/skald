@@ -80,10 +80,16 @@ type Builder struct {
 	buildMu sync.Mutex
 	cache   map[chunkID]*cacheEntry
 	lastDB2 *db2Data
+	// next is the health of the build in progress, published with its snapshot.
+	next Health
+	// failed is the chunks of the current index whose file did not parse
+	// (they keep their last good contents, if any).
+	failed map[chunkID]bool
 
 	mu        sync.RWMutex
 	cur       *Encoded
 	lastBuild float64
+	health    Health
 }
 
 func New(opt Options) *Builder {
@@ -93,7 +99,7 @@ func New(opt Options) *Builder {
 	if opt.Now == nil {
 		opt.Now = time.Now
 	}
-	return &Builder{opt: opt, cache: map[chunkID]*cacheEntry{}}
+	return &Builder{opt: opt, cache: map[chunkID]*cacheEntry{}, failed: map[chunkID]bool{}}
 }
 
 // Enabled is false when no world is configured.
@@ -149,14 +155,18 @@ func (b *Builder) Refresh() (bool, error) {
 	defer b.buildMu.Unlock()
 	gen, ok := latestOK(b.opt.Dir)
 	if !ok {
+		b.setFailure(FailNoSave)
 		return false, errors.New("no finished save generation")
 	}
 	if cur := b.Current(); cur != nil && cur.Generation == gen {
+		// A failure before (a save marker missing for a moment) is over.
+		b.setFailure("")
 		return false, nil
 	}
 	start := time.Now()
 	snap, pieces, nature, err := b.build(gen)
 	if err != nil {
+		b.setFailure(FailIndex)
 		return false, err
 	}
 	snap.Stats.BuildSeconds = math.Round(time.Since(start).Seconds()*1000) / 1000
@@ -168,6 +178,7 @@ func (b *Builder) Refresh() (bool, error) {
 	b.mu.Lock()
 	b.cur = enc
 	b.lastBuild = time.Since(start).Seconds()
+	b.health = b.next
 	b.mu.Unlock()
 	b.opt.Logger.Info("world map built", "generation", gen, "seconds", snap.Stats.BuildSeconds,
 		"chunksParsed", snap.Stats.ChunksParsed, "chunksFailed", snap.Stats.ChunksFailed, "zdos", snap.Stats.ZDOs)
@@ -280,10 +291,12 @@ func (b *Builder) build(gen int) (*Snapshot, *Pieces, *Nature, error) {
 		if err != nil {
 			// Keep whatever this chunk held last time; a later save rewrites it.
 			snap.Stats.ChunksFailed++
+			b.failed[row.id] = true
 			b.opt.Logger.Warn("world map: chunk skipped", "chunk", filepath.Base(chunkFile(dir, row)), "err", err.Error())
 			continue
 		}
 		snap.Stats.ChunksParsed++
+		delete(b.failed, row.id)
 		if cd.noPrefab > 0 {
 			b.opt.Logger.Debug("world map: inventory items without a prefab skipped", "chunk", filepath.Base(chunkFile(dir, row)), "items", cd.noPrefab)
 		}
@@ -297,10 +310,17 @@ func (b *Builder) build(gen int) (*Snapshot, *Pieces, *Nature, error) {
 			delete(b.cache, id)
 		}
 	}
+	for id := range b.failed {
+		if !seen[id] {
+			delete(b.failed, id)
+		}
+	}
 
+	h := Health{Generation: gen, Chunks: len(rows), ChunksUnreadable: len(b.failed)}
 	if d, err := readDB2(base + ".db2"); err == nil {
 		b.lastDB2 = d
 	} else {
+		h.LocationsUnreadable = true
 		b.opt.Logger.Warn("world map: locations not read", "err", err.Error())
 	}
 
@@ -308,6 +328,8 @@ func (b *Builder) build(gen int) (*Snapshot, *Pieces, *Nature, error) {
 	if m, err := world.Read(dir); err == nil {
 		snap.Meta.SeedName, snap.Meta.Seed, snap.Meta.WorldGenVersion = m.SeedName, m.Seed, m.WorldGenVersion
 		snap.Meta.NetTime, snap.Meta.Day, snap.Meta.SavedAt = m.NetTime, m.Day, m.SavedAt
+	} else {
+		h.MetaUnreadable = true
 	}
 
 	chunks := make([]*chunkData, 0, len(b.cache))
@@ -315,6 +337,10 @@ func (b *Builder) build(gen int) (*Snapshot, *Pieces, *Nature, error) {
 		chunks = append(chunks, e.data)
 	}
 	found := assemble(snap, chunks, b.lastDB2, b.opt.ShowNames)
+	h.ContainersUnreadable, h.ContainerReason = snap.Stats.ContainersUnreadable, containerReason(chunks)
+	h.BuiltAt = b.opt.Now().UTC()
+	// Published by Refresh with the snapshot, never for a build that failed to encode.
+	b.next = h
 	return snap, buildPieces(chunks), buildNature(chunks, found), nil
 }
 
@@ -342,6 +368,7 @@ func assemble(snap *Snapshot, chunks []*chunkData, db *db2Data, showNames bool) 
 	var stores []rawStore
 	for _, c := range chunks {
 		snap.Stats.ZDOs += c.zdos
+		snap.Stats.ContainersUnreadable += c.badInventory
 		for k, v := range c.density {
 			density[k] += v
 		}

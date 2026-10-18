@@ -776,6 +776,11 @@ export function createApp(deps: AppDeps): Hono {
 
   app.get("/api/admin/restore", (c) => passTools(c, { op: "restore-info" }));
 
+  // ---- admin: the compatibility check -----------------------------------------
+  // Everyone signed in sees the result (/api/state `compat`); running it again
+  // is an admin's, audited by the agent. 202: the result comes as a live event.
+  app.post("/api/admin/compat/run", (c) => passTools(c, { op: "compat-run", actor: actorFor(c) }));
+
   // ---- admin: Discord notifications ------------------------------------------
   // Behind the admin middleware. The webhook URL is a secret: it comes in on a
   // PUT and only ever goes out masked; it is never logged and never becomes an

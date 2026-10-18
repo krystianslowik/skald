@@ -72,6 +72,9 @@ func TestMatchMsg(t *testing.T) {
 	}{
 		{"version", "Valheim version: l-1.0.17 (network version 40)",
 			[]Match{{Kind: KindVersion, Version: "l-1.0.17", NetworkVersion: 40}}},
+		{"world loaded", "Loading: Done. Total seconds sinze ZNet start: 21.457775, Genloc duration: 17579.497 ms, (Total genloc time 17579.497 ms)",
+			[]Match{{Kind: KindWorldLoaded}}},
+		{"scene loading done is not the world", "Loading: Done, Total time: -4.229639", nil},
 		{"console version is not the version line", "Console: Valheim l-1.0.17 (network version 40)", nil},
 		{"registered", `Session "My Valheim" registered with join code 482915`,
 			[]Match{{Kind: KindJoinCode, Code: "482915"}, {Kind: KindPlayfab, State: PlayfabOK}}},
@@ -144,7 +147,7 @@ func TestStartupLog(t *testing.T) {
 	}
 	defer f.Close()
 
-	var versions, codes, counts []Match
+	var versions, codes, counts, loaded []Match
 	var lastPlayfab string
 	programs := map[string]int{}
 	sc := bufio.NewScanner(f)
@@ -162,6 +165,8 @@ func TestStartupLog(t *testing.T) {
 				counts = append(counts, m)
 			case KindPlayfab:
 				lastPlayfab = m.State
+			case KindWorldLoaded:
+				loaded = append(loaded, m)
 			case KindCharacter, KindWorldSaved, KindWorldBackup, KindRaid, KindNetStats, KindPlatform, KindSocketLost, KindAbandoned:
 				t.Errorf("unexpected %s match in startup log", m.Kind)
 			}
@@ -172,6 +177,9 @@ func TestStartupLog(t *testing.T) {
 	}
 	if len(versions) != 1 || versions[0].Version != "l-1.0.17" || versions[0].NetworkVersion != 40 {
 		t.Errorf("versions = %+v", versions)
+	}
+	if len(loaded) != 1 {
+		t.Errorf("world loaded = %+v", loaded)
 	}
 	if len(codes) != 2 || codes[0].Code != "482915" || codes[1].Code != "482915" {
 		t.Errorf("join codes = %+v", codes)

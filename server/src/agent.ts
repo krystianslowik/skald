@@ -45,7 +45,8 @@ export type ToolsRequest =
   | { op: "access" }
   | { op: "access-change"; list: AccessListName; change: AccessOp; body: Record<string, unknown>; actor: string }
   | { op: "restore-info" }
-  | { op: "restore"; body: Record<string, unknown>; actor: string };
+  | { op: "restore"; body: Record<string, unknown>; actor: string }
+  | { op: "compat-run"; actor: string };
 
 /** Everything the web tier needs from the agent; implemented over HTTP and by the mock. */
 export interface AgentSource {
@@ -230,7 +231,7 @@ export class HttpAgent implements AgentSource {
   }
 
   async tools(req: ToolsRequest): Promise<Proxied> {
-    const path = req.op === "access" ? "/access" : req.op === "access-change" ? `/access/${req.list}/${req.change}` : "/restore";
+    const path = req.op === "access" ? "/access" : req.op === "access-change" ? `/access/${req.list}/${req.change}` : req.op === "compat-run" ? "/compat/run" : "/restore";
     const headers: Record<string, string> = this.headers();
     let body: string | undefined;
     if (req.op === "access-change" || req.op === "restore") {
@@ -238,8 +239,10 @@ export class HttpAgent implements AgentSource {
       headers["X-Skald-Actor"] = req.actor;
       body = JSON.stringify(req.body);
     }
+    if (req.op === "compat-run") headers["X-Skald-Actor"] = req.actor;
+    const method = body || req.op === "compat-run" ? "POST" : "GET";
     // The ban list may go through the bridge (8 s); a restore's checks read the archive's directory.
-    const res = await this.fetchImpl(`${this.baseUrl}${path}`, { method: body ? "POST" : "GET", headers, body, signal: AbortSignal.timeout(20_000) });
+    const res = await this.fetchImpl(`${this.baseUrl}${path}`, { method, headers, body, signal: AbortSignal.timeout(20_000) });
     let json: unknown;
     try {
       json = await res.json();

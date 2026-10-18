@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Added
+
+- Skald now checks itself after every game update. When the server starts with a game build it has not seen, Skald waits for the world to load and the map to be built, then checks what it reads from that build: the version, the world save (unreadable chunks and chests), the terrain, the admin bridge (reachable, tested on this build) and the log lines it relies on. Right after an update the newest save is still the old build's, so the save is checked again after the first save on the new build. The result shows in a new section of the admin sheet, with a button for admins to check again, and when something warns or fails everyone with the panel sees a notice at the top that each device can dismiss. Discord gets a short summary of every game update's check under the new `compat` kind; if you picked kinds in the panel before, tick it there. The agent also exports the result as metrics, with an example alert in the docs (#141).
+- **Operators:** this is in the agent, so deploying it restarts the game. The result is kept in `SETTINGS_DIR/compat.json`.
+
 ### Fixed
 
 - Chests, carts and ships the game saved after its update to build l-1.0.20 showed as unreadable on the map. That build saves inventories with a new version number (110) but the same layout, and the map now reads both. The agent also logs a warning naming the reason when a container cannot be read, so a future format change shows up in the log instead of only on the map.

@@ -58,6 +58,9 @@ func TestStartupLogFinalState(t *testing.T) {
 	if s.LastLogAt == nil {
 		t.Error("lastLogAt not set")
 	}
+	if s.VersionAt == nil || s.WorldLoadedAt == nil || s.JoinCodeSeenAt == nil || s.WorldLoadedAt.Before(*s.VersionAt) {
+		t.Errorf("startup marks = version %v, world loaded %v, join code %v", s.VersionAt, s.WorldLoadedAt, s.JoinCodeSeenAt)
+	}
 
 	got := types(drain(h))
 	want := map[string]int{"log": n, "version": 1, "join_code": 1, "playfab": 2} // playfab: connecting, then ok (deduped)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/krystianslowik/skald/agent/internal/access"
 	"github.com/krystianslowik/skald/agent/internal/bridge"
+	"github.com/krystianslowik/skald/agent/internal/compat"
 	"github.com/krystianslowik/skald/agent/internal/events"
 	"github.com/krystianslowik/skald/agent/internal/icons"
 	"github.com/krystianslowik/skald/agent/internal/settings"
@@ -58,6 +59,9 @@ type Options struct {
 	// Access edits adminlist.txt and bannedlist.txt in ConfigDir; nil leaves
 	// the /access routes unregistered (404).
 	Access *access.Store
+	// Compat is the compatibility check; nil leaves /state.compat null and
+	// the /compat routes unregistered (404).
+	Compat *compat.Checker
 	Logger *slog.Logger
 	// PingEvery is the SSE keepalive interval; 15 s when zero.
 	PingEvery time.Duration
@@ -141,6 +145,10 @@ func (s *Server) Handler() http.Handler {
 	if s.opt.Access != nil {
 		mux.HandleFunc("GET /access", s.accessGet)
 		mux.HandleFunc("POST /access/{list}/{op}", s.accessChange)
+	}
+	if s.opt.Compat != nil {
+		mux.HandleFunc("GET /compat", s.compatGet)
+		mux.HandleFunc("POST /compat/run", s.compatRun)
 	}
 	mux.HandleFunc("GET /restore", s.restoreGet)
 	mux.HandleFunc("POST /restore", s.restorePost)
