@@ -4,7 +4,7 @@
 // it is tested without a canvas.
 
 import type { ApiNature, NatureCategory } from "../types";
-import { ChunkLoader } from "./pieceload";
+import { ChunkLoader, type Lanes } from "./pieceload";
 
 export interface NatureItem {
   category: NatureCategory;
@@ -39,8 +39,8 @@ export function decodeNature(body: unknown): NatureItem[] | null {
 
 /** Nature is fetched in squares this many metres a side: it is denser than floor plans. */
 export const NATURE_CHUNK = 256;
-/** Below this scale (px per metre) nature is not fetched; it fades in from FADE_FROM to FADE_FULL. */
-export const NATURE_MIN_SCALE = 1;
+/** From this scale (px per metre) on nature is fetched: a little before it starts to fade in, from FADE_FROM to FADE_FULL. */
+export const NATURE_MIN_SCALE = 0.7;
 export const NATURE_FADE_FROM = 0.8;
 export const NATURE_FADE_FULL = 1.5;
 /** Pickables show from this scale on. */
@@ -48,8 +48,8 @@ export const PICKABLE_SCALE = 8;
 /** Below this scale crowns are a woodland mass; from here on each tree shows its own rim and trunk. */
 export const TREE_DETAIL_SCALE = 4;
 
-export function natureLoader(fetchImpl?: typeof fetch, clock?: () => number): ChunkLoader<NatureItem> {
-  return new ChunkLoader({ path: "/api/nature", chunk: NATURE_CHUNK, decode: decodeNature }, fetchImpl, clock);
+export function natureLoader(fetchImpl?: typeof fetch, clock?: () => number, lanes?: Lanes): ChunkLoader<NatureItem> {
+  return new ChunkLoader({ path: "/api/nature", chunk: NATURE_CHUNK, decode: decodeNature }, fetchImpl, clock, lanes);
 }
 
 /** Which map layer an item belongs to: ore and pickables are resources, the rest is nature. */

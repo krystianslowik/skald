@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- Trees, rocks and floor plans on the map show a fraction of a second after you lift your finger, instead of several seconds later, and the area just around the view is loaded too, so a short pan finds them already there. A dropped connection no longer leaves a patch of the map without trees until you move it: the missing piece is asked for again by itself within seconds. Zooming to just where the woods start to show no longer leaves bare land, and reopening the map shows what was already loaded at once.
+
 ## [2026.10.15] - 2026-10-18
 
 ### Fixed

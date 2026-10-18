@@ -28,8 +28,9 @@ import { bandCentre, bounceGlide, flingOffset, glideStep, glideTarget, inertiaSt
 import { MapRenderer, type MapTileStats, type Relief } from "../../lib/maprender";
 import type { GLStats } from "../../lib/mapgl";
 import type { TilesDoc } from "../../lib/terraintiles";
-import { NATURE_MIN_SCALE, natureLoader, type NatureItem } from "../../lib/nature";
-import { PieceLoader, type ChunkLoader } from "../../lib/pieceload";
+import { NATURE_CHUNK, NATURE_MIN_SCALE, natureLoader, type NatureItem } from "../../lib/nature";
+import { chunksFor } from "../../lib/pieces";
+import { Lanes, PieceLoader, type LoaderStats } from "../../lib/pieceload";
 import { PLAN_MIN_SCALE, viewBox, type StoreyInfo, type StoreyPick } from "../../lib/planrender";
 import type { ApiMap } from "../../types";
 
@@ -39,6 +40,7 @@ export interface MapStats {
   ahead: View | null;
   gl: GLStats | null;
   tiles: MapTileStats | null;
+  overlays: { plans: LoaderStats; nature: LoaderStats };
 }
 
 declare global {
@@ -76,7 +78,20 @@ const TWO_TAP_MS = 300;
 /** A finger held this long without moving is a long press. */
 const LONG_PRESS_MS = 520;
 /** Chunks of floor plans and nature arriving within this time are drawn together. */
-const ARRIVAL_MS = 120;
+const ARRIVAL_MS = 60;
+/** Floor plans and nature for a still view are asked for at most this often (a wheel zoom is a run of still views). */
+const ASK_MS = 100;
+/** A view touching more nature chunks than this gets no ring of them (a wide desktop window zoomed out). */
+const NATURE_RING_MAX = 30;
+
+/**
+ * Floor plans and nature, kept for the page's life and keyed by the world
+ * and its save generation: a map opened again draws what it had at once. They share the
+ * request slots, plans first.
+ */
+const lanes = new Lanes();
+const planLoader = new PieceLoader(undefined, undefined, lanes);
+const natureLoad = natureLoader(undefined, undefined, lanes);
 /** The view is remembered for the browser session (per tab). */
 const VIEW_KEY = "skald.map.view";
 const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
@@ -170,11 +185,41 @@ export const MapCanvas = forwardRef<
   // Fingers (or the mouse button) are down on the map.
   const gesturing = useRef(false);
   const last = useRef(0);
-  const props = useRef({ markers, layers, selected, highlighted, onAnchor, onFrame, coarse, reduced, remember, storey, onStoreys, generation: map.meta.generation });
-  props.current = { markers, layers, selected, highlighted, onAnchor, onFrame, coarse, reduced, remember, storey, onStoreys, generation: map.meta.generation };
-  const loader = useRef<PieceLoader | null>(null);
-  const natureLoad = useRef<ChunkLoader<NatureItem> | null>(null);
+  const props = useRef({ markers, layers, selected, highlighted, onAnchor, onFrame, coarse, reduced, remember, storey, onStoreys, interactive, save: `${map.meta.seed}:${map.meta.generation}` });
+  props.current = { markers, layers, selected, highlighted, onAnchor, onFrame, coarse, reduced, remember, storey, onStoreys, interactive, save: `${map.meta.seed}:${map.meta.generation}` };
   const reported = useRef<string | null>(null);
+
+  const asked = useRef({ at: -Infinity, key: "" });
+  const askTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Floor plans and nature for the view, or for where the motion in flight
+   * will land: asked for as soon as the fingers lift, whatever the terrain
+   * is still loading or fading, and again whenever that view changes.
+   */
+  const askOverlays = useCallback(() => {
+    const p = props.current;
+    if (!p.interactive || gesturing.current) return;
+    const v = ahead.current ?? view.current;
+    const plans = p.layers.buildings && v.scale >= PLAN_MIN_SCALE;
+    const woods = (p.layers.nature || p.layers.resources) && v.scale >= NATURE_MIN_SCALE;
+    const key = `${p.save}:${plans ? 1 : 0}${woods ? 1 : 0}:${Math.round(v.cx)},${Math.round(v.cz)},${v.scale.toPrecision(4)},${v.w}x${v.h}`;
+    if (key === asked.current.key) return;
+    const wait = asked.current.at + ASK_MS - performance.now();
+    if (wait > 0) {
+      askTimer.current ??= setTimeout(() => {
+        askTimer.current = null;
+        askOverlays();
+      }, wait);
+      return;
+    }
+    asked.current = { at: performance.now(), key };
+    // The view and a ring of chunks round it, so a short pan finds them loaded; not for nature on a view so wide the ring would double what it fetches.
+    const box = viewBox(v);
+    if (plans) planLoader.want(box, p.save, 1);
+    else planLoader.drop();
+    if (woods) natureLoad.want(box, p.save, chunksFor(box, NATURE_CHUNK).length > NATURE_RING_MAX ? 0 : 1);
+    else natureLoad.drop();
+  }, []);
 
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draw = useCallback((quality: "fast" | "full" = "fast", t0?: number) => {
@@ -185,6 +230,7 @@ export const MapCanvas = forwardRef<
     // Fingers need wider clusters and fewer, larger labels on a small screen.
     const labels = p.coarse ? { max: Math.round(Math.max(8, Math.min(40, (v.w * v.h) / 9000))), px: 13 } : { max: 160, px: 12 };
     const moving = gesturing.current || fling.current !== null || zfling.current !== null || glide.current !== null;
+    askOverlays();
     const animating = r.draw(
       { view: v, layers: p.layers, markers: p.markers, selected: p.selected?.id ?? null, highlighted: p.highlighted, hovered: hovered.current, cluster: p.coarse ? 30 : 24, labels, reduced: p.reduced, storey: p.storey, ahead: ahead.current, moving, t0 },
       quality,
@@ -196,10 +242,7 @@ export const MapCanvas = forwardRef<
     if (quality === "fast") idle.current = setTimeout(() => draw("full"), 140);
     else {
       if (p.remember) storeView(v);
-      // Settled: floor plans for what the cached map covers, and the floor switcher's base.
-      if (p.layers.buildings && v.scale >= PLAN_MIN_SCALE) loader.current?.want(viewBox({ ...v, w: v.w * 1.5, h: v.h * 1.5 }, 8), String(p.generation));
-      // Nature is denser: only the view and a little round it.
-      if ((p.layers.nature || p.layers.resources) && v.scale >= NATURE_MIN_SCALE) natureLoad.current?.want(viewBox({ ...v, w: v.w * 1.2, h: v.h * 1.2 }, 8), String(p.generation));
+      // Settled: the floor switcher's base.
       const info = r.storeys(v, p.layers);
       const key = info ? `${info.base}:${info.storeys}:${info.hasRoof ? 1 : 0}:${info.main}` : "";
       if (key !== reported.current) {
@@ -217,7 +260,7 @@ export const MapCanvas = forwardRef<
       }
     }
     p.onFrame?.();
-  }, []);
+  }, [askOverlays]);
 
   const tick = useCallback(
     (now: number) => {
@@ -388,7 +431,7 @@ export const MapCanvas = forwardRef<
     return () => renderer.current?.setTiles(null);
   }, [tiles, schedule]);
 
-  // Floor plans and nature: fetched as the view settles close in. Chunks
+  // Floor plans and nature: fetched once the fingers lift, close in. Chunks
   // arrive one by one, and each full redraw of the map costs a frame or more
   // on a phone: what arrives within ARRIVAL_MS is drawn together, and in the
   // middle of a move only by the move's own frames.
@@ -398,25 +441,27 @@ export const MapCanvas = forwardRef<
     arrival.current = setTimeout(() => {
       arrival.current = null;
       const r = renderer.current;
-      if (loader.current) r?.setPieces(loader.current.pieces);
-      if (natureLoad.current) r?.setNature(natureLoad.current.loaded);
+      r?.setPieces(planLoader.pieces);
+      r?.setNature(natureLoad.loaded);
       if (frame.current === null) draw("full");
     }, ARRIVAL_MS);
   }, [draw]);
   useEffect(() => {
-    const l = (loader.current ??= new PieceLoader());
-    l.onChange = () => {
+    // The dashboard's still preview draws no floor plans or nature of its own.
+    if (!interactive) return;
+    const plans = planLoader.subscribe(() => {
       // The switcher's base may have changed with what arrived: ask again on the next settle.
       reported.current = null;
       arrived();
-    };
-    const n = (natureLoad.current ??= natureLoader());
-    n.onChange = arrived;
+    });
+    const woods = natureLoad.subscribe(arrived);
+    // Opened again: what was loaded before is drawn at once.
+    if (planLoader.loaded.size || natureLoad.loaded.size) arrived();
     return () => {
-      l.onChange = null;
-      n.onChange = null;
+      plans();
+      woods();
     };
-  }, [arrived]);
+  }, [arrived, interactive]);
 
   // Item icons for the contents strips under containers, once the sheet has decoded.
   const iconSheet = useIconSheet();
@@ -478,7 +523,7 @@ export const MapCanvas = forwardRef<
     const stats = (): MapStats => {
       const r = renderer.current;
       const a = ahead.current;
-      return { view: { ...view.current }, ahead: a ? { ...a } : null, gl: r?.glStats ? { ...r.glStats } : null, tiles: r?.tileStats(view.current) ?? null };
+      return { view: { ...view.current }, ahead: a ? { ...a } : null, gl: r?.glStats ? { ...r.glStats } : null, tiles: r?.tileStats(view.current) ?? null, overlays: { plans: planLoader.stats(), nature: natureLoad.stats() } };
     };
     window.__mapStats = stats;
     return () => {
@@ -495,6 +540,15 @@ export const MapCanvas = forwardRef<
       if (frame.current !== null) cancelAnimationFrame(frame.current);
       if (idle.current) clearTimeout(idle.current);
       if (arrival.current) clearTimeout(arrival.current);
+      arrival.current = null;
+      if (askTimer.current) clearTimeout(askTimer.current);
+      askTimer.current = null;
+      // What has loaded stays for the next map; nothing more is fetched or retried for this one.
+      if (props.current.interactive) {
+        planLoader.close();
+        natureLoad.close();
+      }
+      asked.current = { at: -Infinity, key: "" };
       // Woods still being built, or a coast still being traced, must not draw a closed map.
       if (renderer.current) renderer.current.onChange = null;
       renderer.current?.dispose();
@@ -714,7 +768,11 @@ export const MapCanvas = forwardRef<
       if (!pts.has(e.pointerId)) return;
       const p = local(e);
       pts.delete(e.pointerId);
-      if (pts.size === 0) gesturing.current = false;
+      if (pts.size === 0) {
+        gesturing.current = false;
+        // A frame once the release is handled: floor plans and nature for where the view lands are asked for there.
+        schedule();
+      }
       cancelPress();
       if (pressed) {
         // The long press already answered; this release is not a tap.
