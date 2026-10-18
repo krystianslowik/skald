@@ -1,4 +1,4 @@
-import { createContext, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AdminCatalog, AdminCommand, AdminStatus, AgentEvent, ApiState, CompatView, MapContainer, Platform, RestoreBackup } from "../../types";
 import { getAdminStatus, postAdmin, runAdmin, type AdminOutcome, type KitLine } from "../../lib/admin";
 import { Unauthorized } from "../../lib/api";
@@ -313,10 +313,42 @@ export function AdminProvider({
   );
 }
 
+/** Gap between a sheet's header and the first toast (px). */
+const TOAST_GAP = 8;
+
+/**
+ * Where the toast stack starts (px from the top), given the open sheets'
+ * headers: just under the lowest one that sits in the top half of the screen,
+ * so a sheet's title and close button stay in view. A peeking sheet's header
+ * lower down is left alone. Null: no such sheet, the stack keeps its default top.
+ */
+export function toastTop(headers: readonly { top: number; bottom: number }[], viewportHeight: number): number | null {
+  const under = headers.filter((h) => h.bottom > 0 && h.top < viewportHeight / 2).map((h) => h.bottom);
+  return under.length ? Math.max(...under) + TOAST_GAP : null;
+}
+
 function Toasts({ toasts }: { toasts: Toast[] }) {
+  const [top, setTop] = useState<number | null>(null);
+  const shown = toasts.length > 0;
+  // Sheets are portaled to the body and their headers are the dialog's own <header>. While toasts
+  // show, the stack follows them every frame: a sheet that opens, closes, slides or is dragged.
+  useLayoutEffect(() => {
+    if (!shown) {
+      setTop(null);
+      return;
+    }
+    let frame = 0;
+    const measure = () => {
+      const headers = [...document.querySelectorAll<HTMLElement>('[role="dialog"] > header')].map((h) => h.getBoundingClientRect());
+      setTop(toastTop(headers, window.innerHeight));
+      frame = requestAnimationFrame(measure);
+    };
+    measure();
+    return () => cancelAnimationFrame(frame);
+  }, [shown]);
   if (toasts.length === 0) return null;
   return (
-    <div aria-live="polite" className="pointer-events-none fixed inset-x-0 top-[max(0.75rem,env(safe-area-inset-top))] z-60 flex flex-col items-center gap-2 px-4">
+    <div aria-live="polite" style={top === null ? undefined : { top }} className="pointer-events-none fixed inset-x-0 top-[max(0.75rem,env(safe-area-inset-top))] z-60 flex flex-col items-center gap-2 px-4">
       {toasts.map((x) => (
         <p
           key={x.id}

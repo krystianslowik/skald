@@ -605,6 +605,13 @@ describe("i18n", () => {
     expect(i.number(0.25, 2)).toBe("0,25");
   });
 
+  it("gives every raid its own label, so the admin list never shows two the same", () => {
+    for (const dict of [en, pl]) {
+      const labels = Object.entries(dict).filter(([k]) => k.startsWith("raid.")).map(([, v]) => v);
+      expect(new Set(labels).size).toBe(labels.length);
+    }
+  });
+
   it("formats English plurals, durations and labels", () => {
     const i = makeI18n("en");
     expect(i.tn("plank.hearth.aside", 1)).toBe("1 person");
