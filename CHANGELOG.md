@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Changed
+
+- The map is sharper close up. Hills are shaded smoothly at every point instead of looking soft and creased, borders between biomes follow natural curves instead of the terrain grid's stairs, and coasts are one clean line, inked like the world's edge, with two faint lines in the water offshore and lighter shallows. Zoomed out, the map looks as before. Devices that draw the map without WebGL are unchanged.
+
 ### Fixed
 
 - Trees, rocks and floor plans on the map show a fraction of a second after you lift your finger, instead of several seconds later, and the area just around the view is loaded too, so a short pan finds them already there. A dropped connection no longer leaves a patch of the map without trees until you move it: the missing piece is asked for again by itself within seconds. Zooming to just where the woods start to show no longer leaves bare land, and reopening the map shows what was already loaded at once.

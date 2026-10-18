@@ -1,7 +1,9 @@
 // The world map's terrain on the GPU (WebGL2): tiles are uploaded as raw
 // data (biome, forest, height per sample, see packTile) into one fixed
-// texture array, and a fragment shader shades them per screen pixel exactly
-// as paintTile does on the CPU, so a place has one colour at every zoom.
+// texture array, and a fragment shader shades them per screen pixel with
+// paintTile's colours and light, so a place has one colour at every zoom;
+// close up it reconstructs the ground between samples more finely than
+// paintTile does (see TILE_FS).
 // Paper, the fog of war and the world's edge are drawn in full-screen passes
 // from small textures. The woods and floor plans, which only Canvas2D can
 // draw (maprender.ts), are rasterized in small world-anchored chunks a few
@@ -18,6 +20,7 @@ import type { FogField, SeaMask } from "./fogfield";
 import { COAST, PAPER, PAPER_DARK, PAPER_INK, VOID, type Textures } from "./paper";
 import type { TileFeed } from "./terraindata";
 import { FOREST_DARKEN, paletteOf, RELIEF, SWAMP, WATER_DEEP, WATER_SHALLOW } from "./terrainpaint";
+import { detailAt, NOISE_SIZE, noiseTexture } from "./terraindetail";
 import { loadLimit, pinnedTiles, planView, tileKey, tilesIn, type TileRef, type TilesDoc } from "./terraintiles";
 import type { View } from "./mapgeo";
 
@@ -79,24 +82,47 @@ void main() {
 }`;
 
 /**
- * paintTile, per pixel. Each pixel reads the 4 x 4 samples round it: heights
- * bilinear (coasts are smooth curves), hillshade from centred differences at
- * the four nearest samples, forest under a quadratic B-spline, and near a
- * biome border the biome with the most weight under that spline, blended
- * with the runner-up over about 1.6 device px.
+ * The terrain's light, 45 degrees up: from the north-west alone (as
+ * paintTile) at mid zoom, and close up the same key at 0.6 plus softer fills
+ * from the west and the north at 0.2 each, so slopes facing away from the
+ * key are not one flat tone. Lit is linear in the light, so the three add up
+ * to one vector; both give 1 on flat ground.
  */
-const TILE_FS = `${HEADER}
+const lightVec = (key: number) => {
+  const d = Math.SQRT1_2;
+  const fill = (1 - key) / 2;
+  return `vec3(${[-key * d * d - fill * d, key * d * d + fill * d, d].map((x) => f(x / d)).join(", ")})`;
+};
+
+/**
+ * paintTile, per pixel. Each pixel reads the 4 x 4 samples round it. The
+ * height is a cubic B-spline over them, and the relief is shaded from its
+ * gradient at the pixel, so slopes are smooth at any zoom and coasts (the
+ * water line on that height) are one curve. Forest is under a quadratic
+ * B-spline, and near a biome border the biome with the most weight under
+ * that spline wins, blended with the runner-up over about 1.6 device px;
+ * the spline is read at a position nudged by world-anchored noise, so
+ * borders are natural curves rather than the sample grid's stairs. Close
+ * up (uDetail, 0 at 3 CSS px/m, 1 at 12) the coast gets an ink line, two
+ * faint water lines offshore and a lighter shallow band. The per-pixel
+ * arrays stay at 16 entries: more spills registers on phone GPUs.
+ */
+export const TILE_FS = `${HEADER}
 ${COMMON}
 uniform highp usampler2DArray uTiles;
+uniform highp sampler2D uNoise;
 uniform vec3 uPal[16];
 uniform int uPalN;
 uniform float uWater;
 uniform float uPxPerM;
+uniform float uDpr;
+uniform float uDetail;
 in vec2 vWorld;
 in vec2 vSample;
 flat in vec3 vMisc;
 out vec4 outColor;
 
+// Quadratic B-spline weights of the four samples round t.
 vec4 spline(float t) {
   vec4 w;
   for (int k = 0; k < 4; k++) {
@@ -105,16 +131,32 @@ vec4 spline(float t) {
   }
   return w;
 }
-vec3 biomeRgb(uint b, float shade) {
-  int i = int(b) < uPalN ? int(b) : 0;
-  return uPal[i] * vec3(0.94, 1.0, 0.9) * shade;
+// Cubic B-spline weights and their derivatives (C2: no creases along the sample lines).
+vec4 bs(float t) {
+  float t2 = t * t;
+  float t3 = t2 * t;
+  float u = 1.0 - t;
+  return vec4(u * u * u, 3.0 * t3 - 6.0 * t2 + 4.0, -3.0 * t3 + 3.0 * t2 + 3.0 * t + 1.0, t3) / 6.0;
 }
+vec4 dbs(float t) {
+  float t2 = t * t;
+  float u = 1.0 - t;
+  return vec4(-0.5 * u * u, 1.5 * t2 - 2.0 * t, -1.5 * t2 + t + 0.5, 0.5 * t2);
+}
+vec3 biomeRgb(uint b) {
+  int i = int(b) < uPalN ? int(b) : 0;
+  return uPal[i] * vec3(0.94, 1.0, 0.9);
+}
+// World-anchored noise, one texture repeat every period metres.
+float nz(vec2 w, float period) { return texture(uNoise, w / period).r; }
 
 void main() {
   vec2 s = vSample;
+  vec2 wp = vWorld;
   // Samples per device pixel, for the anti-aliased biome edge; and the generated-zone clip (both before any branch).
   float spp = max(length(dFdx(s)), length(dFdy(s)));
-  float cov = vMisc.y * discCov(vWorld, uPxPerM) * seaCov(vWorld);
+  float cov = vMisc.y * discCov(wp, uPxPerM) * seaCov(wp);
+  float det = uDetail;
   ivec2 b = clamp(ivec2(floor(s)), ivec2(1), ivec2(${TILE_EDGE - 3}));
   vec2 fr = clamp(s - vec2(b), 0.0, 1.0);
   int layer = int(vMisc.x + 0.5);
@@ -122,6 +164,7 @@ void main() {
   uint bio[16];
   float hgt[16];
   float fo[16];
+  bool same = true;
   for (int j = 0; j < 4; j++) {
     for (int i = 0; i < 4; i++) {
       uvec4 t = texelFetch(uTiles, ivec3(b.x - 1 + i, b.y - 1 + j, layer), 0);
@@ -129,40 +172,42 @@ void main() {
       bio[k] = t.r;
       fo[k] = float(t.g) / 255.0;
       hgt[k] = float(t.b * 256u + t.a) / 50.0 - 500.0;
+      same = same && t.r == bio[0];
     }
   }
-  // Hillshade at the four nearest samples: light from the north-west, 45 degrees up.
-  vec4 sh;
-  vec4 hb;
-  for (int q = 0; q < 4; q++) {
-    int i = 1 + (q & 1);
-    int j = 1 + (q >> 1);
-    float dhdx = (hgt[j * 4 + i + 1] - hgt[j * 4 + i - 1]) / (2.0 * stepM);
-    float dhdz = (hgt[(j - 1) * 4 + i] - hgt[(j + 1) * 4 + i]) / (2.0 * stepM);
-    float nx = -dhdx * ${f(RELIEF)};
-    float nz = -dhdz * ${f(RELIEF)};
-    float lit = (nx * -0.5 + nz * 0.5 + 0.70711) / sqrt(nx * nx + nz * nz + 1.0) / 0.70711;
-    sh[q] = clamp(1.0 + (lit - 1.0) * 0.85, 0.58, 1.22);
-    hb[q] = hgt[j * 4 + i];
+  // Height and its gradient (metres per metre, x east, y north) from the cubic B-spline.
+  vec4 wx = bs(fr.x);
+  vec4 wz = bs(fr.y);
+  vec4 dwx = dbs(fr.x);
+  vec4 dwz = dbs(fr.y);
+  float h = 0.0;
+  float hs = 0.0;
+  float ht = 0.0;
+  for (int k = 0; k < 16; k++) {
+    float v = hgt[k];
+    h += wz[k >> 2] * wx[k & 3] * v;
+    hs += wz[k >> 2] * dwx[k & 3] * v;
+    ht += dwz[k >> 2] * wx[k & 3] * v;
   }
-  vec4 w = vec4((1.0 - fr.x) * (1.0 - fr.y), fr.x * (1.0 - fr.y), (1.0 - fr.x) * fr.y, fr.x * fr.y);
-  float shade = dot(w, sh);
-  float hh = dot(w, hb);
-  vec4 kx = spline(fr.x);
-  vec4 kz = spline(fr.y);
+  vec2 grad = vec2(hs, -ht) / stepM;
+  // Biome and forest weights round a position nudged by world-anchored noise: up to 0.22 m, so the
+  // same place moves the same way on every level, which on the finest data (0.64 m) is 0.35 samples
+  // and on coarser levels next to nothing. Unclamped, so the nudge is continuous across sample lines:
+  // within half a sample of the cell the quadratic spline's weights stay on the 4 x 4 read.
+  vec2 warp = (vec2(nz(wp, 9.7), nz(wp + 4.85, 9.7)) - 0.5) * min(0.7, 0.448 / stepM);
+  vec2 fb = fr + warp;
+  vec4 kx = spline(fb.x);
+  vec4 kz = spline(fb.y);
   float W[16];
   float forest = 0.0;
-  bool same = true;
   for (int k = 0; k < 16; k++) {
     W[k] = kz[k >> 2] * kx[k & 3];
     forest += W[k] * fo[k];
-    same = same && bio[k] == bio[0];
   }
   uint best = bio[0];
-  vec3 c;
-  if (same) {
-    c = biomeRgb(best, shade);
-  } else {
+  uint second = bio[0];
+  float kb = 1.0;
+  if (!same) {
     // Each biome's weight under the spline (up to four biomes round a pixel;
     // a fifth is too faint to matter); the heaviest wins, ties to the lower index.
     uint bb[4];
@@ -184,7 +229,6 @@ void main() {
     }
     float bw = -1.0;
     float sw = -1.0;
-    uint second = 0u;
     for (int m = 0; m < 4; m++) {
       if (m >= nb) break;
       uint bk = bb[m];
@@ -201,19 +245,37 @@ void main() {
         sw = wk;
       }
     }
-    c = biomeRgb(best, shade);
-    if (sw > 0.0) {
-      float k = 0.5 + 0.5 * smoothstep(0.0, 1.6 * spp, bw - sw);
-      c = mix(biomeRgb(second, shade), c, k);
-    }
+    if (sw > 0.0) kb = 0.5 + 0.5 * smoothstep(0.0, 1.6 * spp, bw - sw);
   }
+  // The relief at this pixel.
+  vec3 n = normalize(vec3(-grad * ${f(RELIEF)}, 1.0));
+  float lit = dot(n, mix(${lightVec(1)}, ${lightVec(0.6)}, det));
+  float shade = clamp(1.0 + (lit - 1.0) * 0.85, mix(0.58, 0.52, det), mix(1.22, 1.25, det));
+  vec3 c = mix(biomeRgb(second), biomeRgb(best), kb);
+  // Finer ground detail (grain, rock, contours) goes here, faded in by det.
+  c *= shade;
   c *= 1.0 - ${f(FOREST_DARKEN)} * forest;
-  float depth = uWater - hh;
+  // Water on the same smooth height, so the coast is one curve.
+  float depth = uWater - h;
+  float fwd = max(fwidth(depth), 1e-4);
   if (depth > 0.0) {
-    float a = best == ${SWAMP}u ? max(0.55 * smoothstep(0.0, 3.0, depth), smoothstep(3.0, 8.0, depth)) : smoothstep(0.0, 0.8, depth);
-    vec3 water = mix(${vec3(WATER_SHALLOW.map((x) => x / 255))}, ${vec3(WATER_DEEP.map((x) => x / 255))}, smoothstep(2.0, 70.0, depth));
+    float a = best == ${SWAMP}u ? max(0.55 * smoothstep(0.0, 3.0, depth), smoothstep(3.0, 8.0, depth)) : smoothstep(0.0, max(0.8 * (1.0 - det), 1.5 * fwd), depth);
+    vec3 shallow = ${vec3(WATER_SHALLOW.map((x) => x / 255))};
+    // A lighter band in the first metres, close up.
+    shallow = mix(shallow * vec3(1.12, 1.12, 1.06), shallow, smoothstep(0.0, 2.5, depth) * det + (1.0 - det));
+    vec3 water = mix(shallow, ${vec3(WATER_DEEP.map((x) => x / 255))}, smoothstep(2.0, 70.0, depth));
     c += (water - c) * a;
   }
+  // Close up, an ink line on the water line and two faint water lines offshore, each about a CSS px
+  // wide. They fade out where the depth changes by more than half a metre a pixel (the lines would
+  // crowd into one), and swamps, all pools and puddles, get none.
+  float px = fwd * uDpr;
+  float coast = 1.0 - smoothstep(0.6, 1.6, abs(depth) / px);
+  float l1 = (1.0 - smoothstep(0.4, 1.2, abs(depth - 0.7) / px)) * step(0.0, depth);
+  float l2 = (1.0 - smoothstep(0.4, 1.2, abs(depth - 1.8) / px)) * step(0.0, depth);
+  float ink = (1.0 - smoothstep(0.15, 0.5, fwd)) * det * (best == ${SWAMP}u ? 0.0 : 1.0);
+  c = mix(c, ${vec3(rgb(COAST))}, coast * 0.7 * ink);
+  c = mix(c, c * 1.18 + 0.03, (l1 * 0.45 + l2 * 0.25) * ink);
   outColor = vec4(clamp(c, 0.0, 1.0) * cov, cov);
 }`;
 
@@ -368,6 +430,7 @@ interface Res {
   clouds: WebGLTexture;
   fog: WebGLTexture;
   sea: WebGLTexture;
+  noise: WebGLTexture;
 }
 
 function compile(gl: WebGL2RenderingContext, vs: string, fs: string): WebGLProgram {
@@ -564,6 +627,11 @@ export class GLMap {
       gl.uniform1i(u["t.uPalN"]!, Math.min(16, pal.length));
       gl.uniform1f(u["t.uWater"]!, 30);
       gl.uniform1f(u["t.uPxPerM"]!, 1);
+      gl.uniform1f(u["t.uDpr"]!, 1);
+      gl.uniform1f(u["t.uDetail"]!, 1);
+      gl.uniform1i(u["t.uNoise"]!, 5);
+      gl.activeTexture(gl.TEXTURE5);
+      gl.bindTexture(gl.TEXTURE_2D, r.noise);
       gl.uniform1f(u["t.uRadius"]!, 10_500);
       gl.uniform1i(u["t.uSeaOn"]!, 0);
       gl.uniform1i(u["t.uSeaTex"]!, 4);
@@ -635,7 +703,7 @@ export class GLMap {
     const raster = compile(gl, TILE_VS, RASTER_FS);
     const u: Programs["u"] = {};
     const names: [WebGLProgram, string, string[]][] = [
-      [tile, "t.", ["uTiles", "uPal", "uPalN", "uWater", "uPxPerM", "uRadius", "uSeaOn", "uSea", "uSeaTex"]],
+      [tile, "t.", ["uTiles", "uNoise", "uPal", "uPalN", "uWater", "uPxPerM", "uDpr", "uDetail", "uRadius", "uSeaOn", "uSea", "uSeaTex"]],
       [sheet, "s.", ["uMode", "uView", "uHalf", "uPaperOct", "uPaperOff", "uCloudOct", "uCloudOff", "uPaperAlpha", "uFog", "uFogBox", "uRim", "uPaper", "uClouds", "uFogTex", "uRadius", "uSeaOn", "uSea", "uSeaTex"]],
       [raster, "r.", ["uChunks"]],
     ];
@@ -676,7 +744,12 @@ export class GLMap {
       clouds: tex(gl.LINEAR_MIPMAP_LINEAR, gl.REPEAT),
       fog: tex(gl.LINEAR, gl.CLAMP_TO_EDGE),
       sea: tex(gl.LINEAR, gl.CLAMP_TO_EDGE),
+      noise: tex(gl.LINEAR_MIPMAP_LINEAR, gl.REPEAT),
     };
+    // The terrain's world-anchored noise (built once per page, uploaded with every context).
+    gl.bindTexture(gl.TEXTURE_2D, this.res.noise);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, NOISE_SIZE, NOISE_SIZE, 0, gl.RED, gl.UNSIGNED_BYTE, noiseTexture());
+    gl.generateMipmap(gl.TEXTURE_2D);
     // What was handed over before (or before the context was lost) goes up again.
     if (this.paperTex) this.setPaper(this.paperTex);
     if (this.fogField !== undefined) this.setFog(this.fogField, this.fogAll);
@@ -1004,6 +1077,11 @@ export class GLMap {
       gl.uniform1i(u["t.uPalN"]!, this.palN);
       gl.uniform1f(u["t.uWater"]!, doc.waterLevel);
       gl.uniform1f(u["t.uPxPerM"]!, pxPerM);
+      gl.uniform1f(u["t.uDpr"]!, k);
+      gl.uniform1f(u["t.uDetail"]!, detailAt(v.scale));
+      gl.uniform1i(u["t.uNoise"]!, 5);
+      gl.activeTexture(gl.TEXTURE5);
+      gl.bindTexture(gl.TEXTURE_2D, r.noise);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, r.pool);
       gl.bindVertexArray(r.vao);
@@ -1190,7 +1268,7 @@ export class GLMap {
     const r = this.res;
     const gl = this.gl;
     if (r && !gl.isContextLost()) {
-      for (const t of [r.pool, r.chunks, r.paper, r.clouds, r.fog, r.sea]) if (t) gl.deleteTexture(t);
+      for (const t of [r.pool, r.chunks, r.paper, r.clouds, r.fog, r.sea, r.noise]) if (t) gl.deleteTexture(t);
       gl.deleteBuffer(r.inst);
       gl.deleteVertexArray(r.vao);
       gl.deleteVertexArray(r.empty);
