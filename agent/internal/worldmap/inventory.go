@@ -10,10 +10,10 @@ import (
 )
 
 // A container's inventory is the byte array under ZDO key "items" (the 0x80
-// map). Valheim 1.0 writes it compactly (inventory version 109), in the order
-// the game's own inventory and item save code writes it:
+// map). Valheim 1.0 writes it compactly (inventory version 109 or 110), in the
+// order the game's own inventory and item save code writes it:
 //
-//	i32 version (109) | u16 count | count x item
+//	i32 version (109, 110) | u16 count | count x item
 //
 //	item: i32 durability x 100 (10000 for anything without wear)
 //	      u8 slot x | u8 slot y
@@ -50,14 +50,18 @@ import (
 // world treasure chests): flag sets 0x40 0x41 0x48 0x49 0x61 0x65 0x69, every
 // blob read to its last byte and every prefab hash resolved.
 //
-// Version 109 is the only one the game writes; an older one (pre-1.0 saves,
-// which carried a different item layout) is refused.
+// Versions 109 and 110 share this layout: game build l-1.0.20 writes 110, and
+// 41 real 110 inventories (wood and reinforced chests) read to their last byte
+// with every prefab hash resolved. Any other version (pre-1.0 saves carried a
+// different item layout, a later one may again) is refused.
 //
 // The crafter id is a platform id: it is read past and never kept.
 
 const (
-	inventoryVersion = 109
-	maxItems         = 1024
+	inventoryVersion = 110
+	// inventoryVersionOld is the 1.0 version before game build l-1.0.20.
+	inventoryVersionOld = 109
+	maxItems            = 1024
 
 	itemPickedUp = 0x01
 	itemQuality  = 0x04
@@ -85,7 +89,7 @@ var errInventory = errors.New("worldmap: unreadable inventory")
 // half-read.
 func parseInventory(blob []byte) (items []rawItem, skipped int, err error) {
 	r := &buf{b: blob}
-	if v := r.i32(); r.err == nil && v != inventoryVersion {
+	if v := r.i32(); r.err == nil && v != inventoryVersion && v != inventoryVersionOld {
 		return nil, 0, fmt.Errorf("%w: version %d", errInventory, v)
 	}
 	n := int(r.u16())
