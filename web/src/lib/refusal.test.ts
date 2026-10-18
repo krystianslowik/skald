@@ -53,7 +53,7 @@ const KNOWN: [string, string, string][] = [
   ["'Steam_***' is not on the ban list", "That entry is not on the ban list any more. Reload the list.", "Tego wpisu nie ma już na liście banów. Odśwież listę."],
   ["world not loaded yet", "The world is still loading. Try again in a moment.", "Świat jeszcze się wczytuje. Spróbuj za chwilę."],
   ["EnvMan not available", "The world is still loading. Try again in a moment.", "Świat jeszcze się wczytuje. Spróbuj za chwilę."],
-  ["untested game build l-1.0.18: confirm it in the admin panel first", "Game build l-1.0.18 is not allowed yet. Allow it in the admin panel first.", "Wersja gry l-1.0.18 nie jest jeszcze dozwolona. Najpierw zezwól na nią w panelu admina."],
+  ["untested game build l-1.0.18: confirm it in the admin panel first", "Game build 1.0.18 is not allowed yet. Allow it in the admin panel first.", "Wersja gry 1.0.18 nie jest jeszcze dozwolona. Najpierw zezwól na nią w panelu admina."],
   ["the bridge did not answer in time", "The admin plugin did not answer in time. It may have worked anyway: check before you try again.", "Wtyczka admina nie odpowiedziała na czas. Mogło się jednak udać: sprawdź, zanim spróbujesz jeszcze raz."],
   ["game main thread did not pick up the command in time", "The game was busy and did not take the command, so nothing was done. Try again in a moment.", "Gra była zajęta i nie przyjęła polecenia, więc nic się nie stało. Spróbuj za chwilę."],
   ["command did not finish in time", "The admin plugin did not answer in time. It may have worked anyway: check before you try again.", "Wtyczka admina nie odpowiedziała na czas. Mogło się jednak udać: sprawdź, zanim spróbujesz jeszcze raz."],

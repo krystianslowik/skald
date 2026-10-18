@@ -456,7 +456,7 @@ describe("admin", () => {
     render(<I18nProvider locale="en"><FillSheet station="smelters" target={{ player: "Ragnar" }} catalog={{ events: [], currentEvent: null, globalKeys: [], spots: [], stations: { kilns: [], smelters: [], fermenters: [] } }} onClose={() => {}} /></I18nProvider>);
     const flow = screen.getByRole("dialog", { name: "Fill smelters" });
     expect(within(flow).queryByRole("button", { name: /Keep the current ore/ })).not.toBeInTheDocument();
-    expect(within(flow).getByText(/needs plugin 0\.3\.0 or later/)).toBeInTheDocument();
+    expect(within(flow).getByText(/needs admin plugin 0\.3\.0 or later/)).toBeInTheDocument();
   });
 
   it("fills smelters step by step: metal, coal, confirm, result", async () => {

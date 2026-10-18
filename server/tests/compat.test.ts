@@ -57,7 +57,7 @@ describe("compat notifications", () => {
     expect(d.sent[0]!.split("\n")).toEqual([
       "Skald checked the game update from 1.0.16 to 1.0.20: something broke",
       "- Save: 41 containers unreadable (unreadable inventory: version 111)",
-      "- Admin bridge: not tested on this build yet, commands wait for a confirmation",
+      "- Admin plugin: not tested on this build yet, commands wait for a confirmation",
       "Details in the admin sheet.",
     ]);
   });
