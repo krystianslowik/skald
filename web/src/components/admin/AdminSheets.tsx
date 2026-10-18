@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { unlockAdmin } from "../../lib/admin";
 import { Unauthorized } from "../../lib/api";
 import { useI18n } from "../../i18n";
@@ -11,7 +11,7 @@ import { ItemPicker } from "./ItemPicker";
 import { CreatureSheet, PointSheet } from "./PointSheet";
 import { PlayerSheet } from "./PlayerSheet";
 import { KeyGlyph } from "./glyphs";
-import { AdminHead, Btn } from "./parts";
+import { AdminHead } from "./parts";
 import { RestoreSheet } from "./WorldTools";
 
 /** Every admin sheet, loaded together on first use. */
@@ -33,23 +33,33 @@ export default function AdminSheets({ view, unlocking }: { view: AdminView | nul
   );
 }
 
-/** The admin password, asked for when a command needs it. Rate-limited like the login. */
+/**
+ * The admin password, asked for when a command needs it. Rate-limited like the
+ * login. On success it closes itself (the caller retries what was asked) and
+ * says so in a toast.
+ */
 function UnlockSheet({ onDone }: { onDone: (ok: boolean) => void }) {
   const { t } = useI18n();
+  const toast = useAdmin()?.toast;
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [ok, setOk] = useState(false);
+  const ok = useRef(false);
+  const close = useRef<(() => void) | null>(null);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    // Unlocked, but the sheet was grabbed back mid-close: just close again.
+    if (ok.current) return close.current?.();
     if (!password || busy) return;
     setBusy(true);
     setError(null);
     try {
       const r = await unlockAdmin(password);
       if (r.ok) {
-        setOk(true);
+        ok.current = true;
+        toast?.(true, t("admin.unlock.ok"));
+        close.current?.();
         return;
       }
       setError(r.retryAfter ? t("admin.unlock.locked", { min: Math.ceil(r.retryAfter / 60) }) : r.refused ? t("login.refused") : t("admin.unlock.wrong"));
@@ -64,46 +74,33 @@ function UnlockSheet({ onDone }: { onDone: (ok: boolean) => void }) {
   return (
     <Sheet
       labelledBy="unlock-h"
-      onClose={() => onDone(ok)}
+      closeRef={close}
+      onClose={() => onDone(ok.current)}
       header={(close) => <AdminHead id="unlock-h" kicker={t("admin.kicker")} title={t("admin.unlock.title")} emblem={<KeyGlyph />} onClose={close} />}
     >
       <form onSubmit={(e) => void submit(e)} className="pb-2">
         <p className="mb-4 text-sm text-bone/90">{t("admin.unlock.body")}</p>
-        {ok ? (
-          <p className="mb-4 font-bold text-flame" role="status">
-            {t("admin.unlock.ok")}
+        <label htmlFor="admin-pass" className="label-caps mb-1.5 block">
+          {t("admin.unlock.label")}
+        </label>
+        <input
+          id="admin-pass"
+          data-autofocus
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className={`field w-full ${error ? "field-bad" : ""}`}
+        />
+        {error && (
+          <p role="alert" className="mt-2 text-sm text-blood">
+            {error}
           </p>
-        ) : (
-          <>
-            <label htmlFor="admin-pass" className="label-caps mb-1.5 block">
-              {t("admin.unlock.label")}
-            </label>
-            <input
-              id="admin-pass"
-              data-autofocus
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className={`field w-full ${error ? "field-bad" : ""}`}
-            />
-            {error && (
-              <p role="alert" className="mt-2 text-sm text-blood">
-                {error}
-              </p>
-            )}
-          </>
         )}
         <div className="mt-4 flex gap-3">
-          {ok ? (
-            <Btn primary onClick={() => onDone(true)} className="flex-1">
-              {t("admin.unlock.continue")}
-            </Btn>
-          ) : (
-            <button type="submit" disabled={!password || busy} className="press min-h-11 flex-1 rounded-[3px] border border-white/20 bg-[linear-gradient(180deg,#7aaedc,#5e97cc_60%,#4c82b5)] px-4 text-sm font-bold text-[#10161d] disabled:opacity-40">
-              {busy ? t("admin.unlock.busy") : t("admin.unlock.submit")}
-            </button>
-          )}
+          <button type="submit" disabled={!password || busy} className="press min-h-11 flex-1 rounded-[3px] border border-white/20 bg-[linear-gradient(180deg,#7aaedc,#5e97cc_60%,#4c82b5)] px-4 text-sm font-bold text-[#10161d] disabled:opacity-40">
+            {busy ? t("admin.unlock.busy") : t("admin.unlock.submit")}
+          </button>
         </div>
         <p className="mt-3 text-xs text-ash">{t("admin.unlock.idle")}</p>
       </form>

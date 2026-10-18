@@ -6,7 +6,7 @@ import { useI18n, type TextKey } from "../../i18n";
 import { PlatformGlyph } from "../PlatformGlyph";
 import { Sheet } from "../Sheet";
 import { useAdmin } from "./AdminContext";
-import { HoldButton } from "./HoldButton";
+import { BAN_HOLD_MS, HoldButton } from "./HoldButton";
 import { AdminHead, Btn, Section } from "./parts";
 
 const APPLIES: Record<string, TextKey> = {
@@ -68,7 +68,7 @@ export function AccessLists() {
                 {state.online.map((p) => (
                   <li key={p.name} className="flex min-h-12 flex-wrap items-center gap-2 py-1.5">
                     <PlatformGlyph platform={p.platform} className="text-label" />
-                    <span className="min-w-0 flex-1 truncate font-bold text-bone">{p.name}</span>
+                    <span className="min-w-24 flex-1 truncate font-bold text-bone">{p.name}</span>
                     {p.admin && <span className="text-xs text-flame">{t("admin.access.isAdmin")}</span>}
                     {p.banned && <span className="text-xs text-blood">{t("admin.access.isBanned")}</span>}
                     {!p.canAdd ? (
@@ -81,7 +81,7 @@ export function AccessLists() {
                           </Btn>
                         )}
                         {!p.banned && (
-                          <HoldButton disabled={!state.writable && !state.bans.live} label={t("admin.access.banAria", { name: p.name })} onConfirm={() => void change("bans", "add", { player: p.name })}>
+                          <HoldButton ms={BAN_HOLD_MS} disabled={!state.writable && !state.bans.live} label={t("admin.access.banAria", { name: p.name })} onConfirm={() => void change("bans", "add", { player: p.name })}>
                             {t("admin.access.ban")}
                           </HoldButton>
                         )}
@@ -173,7 +173,7 @@ function AddById({ writable, bansLive, onAdd }: { writable: boolean; bansLive: b
         <Btn disabled={!valid || !writable} onClick={() => void add("admins")}>
           {t("admin.access.addAdmin")}
         </Btn>
-        <HoldButton disabled={!valid || (!writable && !bansLive)} onConfirm={() => void add("bans")}>
+        <HoldButton ms={BAN_HOLD_MS} disabled={!valid || (!writable && !bansLive)} onConfirm={() => void add("bans")}>
           {t("admin.access.addBan")}
         </HoldButton>
       </div>

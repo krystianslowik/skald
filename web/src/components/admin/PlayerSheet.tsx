@@ -5,7 +5,7 @@ import { PlatformGlyph } from "../PlatformGlyph";
 import { Sheet } from "../Sheet";
 import { Shield } from "../Shield";
 import { useAdmin } from "./AdminContext";
-import { HoldButton } from "./HoldButton";
+import { BAN_HOLD_MS, HoldButton } from "./HoldButton";
 import { AdminHead, BridgeBanner, Btn, Chip, HealthBar, Section, platformOf } from "./parts";
 
 /** Teleport spots the plugin knows by alias (bridge/README.md). */
@@ -19,7 +19,6 @@ export function PlayerSheet({ name, onClose }: { name: string; onClose: () => vo
   const { t, lookup } = useI18n();
   const admin = useAdmin();
   const live = useLivePositions();
-  const [banName, setBanName] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   if (!admin) return null;
   const me = live.players.find((p) => p.name === name);
@@ -135,27 +134,17 @@ export function PlayerSheet({ name, onClose }: { name: string; onClose: () => vo
             <HoldButton disabled={off} className="w-full" onConfirm={() => void admin.run("kick", { player: name }, { done: t("admin.player.kicked", { name }) })}>
               {t("admin.player.kick", { name })}
             </HoldButton>
+            {/* Ban: the same longer hold as in the access list, set apart from Kick. */}
             <div className="rounded-[3px] border border-blood/30 bg-black/25 p-3">
-              <label htmlFor="ban-name" className="text-xs text-ash">
-                {t("admin.player.banType", { name })}
-              </label>
-              <input
-                id="ban-name"
-                value={banName}
-                onChange={(e) => setBanName(e.target.value)}
-                autoComplete="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                placeholder={name}
-                className="field mt-1.5 w-full"
-              />
               <HoldButton
-                disabled={off || banName.trim() !== name}
-                className="mt-2 w-full"
+                disabled={off}
+                className="w-full"
+                ms={BAN_HOLD_MS}
                 onConfirm={() => void admin.run("ban", { player: name }, { done: t("admin.player.banned", { name }) }).then((r) => r.ok && onClose())}
               >
                 {t("admin.player.ban", { name })}
               </HoldButton>
+              <p className="mt-2 text-xs text-ash">{t("admin.player.banNote")}</p>
             </div>
           </div>
         </Section>

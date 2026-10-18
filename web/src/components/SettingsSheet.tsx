@@ -27,8 +27,9 @@ export default function SettingsSheet(props: SheetProps) {
   const { onClose } = props;
   const asked = useRef(false);
   const shown = useRef(false);
-  // The unlock sheet stays up until it is dismissed; a status poll can
-  // report the unlock before that, and the form must not open over it.
+  // admin.unlock() resolves once the unlock sheet is gone (it closes itself
+  // on success, animated); a status poll can report the unlock before that,
+  // and the form must not open under it.
   const [asking, setAsking] = useState(false);
   useEffect(() => {
     if (!locked || !admin) return;
