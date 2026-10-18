@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.16] - 2026-10-18
+
 ### Changed
 
 - The map is sharper close up. Hills are shaded smoothly at every point instead of looking soft and creased, borders between biomes follow natural curves instead of the terrain grid's stairs, and coasts are one clean line, inked like the world's edge, with two faint lines in the water offshore and lighter shallows. Zoomed out, the map looks as before. Devices that draw the map without WebGL are unchanged.
