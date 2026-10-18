@@ -106,6 +106,14 @@ afterEach(() => {
 });
 
 describe("admin", () => {
+  it("labels the desktop header's Admin button with visible text", async () => {
+    api(status());
+    renderDashboard();
+    const button = await screen.findByRole("button", { name: "Admin" });
+    expect(button.closest("header")).not.toBeNull();
+    expect(button).toHaveTextContent(/^Admin$/);
+    expect(button).not.toHaveAttribute("aria-label");
+  });
 
   it("updates default kit names when the language changes", () => {
     vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() });

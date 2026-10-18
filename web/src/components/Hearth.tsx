@@ -32,7 +32,7 @@ export const Hearth = memo(function Hearth({ players }: { players: Player[] }) {
             <figcaption className="mt-1.5 w-full">
               <span className="flex w-full items-center justify-center gap-1">
                 <PlatformGlyph platform={p.platform} className="text-label" />
-                <PlayerName name={p.name} className="block min-w-0 truncate text-[0.9375rem] font-bold text-bone" />
+                <PlayerName name={p.name} truncate className="block min-w-0 text-[0.9375rem] font-bold text-bone" />
               </span>
               <span className="block text-xs text-flame/90"><Elapsed since={p.since} /></span>
             </figcaption>

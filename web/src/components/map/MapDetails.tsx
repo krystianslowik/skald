@@ -4,6 +4,7 @@ import { markerItems, markerStore, type Marker } from "../../lib/mapgeo";
 import { topDown } from "../../lib/stacks";
 import { countItems } from "../../lib/storage";
 import { mapUrlAt } from "../../lib/world";
+import { useLinkTarget } from "../../lib/useMedia";
 import type { MapContainer, MapItem } from "../../types";
 import { canAddTo, usePendingItems } from "../../lib/chestadd";
 import { BLOCKER_TEXT, pluginBelow, useAdmin } from "../admin/AdminContext";
@@ -261,13 +262,14 @@ function AddItemButton({ chest, roomy, className = "" }: { chest: MapContainer; 
   );
 }
 
-/** The same spot on valheim-map.world, in a new tab. */
+/** The same spot on valheim-map.world: a new tab on desktop, the same tab on a phone. */
 function FullMapLink({ seedName, marker, roomy }: { seedName: string; marker: Marker; roomy: boolean }) {
   const { t } = useI18n();
+  const target = useLinkTarget();
   return (
     <a
       href={mapUrlAt(seedName, marker.x, marker.z)}
-      target="_blank"
+      target={target}
       rel="noopener noreferrer"
       title={t("map.openFullHint")}
       className={`inline-flex items-center gap-1 font-bold text-flame underline decoration-flame/40 underline-offset-4 hover:text-gold ${roomy ? "min-h-11 text-sm" : "text-xs"}`}

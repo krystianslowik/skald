@@ -25,3 +25,15 @@ export function useMedia(query: string): boolean {
   if (!sub) subs.set(query, (sub = subscribe(query)));
   return useSyncExternalStore(sub, () => matches(query), () => false);
 }
+
+/**
+ * Where an outside link opens: the same tab on touch screens and narrow
+ * windows, where a new tab strands the player outside the panel (Back brings
+ * them home), and a new tab on a desktop.
+ */
+export function useLinkTarget(): "_blank" | undefined {
+  // Two queries, not one combined list: the same ones the rest of the panel already watches.
+  const coarse = useMedia(COARSE);
+  const phone = useMedia(PHONE);
+  return coarse || phone ? undefined : "_blank";
+}

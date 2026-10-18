@@ -340,7 +340,8 @@ const TEXT_TONE: Partial<Record<Tone, string>> = { death: "text-blood", leave: "
 /** A line in the top-left message feed: a small slot icon, the text, the time. */
 function FeedLine({ d, time, quiet = false }: { d: Line; time?: ReactNode; quiet?: boolean }) {
   return (
-    <div className="flex items-center gap-2.5 py-1">
+    // A touch row is 44 px tall: a name in it gets the full finger-sized target, not half of it shared with the next row's.
+    <div className="flex items-center gap-2.5 py-1 coarse:min-h-11">
       <span className="slot grid h-7 w-7 shrink-0 place-items-center">
         <Glyph tone={d.tone} />
       </span>

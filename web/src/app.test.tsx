@@ -659,6 +659,28 @@ describe("On a phone", () => {
     return writeText;
   };
 
+  it("opens the outside world map in the same tab on a phone and a touch screen", () => {
+    const cases: Record<string, boolean>[] = [{ [PHONE]: true, [COARSE]: true }, { [COARSE]: true }, { [PHONE]: true }];
+    for (const m of cases) {
+      media.__media = m;
+      const { unmount } = render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
+      const map = screen.getByRole("link", { name: /World map/ });
+      expect(map).toHaveAttribute("href", expect.stringContaining("valheim-map.world"));
+      expect(map).not.toHaveAttribute("target");
+      unmount();
+    }
+  });
+
+  it("keeps a truncated player name's touch area unclipped", () => {
+    phone();
+    render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
+    const name = within(screen.getByRole("heading", { name: "At the fire" }).closest("section")!).getByRole("button", { name: "Ragnar" });
+    // Overflow on the button would clip its 44 px .tap area; the ellipsis lives on the inner span.
+    expect(name).toHaveClass("tap");
+    expect(name).not.toHaveClass("truncate");
+    expect(name.querySelector("span.truncate")).toHaveTextContent("Ragnar");
+  });
+
   it("shows one tab at a time and Back returns to the fire", async () => {
     phone();
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 })));

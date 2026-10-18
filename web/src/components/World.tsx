@@ -3,12 +3,14 @@ import type { WorldMeta } from "../types";
 import { useI18n } from "../i18n";
 import { mapUrl, type BossProgress } from "../lib/world";
 import { RelativeTime } from "./RelativeTime";
+import { useLinkTarget } from "../lib/useMedia";
 
 /** World: in-game day, seed and a link to the world map. */
 export const World = memo(function World({ meta }: { meta: WorldMeta | null }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const linkTarget = useLinkTarget();
 
   if (!meta) return <p className="text-sm text-ash">{t("world.unreadable")}</p>;
 
@@ -51,7 +53,7 @@ export const World = memo(function World({ meta }: { meta: WorldMeta | null }) {
         <div className="col-span-2 sm:col-span-1">
           <a
             href={mapUrl(meta.seedName)}
-            target="_blank"
+            target={linkTarget}
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-sm font-bold text-flame underline coarse:min-h-11 decoration-flame/40 underline-offset-4 transition-colors hover:text-gold hover:decoration-gold"
           >
