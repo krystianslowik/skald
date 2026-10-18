@@ -24,6 +24,7 @@ function fakeAgent(calls: BridgeRequest[], status = 200, toolCalls: ToolsRequest
       if (req.op === "access") return { status: 200, body: { ok: true, data: { writable: true, running: true, admins: { entries: [{ id: "X_1234500000000001", platform: "xbox", known: true }], live: false }, bans: { entries: [], live: true }, online: [] } } };
       if (req.op === "restore-info") return { status: 200, body: { ok: true, data: { world: "Testheim", running: false, playersOnline: false, backups: [] } } };
       if (req.op === "restore") return { status: 202, body: { ok: true, data: { backup: req.body.backup } } };
+      if (req.op === "compat-run") return { status: 202, body: { ok: true } };
       return { status: 200, body: { ok: true, data: { applies: "restart" } } };
     },
     async getLogs() {
@@ -806,5 +807,33 @@ describe("discord test notification", () => {
     expect(busy.status).toBe(429);
     expect(await busy.json()).toEqual({ ok: false, error: "busy", retryAfter: 10 });
     expect(d.posts).toHaveLength(2);
+  });
+});
+
+describe("compatibility check", () => {
+  it("runs again only for an admin, with the actor, and shows the result to everyone signed in", async () => {
+    const { app, toolCalls } = await setup({ admin: true });
+    const cookie = await signIn(app);
+    expect((await app.request("/api/admin/compat/run", { method: "POST" })).status).toBe(401);
+    expect((await post(app, "/api/admin/compat/run", cookie)).status).toBe(403);
+    expect(toolCalls).toHaveLength(0);
+    const unlock = await post(app, "/api/admin/unlock", cookie, { password: "jarl" });
+    const both = `${cookie}; ${adminCookie(unlock)}`;
+    const res = await post(app, "/api/admin/compat/run", both, undefined, { "X-Skald-Name": "Jarl" });
+    expect(res.status).toBe(202);
+    expect(toolCalls.at(-1)).toEqual({ op: "compat-run", actor: "Jarl" });
+    // Not swallowed by /api/admin/:command.
+    expect(toolCalls.filter((c) => c.op === "compat-run")).toHaveLength(1);
+    // The result sits in the state every session reads, null from this agent.
+    const st = (await (await app.request("/api/state", { headers: { Cookie: cookie } })).json()) as { compat: unknown };
+    expect(st.compat).toBeNull();
+  });
+
+  it("refuses a run from another site", async () => {
+    const { app, toolCalls } = await setup();
+    const cookie = await signIn(app);
+    const res = await post(app, "/api/admin/compat/run", cookie, undefined, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" });
+    expect(res.status).toBe(403);
+    expect(toolCalls).toHaveLength(0);
   });
 });

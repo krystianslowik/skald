@@ -5,6 +5,7 @@ import { mockMap } from "./mapmock";
 import { mockNature, natureIn } from "./mocknature";
 import { mockPieces, piecesIn } from "./mockpieces";
 import { mockIcons, type MockIcons } from "./mockicons";
+import { mockCompat } from "./mockcompat";
 import { MOCK_TERRAIN_RADIUS, MOCK_TILE_BUILD, mockTerrain, mockTerrainTile, mockTilesDoc, packHeights } from "./mockterrain";
 import { addDays, calendar } from "./profiles";
 import { buildArgs, changedKeys, normalize, parseArgs, validateSettings } from "./settings";
@@ -251,6 +252,8 @@ export class MockAgent implements AgentSource {
     private readonly timeZone = "UTC",
     /** How the fake bridge behaves: on, off (not installed), disabled (after a patch), untested (unknown build). */
     private readonly bridgeMode = "on",
+    /** The compatibility check's outcome (MOCK_COMPAT): ok, warn, fail, pending or none. */
+    private readonly compatMode = "ok",
   ) {
     const now = this.clock();
     this.state = {
@@ -315,6 +318,7 @@ export class MockAgent implements AgentSource {
       agent: { startedAt: this.startedAt, lastLogAt: null, version: VERSION },
       settings: { enabled: true, pending: false, armed: false, passwordSet: true },
     };
+    this.state.compat = mockCompat(this.compatMode, this.state.server.version, this.state.server.networkVersion, now);
     this.settingsCur = { name: this.state.server.name, public: true, ...parseArgs(this.state.server.args) };
     this.effective = { name: this.state.server.name, public: true, args: this.state.server.args };
     this.seedHistory(now);
@@ -1046,7 +1050,27 @@ export class MockAgent implements AgentSource {
         } satisfies RestoreInfo);
       case "restore":
         return this.restore(req.body, req.actor);
+      case "compat-run":
+        return this.compatRun(req.actor);
     }
+  }
+
+  /** A check from the panel: running for a moment, then the same outcome, checked now. */
+  private compatRun(actor: string): Proxied {
+    if (this.state.compat?.running) return { status: 409, body: { ok: false, error: "a check is running" } };
+    const prev = this.state.compat?.result ?? null;
+    this.state.compat = { running: true, result: prev };
+    this.emit("admin", { actor, command: "compat-check", result: "ok", via: "agent" });
+    this.emit("compat", { running: true, result: prev });
+    this.timers.push(
+      setTimeout(() => {
+        const mode = this.compatMode === "none" ? "ok" : this.compatMode;
+        const view = mockCompat(mode, this.state.server.version, this.state.server.networkVersion, this.clock() + 60_000, "manual");
+        this.state.compat = view;
+        this.emit("compat", { running: false, result: view.result });
+      }, 1500),
+    );
+    return { status: 202, body: { ok: true } };
   }
 
   /** A restore as the agent runs it: one `admin` event per step, the server down in the middle. */

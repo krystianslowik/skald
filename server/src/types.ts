@@ -114,6 +114,50 @@ export interface AgentState {
   icons?: IconsInfo | null;
   /** The world generator's terrain (`skald-terrain`); null without one and without a readable save (or before 0.7.0). */
   terrain?: TerrainInfo | null;
+  /** The compatibility check with the game build; null from agents older than 2026.10.12. */
+  compat?: CompatView | null;
+}
+
+// ---- compatibility check (agent GET /compat, /state.compat) -----------------
+
+/** pending: waits for something that comes on its own; pending and skipped do not count toward the overall status. */
+export type CompatStatus = "ok" | "warn" | "fail" | "pending" | "skipped";
+export const COMPAT_CHECKS = ["version", "save", "terrain", "bridge", "logs"] as const;
+export type CompatCheckName = (typeof COMPAT_CHECKS)[number];
+/** start: first build since the agent started; update: a new build; save: the first save by an updated build; manual: an admin. */
+export type CompatTrigger = "start" | "update" | "save" | "manual";
+
+/** One graded part. `reason` is a short code; `detail` the numbers behind it (no names, ids or paths). */
+export interface CompatCheck {
+  name: CompatCheckName;
+  status: CompatStatus;
+  reason?: string;
+  detail?: Record<string, unknown>;
+}
+
+export interface CompatResult {
+  build: string;
+  networkVersion: number;
+  /** The build checked before this one; missing on the very first check. */
+  previousBuild?: string;
+  previousNetworkVersion?: number;
+  /** This build replaced `previousBuild`. */
+  updated: boolean;
+  trigger: CompatTrigger;
+  startedAt: string;
+  checkedAt: string;
+  status: "ok" | "warn" | "fail";
+  /** The newest save is from before the update; the save is checked again after the first save. */
+  awaitingSave: boolean;
+  generation: number;
+  checks: CompatCheck[];
+}
+
+export interface CompatView {
+  /** A check waits for the world or the map right now. */
+  running: boolean;
+  /** The last completed check; null before the first. */
+  result: CompatResult | null;
 }
 
 /** The agent's terrain image and what a terrain run should sample (`/state.terrain`). */
@@ -248,10 +292,11 @@ export type AgentEventType =
   | "settings_changed"
   | "settings_apply"
   | "admin"
+  | "compat"
   | "positions";
 
 /** High-frequency types that are broadcast live but never stored in history. */
-export const UNSTORED_EVENTS: readonly AgentEventType[] = ["log", "net_stats", "positions"];
+export const UNSTORED_EVENTS: readonly AgentEventType[] = ["log", "net_stats", "positions", "compat"];
 
 /**
  * A bridge read (for example the map's terrain tiles) that reached the admin
@@ -411,6 +456,7 @@ export function emptyAgentState(now = new Date()): AgentState {
     settings: null,
     icons: null,
     terrain: null,
+    compat: null,
   };
 }
 
@@ -729,7 +775,7 @@ export interface BridgeStatus {
 }
 
 /** The Discord notification kinds; DISCORD_NOTIFY and the admin sheet pick from these. */
-export const NOTIFY_KINDS = ["join", "leave", "death", "raid", "server", "join_code", "version", "failure"] as const;
+export const NOTIFY_KINDS = ["join", "leave", "death", "raid", "server", "join_code", "version", "compat", "failure"] as const;
 export type NotifyKind = (typeof NOTIFY_KINDS)[number];
 
 /**

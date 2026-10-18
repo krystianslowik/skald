@@ -1,4 +1,4 @@
-import { NOTIFY_KINDS, type AgentEvent, type AgentState, type LiveMessage, type Locale, type NotifyChange, type NotifyConfig, type NotifyKind } from "./types";
+import { NOTIFY_KINDS, type AgentEvent, type AgentState, type CompatResult, type LiveMessage, type Locale, type NotifyChange, type NotifyConfig, type NotifyKind } from "./types";
 
 export { NOTIFY_KINDS, type NotifyChange, type NotifyKind };
 
@@ -11,6 +11,8 @@ type Item =
   | { kind: "server"; status: "stopped" | "starting" | "running" }
   | { kind: "join_code"; code: string }
   | { kind: "version"; version: string }
+  /** A compatibility check of a new build; `followUp`: after its first save. */
+  | { kind: "compat"; result: CompatResult; followUp: boolean }
   | { kind: "failure"; what: "admin"; actor: string; command: string; error: string }
   | { kind: "failure"; what: "settings"; error: string }
   | { kind: "failure"; what: "action"; action: string; error: string };
@@ -41,6 +43,27 @@ const STRINGS = {
     "server.running": "The fire burns again, the server is up",
     joinCode: "New join code: **{code}**",
     version: "Game updated to {version}",
+    "compat.ok": "Skald checked the game update from {from} to {to}: all fine",
+    "compat.warn": "Skald checked the game update from {from} to {to}: something to look at",
+    "compat.fail": "Skald checked the game update from {from} to {to}: something broke",
+    "compat.followUp.ok": "Skald checked the first save on {to}: all fine",
+    "compat.followUp.warn": "Skald checked the first save on {to}: something to look at",
+    "compat.followUp.fail": "Skald checked the first save on {to}: something broke",
+    "compat.awaitingSave": "The save is checked again after the first save on the new build.",
+    "compat.panel": "Details in the admin sheet.",
+    "compat.check.version": "Version",
+    "compat.check.save": "Save",
+    "compat.check.terrain": "Terrain",
+    "compat.check.bridge": "Admin bridge",
+    "compat.check.logs": "Server log",
+    "compat.reason.containers_unreadable": "{n} containers unreadable ({why})",
+    "compat.reason.chunks_unreadable": "{n} parts of the world unreadable",
+    "compat.reason.untested": "not tested on this build yet, commands wait for a confirmation",
+    "compat.reason.disabled": "the plugin turned itself off",
+    "compat.reason.unreachable": "not reachable",
+    "compat.reason.world_loaded_missing": "no world loaded line",
+    "compat.reason.join_code_missing": "no join code",
+    "compat.reason.map_behind": "the map is not built from the newest save",
     adminFailed: "{actor}: {command} failed ({error})",
     settingsFailed: "Applying the new settings failed ({error})",
     actionFailed: "{action} failed ({error})",
@@ -63,6 +86,27 @@ const STRINGS = {
     "server.running": "Ogień znów płonie, serwer działa",
     joinCode: "Nowy kod dołączenia: **{code}**",
     version: "Gra zaktualizowana do {version}",
+    "compat.ok": "Skald sprawdził aktualizację gry z {from} do {to}: wszystko w porządku",
+    "compat.warn": "Skald sprawdził aktualizację gry z {from} do {to}: coś wymaga uwagi",
+    "compat.fail": "Skald sprawdził aktualizację gry z {from} do {to}: coś przestało działać",
+    "compat.followUp.ok": "Skald sprawdził pierwszy zapis na {to}: wszystko w porządku",
+    "compat.followUp.warn": "Skald sprawdził pierwszy zapis na {to}: coś wymaga uwagi",
+    "compat.followUp.fail": "Skald sprawdził pierwszy zapis na {to}: coś przestało działać",
+    "compat.awaitingSave": "Zapis świata zostanie sprawdzony ponownie po pierwszym zapisie na nowej wersji.",
+    "compat.panel": "Szczegóły w panelu admina.",
+    "compat.check.version": "Wersja",
+    "compat.check.save": "Zapis świata",
+    "compat.check.terrain": "Teren",
+    "compat.check.bridge": "Most admina",
+    "compat.check.logs": "Log serwera",
+    "compat.reason.containers_unreadable": "nieczytelne skrzynie: {n} ({why})",
+    "compat.reason.chunks_unreadable": "nieczytelne fragmenty świata: {n}",
+    "compat.reason.untested": "jeszcze nie sprawdzony na tej wersji, komendy czekają na potwierdzenie",
+    "compat.reason.disabled": "wtyczka sama się wyłączyła",
+    "compat.reason.unreachable": "nieosiągalny",
+    "compat.reason.world_loaded_missing": "brak wpisu o wczytaniu świata",
+    "compat.reason.join_code_missing": "brak kodu dołączenia",
+    "compat.reason.map_behind": "mapa nie jest zbudowana z najnowszego zapisu",
     adminFailed: "{actor}: {command} nie powiodło się ({error})",
     settingsFailed: "Nie udało się zastosować nowych ustawień ({error})",
     actionFailed: "{action} nie powiodło się ({error})",
@@ -208,6 +252,9 @@ export function formatBatch(items: readonly Item[], locale: Locale): string[] {
       case "version":
         lines.push(fill(s.version, { version: escapeMd(gameVersion(it.version)) }));
         break;
+      case "compat":
+        lines.push(...compatLines(it.result, it.followUp, locale));
+        break;
       case "failure":
         if (it.what === "admin") lines.push(fill(s.adminFailed, { actor: escapeMd(it.actor), command: escapeMd(it.command), error: escapeMd(it.error) }));
         else if (it.what === "settings") lines.push(fill(s.settingsFailed, { error: escapeMd(it.error) }));
@@ -215,6 +262,27 @@ export function formatBatch(items: readonly Item[], locale: Locale): string[] {
         break;
     }
   }
+  return lines;
+}
+
+/**
+ * A compatibility check as message lines: the build change and the outcome,
+ * then one line per check that warns or fails.
+ */
+function compatLines(r: CompatResult, followUp: boolean, locale: Locale): string[] {
+  const s = STRINGS[locale] as Record<string, string>;
+  const vars = { from: escapeMd(gameVersion(r.previousBuild ?? "?")), to: escapeMd(gameVersion(r.build)) };
+  const lines = [fill(s[`compat.${followUp ? "followUp." : ""}${r.status}`] ?? r.status, vars)];
+  for (const c of r.checks) {
+    if (c.status !== "warn" && c.status !== "fail") continue;
+    const d = c.detail ?? {};
+    const reason = c.reason ?? "";
+    const n = String(d.containersUnreadable ?? d.chunksUnreadable ?? "");
+    const text = s[`compat.reason.${reason}`] ? fill(s[`compat.reason.${reason}`]!, { n, why: escapeMd(String(d.containerReason ?? "")) }) : escapeMd(reason);
+    lines.push(`- ${s[`compat.check.${c.name}`] ?? escapeMd(c.name)}: ${text}`);
+  }
+  if (r.awaitingSave) lines.push(s["compat.awaitingSave"]!);
+  if (r.status !== "ok") lines.push(s["compat.panel"]!);
   return lines;
 }
 
@@ -419,6 +487,16 @@ export class DiscordNotifier {
         this.version = v;
         // The first version seen is a baseline, not an update.
         if (before) this.add({ kind: "version", version: v });
+        return;
+      }
+      case "compat": {
+        // Only a finished check of a new build is news: right after the
+        // update, and after its first save when that found a problem.
+        if (d.running === true || !d.result || typeof d.result !== "object") return;
+        const r = d.result as CompatResult;
+        if (!r.updated || !r.previousBuild || !Array.isArray(r.checks)) return;
+        if (r.trigger === "update") return this.add({ kind: "compat", result: r, followUp: false });
+        if (r.trigger === "save" && r.status !== "ok") return this.add({ kind: "compat", result: r, followUp: true });
         return;
       }
       case "server_state":

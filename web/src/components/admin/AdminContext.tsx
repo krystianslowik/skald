@@ -1,5 +1,5 @@
 import { createContext, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { AdminCatalog, AdminCommand, AdminStatus, AgentEvent, ApiState, MapContainer, Platform, RestoreBackup } from "../../types";
+import type { AdminCatalog, AdminCommand, AdminStatus, AgentEvent, ApiState, CompatView, MapContainer, Platform, RestoreBackup } from "../../types";
 import { getAdminStatus, postAdmin, runAdmin, type AdminOutcome, type KitLine } from "../../lib/admin";
 import { Unauthorized } from "../../lib/api";
 import { failText } from "../../lib/refusal";
@@ -113,6 +113,8 @@ export interface Admin {
   events: AgentEvent[];
   /** Skald releases of this panel and of the agent (missing from agents before 2026.10.0). */
   versions: { web: string; agent?: string };
+  /** The compatibility check with the game build; null from agents before it. */
+  compat: CompatView | null;
 }
 
 const AdminCtx = createContext<Admin | null>(null);
@@ -285,8 +287,9 @@ export function AdminProvider({
       world: state.server.world,
       events: state.history.events,
       versions,
+      compat: state.compat ?? null,
     }),
-    [status, present, bridgeOn, blocker, unlocked, refresh, run, post, unlock, pick, startPick, completePick, cancelPick, toast, state.players, mainBase, state.server.world, state.history.events, versions],
+    [status, present, bridgeOn, blocker, unlocked, refresh, run, post, unlock, pick, startPick, completePick, cancelPick, toast, state.players, mainBase, state.server.world, state.history.events, versions, state.compat],
   );
 
   return (

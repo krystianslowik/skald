@@ -25,7 +25,8 @@ import { BOSSES } from "../lib/world";
 import { cancelApply, type LogoutResult } from "../lib/api";
 import { PHONE, useMedia } from "../lib/useMedia";
 import { TABS, useRoute, type Tab } from "../lib/useRoute";
-import { AdminProvider } from "./admin/AdminContext";
+import { AdminProvider, useAdmin } from "./admin/AdminContext";
+import { CompatNotice } from "./Compat";
 import { AdminBoard } from "./admin/AdminBoard";
 import { lazyChunk } from "../lib/chunks";
 import { ChunkBoundary } from "./ErrorBoundary";
@@ -226,6 +227,8 @@ export function Dashboard({ live, onLogout, onUnauthorized = () => {} }: { live:
         {!online && <OfflineBanner />}
         {phone ? (
           <main className="relative z-10 mx-auto max-w-xl pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pb-[calc(var(--tabbar-h)+1.5rem)] pt-[max(1.25rem,env(safe-area-inset-top))]">
+            {/* On every tab: it is news for whoever opens the panel. */}
+            <DashboardCompatNotice className="mb-5" />
             {/* Each tab fades in on its own; the boards inside do not move. */}
             <motion.div key={shownTab} className="space-y-5" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.18 }}>
               {shownTab === "fire" && (
@@ -266,6 +269,7 @@ export function Dashboard({ live, onLogout, onUnauthorized = () => {} }: { live:
             animate={{ opacity: 1 }}
             transition={{ duration: 0.8 }}
           >
+            <DashboardCompatNotice />
             {header}
             {/* The code and who is at the fire side by side, centred on each other: the board as tall as its players. */}
             <div className="grid gap-5 lg:grid-cols-12 lg:items-center lg:gap-6">
@@ -320,6 +324,12 @@ export function Dashboard({ live, onLogout, onUnauthorized = () => {} }: { live:
     </ProfileProvider>
     </AdminProvider>
   );
+}
+
+/** The compatibility notice, with a way into the admin sheet's details. */
+function DashboardCompatNotice({ className }: { className?: string }) {
+  const admin = useAdmin();
+  return <CompatNotice view={admin?.compat} onDetails={admin?.present ? () => admin.open({ kind: "panel" }) : undefined} className={className} />;
 }
 
 /** A first state this late with the link down is an outage, not a slow load. */

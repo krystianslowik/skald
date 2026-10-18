@@ -15,6 +15,7 @@ import { HoldButton } from "./HoldButton";
 import { SkaldVersion } from "../SkaldVersion";
 import { AdminHead, BridgeBanner, Btn, Chip, HealthBar, Section, TargetChips } from "./parts";
 import { AccessLists, RestoreSection } from "./WorldTools";
+import { CompatRows } from "../Compat";
 
 type Style = "center" | "topleft" | "narrator";
 const STYLES: Style[] = ["center", "topleft", "narrator"];
@@ -75,6 +76,7 @@ export function AdminPanel({ picked, onClose }: { picked?: { x: number; z: numbe
         )}
         {admin.bridgeOn ? <BridgeTools catalog={catalog} picked={pickedTarget} reload={reload} /> : <p className="mt-2 text-sm text-ash">{t("admin.noBridge")}</p>}
 
+        <CompatSection />
         <Notify />
         <AccessLists />
         <RestoreSection />
@@ -105,6 +107,28 @@ export function AdminPanel({ picked, onClose }: { picked?: { x: number; z: numbe
         <SkaldVersion web={admin.versions.web} agent={admin.versions.agent} update={st?.update} className="mt-6 border-t border-iron/25 pt-3" />
       </div>
     </Sheet>
+  );
+}
+
+/**
+ * The compatibility check with the game build: every part with what it found,
+ * for everyone who can open the sheet; running it again is an admin's.
+ * Missing with an agent older than the check.
+ */
+function CompatSection() {
+  const { t } = useI18n();
+  const admin = useAdmin()!;
+  const view = admin.compat;
+  if (!view) return null;
+  const r = view.result;
+  const aside = view.running ? t("compat.aside.running") : r ? t(`compat.aside.${r.status}`) : undefined;
+  return (
+    <Section title={t("compat.title")} aside={aside} id="admin-compat">
+      <CompatRows view={view} />
+      <Btn className="mt-3" disabled={view.running} onClick={() => void admin.post("/api/admin/compat/run", {}, { done: t("compat.rerun.started") })}>
+        {t("compat.rerun")}
+      </Btn>
+    </Section>
   );
 }
 
