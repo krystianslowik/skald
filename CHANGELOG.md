@@ -13,6 +13,12 @@ above them.
 
 - **Operators:** the README now explains how to update Skald with Compose or Kubernetes, which updates restart the game (and so change the join code), and how to pin a version. docs/configuration.md explains how to change or reset the panel and admin passwords, who stays signed in afterwards, and what to do when locked out. The quick start now sets `ADMIN_PASSWORD_HASH`.
 
+### Changed
+
+- The login screen now says what it asks for: the panel password, which the server's admin hands out.
+- With an admin password set, players who have not unlocked admin no longer see eye and copy buttons next to the server password that only led to the admin prompt. They see "Ask an admin for the password" instead. Admins see the buttons as before.
+- Players who have not unlocked admin get a short compatibility notice after a game update, without the admin's list of checks and the Details button they could not use.
+
 ### Fixed
 
 - The compatibility check reported "world not loaded" on game build l-1.0.20, which no longer writes the "Loading: Done. Total seconds since ZNet start" line. The agent now also recognises the line that build ends world loading with.
@@ -21,6 +27,7 @@ above them.
 - The two raids the game announces with the same swamp message are now told apart in the raid list, the saga and Discord: "A foul smell from the swamp... (Bonemass's army)" and "(blobs)", in Polish "Stęchlizna z bagien (armia Kościoszlamu)" and "(flegmy)".
 - Give items: the + and − next to an amount now move by 10 for items that stack, the same as tapping the item again, instead of by 1 below 20. The amount itself can be tapped to type an exact number.
 - Clearer wording in the admin sheet. The notice for an untested game build no longer asks for a test broadcast (commands, broadcast included, stay off until you allow the build): it says to join the game and check the server works first. A plugin that switched itself off now says what to do next, with the raw reason as a small detail line. The compatibility check explains in words why chests could not be read. The admin plugin has one name everywhere ("wtyczka admina" in Polish), game builds show without the "l-" prefix, and Polish fixes: Karve, "portale: łagodne" and other modifier levels that now agree with their modifier, the backups section's unlock hint, and sentence-case item names such as "Kilof z brązu" and "Idol bitwy z żelaza".
+- The server settings sheet no longer opens with "2 changes" before anything was touched. The modifiers the world was created with are now the starting point, so only real edits count, and Reset keeps them selected.
 
 ## [2026.10.12] - 2026-10-18
 

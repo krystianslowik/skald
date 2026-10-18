@@ -86,6 +86,15 @@ function SettingsForm({
   const [armedLocal, setArmedLocal] = useState<boolean | null>(null);
   const [applying, setApplying] = useState(false);
   const footer = useRef<HTMLDivElement>(null);
+  // The world's modifiers the draft was last built from: the draft and the
+  // change count must use the same ones, even if the state push moves on.
+  const [world, setWorld] = useState<Record<string, string> | null | undefined>(worldModifiers);
+  const worldNow = useRef(worldModifiers);
+  worldNow.current = worldModifiers;
+  const resetTo = useCallback((to: SettingsCurrent) => {
+    setWorld(worldNow.current);
+    dispatch({ type: "reset", to, world: worldNow.current });
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -95,11 +104,8 @@ function SettingsForm({
         if (r.status !== 200) return setFailed(true);
         setView(r.body);
         setSaved(r.body.current);
-        dispatch({ type: "reset", to: r.body.current });
-        // Preselect what the world really plays with, so a save keeps it.
-        for (const [name, value] of Object.entries(worldOnly(r.body.current, worldModifiers))) {
-          dispatch({ type: "modifier", name: name as ModifierName, value });
-        }
+        // Preselects what the world really plays with, so a save keeps it.
+        resetTo(r.body.current);
       })
       .catch(() => live && setFailed(true));
     return () => {
@@ -120,7 +126,7 @@ function SettingsForm({
   }, [focusFooter, view]);
 
   const passwordSet = view?.password.set ?? summary.passwordSet;
-  const changes = useMemo(() => (saved && draft ? diff(saved, draft, known) : []), [saved, draft, known]);
+  const changes = useMemo(() => (saved && draft ? diff(saved, draft, known, world) : []), [saved, draft, known, world]);
   const errors = useMemo(() => {
     if (!saved || !draft) return {};
     return { ...draftErrors(saved, passwordSet, known, draft), ...serverErrors };
@@ -149,7 +155,7 @@ function SettingsForm({
       if (r.status === 200 && "current" in r.body) {
         setView(r.body);
         setSaved(r.body.current);
-        dispatch({ type: "reset", to: r.body.current });
+        resetTo(r.body.current);
         setJustSaved(true);
         setMessage({ tone: "ok", text: t("settings.saved") });
         return;
@@ -200,7 +206,7 @@ function SettingsForm({
 
   const ready = view && saved && draft;
   // Shown until a save carries the world's modifiers into the settings.
-  const worldNote = useMemo(() => (saved ? worldOnly(saved, worldModifiers) : {}), [saved, worldModifiers]);
+  const worldNote = useMemo(() => (saved ? worldOnly(saved, world) : {}), [saved, world]);
   return (
     <Sheet
       labelledBy="settings-h"
@@ -236,7 +242,9 @@ function SettingsForm({
               applying={applying}
               message={message}
               onReset={() => {
-                edit({ type: "reset", to: saved });
+                resetTo(saved);
+                setServerErrors({});
+                setMessage(null);
               }}
               onSave={save}
               onApplyNow={applyNow}

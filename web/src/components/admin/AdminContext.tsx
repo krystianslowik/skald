@@ -119,6 +119,13 @@ export interface Admin {
 
 const AdminCtx = createContext<Admin | null>(null);
 
+/**
+ * A view-only session: an admin password is set and this session has not
+ * unlocked it. False until the first admin status arrives, so a panel whose
+ * status cannot be read keeps working as before (the server still refuses).
+ */
+export const viewOnly = (admin: Admin | null | undefined): boolean => !!admin?.present && !admin.unlocked;
+
 /** The admin layer, or null outside the provider (tests, the login screen). */
 export const useAdmin = (): Admin | null => useContext(AdminCtx);
 

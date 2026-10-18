@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createLogStore } from "../lib/useValheim";
 import { preloadLazyChunks } from "../test-preload";
 import { emptyAgentState, type AdminStatus, type ApiState } from "../types";
+import { mockCompat } from "@server/mockcompat";
 import { Dashboard } from "./Dashboard";
 
 function fixture(): ApiState {
@@ -114,9 +115,35 @@ describe("server settings behind an admin password", () => {
     await act(async () => {});
     // Sharing takes the code alone: no "include password" switch.
     expect(screen.queryByRole("checkbox", { name: "Include password" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Show password" }));
-    expect(await screen.findByRole("dialog", { name: "Admin password" })).toBeInTheDocument();
+    // No reveal or copy that would only lead to the admin prompt: who to ask instead.
+    expect(await screen.findByText("Ask an admin for the password")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show password" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy password" })).not.toBeInTheDocument();
     expect(screen.queryByText("hearth-77")).not.toBeInTheDocument();
+    expect(calls).not.toContain("/api/settings/password");
+  });
+
+  it("gives a viewer a plain compatibility notice, the admin the full one", async () => {
+    const withCompat = (unlocked: boolean) => {
+      const calls = api(unlocked);
+      const state = { ...fixture(), compat: mockCompat("warn", "l-1.0.20", 41, Date.parse("2026-10-09T19:30:00Z")) };
+      const view = render(<Dashboard live={{ state, logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
+      return { calls, view };
+    };
+    const viewer = withCompat(false);
+    await waitFor(() => expect(viewer.calls).toContain("/api/admin/status"));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("After the game update to 1.0.20, parts of the panel may not work."));
+    expect(screen.queryByText(/Skald's check:/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Details" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    viewer.view.unmount();
+    vi.unstubAllGlobals();
+
+    const admin = withCompat(true);
+    await waitFor(() => expect(admin.calls).toContain("/api/admin/status"));
+    expect(await screen.findByRole("button", { name: "Details" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Something needs a look after the game update to 1.0.20.");
+    expect(screen.getByRole("status")).toHaveTextContent("Skald's check: Server log.");
   });
 
   it("shows it to an unlocked admin", async () => {

@@ -107,3 +107,35 @@ describe("worldOnly", () => {
     expect(worldOnly({ ...saved, preset: "hard", modifiers: {} }, { resources: "muchmore" })).toEqual({});
   });
 });
+
+describe("the world's own modifiers as the baseline", () => {
+  const world = { resources: "muchmore", portals: "casual" };
+
+  it("opens with them selected and nothing to save", () => {
+    const d = draftFrom(saved, world);
+    expect(d.modifiers).toEqual({ raids: "less", deathpenalty: "casual", resources: "muchmore", portals: "casual" });
+    expect(diff(saved, d, null, world)).toEqual([]);
+  });
+
+  it("keeps them on undo", () => {
+    const d = apply(draftFrom(saved, world), { type: "modifier", name: "combat", value: "hard" }, { type: "reset", to: saved, world });
+    expect(d.modifiers).toMatchObject(world);
+    expect(diff(saved, d, null, world)).toEqual([]);
+  });
+
+  it("does not count one set back to normal, which would save what is already saved", () => {
+    const d = apply(draftFrom(saved, world), { type: "modifier", name: "resources", value: null });
+    expect(diff(saved, d, null, world)).toEqual([]);
+  });
+
+  it("counts real modifier edits and saves the world's along with them", () => {
+    const d = apply(draftFrom(saved, world), { type: "modifier", name: "resources", value: "more" }, { type: "modifier", name: "combat", value: "hard" });
+    expect(diff(saved, d, null, world).sort()).toEqual(["modifier.combat", "modifier.resources"]);
+    expect(toInput(d, null).modifiers).toEqual({ raids: "less", deathpenalty: "casual", resources: "more", portals: "casual", combat: "hard" });
+  });
+
+  it("comes back clean after a preset and back to normal", () => {
+    const d = apply(draftFrom({ ...saved, modifiers: {} }, world), { type: "preset", value: "hard" }, { type: "preset", value: "normal" });
+    expect(diff({ ...saved, modifiers: {} }, d, null, world)).toEqual([]);
+  });
+});
