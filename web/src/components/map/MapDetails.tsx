@@ -3,6 +3,7 @@ import { useI18n } from "../../i18n";
 import { markerItems, markerStore, type Marker } from "../../lib/mapgeo";
 import { topDown } from "../../lib/stacks";
 import { countItems } from "../../lib/storage";
+import { gameVersion } from "../../lib/format";
 import { mapUrlAt } from "../../lib/world";
 import type { MapContainer, MapItem } from "../../types";
 import { canAddTo, usePendingItems } from "../../lib/chestadd";
@@ -236,7 +237,7 @@ function AddItemButton({ chest, roomy, className = "" }: { chest: MapContainer; 
   if (!admin || !admin.bridgeOn || !bridge?.commands.includes("chest-add") || !canAddTo(chest)) return null;
   const old = pluginBelow(admin.status, "0.4.0");
   // Said next to the button, not in a title: phones never show titles.
-  const why = admin.blocker ? t(BLOCKER_TEXT[admin.blocker], { build: bridge.gameBuild ?? "?" }) : old ? t("admin.chest.needsBridge") : null;
+  const why = admin.blocker ? t(BLOCKER_TEXT[admin.blocker], { build: gameVersion(bridge.gameBuild) }) : old ? t("admin.chest.needsBridge") : null;
   return (
     <>
       <button

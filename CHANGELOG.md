@@ -20,6 +20,7 @@ above them.
 - Admin results no longer cover the open sheet's title and close button: when several actions run in a row (repair, grow, reveal the map, save), their messages stack below the sheet's header.
 - The two raids the game announces with the same swamp message are now told apart in the raid list, the saga and Discord: "A foul smell from the swamp... (Bonemass's army)" and "(blobs)", in Polish "Stęchlizna z bagien (armia Kościoszlamu)" and "(flegmy)".
 - Give items: the + and − next to an amount now move by 10 for items that stack, the same as tapping the item again, instead of by 1 below 20. The amount itself can be tapped to type an exact number.
+- Clearer wording in the admin sheet. The notice for an untested game build no longer asks for a test broadcast (commands, broadcast included, stay off until you allow the build): it says to join the game and check the server works first. A plugin that switched itself off now says what to do next, with the raw reason as a small detail line. The compatibility check explains in words why chests could not be read. The admin plugin has one name everywhere ("wtyczka admina" in Polish), game builds show without the "l-" prefix, and Polish fixes: Karve, "portale: łagodne" and other modifier levels that now agree with their modifier, the backups section's unlock hint, and sentence-case item names such as "Kilof z brązu" and "Idol bitwy z żelaza".
 
 ## [2026.10.12] - 2026-10-18
 

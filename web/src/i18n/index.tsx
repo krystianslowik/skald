@@ -47,6 +47,14 @@ export interface I18n {
   raidLabel(id: string): string;
 }
 
+/**
+ * A world modifier's level in words, agreeing with the modifier ("walka:
+ * łatwa", "portale: łagodne"); the shared `modv.*` word when there is none.
+ */
+export function modLevel(lookup: (key: string) => string | undefined, mod: string, level: string): string {
+  return lookup(`step.${mod}.${level}`) ?? lookup(`modv.${level}`) ?? level;
+}
+
 /** Needs the language's dictionary loaded (`loadLocale`, or `I18nProvider` does it). */
 export function makeI18n(locale: Locale): I18n {
   const dict = dictFor(locale);
@@ -135,7 +143,7 @@ export function makeI18n(locale: Locale): I18n {
         else if (w === "-modifier" && a[i + 2]) {
           const k = a[i + 1]!.toLowerCase();
           const v = a[i + 2]!.toLowerCase();
-          out.push(`${lookup(`mod.${k}`) ?? k}: ${lookup(`modv.${v}`) ?? v}`);
+          out.push(`${lookup(`mod.${k}`) ?? k}: ${modLevel(lookup, k, v)}`);
           i += 2;
         } else if (w === "-preset" && a[i + 1]) {
           out.push(`preset: ${a[i + 1]}`);

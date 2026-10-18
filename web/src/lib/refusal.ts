@@ -6,6 +6,7 @@
 
 import type { I18n, TextKey } from "../i18n";
 import { isOriginRefusal } from "./api";
+import { gameVersion } from "./format";
 import { itemLabel } from "./storage";
 
 type Vars = Record<string, string | number>;
@@ -70,7 +71,7 @@ const RULES: Rule[] = [
   { re: /^not on the ban list \(reload it\)$|^'.+' is not on the ban list$/, key: "admin.refusal.notBanned" },
   // The game, the bridge or the agent not ready.
   { re: /^(world not loaded yet|EnvMan not available|RandEventSystem not available|ObjectDB not available)$/, key: "admin.refusal.worldLoading" },
-  { re: /^untested game build (\S+): confirm it in the admin panel first$/, key: "admin.refusal.untested", vars: (m) => ({ build: m[1]! }) },
+  { re: /^untested game build (\S+): confirm it in the admin panel first$/, key: "admin.refusal.untested", vars: (m) => ({ build: gameVersion(m[1]) }) },
   // The bridge waits 5 s for the game's main thread to pick a command up, less
   // than the agent's 8 s, so "not picked up" is the usual timeout: the bridge
   // dropped the command, nothing was done. A command that started waits 5 s

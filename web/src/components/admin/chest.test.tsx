@@ -233,15 +233,15 @@ describe("the chest on the map", () => {
     const add = await screen.findByRole("button", { name: "Add item" });
     await waitFor(() => expect(add).toBeDisabled());
     expect(add).not.toHaveAttribute("title");
-    expect(add).toHaveAccessibleDescription("Needs bridge 0.4.0 or later");
-    expect(screen.getByText("Needs bridge 0.4.0 or later")).toBeVisible();
+    expect(add).toHaveAccessibleDescription("Needs admin plugin 0.4.0 or later");
+    expect(screen.getByText("Needs admin plugin 0.4.0 or later")).toBeVisible();
     unmount();
     vi.unstubAllGlobals();
     api(status({ tested: false, acknowledged: false, gameBuild: "l-1.0.18" }), () => Response.json({ ok: true, data: {} }));
     wrap(<DetailsBody marker={marker} seedName="" roomy />, "pl");
     const dodaj = await screen.findByRole("button", { name: "Dodaj przedmiot" });
     await waitFor(() => expect(dodaj).toBeDisabled());
-    expect(dodaj).toHaveAccessibleDescription(makeI18n("pl").t("admin.blocker.untested", { build: "l-1.0.18" }));
+    expect(dodaj).toHaveAccessibleDescription(makeI18n("pl").t("admin.blocker.untested", { build: "1.0.18" }));
   });
 
   it("gives an enabled Add item no reason line", async () => {

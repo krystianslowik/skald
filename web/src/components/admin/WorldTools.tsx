@@ -208,7 +208,7 @@ export function RestoreSection() {
     <Section title={t("admin.restore.title")} aside={info ? String(info.backups.length) : undefined}>
       <p className="mb-2 text-sm text-ash">{t("admin.restore.lead")}</p>
       {!info ? (
-        <p className="text-sm text-ash">{canRead ? t("admin.access.loading") : t("admin.access.locked")}</p>
+        <p className="text-sm text-ash">{canRead ? t("admin.access.loading") : t("admin.restore.locked")}</p>
       ) : (
         <>
           {blocked && (

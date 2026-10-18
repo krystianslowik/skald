@@ -167,7 +167,7 @@ export function describeAdmin(i: I18n, d: Record<string, unknown>): string {
       vars.effect = lookup(`effect.${d.effect}`) ?? String(d.effect ?? "");
       break;
     case "ack-build":
-      vars.build = String(d.build ?? "");
+      vars.build = gameVersion(String(d.build ?? ""));
       break;
   }
   const key = WITH_PLAYER.has(command) && !player ? `saga.admin.${command}.at` : `saga.admin.${command}`;

@@ -308,7 +308,7 @@ describe("admin", () => {
     renderDashboard();
     const sheet = await openAdmin();
     expect(within(sheet).queryByRole("textbox", { name: "Broadcast" })).not.toBeInTheDocument();
-    expect(within(sheet).getByText(/Without the bridge, live commands are off/)).toBeInTheDocument();
+    expect(within(sheet).getByText(/Without the admin plugin, live commands are off/)).toBeInTheDocument();
     expect(await within(sheet).findByRole("heading", { name: "Admins and bans" })).toBeInTheDocument();
     expect(within(sheet).getByRole("heading", { name: "Restore a world backup" })).toBeInTheDocument();
     expect(within(sheet).getByText(/go to a Discord channel/)).toBeInTheDocument();
@@ -343,7 +343,8 @@ describe("admin", () => {
     const calls = api(status({ required: true, unlocked: false }));
     renderDashboard();
     const sheet = await openAdmin();
-    expect(within(sheet).getAllByText("Unlock to see the lists.").length).toBeGreaterThan(0);
+    expect(within(sheet).getByText("Unlock to see the lists.")).toBeInTheDocument();
+    expect(within(sheet).getByText("Unlock to see the backups.")).toBeInTheDocument();
     await act(async () => {});
     expect(calls.some((c) => c.url === "/api/admin/access" || c.url === "/api/admin/restore")).toBe(false);
   });
@@ -366,7 +367,7 @@ describe("admin", () => {
     api(status({ required: true, unlocked: false }, { reason: "off", available: false }));
     renderDashboard();
     const sheet = await openAdmin();
-    expect(within(sheet).getByText("View only").compareDocumentPosition(within(sheet).getByText(/Without the bridge/)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(sheet).getByText("View only").compareDocumentPosition(within(sheet).getByText(/Without the admin plugin/)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("shows no view-only banner when the session may command", async () => {
@@ -448,7 +449,7 @@ describe("admin", () => {
     for (const name of ["Fill kilns with wood", "Fill smelters", "Fill fermenters"]) {
       const b = within(panel).getByRole("button", { name });
       expect(b).toBeDisabled();
-      expect(b).toHaveAccessibleDescription("Bridge 0.2.1 cannot fill stations: kilns and smelters need 0.3.0 or later, fermenters 0.4.0.");
+      expect(b).toHaveAccessibleDescription("Admin plugin 0.2.1 cannot fill stations: kilns and smelters need 0.3.0 or later, fermenters 0.4.0.");
     }
     expect(within(panel).getByRole("button", { name: "Repair" })).toBeEnabled();
   });
@@ -461,7 +462,7 @@ describe("admin", () => {
     expect(within(panel).getByRole("button", { name: "Fill smelters" })).toBeEnabled();
     const ferment = within(panel).getByRole("button", { name: "Fill fermenters" });
     expect(ferment).toBeDisabled();
-    expect(ferment).toHaveAccessibleDescription("Bridge 0.3.0 cannot fill fermenters: that needs 0.4.0 or later.");
+    expect(ferment).toHaveAccessibleDescription("Admin plugin 0.3.0 cannot fill fermenters: that needs 0.4.0 or later.");
   });
 
   it("greys out a fill the agent does not list, and says to update the agent", async () => {
@@ -486,7 +487,7 @@ describe("admin", () => {
     render(<I18nProvider locale="en"><FillSheet station="smelters" target={{ player: "Ragnar" }} catalog={{ events: [], currentEvent: null, globalKeys: [], spots: [], stations: { kilns: [], smelters: [], fermenters: [] } }} onClose={() => {}} /></I18nProvider>);
     const flow = screen.getByRole("dialog", { name: "Fill smelters" });
     expect(within(flow).queryByRole("button", { name: /Keep the current ore/ })).not.toBeInTheDocument();
-    expect(within(flow).getByText(/needs bridge 0\.3\.0 or later/)).toBeInTheDocument();
+    expect(within(flow).getByText(/needs admin plugin 0\.3\.0 or later/)).toBeInTheDocument();
   });
 
   it("fills smelters step by step: metal, coal, confirm, result", async () => {
@@ -647,9 +648,21 @@ describe("admin", () => {
     api(status({}, { tested: false, gameBuild: "l-1.0.18" }));
     renderDashboard();
     const sheet = await openAdmin();
-    expect(within(sheet).getByText("Game build l-1.0.18 has not been tested with the bridge.")).toBeInTheDocument();
-    expect(within(sheet).getByRole("button", { name: /Allow build l-1.0.18/ })).toBeEnabled();
+    expect(within(sheet).getByText("Game build 1.0.18 has not been tested with the admin plugin.")).toBeInTheDocument();
+    // The check that is possible while commands are off: in the game, not a broadcast.
+    expect(within(sheet).getByText(/Check in the game that the server works/)).toBeInTheDocument();
+    expect(within(sheet).queryByText(/broadcast/)).toBeNull();
+    expect(within(sheet).getByRole("button", { name: /Allow build 1.0.18/ })).toBeEnabled();
     expect(within(sheet).getByRole("button", { name: "Send" })).toBeDisabled();
+  });
+
+  it("says what to do about a plugin that switched itself off, the raw reason last", async () => {
+    api(status({}, { available: false, reason: "disabled", message: "bridge disabled: game API binding failed (ZNet.Kick), game build l-1.0.18" }));
+    renderDashboard();
+    const sheet = await openAdmin();
+    expect(within(sheet).getByText("The admin plugin switched itself off, usually after a game update changed what it uses.")).toBeInTheDocument();
+    expect(within(sheet).getByText(/Update the admin plugin to a version that supports this game build/)).toBeInTheDocument();
+    expect(within(sheet).getByText("Details: bridge disabled: game API binding failed (ZNet.Kick), game build l-1.0.18")).toBeInTheDocument();
   });
 
   it("needs the player's name typed before a ban can be held", async () => {

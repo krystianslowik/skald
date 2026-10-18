@@ -3,11 +3,11 @@ import type { ReactElement } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { mockCompat } from "@server/mockcompat";
 import { BRIDGE_PLUGIN_VERSION } from "@server/bridgeplugin";
-import { I18nProvider } from "../i18n";
+import { I18nProvider, makeI18n } from "../i18n";
 import { createLogStore } from "../lib/useValheim";
 import { preloadLazyChunks } from "../test-preload";
 import { emptyAgentState, type AdminStatus, type ApiState, type CompatView } from "../types";
-import { CompatNotice, CompatRows } from "./Compat";
+import { CompatNotice, CompatRows, containerWhy } from "./Compat";
 import { Dashboard } from "./Dashboard";
 
 const NOW = Date.parse("2026-10-18T20:00:00Z");
@@ -31,8 +31,8 @@ describe("compatibility rows", () => {
     inLocale(<CompatRows view={view("fail")} />);
     expect(screen.getByText("Game updated from 1.0.16 to 1.0.20.")).toBeInTheDocument();
     const rows = within(screen.getByRole("list", { name: "Game compatibility" })).getAllByRole("listitem");
-    expect(rows.map((r) => r.querySelector("p")!.textContent)).toEqual(["Version", "World save", "Terrain", "Admin bridge", "Server log"]);
-    expect(rows[1]).toHaveTextContent("41 containers cannot be read (unreadable inventory: version 111)");
+    expect(rows.map((r) => r.querySelector("p")!.textContent)).toEqual(["Version", "World save", "Terrain", "Admin plugin", "Server log"]);
+    expect(rows[1]).toHaveTextContent("41 containers cannot be read: the game saves inventories in a new format (version 111) that Skald does not know yet.");
     expect(within(rows[1]!).getByRole("img", { name: "broken" })).toBeInTheDocument();
     expect(within(rows[3]!).getByRole("img", { name: "needs a look" })).toBeInTheDocument();
     expect(rows[3]).toHaveTextContent("Plugin 0.2.0 is not tested on 1.0.20");
@@ -44,7 +44,8 @@ describe("compatibility rows", () => {
   it("speaks Polish, the default", () => {
     inLocale(<CompatRows view={view("fail")} />, "pl");
     expect(screen.getByText("Gra zaktualizowana z 1.0.16 do 1.0.20.")).toBeInTheDocument();
-    expect(screen.getByText(/Nie da się odczytać 41 skrzyń/)).toBeInTheDocument();
+    expect(screen.getByText(/Nie da się odczytać 41 skrzyń: gra zapisuje ekwipunek w nowym formacie \(wersja 111\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/unreadable inventory/)).toBeNull();
     expect(screen.getAllByRole("img", { name: "nie działa" })).toHaveLength(1);
   });
 
@@ -57,6 +58,16 @@ describe("compatibility rows", () => {
       </I18nProvider>,
     );
     expect(screen.getByText(/Checking: waiting for the world/)).toBeInTheDocument();
+  });
+
+  it("words each known reason a container did not read, and passes a new one through", () => {
+    const pl = makeI18n("pl");
+    const en = makeI18n("en");
+    expect(containerWhy(pl, "unreadable inventory: 70000 items")).toBe("skrzynia podaje 70000 przedmiotów, więcej niż się mieści");
+    expect(containerWhy(en, "unreadable inventory: item flags 0x80")).toBe("an item has unknown flags (0x80)");
+    expect(containerWhy(en, "unreadable inventory: 3 trailing bytes")).toBe("3 unknown bytes follow the last item");
+    expect(containerWhy(pl, "truncated data")).toBe("zapis jest ucięty");
+    expect(containerWhy(en, "bad varint")).toBe("bad varint");
   });
 
   it("shows an unknown reason code instead of nothing", () => {
