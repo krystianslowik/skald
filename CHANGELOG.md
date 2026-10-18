@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Added
+
+- **Operators:** the README now explains how to update Skald with Compose or Kubernetes, which updates restart the game (and so change the join code), and how to pin a version. docs/configuration.md explains how to change or reset the panel and admin passwords, who stays signed in afterwards, and what to do when locked out. The quick start now sets `ADMIN_PASSWORD_HASH`.
+
 ## [2026.10.12] - 2026-10-18
 
 ### Added

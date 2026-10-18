@@ -122,8 +122,15 @@ openssl rand -hex 24   # SUPERVISOR_HTTP_PASS
 openssl rand -hex 32   # SESSION_SECRET
 
 # dashboard password as an argon2id hash (keep the single quotes in .env)
-printf '%s' 'your password' | docker run --rm -i ghcr.io/krystianslowik/skald-web hash-password
+printf '%s' 'your password' | docker run --rm -i ghcr.io/krystianslowik/skald-web hash-password   # PANEL_PASSWORD_HASH
+
+# a second, different password for admins, hashed the same way
+printf '%s' 'admin password' | docker run --rm -i ghcr.io/krystianslowik/skald-web hash-password  # ADMIN_PASSWORD_HASH
 ```
+
+Set `ADMIN_PASSWORD_HASH` too. Without it, everyone who knows the panel
+password is an admin and can restart the server, restore backups and change
+settings. With it, the panel password only views.
 
 ```sh
 docker compose up -d
@@ -158,13 +165,58 @@ client IP header, so the login rate limit sees real addresses. Every setting is
 in [docs/configuration.md](docs/configuration.md), metrics and alerts in
 [docs/metrics.md](docs/metrics.md).
 
+## Updating
+
+Read the [CHANGELOG](CHANGELOG.md) first. Each release says what changed, and
+says when an update restarts the game.
+
+**What restarts.** skald-web is the dashboard. Updating it never touches the
+game. The agent, the bridge plugin and the icons sidecar live with the game.
+In Kubernetes, updating any of them restarts the game pod. A game restart
+kicks everyone, and with crossplay the server gets a new join code. Do that
+when nobody is playing, and take a backup from the panel first.
+
+**Pin a version.** Releases use calendar versions (`2026.10.12`). Pin one
+instead of `latest`, so an update happens only when you choose it. Update
+the agent and skald-web together: the panel warns when their versions differ.
+
+**Compose.** Set `SKALD_VERSION` in `.env` to the new release, then:
+
+```sh
+cd skald/deploy/compose
+docker compose pull
+docker compose up -d
+```
+
+`up -d` recreates only the containers whose image or settings changed. The
+game image is pinned in `docker-compose.yaml`, so the game keeps running.
+If you also pulled a newer `docker-compose.yaml` that changes that tag, the
+game restarts too.
+With the bridge on, the new plugin is copied in but loads at the next game
+restart. Restart the server from the panel when nobody is playing.
+
+**Kubernetes.** The example pins every image. Change the version in
+`skald-web.yaml`, `valheim.yaml` (the agent) and the components you use
+(`icons/sidecar.yaml`, `bridge/plugin.yaml`, `terrain/cronjob.yaml`), then:
+
+```sh
+cd deploy/kubernetes
+kubectl apply -k .
+kubectl -n valheim rollout status deployment/skald-web
+kubectl -n valheim rollout status deployment/valheim
+```
+
+A new skald-web image restarts only the dashboard. A new agent, bridge or
+icons image restarts the game pod.
+
 ## Security
 
 The panel password is stored only as an argon2id hash, and login locks for 15
 minutes after 5 bad tries. With crossplay the server only dials out, so there are
 no game ports to forward or scan. The containers run as non-root on read-only
 filesystems, and player platform IDs leave the agent only for admins, in the
-admin and ban lists. Two things to keep
+admin and ban lists. To change or reset a password, see
+[Changing a password](docs/configuration.md#changing-a-password). Two things to keep
 private: the metrics port has no token, and the settings volume holds the server
 password in plain text. More in [SECURITY.md](SECURITY.md).
 

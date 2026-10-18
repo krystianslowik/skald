@@ -65,6 +65,53 @@ them (`container_cpu_usage_seconds_total`, `container_memory_working_set_bytes`,
 `container_network_*_bytes_total`). Outside Kubernetes, point `PROM_*` at
 whatever labels your cAdvisor uses, or leave `PROM_URL` empty.
 
+## Changing a password
+
+Skald keeps no password list. The panel password and the admin password are
+the two hashes in skald-web's settings, so you change one by replacing its
+hash. This is also how you reset a password nobody remembers.
+
+1. Make a new hash, the same way as at install:
+
+   ```sh
+   printf '%s' 'new password' | docker run --rm -i ghcr.io/krystianslowik/skald-web hash-password
+   ```
+
+2. Put it in place of the old one:
+   - Compose: `PANEL_PASSWORD_HASH` or `ADMIN_PASSWORD_HASH` in `.env`, inside
+     single quotes.
+   - Kubernetes: the same key in the `skald-web` Secret
+     (`secrets.yaml`, then `kubectl apply -k .`).
+3. Restart skald-web. It reads the hashes only at start.
+   - Compose: `docker compose up -d skald-web`. A plain
+     `docker compose restart` keeps the old value.
+   - Kubernetes: `kubectl -n valheim rollout restart deployment/skald-web`.
+
+This restarts only the dashboard, never the game. If the new hash is broken,
+skald-web stops at start and its log says why.
+
+**Who stays signed in.** Sessions are signed with `SESSION_SECRET`, not with
+the password. Changing a password does not sign anyone out:
+
+- Panel sessions last 30 days from sign-in.
+- An unlocked admin session lasts until 30 minutes pass without an admin
+  action.
+
+To sign everyone out at once, also replace `SESSION_SECRET` with a new value
+(`openssl rand -hex 32`) in the same step. Every device then has to sign in
+again with the new password.
+
+**Locked out.**
+
+- Forgot a password: an operator with access to `.env` or the Secret sets a
+  new hash as above. There is no reset from the panel.
+- Too many wrong tries: sign-in, and admin unlock, lock for 15 minutes after
+  5 wrong tries in a minute. Wait, or restart skald-web: the lock is kept in
+  memory and a restart clears it.
+- Removing `ADMIN_PASSWORD_HASH` and restarting makes everyone signed in an
+  admin again. Use it only as a last resort, and set a new admin password
+  right after.
+
 ## Origin check
 
 skald-web only accepts a request that changes something (any `POST`, `PUT` or
