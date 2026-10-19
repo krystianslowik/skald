@@ -159,6 +159,33 @@ describe("NotifySheet", () => {
     await act(async () => held.forEach((f) => f()));
   });
 
+  it("stays off when a save from before turning off fails afterwards", async () => {
+    browser({ subscribed: true });
+    const answer = globalThis.fetch;
+    const held: Record<string, () => void> = {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((path: string, init: RequestInit = {}) =>
+        init.method === "PUT"
+          ? new Promise<Response>((r) => (held.put = () => r(new Response("{}", { status: 500 }))))
+          : init.method === "DELETE"
+            ? new Promise<Response>((r) => (held.del = () => void answer(path, init).then(r)))
+            : answer(path, init),
+      ),
+    );
+    sheet();
+    fireEvent.click(await screen.findByRole("switch", { name: "Someone falls" }));
+    const device = screen.getByRole("switch", { name: "Notifications on this device" });
+    await waitFor(() => expect(held.put).toBeDefined());
+    await act(async () => fireEvent.click(device));
+    await waitFor(() => expect(held.del).toBeDefined());
+    // The save fails while the device is still subscribed: the server's old row comes back.
+    await act(async () => held.put!());
+    await act(async () => new Promise((r) => setTimeout(r, 20)));
+    expect(device).toHaveAttribute("aria-checked", "false");
+    await act(async () => held.del!());
+  });
+
   it("says so when the server keeps no more devices, and drops the browser's subscription", async () => {
     const b = browser();
     const fetchImpl = globalThis.fetch;

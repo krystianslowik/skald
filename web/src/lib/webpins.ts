@@ -85,6 +85,7 @@ export function putPin(p: WebPin): void {
 /** One pin deleted ("pin_gone" on /live). */
 export function dropPin(id: string): void {
   gone.add(id);
+  optimistic.dismiss(id);
   if (byId.delete(id)) publish();
 }
 
@@ -201,10 +202,10 @@ function changed(p: WebPin, by: string, c: PinChange, now: number): WebPin {
 }
 
 /**
- * Changes a pin on the map at once, then saves it. `from`: the pin the change
- * was decided on, for an edit whose guard must stay what the form began
- * from; without it, the change names the server's copy when it goes out, so
- * a second tap right after the first waits for it and still passes the guard.
+ * Changes a pin on the map at once, then saves it. The guard names the pin as
+ * the sheet showed it at the tap (or `from`, for an edit: the pin the form
+ * began from), so a second tap right after the first goes out once the first
+ * is in and still passes, while someone else's change meanwhile is a `stale`.
  * A refusal or a `stale` takes the change back; `pinFailure` says why.
  */
 export function changePin(id: string, by: string, change: PinChange, from?: WebPin): Promise<PinCall> {
@@ -212,8 +213,8 @@ export function changePin(id: string, by: string, change: PinChange, from?: WebP
   return optimistic.run(
     id,
     (p) => changed(p, by, change, now),
-    (base) => {
-      const was = from ?? base;
+    (seen) => {
+      const was = from ?? seen;
       return was ? updatePin(was, by, change) : Promise.resolve<PinCall>({ ok: false, error: "not_found" });
     },
   );
@@ -229,6 +230,7 @@ export function removePin(id: string): Promise<PinCall> {
       // Gone already is what was asked for.
       return !r.ok && r.error === "not_found" ? { ok: true } : r;
     },
+    { chained: false },
   );
 }
 

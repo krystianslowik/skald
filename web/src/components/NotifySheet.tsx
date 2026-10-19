@@ -52,7 +52,8 @@ export default function NotifySheet({ onClose }: { onClose: () => void }) {
     try {
       if (prefs) {
         // Off at once: the browser drops its subscription whatever the server answers,
-        // so this device gets no more push either way.
+        // so this device gets no more push either way. A save still out cannot turn it back on.
+        device.current += 1;
         setPrefs(null);
         await disablePush();
       } else {
@@ -72,12 +73,15 @@ export default function NotifySheet({ onClose }: { onClose: () => void }) {
   // Saves go one at a time and only the newest choice is sent, so the server
   // never ends on an older one; a failure shows what the server kept.
   const latest = useRef<PushPrefs | null>(null);
+  /** Bumped when push is turned off: a failed save from before shows nothing back. */
+  const device = useRef(0);
   const saving = useRef<Promise<void>>(Promise.resolve());
   const change = (next: PushPrefs) => {
     if (!prefs) return;
     setPrefs(next);
     setNote(null);
     latest.current = { ...next, locale };
+    const gen = device.current;
     saving.current = saving.current.then(async () => {
       const want = latest.current;
       if (!want) return;
@@ -87,7 +91,7 @@ export default function NotifySheet({ onClose }: { onClose: () => void }) {
       } catch (e) {
         fail(e);
         const kept = await loadDevice().catch(() => undefined);
-        if (live.current && kept !== undefined && latest.current === null) setPrefs(kept);
+        if (live.current && kept !== undefined && latest.current === null && device.current === gen) setPrefs(kept);
       }
     });
   };

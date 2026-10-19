@@ -260,6 +260,13 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({ ok: true });
   });
 
+  app.get("/api/me", (c) => (authed(c) ? c.json({ authenticated: true }) : c.json({ authenticated: false }, 401)));
+
+  app.use("/api/*", async (c, next) => {
+    if (!authed(c)) return c.json({ error: "unauthorized" }, 401);
+    await next();
+  });
+
   // A slow link for trying the panel's instant changes on the mock: the change
   // waits before it runs, so neither its answer nor its /live frame comes early.
   const writeDelay = deps.writeDelayMs ?? 0;
@@ -269,13 +276,6 @@ export function createApp(deps: AppDeps): Hono {
       await next();
     });
   }
-
-  app.get("/api/me", (c) => (authed(c) ? c.json({ authenticated: true }) : c.json({ authenticated: false }, 401)));
-
-  app.use("/api/*", async (c, next) => {
-    if (!authed(c)) return c.json({ error: "unauthorized" }, 401);
-    await next();
-  });
 
   // Phone push: each signed-in viewer turns it on for their own device.
   if (deps.push) {

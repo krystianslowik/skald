@@ -173,7 +173,7 @@ export function loadConfig(env: Env = process.env): Config {
     mockBridge: opt("MOCK_BRIDGE", "on").toLowerCase(),
     mockCompat: opt("MOCK_COMPAT", "ok").toLowerCase(),
     mockRestart: opt("MOCK_RESTART", "ok").toLowerCase(),
-    mockWriteDelayMs: mock ? Math.max(0, Number(opt("MOCK_WRITE_DELAY_MS", "0")) || 0) : 0,
+    mockWriteDelayMs: mock ? Math.min(60_000, Math.max(0, Number(opt("MOCK_WRITE_DELAY_MS", "0")) || 0)) : 0,
     discordWebhookUrl,
     discordNotify,
     pushContact,

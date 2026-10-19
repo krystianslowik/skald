@@ -117,7 +117,7 @@ describe("Optimistic", () => {
     expect(s.shown()).toEqual([{ id: "a", v: 2, state: "doing" }]);
   });
 
-  it("two quick taps: both show at once, and the second goes out after the first with the first's answer as its base", async () => {
+  it("two quick taps: both show at once, and the second goes out after the first, with what the viewer saw as its base", async () => {
     const s = store([{ id: "a", v: 1, state: "todo" }]);
     const bases: (Item | undefined)[] = [];
     const first = deferred();
@@ -132,9 +132,10 @@ describe("Optimistic", () => {
     await tick();
     // Still the second tap's state: the first answer does not pull the card back.
     expect(s.stateOf("a")).toBe("done");
+    // Sent only now, after the first is in; its guard is the copy shown at the tap.
     expect(bases).toEqual([
       { id: "a", v: 1, state: "todo" },
-      { id: "a", v: 2, state: "doing" },
+      { id: "a", v: 1, state: "doing" },
     ]);
     second.resolve({ ok: true, item: { id: "a", v: 3, state: "done" } });
     await two;
@@ -155,6 +156,26 @@ describe("Optimistic", () => {
     // A new tap after the failure starts afresh.
     expect(await s.o.run("a", (i) => ({ ...i, state: "doing" }), async (): Promise<Result> => (sent++, { ok: true }))).toEqual({ ok: true });
     expect(sent).toBe(2);
+  });
+
+  it("an independent change (a delete) queued behind a failing one is still sent", async () => {
+    const s = store([{ id: "a", v: 1, state: "todo" }]);
+    let deleted = false;
+    const one = s.o.run("a", (i) => ({ ...i, state: "doing" }), async (): Promise<Result> => ({ ok: false, error: "failed" }));
+    const del = s.o.run("a", () => undefined, async (): Promise<Result> => ((deleted = true), { ok: true }), { chained: false });
+    expect(s.shown()).toEqual([]);
+    await one;
+    // The status change is gone; the delete is still out and still hides it.
+    expect(s.shown()).toEqual([]);
+    expect(await del).toEqual({ ok: true });
+    expect(deleted).toBe(true);
+  });
+
+  it("dismiss forgets a failure", async () => {
+    const s = store([{ id: "a", v: 1, state: "todo" }]);
+    await s.o.run("a", (i) => i, async (): Promise<Result> => ({ ok: false, error: "failed" }));
+    s.o.dismiss("a");
+    expect(s.o.failure("a")).toBeUndefined();
   });
 
   it("a delete hides at once and comes back if refused", async () => {

@@ -219,6 +219,21 @@ describe("instant task changes", () => {
     expect(screen.getByRole("button", { name: "Reopen Task 1" })).toBeInTheDocument();
   });
 
+  it("refuse a queued second tap when another player changed the task in between", async () => {
+    const held = holdWrites();
+    setTasks([task(1)]);
+    inLocale(<TaskBoard saveKey="a" players={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start Task 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark Task 1 done" }));
+    await waitFor(() => expect(held).toHaveLength(1));
+    // Freya reopens it after this page's first change, before its answer.
+    act(() => putTask(task(1, { status: "todo", owner: "Freya", rev: 2 })));
+    await act(async () => held[0]!.answer(Response.json({ ok: true, task: task(1, { status: "doing", rev: 1 }) })));
+    await waitFor(() => expect(held).toHaveLength(2));
+    // The guard is what this page showed (doing), not Freya's todo: the server refuses it.
+    expect(held[1]!.body).toEqual({ status: "done", expect: { status: "doing" } });
+  });
+
   it("take a deleted task off at once and bring it back with a note if the server refuses", async () => {
     const held = holdWrites();
     setTasks([task(3, { title: "Karve" })]);

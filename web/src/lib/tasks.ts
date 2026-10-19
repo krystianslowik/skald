@@ -54,6 +54,8 @@ export function putTask(task: Task): void {
   const list = current ?? [];
   const have = list.find((t) => t.id === task.id);
   if (have && have.rev > task.rev) return;
+  // The task moved on since a failed change here: its note no longer fits.
+  if (have && task.rev > have.rev) optimistic.dismiss(task.id);
   publish(have ? list.map((t) => (t.id === task.id ? task : t)) : [...list, task]);
 }
 
@@ -62,6 +64,7 @@ export function dropTask(id: number): void {
   if (current === null) return;
   generation += 1;
   deleted.add(id);
+  optimistic.dismiss(id);
   if (current?.some((t) => t.id === id)) publish(current.filter((t) => t.id !== id));
 }
 
@@ -177,9 +180,9 @@ export async function deleteTask(id: number): Promise<TaskResult> {
 
 /**
  * Moves a task to `status` on the board at once, then saves it. The save
- * names the status the server has when it goes out, so a second tap right
- * after the first waits for it and still passes the guard; someone else's
- * change meanwhile is a `stale`, and the board shows theirs.
+ * names the status the board showed at the tap, so a second tap right after
+ * the first goes out once the first is in and still passes the guard;
+ * someone else's change meanwhile is a `stale`, and the board shows theirs.
  */
 export function setTaskStatus(id: number, status: Task["status"]): Promise<TaskResult> {
   const now = new Date().toISOString();
@@ -187,7 +190,7 @@ export function setTaskStatus(id: number, status: Task["status"]): Promise<TaskR
     id,
     // Already there (the /live frame came first): the server's copy, with its times, stays.
     (t) => (t.status === status ? t : { ...t, status, updatedAt: now, doneAt: status === "done" ? now : null }),
-    (base) => (base ? updateTask(id, { status }, { status: base.status }) : Promise.resolve<TaskResult>({ ok: false, error: "not_found" })),
+    (seen) => (seen ? updateTask(id, { status }, { status: seen.status }) : Promise.resolve<TaskResult>({ ok: false, error: "not_found" })),
   );
 }
 
@@ -201,6 +204,7 @@ export function removeTask(id: number): Promise<TaskResult> {
       // Gone already is what was asked for.
       return !r.ok && r.error === "not_found" ? { ok: true } : r;
     },
+    { chained: false },
   );
 }
 
