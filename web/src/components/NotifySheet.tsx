@@ -51,8 +51,15 @@ export default function NotifySheet({ onClose }: { onClose: () => void }) {
     setNote(null);
     try {
       if (prefs) {
+        // Off at once: the browser drops its subscription whatever the server answers,
+        // so this device gets no more push either way. A save still out cannot turn it back on.
+        device.current += 1;
+        setPrefs(null);
+        // A choice not yet sent is dropped, and one on its way lands first: a save
+        // after the DELETE would make the device again on the server.
+        latest.current = null;
+        await saving.current;
         await disablePush();
-        if (live.current) setPrefs(null);
       } else {
         const next = defaultPrefs(locale);
         const r = await enablePush(next);
@@ -70,12 +77,15 @@ export default function NotifySheet({ onClose }: { onClose: () => void }) {
   // Saves go one at a time and only the newest choice is sent, so the server
   // never ends on an older one; a failure shows what the server kept.
   const latest = useRef<PushPrefs | null>(null);
+  /** Bumped when push is turned off: a failed save from before shows nothing back. */
+  const device = useRef(0);
   const saving = useRef<Promise<void>>(Promise.resolve());
   const change = (next: PushPrefs) => {
     if (!prefs) return;
     setPrefs(next);
     setNote(null);
     latest.current = { ...next, locale };
+    const gen = device.current;
     saving.current = saving.current.then(async () => {
       const want = latest.current;
       if (!want) return;
@@ -83,9 +93,11 @@ export default function NotifySheet({ onClose }: { onClose: () => void }) {
       try {
         if (!(await savePrefs(want))) throw new Error("not saved");
       } catch (e) {
+        // Turned off meanwhile: a failed save of a choice no longer shown is not news.
+        if (device.current !== gen && !(e instanceof Unauthorized)) return;
         fail(e);
         const kept = await loadDevice().catch(() => undefined);
-        if (live.current && kept !== undefined && latest.current === null) setPrefs(kept);
+        if (live.current && kept !== undefined && latest.current === null && device.current === gen) setPrefs(kept);
       }
     });
   };

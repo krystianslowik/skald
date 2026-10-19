@@ -67,3 +67,14 @@ describe("config", () => {
     expect(message).not.toContain("abc");
   });
 });
+
+describe("MOCK_WRITE_DELAY_MS", () => {
+  it("holds writes only on the mock", () => {
+    expect(loadConfig({ MOCK_AGENT: "1", MOCK_WRITE_DELAY_MS: "1000" }).mockWriteDelayMs).toBe(1000);
+    expect(loadConfig({ MOCK_AGENT: "1", MOCK_WRITE_DELAY_MS: "soon" }).mockWriteDelayMs).toBe(0);
+    expect(loadConfig({ MOCK_AGENT: "1", MOCK_WRITE_DELAY_MS: "-5" }).mockWriteDelayMs).toBe(0);
+    expect(loadConfig({ MOCK_AGENT: "1", MOCK_WRITE_DELAY_MS: "1e9" }).mockWriteDelayMs).toBe(60_000);
+    expect(loadConfig({ MOCK_AGENT: "1" }).mockWriteDelayMs).toBe(0);
+    expect(loadConfig({ ...base, MOCK_WRITE_DELAY_MS: "1000" }).mockWriteDelayMs).toBe(0);
+  });
+});

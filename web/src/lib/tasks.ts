@@ -6,19 +6,33 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type { Task, TaskExpect, TaskInput, TaskInputError } from "@server/taskmodel";
 import { Unauthorized } from "./api";
+import { Optimistic, writeSignal } from "./optimistic";
 
 export type { Task, TaskExpect, TaskInput, TaskStatus, TaskTarget, TaskMaterial } from "@server/taskmodel";
 export { expectOf } from "@server/taskmodel";
 
+/** The server's copies: the socket's list with every answer and frame since. */
 let current: Task[] | null = null;
+/** What the board shows: `current` with this page's pending changes on top. */
+let shown: Task[] | null = null;
 /** Bumped by every list from the socket: a read that started before one is older than it. */
 let generation = 0;
 const subs = new Set<() => void>();
 
-function publish(next: Task[]): void {
+function publish(next: Task[] | null = current): void {
   current = next;
+  shown = next && next.flatMap((t) => optimistic.view(t.id, t) ?? []);
   for (const f of subs) f();
 }
+
+/** This page's changes still out: shown at once, taken back if the server refuses. */
+const optimistic = new Optimistic<number, Task, TaskResult>({
+  server: (id) => current?.find((t) => t.id === id),
+  ok: (r) => r.ok,
+  changed: () => publish(),
+  thrown: () => ({ ok: false, error: "failed" }),
+  gone: (id) => deleted.has(id),
+});
 
 /** Tasks the socket has reported gone: no late answer to this page's own write brings one back. */
 const deleted = new Set<number>();
@@ -42,6 +56,8 @@ export function putTask(task: Task): void {
   const list = current ?? [];
   const have = list.find((t) => t.id === task.id);
   if (have && have.rev > task.rev) return;
+  // The task moved on since a failed change here: its note no longer fits.
+  if (have && task.rev > have.rev) optimistic.dismiss(task.id, true);
   publish(have ? list.map((t) => (t.id === task.id ? task : t)) : [...list, task]);
 }
 
@@ -50,6 +66,7 @@ export function dropTask(id: number): void {
   if (current === null) return;
   generation += 1;
   deleted.add(id);
+  optimistic.dismiss(id, true);
   if (current?.some((t) => t.id === id)) publish(current.filter((t) => t.id !== id));
 }
 
@@ -80,7 +97,7 @@ function readTasks(onUnauthorized?: () => void): Promise<void> {
 
 /** Every task, or null until the first list arrives. */
 export function useTasks(onUnauthorized?: () => void): Task[] | null {
-  const tasks = useSyncExternalStore(subscribe, () => current, () => current);
+  const tasks = useSyncExternalStore(subscribe, () => shown, () => shown);
   useEffect(() => {
     if (current === null) void readTasks(onUnauthorized);
   }, [onUnauthorized]);
@@ -115,6 +132,8 @@ async function send(method: string, path: string, body?: unknown): Promise<TaskR
     res = await fetch(path, {
       method,
       credentials: "same-origin",
+      // A request that never answers would hold the task's later changes forever.
+      signal: writeSignal(),
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -159,9 +178,55 @@ export async function updateTask(id: number, input: TaskInput, expect?: TaskExpe
 
 export async function deleteTask(id: number): Promise<TaskResult> {
   const r = await send("DELETE", `/api/tasks/${id}`);
-  if ((r.ok || r.error === "not_found") && current) publish(current.filter((t) => t.id !== id));
+  if (r.ok || r.error === "not_found") {
+    // Gone for good: an older /live frame or a late answer must not bring it back.
+    deleted.add(id);
+    if (current) publish(current.filter((t) => t.id !== id));
+  }
   return r;
 }
+
+/**
+ * Moves a task to `status` on the board at once, then saves it. The save
+ * names the status the board showed at the tap, so a second tap right after
+ * the first goes out once the first is in and still passes the guard;
+ * someone else's change meanwhile is a `stale`, and the board shows theirs.
+ */
+export function setTaskStatus(id: number, status: Task["status"]): Promise<TaskResult> {
+  const now = new Date().toISOString();
+  return optimistic.run(
+    id,
+    // Already there (the /live frame came first): the server's copy, with its times, stays.
+    (t) => (t.status === status ? t : { ...t, status, updatedAt: now, doneAt: status === "done" ? now : null }),
+    (seen) => (seen ? updateTask(id, { status }, { status: seen.status }) : Promise.resolve<TaskResult>({ ok: false, error: "not_found" })),
+  );
+}
+
+/** Takes a task off the board at once; it comes back if the server refuses. */
+export function removeTask(id: number): Promise<TaskResult> {
+  return optimistic.run(
+    id,
+    () => undefined,
+    async () => {
+      const r = await deleteTask(id);
+      // Gone already is what was asked for.
+      return !r.ok && r.error === "not_found" ? { ok: true } : r;
+    },
+    { chained: false },
+  );
+}
+
+/** A result a dropped quick change got: the failure of the change before it, already reported there. */
+export const taskResultRepeated = (r: TaskResult): boolean => optimistic.repeated(r);
+
+/** A change to this task is still out. */
+export const taskPending = (id: number): boolean => optimistic.pending(id);
+
+/** Why the last quick change to this task failed, until the next one. */
+export const taskFailure = (id: number): Exclude<TaskResult, { ok: true }> | undefined => {
+  const r = optimistic.failure(id);
+  return r && !r.ok ? r : undefined;
+};
 
 /**
  * What an edit changed against the task as it was opened, so saving one
@@ -192,6 +257,8 @@ export function sortTasks(tasks: readonly Task[]): { open: Task[]; done: Task[] 
 /** Tests: forget the list. */
 export function resetTasks(): void {
   current = null;
+  shown = null;
+  optimistic.reset();
   deleted.clear();
   generation = 0;
   reading = null;

@@ -7,6 +7,7 @@
 import { useSyncExternalStore } from "react";
 import { cutText, DONE_STATES, PIN_ICONS, PIN_NAME_MAX, PIN_STATES, sameName, tidyText, type PinExpect, type PinIcon, type PinState, type WebPin } from "@server/pintypes";
 import type { IconId } from "./mapgeo";
+import { Optimistic, writeSignal } from "./optimistic";
 
 /** The map mark each web pin icon is drawn with (the map's own line drawings). */
 export const PIN_ICON_MARK: Record<PinIcon, IconId> = {
@@ -36,10 +37,21 @@ const subs = new Set<() => void>();
 /** Pins deleted while this page was open: a late answer about one must not bring it back. */
 const gone = new Set<string>();
 
+/** The server's copies in `byId`, with this page's pending changes on top. */
 function publish(load: PinsLoad = snap.load): void {
-  snap = { pins: [...byId.values()].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)), load };
+  const pins = [...byId.values()].flatMap((p) => optimistic.view(p.id, p) ?? []);
+  snap = { pins: pins.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)), load };
   for (const f of subs) f();
 }
+
+/** This page's changes still out: shown at once, taken back if the server refuses. */
+const optimistic = new Optimistic<string, WebPin, PinCall>({
+  server: (id) => byId.get(id),
+  ok: (r) => r.ok,
+  changed: () => publish(),
+  thrown: () => ({ ok: false, error: "network" }),
+  gone: (id) => gone.has(id),
+});
 
 /** A pin this page can draw: a newer server may know icons or states this build does not. */
 const known = (p: WebPin): boolean =>
@@ -50,6 +62,8 @@ function take(p: WebPin): boolean {
   if (!known(p) || gone.has(p.id)) return false;
   const have = byId.get(p.id);
   if (have && have.version >= p.version) return false;
+  // The pin moved on since a failed change here: its note no longer fits.
+  if (have) optimistic.dismiss(p.id, true);
   byId.set(p.id, p);
   return true;
 }
@@ -75,6 +89,7 @@ export function putPin(p: WebPin): void {
 /** One pin deleted ("pin_gone" on /live). */
 export function dropPin(id: string): void {
   gone.add(id);
+  optimistic.dismiss(id, true);
   if (byId.delete(id)) publish();
 }
 
@@ -91,6 +106,7 @@ export function usePins(): Snapshot {
 /** For tests: forget everything. */
 export function resetPins(): void {
   byId = new Map();
+  optimistic.reset();
   gone.clear();
   snap = { pins: [], load: "idle" };
   for (const f of subs) f();
@@ -110,6 +126,8 @@ async function send(method: string, path: string, body?: unknown): Promise<PinCa
     res = await fetch(path, {
       method,
       credentials: "same-origin",
+      // A request that never answers would hold the pin's later changes forever.
+      signal: writeSignal(),
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -169,6 +187,67 @@ export async function deletePin(id: string): Promise<PinCall> {
   if (res.ok || res.error === "not_found") dropPin(id);
   return res;
 }
+
+export type PinChange = { state?: PinState; note?: string; icon?: PinIcon; archived?: boolean };
+
+/** A pin with a change made by `by`, as the server would make it (pins.ts): shown before it answers. */
+function changed(p: WebPin, by: string, c: PinChange, now: number): WebPin {
+  const next: WebPin = { ...p };
+  if (c.state !== undefined && c.state !== p.state) {
+    next.state = c.state;
+    next.stateBy = by;
+    next.stateAt = now;
+    if (c.state === "claimed") next.claimedBy = by;
+    else if (c.state === "new") next.claimedBy = null;
+  }
+  if (c.note !== undefined) next.note = c.note;
+  if (c.icon !== undefined) next.icon = c.icon;
+  if (c.archived !== undefined) next.archived = c.archived;
+  const same = next.state === p.state && next.note === p.note && next.icon === p.icon && next.archived === p.archived;
+  return same ? p : { ...next, updatedAt: now };
+}
+
+/**
+ * Changes a pin on the map at once, then saves it. The guard names the pin as
+ * the sheet showed it at the tap (or `from`, for an edit: the pin the form
+ * began from), so a second tap right after the first goes out once the first
+ * is in and still passes, while someone else's change meanwhile is a `stale`.
+ * A refusal or a `stale` takes the change back; `pinFailure` says why.
+ */
+export function changePin(id: string, by: string, change: PinChange, from?: WebPin): Promise<PinCall> {
+  const now = Date.now();
+  return optimistic.run(
+    id,
+    (p) => changed(p, by, change, now),
+    (seen) => {
+      const was = from ?? seen;
+      return was ? updatePin(was, by, change) : Promise.resolve<PinCall>({ ok: false, error: "not_found" });
+    },
+  );
+}
+
+/** Takes a pin off the map at once; it comes back if the server refuses. */
+export function removePin(id: string): Promise<PinCall> {
+  return optimistic.run(
+    id,
+    () => undefined,
+    async () => {
+      const r = await deletePin(id);
+      // Gone already is what was asked for.
+      return !r.ok && r.error === "not_found" ? { ok: true } : r;
+    },
+    { chained: false },
+  );
+}
+
+/** A change to this pin is still out. */
+export const pinPending = (id: string): boolean => optimistic.pending(id);
+
+/** Why the last change to this pin failed, until the next one. */
+export const pinFailure = (id: string): PinCall | undefined => optimistic.failure(id);
+
+/** The pin's sheet closed: its last failure has been seen. */
+export const dismissPinFailure = (id: string): void => optimistic.dismiss(id);
 
 // ---- who is looking -------------------------------------------------------------
 

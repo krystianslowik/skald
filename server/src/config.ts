@@ -46,6 +46,8 @@ export interface Config {
   mockCompat: string;
   /** MOCK_RESTART: how the mock's safe restart goes, ok or fail-save|backup|verify|start|recover. */
   mockRestart: string;
+  /** MOCK_WRITE_DELAY_MS: mock mode only, holds task, pin and push changes this long before they run (a slow phone link). */
+  mockWriteDelayMs: number;
   /** Discord webhook for notifications; empty means off. A secret: never logged. */
   discordWebhookUrl: string;
   /** Which notifications go to Discord (DISCORD_NOTIFY); all when unset. */
@@ -171,6 +173,7 @@ export function loadConfig(env: Env = process.env): Config {
     mockBridge: opt("MOCK_BRIDGE", "on").toLowerCase(),
     mockCompat: opt("MOCK_COMPAT", "ok").toLowerCase(),
     mockRestart: opt("MOCK_RESTART", "ok").toLowerCase(),
+    mockWriteDelayMs: mock ? Math.min(60_000, Math.max(0, Number(opt("MOCK_WRITE_DELAY_MS", "0")) || 0)) : 0,
     discordWebhookUrl,
     discordNotify,
     pushContact,

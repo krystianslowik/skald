@@ -130,6 +130,7 @@ const app = createApp({
   update: updates ? () => updates.get() : undefined,
   tasks: { store: tasks, onDone: (task) => hub.record("task", doneEvent(task)) },
   pins: { store: pins },
+  writeDelayMs: cfg.mockWriteDelayMs,
 });
 
 // Static SPA, resolved relative to the process CWD (image: /app/bin -> /app/web/dist).

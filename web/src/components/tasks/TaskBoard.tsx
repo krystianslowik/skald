@@ -3,7 +3,7 @@ import { memo, Suspense, useCallback, useMemo, useState } from "react";
 import { shortfall, stillMissing, stockTotals, type MaterialNeed } from "@server/taskmodel";
 import { useI18n } from "../../i18n";
 import { itemLabel } from "../../lib/storage";
-import { nextStatus, sortTasks, updateTask, useTasks, type Task } from "../../lib/tasks";
+import { nextStatus, setTaskStatus, sortTasks, taskFailure, taskPending, taskResultRepeated, useTasks, type Task, type TaskResult } from "../../lib/tasks";
 import { useStorage, type StorageLoad } from "../../lib/useStorage";
 import { ItemIcon } from "../storage/ItemIcon";
 import { StatusMark, targetLabel } from "./marks";
@@ -44,31 +44,48 @@ function MissingLine({ needs }: { needs: MaterialNeed[] }) {
   );
 }
 
-const TaskCard = memo(function TaskCard({ task, stock, onOpen, onUnauthorized }: { task: Task; stock: ReadonlyMap<string, number> | null; onOpen: (t: Task) => void; onUnauthorized?: () => void }) {
+/** The short line a card shows for its last failed change; null for none (a sign-in prompt says enough). */
+function failLine(t: ReturnType<typeof useI18n>["t"], r: Exclude<TaskResult, { ok: true }> | undefined): string | null {
+  if (!r || r.error === "unauthorized") return null;
+  return r.error === "stale" ? t("tasks.error.staleCard") : r.error === "rate_limited" ? t("tasks.error.rateLimited", { n: r.retryAfter }) : t("tasks.saveFailed");
+}
+
+const TaskCard = memo(function TaskCard({
+  task,
+  stock,
+  pending,
+  failed,
+  onOpen,
+  onUnauthorized,
+}: {
+  task: Task;
+  stock: ReadonlyMap<string, number> | null;
+  /** A change made here is still on its way to the server. */
+  pending: boolean;
+  /** Why the last change made here failed; kept by the store, so a card that moved lists still says it. */
+  failed: Exclude<TaskResult, { ok: true }> | undefined;
+  onOpen: (t: Task) => void;
+  onUnauthorized?: () => void;
+}) {
   const i18n = useI18n();
   const { t } = i18n;
-  const [busy, setBusy] = useState(false);
-  // Why the last tap failed, as a kind: the words follow the language, and a limit's wait is shown as given.
-  const [failed, setFailed] = useState<null | { kind: "stale" | "failed" } | { kind: "limited"; wait: number }>(null);
   const needs = useMemo(() => (stock ? stillMissing(shortfall(task.materials, stock)) : null), [task.materials, stock]);
   const where = targetLabel(i18n, task);
   const done = task.status === "done";
+  const failText = failLine(t, failed);
+  // The card moves at once; the store sends the change and takes it back if the server refuses.
   const advance = async () => {
-    if (busy) return;
     navigator.vibrate?.(6);
-    setBusy(true);
-    const r = await updateTask(task.id, { status: nextStatus(task.status) }, { status: task.status });
-    setBusy(false);
-    if (!r.ok && r.error === "unauthorized") onUnauthorized?.();
-    setFailed(r.ok || r.error === "unauthorized" ? null : r.error === "stale" ? { kind: "stale" } : r.error === "rate_limited" ? { kind: "limited", wait: r.retryAfter } : { kind: "failed" });
+    const r = await setTaskStatus(task.id, nextStatus(task.status));
+    // Taps queued behind a refused one get its result again: the sign-in is asked for once.
+    if (!r.ok && r.error === "unauthorized" && !taskResultRepeated(r)) onUnauthorized?.();
   };
   const meta = [task.owner, where].filter(Boolean).join(" · ");
   return (
-    <div className={`flex items-start gap-2 rounded-[3px] border border-iron/30 bg-black/20 p-1.5 ${done ? "opacity-75" : ""}`}>
+    <div aria-busy={pending || undefined} className={`flex items-start gap-2 rounded-[3px] border border-iron/30 bg-black/20 p-1.5 ${done ? (pending ? "opacity-60" : "opacity-75") : pending ? "opacity-80" : ""}`}>
       <button
         type="button"
         onClick={() => void advance()}
-        disabled={busy}
         aria-label={t(STATUS_NEXT_LABEL[task.status], { title: task.title })}
         title={t(STATUS_NEXT_LABEL[task.status], { title: task.title })}
         className="slot press grid h-11 w-11 shrink-0 place-items-center disabled:opacity-50"
@@ -82,9 +99,9 @@ const TaskCard = memo(function TaskCard({ task, stock, onOpen, onUnauthorized }:
           {meta && <> · {meta}</>}
         </span>
         {!done && task.materials.length > 0 && (needs === null ? null : needs.length > 0 ? <MissingLine needs={needs} /> : <span className="mt-1.5 block text-xs font-bold text-select-hi">{t("tasks.allInStores")}</span>)}
-        {failed && (
+        {failText && (
           <span role="alert" className="mt-1 block text-xs text-blood">
-            {failed.kind === "stale" ? t("tasks.error.staleCard") : failed.kind === "limited" ? t("tasks.error.rateLimited", { n: failed.wait }) : t("tasks.saveFailed")}
+            {failText}
           </span>
         )}
       </button>
@@ -118,7 +135,7 @@ export function TaskBoard({ saveKey, players, onUnauthorized }: { saveKey: strin
       <AnimatePresence initial={false}>
         {items.map((task) => (
           <motion.li key={task.id} layout={reduced ? false : "position"} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={spring}>
-            <TaskCard task={task} stock={stock} onOpen={onOpen} onUnauthorized={onUnauthorized} />
+            <TaskCard task={task} stock={stock} pending={taskPending(task.id)} failed={taskFailure(task.id)} onOpen={onOpen} onUnauthorized={onUnauthorized} />
           </motion.li>
         ))}
       </AnimatePresence>

@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Changed
+
+- Taps on the task board and on shared pins show at once instead of waiting for the server: moving a task on, deleting a task, claiming, finishing, reopening, editing, archiving and deleting a pin, and turning push off on a device. A task card looks a little faded until the server has the change. If the server refuses or someone changed the same thing first, the task or pin goes back to how the server has it and the usual short message says why; a change that gets no answer within 15 seconds is taken back the same way. Two quick taps in a row both count.
+- For operators and contributors: `MOCK_WRITE_DELAY_MS` (mock agent only) holds task, pin and push changes for that many milliseconds before they run, to try the panel as it feels over a slow phone connection.
+
 ## [2026.10.28] - 2026-10-19
 
 ### Fixed

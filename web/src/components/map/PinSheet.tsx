@@ -1,7 +1,7 @@
 import { useId, useState, type ReactNode } from "react";
 import { cutText, PIN_ICONS, PIN_NAME_MAX, PIN_NOTE_MAX, type PinIcon, type PinState, type WebPin } from "@server/pintypes";
 import { useI18n, type TextKey } from "../../i18n";
-import { createPin, deletePin, isDone, PIN_ICON_MARK, pinName, sameName, setPinName, updatePin, usePinName, type PinCall } from "../../lib/webpins";
+import { changePin, createPin, dismissPinFailure, isDone, PIN_ICON_MARK, pinFailure, pinName, pinPending, removePin, sameName, setPinName, usePinName, type PinCall, type PinChange } from "../../lib/webpins";
 import { RelativeTime } from "../RelativeTime";
 import { Sheet, SheetClose } from "../Sheet";
 import { MapIcon } from "./MapIcon";
@@ -30,8 +30,13 @@ const ERROR_TEXT: Record<Exclude<PinCall, { ok: true }>["error"], TextKey> = {
  * happen next (claim, cleared, depleted, reopen), editing, archiving and, after
  * a confirm, deleting for good. The viewer's name is asked for once per device.
  */
-export function PinSheet({ mode, pins, onClose, onAdded }: { mode: PinSheetMode; pins: readonly WebPin[]; onClose: () => void; onAdded?: (pin: WebPin) => void }) {
+export function PinSheet({ mode, pins, onClose: closeSheet, onAdded }: { mode: PinSheetMode; pins: readonly WebPin[]; onClose: () => void; onAdded?: (pin: WebPin) => void }) {
   const { t } = useI18n();
+  // A failure seen once is enough: the next time this pin's sheet opens, it starts clean.
+  const onClose = () => {
+    if (mode.kind === "view") dismissPinFailure(mode.id);
+    closeSheet();
+  };
   const headingId = useId();
   const pin = mode.kind === "view" ? (pins.find((p) => p.id === mode.id) ?? null) : null;
   const title = mode.kind === "add" ? t("pins.add.title") : pin ? pin.note || t(`pins.icon.${pin.icon}` as TextKey) : t("pins.error.gone");
@@ -197,8 +202,6 @@ function ViewPin({ pin, onClose }: { pin: WebPin; onClose: () => void }) {
   const { t } = useI18n();
   const saved = usePinName();
   const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<PinCall | null>(null);
   const [editing, setEditing] = useState(false);
   const [icon, setIcon] = useState(pin.icon);
   const [note, setNote] = useState(pin.note);
@@ -207,21 +210,15 @@ function ViewPin({ pin, onClose }: { pin: WebPin; onClose: () => void }) {
   const [base, setBase] = useState(pin);
   const me = saved || name.trim();
   const mine = sameName(pin.claimedBy, me);
+  // Changes show at once; the store keeps why the last one failed (and shows the server's copy again).
+  const failure = pinFailure(pin.id) ?? null;
+  const pending = pinPending(pin.id);
 
-  const run = async (call: () => Promise<PinCall>) => {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    const res = await call();
-    setBusy(false);
-    if (!res.ok) setError(res);
-    return res;
-  };
-  /** `from`: the pin as the viewer saw it when deciding (the shown one, or the one an edit began from). */
-  const change = (c: { state?: PinState; note?: string; icon?: PinIcon; archived?: boolean }, from: WebPin = pin) => {
+  /** `from`: for an edit, the pin as the form began from; otherwise the server's copy when the change goes out. */
+  const change = (c: PinChange, from?: WebPin) => {
     if (!me) return;
     if (!saved) setPinName(me);
-    return run(() => updatePin(from, me, c));
+    return changePin(pin.id, me, c, from);
   };
 
   const stateLine =
@@ -232,7 +229,7 @@ function ViewPin({ pin, onClose }: { pin: WebPin; onClose: () => void }) {
         : t("pins.doneBy", { state: t(`pins.state.${pin.state}` as TextKey), name: pin.stateBy });
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" aria-busy={pending || undefined}>
       <div className="space-y-1">
         <p className={`text-sm font-bold ${pin.state === "claimed" ? "text-select-hi" : isDone(pin) ? "text-ash" : "text-flame"}`}>
           {stateLine}
@@ -255,27 +252,27 @@ function ViewPin({ pin, onClose }: { pin: WebPin; onClose: () => void }) {
       {!editing && (
         <div className="flex flex-wrap gap-2">
           {pin.state === "new" && (
-            <Action tone="main" disabled={!me || busy} onClick={() => void change({ state: "claimed" })}>
+            <Action tone="main" disabled={!me} onClick={() => void change({ state: "claimed" })}>
               {t("pins.do.claim")}
             </Action>
           )}
           {pin.state === "claimed" && mine && (
-            <Action disabled={!me || busy} onClick={() => void change({ state: "new" })}>
+            <Action disabled={!me} onClick={() => void change({ state: "new" })}>
               {t("pins.do.unclaim")}
             </Action>
           )}
           {!isDone(pin) && (
             <>
-              <Action tone="main" disabled={!me || busy} onClick={() => void change({ state: "cleared" })}>
+              <Action tone="main" disabled={!me} onClick={() => void change({ state: "cleared" })}>
                 {t("pins.do.cleared")}
               </Action>
-              <Action tone="main" disabled={!me || busy} onClick={() => void change({ state: "depleted" })}>
+              <Action tone="main" disabled={!me} onClick={() => void change({ state: "depleted" })}>
                 {t("pins.do.depleted")}
               </Action>
             </>
           )}
           {isDone(pin) && (
-            <Action disabled={!me || busy} onClick={() => void change({ state: "new" })}>
+            <Action disabled={!me} onClick={() => void change({ state: "new" })}>
               {t("pins.do.reopen")}
             </Action>
           )}
@@ -289,14 +286,19 @@ function ViewPin({ pin, onClose }: { pin: WebPin; onClose: () => void }) {
           <div className="flex flex-wrap gap-2">
             <Action
               tone="main"
-              disabled={!me || busy}
-              onClick={() =>
-                void change({ icon, note: note.trim() }, base)?.then((r) => {
-                  if (r?.ok) setEditing(false);
-                  // Typed text stays; saving again now knowingly replaces the newer copy shown.
-                  else if (r?.error === "stale") setBase(r.pin);
-                })
-              }
+              disabled={!me}
+              onClick={() => {
+                const saving = change({ icon, note: note.trim() }, base);
+                if (!saving) return;
+                // Shown at once; a refusal opens the editor again with what was typed.
+                setEditing(false);
+                void saving.then((r) => {
+                  if (r.ok) return;
+                  // Saving again now knowingly replaces the newer copy shown.
+                  if (r.error === "stale") setBase(r.pin);
+                  setEditing(true);
+                });
+              }}
             >
               {t("pins.save")}
             </Action>
@@ -314,7 +316,6 @@ function ViewPin({ pin, onClose }: { pin: WebPin; onClose: () => void }) {
       ) : (
         <div className="flex flex-wrap gap-2 border-t border-iron/30 pt-3">
           <Action
-            disabled={busy}
             onClick={() => {
               setIcon(pin.icon);
               setNote(pin.note);
@@ -324,12 +325,12 @@ function ViewPin({ pin, onClose }: { pin: WebPin; onClose: () => void }) {
           >
             {t("pins.edit")}
           </Action>
-          <Action disabled={!me || busy} onClick={() => void change({ archived: !pin.archived })}>
+          <Action disabled={!me} onClick={() => void change({ archived: !pin.archived })}>
             {pin.archived ? t("pins.restore") : t("pins.archive")}
           </Action>
           {/* Only an archived pin is deleted for good, and only after a confirm. */}
           {pin.archived && !confirmDelete && (
-            <Action tone="danger" disabled={busy} onClick={() => setConfirmDelete(true)}>
+            <Action tone="danger" onClick={() => setConfirmDelete(true)}>
               {t("pins.delete")}
             </Action>
           )}
@@ -342,12 +343,11 @@ function ViewPin({ pin, onClose }: { pin: WebPin; onClose: () => void }) {
           <div className="flex flex-wrap gap-2">
             <Action
               tone="danger"
-              disabled={busy}
-              onClick={() =>
-                void run(() => deletePin(pin.id)).then((r) => {
-                  if (r?.ok) onClose();
-                })
-              }
+              onClick={() => {
+                // Off the map at once; if the server refuses, the pin comes back and its sheet says why.
+                onClose();
+                void removePin(pin.id);
+              }}
             >
               {t("pins.deleteYes")}
             </Action>
@@ -356,7 +356,7 @@ function ViewPin({ pin, onClose }: { pin: WebPin; onClose: () => void }) {
         </div>
       )}
 
-      <Failure error={error} />
+      <Failure error={failure} />
     </div>
   );
 }
