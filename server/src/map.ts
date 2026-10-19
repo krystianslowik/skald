@@ -53,8 +53,6 @@ export class MapCache {
     private readonly clock: () => number = Date.now,
     /** Keys the world identity of the catch-up facts (the session secret). */
     private readonly worldKey = "",
-    /** Told the world's identity with every new copy (the web pins follow the world on the map). */
-    private readonly onWorld?: (id: string) => void,
   ) {}
 
   /** The map, or with "storage" the village stores cut from the same copy. */
@@ -126,7 +124,6 @@ export class MapCache {
     // Our own tags: the spoiler setting changes the body for the same agent map.
     this.cached = { agentEtag: res.etag ?? "", map: body(JSON.stringify(map)), storage: body(JSON.stringify(storageOf(map))), facts: { ...worldFacts(map), id: worldId(this.worldKey, map.meta.seedName, map.meta.seed) } };
     this.checked(false);
-    this.onWorld?.(this.cached.facts.id);
     return this.serve(false);
   }
 }

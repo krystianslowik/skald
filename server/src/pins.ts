@@ -1,11 +1,15 @@
 import { Database } from "bun:sqlite";
 import type { Context, Hono } from "hono";
 import { RateLimiter } from "./auth";
+import { worldId } from "./catchup";
 import { DONE_STATES, PIN_ICONS, PIN_MAX, PIN_NAME_MAX, PIN_NOTE_MAX, PIN_STATES, sameName, tidyText, type PinExpect, type PinIcon, type PinState, type WebPin } from "./pintypes";
 import { jsonBody, writeLimit } from "./routehelp";
+import type { WorldMeta } from "./types";
 
 /** Pins stand inside the world disc's square, like the floor-plan boxes. */
 const WORLD_EDGE = 10_500;
+/** Pins kept in all worlds together: a cap on the file, far above what one world holds. */
+const PIN_MAX_ALL = 10 * PIN_MAX;
 /** A pin with a full note is a few hundred bytes. */
 const MAX_BODY = 4 * 1024;
 
@@ -92,7 +96,7 @@ export function canMove(from: PinState, to: PinState): boolean {
 }
 
 type PinFailure =
-  | { ok: false; error: "bad_request" | "outside" | "not_found" | "full" | "bad_move" | "not_archived"; message: string }
+  | { ok: false; error: "bad_request" | "outside" | "not_found" | "full" | "bad_move" | "not_archived" | "no_world"; message: string }
   /** Someone changed a field this edit changes after the edit's page saw it (or holds the claim): `pin` is the current one. */
   | { ok: false; error: "stale"; message: string; pin: WebPin };
 export type PinResult = { ok: true; pin: WebPin } | PinFailure;
@@ -132,7 +136,7 @@ export class PinStore {
   private db: Database;
   private readonly own: boolean;
   private listeners = new Set<(ev: PinEvent) => void>();
-  /** The world on the map now (catchup.ts worldId); "" until the map is first read, or when it has no identity. */
+  /** The world being played (catchup.ts worldId of its seed); "" until the agent has read a save. */
   private current = "";
 
   /** `db`: the history store's connection; a path opens its own (tests). */
@@ -171,7 +175,16 @@ export class PinStore {
     return Number((this.db.query("SELECT value FROM meta WHERE key = ?").get(SCHEMA_KEY) as { value: string } | null)?.value ?? 0);
   }
 
-  /** The world now on the map. A different one sends every page its pins (or none). */
+  /**
+   * The world from the agent's state: its id is keyed like the catch-up's
+   * (`secret`), so the stored value does not give the seed away. A state
+   * without a world (agent away) keeps the one known.
+   */
+  followWorld(meta: Pick<WorldMeta, "seedName" | "seed"> | null | undefined, secret: string): void {
+    if (meta) this.setWorld(worldId(secret, meta.seedName, meta.seed));
+  }
+
+  /** The world now played. A different one sends every page its pins (or none). */
   setWorld(id: string): void {
     if (id === this.current) return;
     this.current = id;
@@ -193,8 +206,12 @@ export class PinStore {
     return r ? fromRow(r) : null;
   }
 
-  /** Every pin kept, all worlds. */
+  /** Pins kept in the current world. */
   count(): number {
+    return (this.db.query("SELECT COUNT(*) AS n FROM web_pins WHERE world = ?").get(this.current) as { n: number }).n;
+  }
+
+  private countAll(): number {
     return (this.db.query("SELECT COUNT(*) AS n FROM web_pins").get() as { n: number }).n;
   }
 
@@ -214,6 +231,8 @@ export class PinStore {
   }
 
   create(input: PinCreate): PinResult {
+    // Before the agent has read a save, a pin would land in no world and never be listed.
+    if (!this.current) return { ok: false, error: "no_world", message: "the world is not known yet; try again in a moment" };
     const x = coord(input.x);
     const z = coord(input.z);
     if (x === null || z === null) return { ok: false, error: "outside", message: "x and z must be numbers inside the world" };
@@ -228,8 +247,9 @@ export class PinStore {
     // At the limit the oldest archived pin makes room, in the same transaction as the new one.
     const write = this.db.transaction((): { evicted: Row | null } | "full" => {
       let evicted: Row | null = null;
+      if (this.countAll() >= PIN_MAX_ALL) return "full";
       if (this.count() >= this.max) {
-        evicted = this.db.query(`SELECT ${COLUMNS} FROM web_pins WHERE archived = 1 ORDER BY updated, id LIMIT 1`).get() as Row | null;
+        evicted = this.db.query(`SELECT ${COLUMNS} FROM web_pins WHERE world = ? AND archived = 1 ORDER BY updated, id LIMIT 1`).get(this.current) as Row | null;
         if (!evicted) return "full";
         this.db.query("DELETE FROM web_pins WHERE id = ?").run(evicted.id);
       }
@@ -241,7 +261,7 @@ export class PinStore {
     const res = write();
     if (res === "full") return { ok: false, error: "full", message: `at most ${this.max} pins; archive or delete some first` };
     // Only once both are written.
-    if (res.evicted && res.evicted.world === this.current) this.emit({ kind: "gone", id: res.evicted.id });
+    if (res.evicted) this.emit({ kind: "gone", id: res.evicted.id });
     this.emit({ kind: "put", pin });
     return { ok: true, pin };
   }
@@ -346,14 +366,12 @@ function parseExpect(v: unknown): PinExpect | string {
   return out;
 }
 
-const STATUS: Record<PinFailure["error"], 400 | 404 | 409> = { bad_request: 400, outside: 400, not_found: 404, full: 409, bad_move: 409, not_archived: 409, stale: 409 };
+const STATUS: Record<PinFailure["error"], 400 | 404 | 409> = { bad_request: 400, outside: 400, not_found: 404, full: 409, bad_move: 409, not_archived: 409, stale: 409, no_world: 409 };
 
 const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
 
 export interface PinRoutesDeps {
   store: PinStore;
-  /** Reads the map so the store knows which world is current before it lists or adds. */
-  world?: () => Promise<unknown>;
   /** Changes per client: 120 a minute, then a minute's pause, by default. Reads are never limited. */
   limiter?: RateLimiter;
   /** Who a change counts against (the client address); one shared bucket without it. */
@@ -372,15 +390,7 @@ export function mountPins(app: Hono, deps: PinRoutesDeps): void {
     c.header("Cache-Control", "no-store");
     return res.ok ? c.json(res) : c.json(res, STATUS[res.error]);
   };
-  const known = async () => {
-    try {
-      await deps.world?.();
-    } catch {
-      // no map now: the world stays as it was
-    }
-  };
-  app.get("/api/pins", async (c) => {
-    await known();
+  app.get("/api/pins", (c) => {
     c.header("Cache-Control", "no-store");
     return c.json({ ok: true, pins: deps.store.list() });
   });
@@ -391,7 +401,6 @@ export function mountPins(app: Hono, deps: PinRoutesDeps): void {
     if (!body) return c.json({ ok: false, error: "bad_request", message: "JSON object expected" }, 400);
     const stop = limited(c);
     if (stop) return stop;
-    await known();
     return answer(c, deps.store.create({ x: body.x, z: body.z, icon: body.icon, note: body.note, by: body.by }));
   });
   app.patch("/api/pins/:id", async (c) => {

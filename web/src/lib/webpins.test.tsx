@@ -159,6 +159,9 @@ describe("pins store", () => {
     expect(await createPin({ x: 1, z: 2, icon: "point", note: "", by: "Ragnar" })).toEqual({ ok: false, error: "signed_out" });
     answer = async () => Response.json({ ok: false, error: "not_archived", message: "archive first" }, { status: 409 });
     expect(await deletePin("x")).toEqual({ ok: false, error: "not_archived", message: "archive first" });
+    // An error this page has no words for is a plain failure.
+    answer = async () => Response.json({ ok: false, error: "bad request body" }, { status: 415 });
+    expect(await createPin({ x: 1, z: 2, icon: "point", note: "", by: "Ragnar" })).toEqual({ ok: false, error: "failed", message: undefined });
     answer = async () => {
       throw new TypeError("offline");
     };

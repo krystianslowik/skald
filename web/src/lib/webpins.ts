@@ -97,9 +97,11 @@ export function resetPins(): void {
 
 // ---- changes --------------------------------------------------------------------
 
-export type PinError = "bad_request" | "outside" | "not_archived" | "signed_out" | "not_found" | "full" | "stale" | "bad_move" | "rate_limited" | "network" | "failed";
+export type PinError = "bad_request" | "outside" | "not_archived" | "no_world" | "signed_out" | "not_found" | "full" | "stale" | "bad_move" | "rate_limited" | "network" | "failed";
 /** `stale`: someone changed the pin first; `pin` is the server's copy now, and the page already shows it. */
 export type PinCall = { ok: true; pin?: WebPin } | { ok: false; error: "stale"; pin: WebPin } | { ok: false; error: Exclude<PinError, "stale">; message?: string };
+
+const KNOWN_ERRORS = new Set<string>(["bad_request", "outside", "not_archived", "no_world", "not_found", "full", "bad_move", "rate_limited"]);
 
 async function send(method: string, path: string, body?: unknown): Promise<PinCall> {
   let res: Response;
@@ -125,7 +127,8 @@ async function send(method: string, path: string, body?: unknown): Promise<PinCa
     putPin(json.pin);
     return { ok: false, error: "stale", pin: json.pin };
   }
-  const error = json?.error && json.error !== "stale" ? json.error : "failed";
+  // Only the errors this page has words for; anything else (a proxy, a body refused before parsing) is a plain failure.
+  const error = json?.error && json.error !== "stale" && KNOWN_ERRORS.has(json.error) ? json.error : "failed";
   return { ok: false, error, message: json?.message };
 }
 

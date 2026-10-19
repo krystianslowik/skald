@@ -2785,6 +2785,7 @@ export const en = {
   "pins.error.signedOut": "Signed out. Sign in again to change pins.",
   "pins.error.stale": "Someone changed this pin first. It now shows their change; look again.",
   "pins.error.move": "That move does not fit the pin as it is now.",
+  "pins.error.noWorld": "The server has not read the world yet. Try again in a moment.",
 };
 
 export type Dict = typeof en;

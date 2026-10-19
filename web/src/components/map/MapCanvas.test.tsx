@@ -299,3 +299,34 @@ describe("MapCanvas page marks and long presses", () => {
     expect(onLongPress).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("MapCanvas long press by mouse and pen", () => {
+  it("does not take a mouse held still after a short drag as a long press, and lets a pen's right click through", () => {
+    const onLongPress = vi.fn();
+    const ref = createRef<MapCanvasHandle>();
+    const view = render(
+      <I18nProvider locale="en">
+        <MapCanvas ref={ref} map={map} mask={null} markers={[]} layers={DEFAULT_LAYERS} selected={null} onSelect={() => {}} onLongPress={onLongPress} />
+      </I18nProvider>,
+    );
+    const el = view.getByRole("img");
+    const fire = (type: string, x: number, y: number, pointerType: string, button = 0) => {
+      const e = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(e, { pointerId: 1, pointerType, button, clientX: x, clientY: y });
+      act(() => {
+        el.dispatchEvent(e);
+      });
+      return e;
+    };
+    fire("pointerdown", 100, 100, "mouse");
+    fire("pointermove", 107, 100, "mouse");
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+    fire("pointerup", 107, 100, "mouse");
+    expect(onLongPress).not.toHaveBeenCalled();
+    fire("pointerdown", 60, 60, "pen", 2);
+    expect(fire("contextmenu", 60, 60, "pen").defaultPrevented).toBe(true);
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+  });
+});

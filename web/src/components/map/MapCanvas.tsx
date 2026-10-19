@@ -78,7 +78,7 @@ const DOUBLE_TAP_PX = 30;
 const TWO_TAP_MS = 300;
 /** A finger held this long without moving is a long press. */
 const LONG_PRESS_MS = 600;
-/** A long press survives this much wander (a resting thumb is never quite still). */
+/** A finger's long press survives this much wander (a resting thumb is never quite still); a mouse's ends where a pan starts. */
 const PRESS_SLOP = 10;
 /** Chunks of floor plans and nature arriving within this time are drawn together. */
 const ARRIVAL_MS = 60;
@@ -615,8 +615,10 @@ export const MapCanvas = forwardRef<
     // A finger resting on one spot: after LONG_PRESS_MS it is a long press, and its release is not a tap.
     let press: ReturnType<typeof setTimeout> | null = null;
     let pressed = false;
-    // What the last press was made with: a touch long press is answered by the timer, never again by the contextmenu that follows it.
+    // What the last press was made with, and when the last finger lifted: a touch long press is
+    // answered by the timer, never again by the contextmenu that follows it.
     let pressType = "mouse";
+    let touchUpAt = -Infinity;
     // Where a spring back to the limits that this touch stopped was heading; a tap that does not move picks it up again.
     let caught: View | null = null;
     // The map answered this touch (often by opening a sheet over itself): its touchend cancels the
@@ -698,10 +700,12 @@ export const MapCanvas = forwardRef<
             if (pts.size !== 1) return;
             pressed = true;
             navigator.vibrate?.(12);
+            // Where the finger rests now (it may have wandered a little), not where it went down.
+            const at = pts.get(e.pointerId) ?? p;
             // On a page mark, the press opens that mark.
-            const own = overlay.current?.(p.x, p.y, e.pointerType !== "mouse");
+            const own = overlay.current?.(at.x, at.y, e.pointerType !== "mouse");
             if (own) own();
-            else onLongPress(toWorld(p));
+            else onLongPress(toWorld(at));
           }, LONG_PRESS_MS);
         }
       } else {
@@ -758,7 +762,7 @@ export const MapCanvas = forwardRef<
       }
       const far = downAt ? Math.hypot(p.x - downAt.x, p.y - downAt.y) : Infinity;
       if (!moved && far < SLOP) return;
-      if (far > PRESS_SLOP) cancelPress();
+      if (far > (pressType === "touch" ? PRESS_SLOP : SLOP)) cancelPress();
       if (!moved) {
         moved = true;
         el.style.cursor = "grabbing";
@@ -789,6 +793,7 @@ export const MapCanvas = forwardRef<
       if (!pts.has(e.pointerId)) return;
       const p = local(e);
       pts.delete(e.pointerId);
+      if (e.pointerType === "touch") touchUpAt = e.timeStamp;
       if (pts.size === 0) {
         gesturing.current = false;
         // A frame once the release is handled: floor plans and nature for where the view lands are asked for there.
@@ -915,7 +920,7 @@ export const MapCanvas = forwardRef<
       if (!onLongPress) return;
       e.preventDefault();
       // A finger's long press (Android follows it with a contextmenu) was answered by the timer already.
-      if (pressed || pressType !== "mouse") return;
+      if (pressed || (pressType === "touch" && (pts.size > 0 || e.timeStamp - touchUpAt < 1000))) return;
       const p = local(e as PointerEvent);
       const own = overlay.current?.(p.x, p.y, false);
       if (own) own();

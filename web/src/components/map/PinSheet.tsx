@@ -14,6 +14,7 @@ const ERROR_TEXT: Record<Exclude<PinCall, { ok: true }>["error"], TextKey> = {
   bad_request: "pins.error.bad",
   outside: "pins.error.outside",
   not_archived: "pins.error.notArchived",
+  no_world: "pins.error.noWorld",
   signed_out: "pins.error.signedOut",
   not_found: "pins.error.gone",
   full: "pins.error.full",

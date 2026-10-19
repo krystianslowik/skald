@@ -76,8 +76,12 @@ if (cfg.mock) {
 const store = new HistoryStore(cfg.dbPath);
 const hub = new Hub(agent, store, { timeZone: cfg.timeZone });
 const tasks = new TaskStore(store.connection);
-// Web map pins, kept per world; the map cache tells them which world is on the map.
+// Web map pins, kept per world.
 const pins = new PinStore(store.connection);
+// The world comes with the agent's state (its save's seed), so pins follow a new or imported world at once.
+hub.subscribe((m) => {
+  if (m.type === "state") pins.followWorld(m.state.world.meta, cfg.sessionSecret);
+});
 // Subscribed before start: the first state it sees is its baseline, and
 // nothing that happened before boot is sent.
 // Always there, so a webhook saved in the admin sheet later starts from the same
@@ -107,8 +111,6 @@ const metrics = cachedMetrics(async () => {
 const updates = cfg.updateCheck && isRelease(VERSION) ? new UpdateChecker({ current: VERSION }) : null;
 void updates?.check();
 
-const mapCache = new MapCache((etag) => agent.map(etag), cfg.mapSpoilers, Date.now, cfg.sessionSecret, (id) => pins.setWorld(id));
-
 const app = createApp({
   sessionSecret: cfg.sessionSecret,
   passwordHash,
@@ -121,13 +123,13 @@ const app = createApp({
   locale: cfg.locale,
   trustedIpHeader: cfg.trustedIpHeader,
   publicOrigins: cfg.publicOrigins,
-  map: mapCache,
+  map: new MapCache((etag) => agent.map(etag), cfg.mapSpoilers, Date.now, cfg.sessionSecret),
   notify,
   push,
   version: VERSION,
   update: updates ? () => updates.get() : undefined,
   tasks: { store: tasks, onDone: (task) => hub.record("task", doneEvent(task)) },
-  pins: { store: pins, world: () => mapCache.get("map") },
+  pins: { store: pins },
 });
 
 // Static SPA, resolved relative to the process CWD (image: /app/bin -> /app/web/dist).

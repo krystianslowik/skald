@@ -7,9 +7,8 @@ import { Hub } from "../src/hub";
 import { liveSocket, type LiveSocket } from "../src/live";
 import { silentLog } from "../src/log";
 import { worldId } from "../src/catchup";
-import { MapCache } from "../src/map";
-import { mockMap } from "../src/mapmock";
 import { canMove, PinStore, type PinEvent } from "../src/pins";
+import { emptyAgentState } from "../src/types";
 import { cutText, sameName, tidyText, type WebPin } from "../src/pintypes";
 
 const T0 = Date.parse("2026-10-19T18:00:00Z");
@@ -64,6 +63,9 @@ describe("PinStore", () => {
     expect(pin.author).toBe("Bjorn");
     expect(made(s, { icon: undefined, note: undefined }).icon).toBe("point");
     expect(tidyText("a\u2066b\u2069\u200D c")).toBe("ab c");
+    // Soft hyphens, word joiners and fillers draw nothing either; emoji presentation stays.
+    expect(tidyText("Bob\u00AD\u2060\u3164")).toBe("Bob");
+    expect(tidyText("\u2764\uFE0F")).toBe("\u2764\uFE0F");
     expect(cutText("\u{1F525}\u{1F525}x", 2)).toBe("\u{1F525}\u{1F525}");
   });
 
@@ -172,6 +174,14 @@ describe("PinStore", () => {
     expect(sent).toEqual([{ kind: "gone", id: b.id }, { kind: "put", pin: c }]);
   });
 
+  it("counts the limit per world: another world's pins never fill this one", () => {
+    const { s } = store(1);
+    made(s);
+    expect(s.create({ x: 0, z: 0, by: "Astrid" })).toMatchObject({ ok: false, error: "full" });
+    s.setWorld("world-b");
+    expect(s.create({ x: 0, z: 0, by: "Astrid" }).ok).toBe(true);
+  });
+
   it("keeps pins per world and lists only the current one", () => {
     const { s, sent } = store();
     const a = made(s);
@@ -187,26 +197,50 @@ describe("PinStore", () => {
     expect(sent.filter((e) => e.kind === "list")).toHaveLength(1);
     s.setWorld("world-a");
     expect(s.list().map((p) => p.id)).toEqual([a.id]);
-    expect(s.count()).toBe(2);
+    expect(s.count()).toBe(1);
     expect(b.id).not.toBe(a.id);
   });
 
   it("keeps pins in the shared history file", () => {
     const history = new HistoryStore(":memory:");
     const one = new PinStore(history.connection);
+    one.setWorld("w1");
     const pin = made(one);
-    expect(new PinStore(history.connection).get(pin.id)).toEqual(pin);
+    const two = new PinStore(history.connection);
+    two.setWorld("w1");
+    expect(two.get(pin.id)).toEqual(pin);
   });
 });
 
 describe("pins follow the world on the map", () => {
-  it("the map cache names the world of every copy it reads", async () => {
+  it("takes the world from the agent's state, keyed, and keeps it while the state has none", () => {
     const pins = new PinStore(":memory:");
-    const body = mockMap({ now: T0 });
-    const cache = new MapCache(async () => ({ status: 200, etag: '"x"', body }), false, Date.now, "k", (id) => pins.setWorld(id));
+    const sent: PinEvent[] = [];
+    pins.subscribe((e) => sent.push(e));
     expect(pins.world).toBe("");
-    await cache.get("map");
-    expect(pins.world).toBe(worldId("k", body.meta.seedName, body.meta.seed));
+    // No world yet: nothing can be pinned into nowhere.
+    expect(pins.create({ x: 0, z: 0, by: "Ragnar" })).toMatchObject({ ok: false, error: "no_world" });
+    pins.followWorld({ seedName: "TestSeed", seed: 42 }, "k");
+    expect(pins.world).toBe(worldId("k", "TestSeed", 42));
+    expect(sent).toEqual([{ kind: "list" }]);
+    pins.followWorld(null, "k");
+    pins.followWorld({ seedName: "TestSeed", seed: 42 }, "k");
+    expect(pins.world).toBe(worldId("k", "TestSeed", 42));
+    expect(sent).toHaveLength(1);
+    pins.followWorld({ seedName: "Other", seed: 7 }, "k");
+    expect(sent).toHaveLength(2);
+  });
+
+  it("follows the hub's states on a live server", () => {
+    const hub = new Hub({} as AgentSource, new HistoryStore(":memory:"));
+    const pins = new PinStore(":memory:");
+    hub.subscribe((m) => {
+      if (m.type === "state") pins.followWorld(m.state.world.meta, "k");
+    });
+    const state = emptyAgentState();
+    state.world.meta = { name: "w", seedName: "TestSeed", seed: 42, worldGenVersion: 2, netTime: 0, day: 0, savedAt: new Date(T0).toISOString() } as never;
+    (hub as unknown as { emit(m: unknown): void }).emit({ type: "state", state, online: true });
+    expect(pins.world).toBe(worldId("k", "TestSeed", 42));
   });
 });
 
@@ -214,7 +248,7 @@ describe("/api/pins", () => {
   const agent = {} as AgentSource;
   function app(o: { limiter?: RateLimiter; withPins?: boolean } = {}) {
     const pins = new PinStore(":memory:");
-    let worlds = 0;
+    pins.setWorld("w1");
     const a = createApp({
       sessionSecret: "secret",
       passwordHash: "x",
@@ -222,13 +256,13 @@ describe("/api/pins", () => {
       agent,
       hub: new Hub(agent, new HistoryStore(":memory:")),
       metrics: async () => null,
-      pins: o.withPins === false ? undefined : { store: pins, limiter: o.limiter, world: async () => void (worlds += 1, pins.setWorld("w1")) },
+      pins: o.withPins === false ? undefined : { store: pins, limiter: o.limiter },
       log: silentLog,
     });
     const cookie = `${SESSION_COOKIE}=${createSession("secret")}`;
     const call = (method: string, path: string, body?: unknown, headers: Record<string, string> = { Cookie: cookie }) =>
       a.request(path, { method, headers: { "Content-Type": "application/json", ...headers }, body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body) });
-    return { call, pins, worlds: () => worlds };
+    return { call, pins };
   }
 
   it("needs a session", async () => {
@@ -242,11 +276,9 @@ describe("/api/pins", () => {
   });
 
   it("adds in the world on the map, lists, changes and deletes", async () => {
-    const { call, pins, worlds } = app();
+    const { call } = app();
     const created = await call("POST", "/api/pins", { x: 10, z: 20, icon: "ore", note: "Copper", by: "Ragnar" });
     expect(created.status).toBe(200);
-    expect(worlds()).toBe(1);
-    expect(pins.world).toBe("w1");
     const { pin } = (await created.json()) as { pin: WebPin };
     expect(pin).toMatchObject({ icon: "ore", author: "Ragnar", state: "new" });
 

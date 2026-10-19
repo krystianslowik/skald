@@ -2774,4 +2774,5 @@ export const pl: Dict = {
   "pins.error.signedOut": "Wylogowano. Zaloguj się ponownie, by zmieniać pinezki.",
   "pins.error.stale": "Ktoś zmienił tę pinezkę pierwszy. Widać teraz jego zmianę; spójrz jeszcze raz.",
   "pins.error.move": "Ten ruch nie pasuje do obecnego stanu pinezki.",
+  "pins.error.noWorld": "Serwer jeszcze nie wczytał świata. Spróbuj za chwilę.",
 };

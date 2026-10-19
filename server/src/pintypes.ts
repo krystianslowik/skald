@@ -24,10 +24,12 @@ export const PIN_NAME_MAX = 24;
 export const PIN_MAX = 500;
 
 /**
- * Bidi controls and zero-width characters: they turn a name or a note around
- * or make two look the same. Removed from both before they are kept.
+ * Bidi controls and characters that draw nothing (zero-width spaces and
+ * joiners, soft hyphens, fillers, word joiners): they turn a name or a note
+ * around or make two look the same. Removed from both before they are kept.
+ * The emoji presentation selectors stay, so a heart keeps its colour.
  */
-export const INVISIBLE = /[\p{Bidi_Control}\u200B-\u200D\uFEFF]/gu;
+export const INVISIBLE = /(?![\uFE0E\uFE0F])[\p{Bidi_Control}\p{Default_Ignorable_Code_Point}\u3164\uFFA0\u115F\u1160]/gu;
 
 /** A name or a note as the server keeps it: no control or invisible characters, single spaces, trimmed. */
 export function tidyText(v: string): string {
