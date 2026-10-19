@@ -620,7 +620,7 @@ func TestPlayersReportPeerPlatforms(t *testing.T) {
 	before := time.Now()
 	var readAt time.Time
 	c := New(Options{URL: srv.URL, Token: testToken, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		OnPlayers: func(at time.Time, p []Peer) (map[string]string, []string) { readAt = at; got <- p; return nil, nil }})
+		OnPlayers: func(at time.Time, p []Peer) PlayerIDs { readAt = at; got <- p; return PlayerIDs{} }})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var wanted atomic.Bool
@@ -667,8 +667,8 @@ func TestPlayersSharingANameGetIDs(t *testing.T) {
 	// tracker knows only 8 and 7. It also lists "Ragnar#3" for a peer newer
 	// than this read.
 	c := New(Options{URL: srv.URL, Token: testToken, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		OnPlayers: func(time.Time, []Peer) (map[string]string, []string) {
-			return map[string]string{"7": "Ragnar#2", "8": "Ragnar"}, []string{"Ragnar", "Ragnar#2", "Ragnar#3"}
+		OnPlayers: func(time.Time, []Peer) PlayerIDs {
+			return PlayerIDs{ByUID: map[string]string{"7": "Ragnar#2", "8": "Ragnar"}, InUse: []string{"Ragnar", "Ragnar#2", "Ragnar#3"}}
 		}})
 	players, err := c.Players(context.Background())
 	if err != nil {
@@ -683,8 +683,8 @@ func TestPlayersSharingANameGetIDs(t *testing.T) {
 	}
 }
 
-// Two peers of one tracker player (a reconnect the server still holds) are
-// one entry: the one with a character, else the newer.
+// A reconnect's old peer the tracker hides is no entry; a peer it names no
+// one for gets an id of its own.
 func TestPeersOfOnePlayerAreOneEntry(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"ok":true,"data":{"time":1,"players":[
@@ -693,8 +693,8 @@ func TestPeersOfOnePlayerAreOneEntry(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	c := New(Options{URL: srv.URL, Token: testToken, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		OnPlayers: func(time.Time, []Peer) (map[string]string, []string) {
-			return map[string]string{"200": "Ragnar", "300": "Ragnar"}, []string{"Ragnar"}
+		OnPlayers: func(time.Time, []Peer) PlayerIDs {
+			return PlayerIDs{ByUID: map[string]string{"300": "Ragnar"}, Hidden: map[string]bool{"200": true}, InUse: []string{"Ragnar"}}
 		}})
 	players, err := c.Players(context.Background())
 	if err != nil {

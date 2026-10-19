@@ -73,12 +73,13 @@ func main() {
 		Logger:       logger,
 		// The plugin knows whose each peer is and its platform; the log
 		// only guesses both.
-		OnPlayers: func(readAt time.Time, peers []bridge.Peer) (map[string]string, []string) {
+		OnPlayers: func(readAt time.Time, peers []bridge.Peer) bridge.PlayerIDs {
 			list := make([]state.Peer, len(peers))
 			for i, p := range peers {
 				list[i] = state.Peer{UID: p.UID, Name: p.Name, Platform: p.Platform, Account: p.Account}
 			}
-			return tracker.SetPeers(readAt, list)
+			ids := tracker.SetPeers(readAt, list)
+			return bridge.PlayerIDs{ByUID: ids.ByUID, Hidden: ids.Hidden, InUse: ids.InUse}
 		},
 	})
 	if br == nil {

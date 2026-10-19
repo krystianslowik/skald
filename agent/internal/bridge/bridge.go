@@ -120,11 +120,9 @@ type Options struct {
 	// HTTP overrides the client (tests).
 	HTTP *http.Client
 	// OnPlayers hears every player list read: when the read began and each
-	// connected peer. It answers with the player id ("Ragnar#2") of each
-	// peer it knows, by peer id, which tells apart players sharing a name,
-	// and every id in use, which ids made up for the others must avoid.
-	// It must not call back into the client.
-	OnPlayers func(readAt time.Time, peers []Peer) (byUID map[string]string, inUse []string)
+	// connected peer, and answers with the players' ids. It must not call
+	// back into the client.
+	OnPlayers func(readAt time.Time, peers []Peer) PlayerIDs
 }
 
 // Client calls the plugin and keeps the private name <-> id tables.
@@ -523,57 +521,35 @@ func (c *Client) Players(ctx context.Context) ([]Player, error) {
 		})
 	}
 	c.mu.Unlock()
-	var ids map[string]string
-	var inUse []string
+	var known PlayerIDs
 	if c.opt.OnPlayers != nil {
-		ids, inUse = c.opt.OnPlayers(readAt, peers)
+		known = c.opt.OnPlayers(readAt, peers)
 	}
-	// The tracker's ids first, then ids unique within the list for peers
-	// it does not list (still loading, or not in the log yet), so those
-	// never take a listed player's id, also one whose peer is newer than
-	// this read.
+	// The tracker's ids first; a reconnect's old peer it hides is no
+	// entry; every other peer gets an id of its own that avoids all the
+	// tracker's, so it never takes a listed player's id.
 	taken := map[string]bool{}
-	reserved := map[string]bool{}
-	for _, id := range inUse {
-		reserved[id] = true
-	}
-	// Peers of one tracker player (a reconnect the server still holds)
-	// are one entry: the one with a character, else the newer (later
-	// listed).
-	pick := map[string]int{}
-	for i := range out {
-		id := ids[peers[i].UID]
-		if id == "" {
-			continue
-		}
-		if j, ok := pick[id]; !ok || out[i].HasCharacter || !out[j].HasCharacter {
-			pick[id] = i
-		}
-	}
-	drop := map[int]bool{}
-	for i := range out {
-		if id := ids[peers[i].UID]; id != "" {
-			if pick[id] == i {
-				out[i].ID = id
-				taken[id] = true
-			} else {
-				drop[i] = true
-			}
-		}
+	for _, id := range known.InUse {
+		taken[id] = true
 	}
 	kept := out[:0]
+	var unnamed []int
 	for i := range out {
-		if !drop[i] {
-			kept = append(kept, out[i])
-		}
-	}
-	out = kept
-	for i := range out {
-		if out[i].ID != "" {
+		uid := peers[i].UID
+		if known.Hidden[uid] {
 			continue
 		}
+		out[i].ID = known.ByUID[uid]
+		if out[i].ID == "" {
+			unnamed = append(unnamed, len(kept))
+		}
+		taken[out[i].ID] = true
+		kept = append(kept, out[i])
+	}
+	out = kept
+	for _, i := range unnamed {
 		id := out[i].Name
-		for n := 2; taken[id] || reserved[id]; n++ {
+		for n := 2; taken[id]; n++ {
 			id = out[i].Name + "#" + strconv.Itoa(n)
 		}
 		out[i].ID = id
@@ -586,6 +562,15 @@ func (c *Client) Players(ctx context.Context) ([]Player, error) {
 		return out[i].ID < out[j].ID
 	})
 	return out, nil
+}
+
+// PlayerIDs is OnPlayers' answer: the player id of one listed peer per
+// player, the peers to leave out (a reconnect's old peer the server still
+// holds) and every player id in use.
+type PlayerIDs struct {
+	ByUID  map[string]string
+	Hidden map[string]bool
+	InUse  []string
 }
 
 // Peer is one connected peer as OnPlayers hears it. UID is the game's peer
