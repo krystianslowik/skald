@@ -1,5 +1,5 @@
 import { playerKey } from "./apply";
-import { NOTIFY_KINDS, type AgentEvent, type AgentState, type CompatResult, type LiveMessage, type Locale, type NotifyChange, type NotifyConfig, type NotifyKind } from "./types";
+import { NOTIFY_KINDS, type AgentEvent, type AgentState, type CompatResult, type LiveMessage, type Locale, type NotifyChange, type NotifyConfig, type NotifyKind, type SafeRestartRun } from "./types";
 
 export { NOTIFY_KINDS, type NotifyChange, type NotifyKind };
 
@@ -21,10 +21,26 @@ export type Item =
   | { kind: "failure"; what: "admin"; actor: string; command: string; error: string }
   | { kind: "failure"; what: "settings"; error: string }
   | { kind: "failure"; what: "action"; action: string; error: string }
+  /**
+   * A safe restart: its heads-up (minutes 0: going down now), its end with the
+   * new join code, a failure (the archive kept, when there is one), or a
+   * cancel of one players were warned about.
+   */
+  | { kind: "restart"; phase: "warning"; minutes: number }
+  | { kind: "restart"; phase: "done"; code: string }
+  | { kind: "restart"; phase: "failed"; error: string; archive: string }
+  | { kind: "restart"; phase: "cancelled" }
   /** A boss whose key turned defeated since the last state; not a Discord kind, only sinks take it. */
   | { kind: "boss"; key: string };
 
 export type ItemKind = Item["kind"];
+
+/** The Discord kind an item goes out under: a safe restart's failure is a failure, the rest is server news. */
+export function discordKind(item: Item): NotifyKind | null {
+  if (item.kind === "restart") return item.phase === "failed" ? "failure" : "server";
+  if (item.kind === "boss") return null;
+  return item.kind;
+}
 
 /**
  * Another consumer of the same news (phone push): it sees every batch after
@@ -92,6 +108,13 @@ const STRINGS = {
     adminFailed: "{actor}: {command} failed ({error})",
     settingsFailed: "Applying the new settings failed ({error})",
     actionFailed: "{action} failed ({error})",
+    "restart.warning": "The server restarts in {n} min for a backup. Find a safe spot.",
+    "restart.now": "The server restarts now for a backup. Back in a few minutes.",
+    "restart.done": "The server is back after a safe restart. New join code: **{code}**",
+    "restart.doneNoCode": "The server is back after a safe restart.",
+    "restart.failed": "The safe restart failed ({error}). The backup is kept as {archive}.",
+    "restart.failedNoArchive": "The safe restart failed ({error}).",
+    "restart.cancelled": "The server restart is called off.",
     "action.backup": "Backup",
     "action.restart": "Server restart",
     "action.update": "Update check",
@@ -141,6 +164,13 @@ const STRINGS = {
     adminFailed: "{actor}: {command} nie powiodło się ({error})",
     settingsFailed: "Nie udało się zastosować nowych ustawień ({error})",
     actionFailed: "{action} nie powiodło się ({error})",
+    "restart.warning": "Restart serwera za {n} min, na kopię świata. Znajdźcie bezpieczne miejsce.",
+    "restart.now": "Restart serwera teraz, na kopię świata. Wracamy za kilka minut.",
+    "restart.done": "Serwer wrócił po bezpiecznym restarcie. Nowy kod dołączenia: **{code}**",
+    "restart.doneNoCode": "Serwer wrócił po bezpiecznym restarcie.",
+    "restart.failed": "Bezpieczny restart nie powiódł się ({error}). Kopia zostaje jako {archive}.",
+    "restart.failedNoArchive": "Bezpieczny restart nie powiódł się ({error}).",
+    "restart.cancelled": "Restart serwera odwołany.",
     "action.backup": "Kopia świata",
     "action.restart": "Restart serwera",
     "action.update": "Sprawdzenie aktualizacji",
@@ -288,6 +318,9 @@ export function formatBatch(items: readonly Item[], locale: Locale): string[] {
       case "compat":
         lines.push(...compatLines(it.result, it.followUp, locale));
         break;
+      case "restart":
+        lines.push(restartLine(it, locale));
+        break;
       case "failure":
         if (it.what === "admin") lines.push(fill(s.adminFailed, { actor: escapeMd(it.actor), command: escapeMd(it.command), error: escapeMd(it.error) }));
         else if (it.what === "settings") lines.push(fill(s.settingsFailed, { error: escapeMd(it.error) }));
@@ -296,6 +329,21 @@ export function formatBatch(items: readonly Item[], locale: Locale): string[] {
     }
   }
   return lines;
+}
+
+/** A safe restart's news as one message line. */
+function restartLine(it: Extract<Item, { kind: "restart" }>, locale: Locale): string {
+  const s = STRINGS[locale];
+  switch (it.phase) {
+    case "warning":
+      return it.minutes > 0 ? fill(s["restart.warning"], { n: String(it.minutes) }) : s["restart.now"];
+    case "done":
+      return it.code ? fill(s["restart.done"], { code: escapeMd(it.code) }) : s["restart.doneNoCode"];
+    case "failed":
+      return it.archive ? fill(s["restart.failed"], { error: escapeMd(it.error), archive: escapeMd(it.archive) }) : fill(s["restart.failedNoArchive"], { error: escapeMd(it.error) });
+    case "cancelled":
+      return s["restart.cancelled"];
+  }
 }
 
 /**
@@ -404,6 +452,15 @@ export class DiscordNotifier {
   private outbox: string[] = [];
   private sending: Promise<void> | null = null;
   private stopped = false;
+  /**
+   * The safe restart in progress (its id): its own messages say what the
+   * server and join code news would, so that news waits for its end.
+   */
+  private restartRun: string | null = null;
+  /** Its heads-up went out (a cancel is then news too). */
+  private restartWarned = false;
+  /** The join code when it began. */
+  private restartCode = "";
 
   constructor(private readonly o: NotifierOptions) {
     this.url = o.url;
@@ -497,6 +554,8 @@ export class DiscordNotifier {
     this.version = st.server.version ?? "";
     this.status = st.server.status;
     this.announcedStatus = st.server.status;
+    // Started before this boot: its own end is the news.
+    if (st.safeRestart?.state === "running") this.joinRun(st.safeRestart);
     for (const p of st.players) this.joinedAt.set(p.name, Date.parse(p.since) || this.clock());
   }
 
@@ -541,6 +600,8 @@ export class DiscordNotifier {
         const code = String(d.code ?? "");
         if (!code || code === this.joinCode) return;
         this.joinCode = code;
+        // A safe restart's end carries it.
+        if (this.restartRun) return;
         return this.add({ kind: "join_code", code });
       }
       case "version": {
@@ -573,10 +634,67 @@ export class DiscordNotifier {
       case "action":
         if (d.ok === false) this.add({ kind: "failure", what: "action", action: String(d.name ?? "?"), error: String(d.message ?? "") });
         return;
+      case "restart_run":
+        return this.restartEvent(d);
       default:
         // routine saves, backups, logs and the rest are never sent
         return;
     }
+  }
+
+  /** A run already under way when first heard of: past its wait, its heads-up went out before. */
+  private joinRun(run: SafeRestartRun): void {
+    this.restartRun = run.id;
+    this.restartCode = this.joinCode;
+    this.restartWarned = run.step !== "" && run.step !== "wait";
+  }
+
+  /**
+   * A safe restart's step: the heads-up when the countdown starts (or, with
+   * nobody to count down for, when the game stops), then its end. Server and
+   * join code news is held from its begin to its end.
+   */
+  private restartEvent(d: Record<string, unknown>): void {
+    const run = d.run && typeof d.run === "object" ? (d.run as SafeRestartRun) : null;
+    if (!run) return;
+    const step = String(d.step ?? "");
+    const result = String(d.result ?? "");
+    if (step === "begin") {
+      this.restartRun = run.id;
+      this.restartWarned = false;
+      this.restartCode = this.joinCode;
+      return;
+    }
+    if (step !== "end") {
+      if (this.restartRun !== run.id) this.joinRun(run);
+      const countdown = step === "countdown" && result === "running";
+      const goingDown = step === "stop" && result === "running" && !this.restartWarned;
+      if (countdown || goingDown) {
+        this.restartWarned = true;
+        this.add({ kind: "restart", phase: "warning", minutes: countdown ? run.request.warnMinutes : 0 });
+      }
+      return;
+    }
+    this.restartRun = null;
+    const warned = this.restartWarned;
+    this.restartWarned = false;
+    // What the server did meanwhile was told by the run; nothing to catch up on.
+    if (this.serverTimer) clearTimeout(this.serverTimer);
+    this.serverTimer = null;
+    this.announcedStatus = this.status;
+    if (result === "done") {
+      if (run.joinCode) this.joinCode = run.joinCode;
+      return this.add({ kind: "restart", phase: "done", code: run.joinCode ?? "" });
+    }
+    if (result === "failed") {
+      this.add({ kind: "restart", phase: "failed", error: run.error ?? "", archive: run.archive ?? "" });
+      // The game may be up with a new code all the same.
+      const code = run.joinCode || this.joinCode;
+      if (run.joinCode) this.joinCode = run.joinCode;
+      if (code && code !== this.restartCode) this.add({ kind: "join_code", code });
+      return;
+    }
+    if (result === "cancelled" && warned) this.add({ kind: "restart", phase: "cancelled" });
   }
 
   /**
@@ -588,6 +706,8 @@ export class DiscordNotifier {
     if (status !== "running") this.joinedAt.clear();
     if (status === this.status) return;
     this.status = status;
+    // A safe restart tells its own story.
+    if (this.restartRun) return;
     if (status !== "stopped" && status !== "starting" && status !== "running") return;
     if (this.serverTimer) clearTimeout(this.serverTimer);
     this.serverTimer = setTimeout(() => {
@@ -623,7 +743,8 @@ export class DiscordNotifier {
 
   private add(item: Item): void {
     if (this.stopped) return;
-    const discord = this.url && this.kinds.has(item.kind as NotifyKind) ? this.url : "";
+    const kind = discordKind(item);
+    const discord = this.url && kind && this.kinds.has(kind) ? this.url : "";
     if (!discord && !this.sinkWants(item.kind)) return;
     this.pending.push({ item, discord });
     if (COALESCED.has(item.kind)) {

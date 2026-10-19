@@ -25,7 +25,14 @@ const KIND_OF: Partial<Record<ItemKind, PushKind>> = {
   failure: "failure",
   version: "update",
   compat: "update",
+  restart: "server",
 };
+
+/** A safe restart's failure is a failure; its other news is server news. */
+function pushKind(it: Item): PushKind | undefined {
+  if (it.kind === "restart" && it.phase === "failed") return "failure";
+  return KIND_OF[it.kind];
+}
 
 /**
  * Push services browsers subscribe with. The server posts to a URL a viewer
@@ -118,6 +125,11 @@ const STRINGS = {
     "failure.title": "Something failed",
     "failure.action": "{action} failed",
     "failure.settings": "Applying the new settings failed",
+    "failure.restart": "The safe restart failed",
+    "restart.title": "Server restart",
+    "restart.warning": "In {n} min, for a backup. Find a safe spot.",
+    "restart.now": "Going down now for a backup. Back in a few minutes.",
+    "restart.cancelled": "The restart is called off",
     "action.backup": "Backup",
     "action.restart": "Server restart",
     "action.update": "Update check",
@@ -147,6 +159,11 @@ const STRINGS = {
     "failure.title": "Coś się nie udało",
     "failure.action": "{action}: nie powiodło się",
     "failure.settings": "Nie udało się zastosować nowych ustawień",
+    "failure.restart": "Bezpieczny restart nie powiódł się",
+    "restart.title": "Restart serwera",
+    "restart.warning": "Za {n} min, na kopię świata. Znajdźcie bezpieczne miejsce.",
+    "restart.now": "Teraz, na kopię świata. Wracamy za kilka minut.",
+    "restart.cancelled": "Restart odwołany",
     "action.backup": "Kopia świata",
     "action.restart": "Restart serwera",
     "action.update": "Sprawdzenie aktualizacji",
@@ -214,7 +231,7 @@ export function notificationsFor(items: readonly Item[], prefs: PushPrefs, ctx: 
   const s = STRINGS[prefs.locale];
   const on = new Set(prefs.kinds);
   const mine = items.filter((it) => {
-    const k = KIND_OF[it.kind];
+    const k = pushKind(it);
     if (!k || !on.has(k)) return false;
     if (it.kind === "server") return it.status === "running";
     if (it.kind === "failure") return it.what !== "admin";
@@ -242,8 +259,13 @@ export function notificationsFor(items: readonly Item[], prefs: PushPrefs, ctx: 
     const all = names("death", deaths.map((d) => d.name));
     out.push({ title: s["death.title"], body: clip(fill(all.length > 1 ? s.deathMany : s.death, { names: nameList(all, prefs.locale) })), tag: "death", url: "/#saga" });
   }
-  const up = mine.some((it) => it.kind === "server");
-  const code = [...mine].reverse().find((it): it is Extract<Item, { kind: "join_code" }> => it.kind === "join_code")?.code ?? "";
+  // A safe restart's heads-up or cancel; its end reads as the server being up.
+  const restart = [...mine].reverse().find((it): it is Extract<Item, { kind: "restart" }> => it.kind === "restart" && it.phase !== "failed");
+  const back = restart?.phase === "done" ? restart : undefined;
+  if (restart?.phase === "warning") out.push({ title: s["restart.title"], body: restart.minutes > 0 ? fill(s["restart.warning"], { n: String(restart.minutes) }) : s["restart.now"], tag: "server", url: "/" });
+  if (restart?.phase === "cancelled") out.push({ title: s["restart.title"], body: s["restart.cancelled"], tag: "server", url: "/" });
+  const up = mine.some((it) => it.kind === "server") || !!back;
+  const code = back?.code || ([...mine].reverse().find((it): it is Extract<Item, { kind: "join_code" }> => it.kind === "join_code")?.code ?? "");
   if (up) {
     const c = code || ctx.joinCode;
     out.push({ title: s["server.title"], body: c ? fill(s["server.code"], { code: c }) : s["server.noCode"], tag: "server", url: "/" });
@@ -255,6 +277,7 @@ export function notificationsFor(items: readonly Item[], prefs: PushPrefs, ctx: 
   const raid = [...mine].reverse().find((it): it is Extract<Item, { kind: "raid" }> => it.kind === "raid");
   if (raid) out.push({ title: s["raid.title"], body: clip(RAIDS[prefs.locale][raid.raid] ?? raid.raid), tag: "raid", url: "/#saga" });
   const failures = mine.flatMap((it) => {
+    if (it.kind === "restart") return it.phase === "failed" ? [s["failure.restart"]] : [];
     if (it.kind !== "failure") return [];
     if (it.what === "settings") return [s["failure.settings"]];
     if (it.what === "action") return [fill(s["failure.action"], { action: s[`action.${it.action}` as Key] ?? it.action })];
