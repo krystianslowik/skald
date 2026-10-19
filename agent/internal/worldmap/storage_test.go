@@ -22,6 +22,7 @@ type invItem struct {
 	stack      uint16
 	quality    uint16
 	durability int32
+	variant    int32
 	crafterID  int64
 	crafter    string
 	worldLevel byte
@@ -49,6 +50,9 @@ func encodeInventory(items []invItem) []byte {
 		}
 		if it.flags&itemStack != 0 {
 			w(it.stack)
+		}
+		if it.flags&itemVariant != 0 {
+			w(it.variant)
 		}
 		if it.flags&itemCrafter != 0 {
 			w(it.crafterID)
@@ -120,7 +124,7 @@ func TestParseInventoryRefuses(t *testing.T) {
 		"old version": append([]byte{106, 0, 0, 0}, good[4:]...),
 		"new version": append([]byte{111, 0, 0, 0}, good[4:]...),
 	}
-	for _, bit := range []byte{0x02, 0x10, 0x80} {
+	for _, bit := range []byte{0x02, 0x80} {
 		b := encodeInventory([]invItem{{name: "Wood", flags: 0x49 | bit, stack: 3}})
 		cases[fmt.Sprintf("flag %#02x", bit)] = b
 	}
@@ -135,6 +139,34 @@ func TestParseInventoryRefuses(t *testing.T) {
 	}
 	if _, _, err := parseInventory([]byte{1}); !errors.Is(err, errShort) {
 		t.Errorf("short blob err = %v", err)
+	}
+}
+
+// Flag 0x10 is the item's style variant, an i32 between the stack and the
+// crafter (ItemDrop.ItemData.Save). Game build l-1.0.20 saves an item with
+// flag byte 0x71 in a chest (#179).
+func TestParseInventoryVariant(t *testing.T) {
+	in := []invItem{
+		{name: "ShieldWood", x: 0, y: 0, flags: 0x71, variant: 3, durability: 15000, crafterID: 42, crafter: "Ragnar"},
+		{name: "ArrowFire", x: 1, y: 0, flags: 0x5c, stack: 37, quality: 2, variant: 1},
+		{name: "ShieldWood", x: 2, y: 0, flags: 0x7d, stack: 2, quality: 3, variant: -1, crafterID: 7, crafter: "Freya", cheated: 1},
+		{name: "Stone", x: 3, y: 1, flags: 0x41},
+	}
+	got, skipped, err := parseInventory(encodeInventory(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skipped != 0 || len(got) != len(in) {
+		t.Fatalf("%d items (%d skipped), want %d", len(got), skipped, len(in))
+	}
+	want := []rawItem{
+		{name: "ShieldWood", typ: "Shield", stack: 1, quality: 1, durability: 150, crafter: "Ragnar", x: 0, y: 0},
+		{name: "ArrowFire", typ: "Ammo", stack: 37, quality: 2, durability: 100, x: 1, y: 0},
+		{name: "ShieldWood", typ: "Shield", stack: 2, quality: 3, durability: 100, crafter: "Freya", x: 2, y: 0},
+		{name: "Stone", typ: "Material", stack: 1, quality: 1, durability: 100, x: 3, y: 1},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("items = %+v\nwant %+v", got, want)
 	}
 }
 
@@ -174,13 +206,19 @@ func TestParseInventorySkipsNoPrefab(t *testing.T) {
 	if got, skipped, err := parseInventory(zero); err != nil || len(got) != 0 || skipped != 1 {
 		t.Errorf("zero hash = %v %d %v", got, skipped, err)
 	}
+	// An item without a prefab but with a variant is read past the same way.
+	variant := encodeInventory([]invItem{{flags: 0x19, stack: 3, variant: 2}, {name: "Wood", x: 1, flags: 0x49, stack: 5}})
+	if got, skipped, err := parseInventory(variant); err != nil || len(got) != 1 || skipped != 1 || got[0].name != "Wood" || got[0].stack != 5 {
+		t.Errorf("variant without prefab = %+v %d %v", got, skipped, err)
+	}
 	// Skipping does not loosen the layout checks: an item without a prefab
 	// is still refused when the blob around it is malformed.
 	bad := encodeInventory([]invItem{{flags: 0x09, stack: 3}, {name: "Wood", flags: 0x49, stack: 1}})
 	for name, b := range map[string][]byte{
 		"truncated": bad[:len(bad)-1],
 		"trailing":  append(append([]byte{}, bad...), 0),
-		"variant":   encodeInventory([]invItem{{flags: 0x19, stack: 3}}),
+		// cut inside the variant: header, durability, slot, level, flags, stack, then 2 of its 4 bytes
+		"variant truncated": variant[:6+8+2+2],
 	} {
 		if _, _, err := parseInventory(b); err == nil {
 			t.Errorf("%s: parsed, want an error", name)
@@ -227,7 +265,7 @@ func TestStorageFixture(t *testing.T) {
 		}
 	}
 	full := byID["piece_chest_wood@110,-200"]
-	if full.Width != 5 || full.Height != 2 || len(full.Items) != 8 || full.Unreadable {
+	if full.Width != 5 || full.Height != 2 || len(full.Items) != 9 || full.Unreadable {
 		t.Fatalf("wood chest = %+v", full)
 	}
 	if it := full.Items[0]; it.Name != "SwordBronze" || it.Quality != 2 || it.Durability == nil || *it.Durability != 250 || it.Crafter != "Hakon" {
@@ -238,6 +276,9 @@ func TestStorageFixture(t *testing.T) {
 	}
 	if it := full.Items[7]; it.Name != "ArrowFire" || it.Stack != 37 || it.Quality != 3 || it.X != 2 || it.Y != 1 {
 		t.Errorf("stack and quality = %+v", it)
+	}
+	if it := full.Items[8]; it.Name != "ShieldWood" || it.Durability == nil || *it.Durability != 150 || it.Crafter != "Astrid" || it.X != 3 || it.Y != 1 {
+		t.Errorf("item with a variant = %+v", it)
 	}
 	if c := byID["piece_chest_wood@112,-200"]; len(c.Items) != 0 || c.Unreadable {
 		t.Errorf("empty chest = %+v", c)

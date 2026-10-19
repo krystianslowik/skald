@@ -280,6 +280,7 @@ type item struct {
 	stack      uint16
 	quality    uint16
 	durability int32 // x 100; 0 writes 10000
+	variant    int32
 	crafterID  int64
 	crafter    string
 	worldLevel byte
@@ -301,6 +302,9 @@ func inventory(items ...item) []byte {
 		}
 		if it.flags&0x08 != 0 {
 			_ = binary.Write(&b, binary.LittleEndian, it.stack)
+		}
+		if it.flags&0x10 != 0 {
+			i32(&b, it.variant)
 		}
 		if it.flags&0x20 != 0 {
 			i64(&b, it.crafterID)
@@ -386,12 +390,13 @@ func writeMapWorld(dir string) {
 				item{name: "CopperOre", x: 5, y: 2, flags: 0x41},
 			)}}},
 		// Storage: a wood chest with one item per flag set seen in real
-		// saves plus one with both a stack and a quality, an empty one (no
-		// items key), a reinforced chest whose inventory has a flag bit
-		// nobody has seen, a wood chest holding one item without a prefab
-		// (0x40 clear, skipped like the game does) between two good ones, a
-		// chest nobody built and two world chests. Only the first four may
-		// be exported.
+		// saves plus one with both a stack and a quality and one with a
+		// style variant (0x71, #179), an empty one (no items key), a
+		// reinforced chest whose inventory has a flag bit the decoder
+		// refuses (0x80, custom data), a wood chest holding one item
+		// without a prefab (0x40 clear, skipped like the game does) between
+		// two good ones, a chest nobody built and two world chests. Only the
+		// first four may be exported.
 		chest("piece_chest_wood", 110, -200, true, inventory(
 			item{name: "SwordBronze", flags: 0x65, quality: 2, durability: 25000, crafterID: fakeCrafterID, crafter: "Hakon"},
 			item{name: "Stone", x: 1, flags: 0x41},
@@ -401,9 +406,10 @@ func writeMapWorld(dir string) {
 			item{name: "AxeHead1", y: 1, flags: 0x40},
 			item{name: "ArrowWood", x: 1, y: 1, flags: 0x69, stack: 65, crafterID: fakeCrafterID, crafter: "Ulfgar"},
 			item{name: "ArrowFire", x: 2, y: 1, flags: 0x4c, stack: 37, quality: 3},
+			item{name: "ShieldWood", x: 3, y: 1, flags: 0x71, variant: 3, durability: 15000, crafterID: fakeCrafterID, crafter: "Astrid"},
 		)),
 		chest("piece_chest_wood", 112, -200, true, nil),
-		chest("piece_chest", 114, -200, true, inventory(item{name: "Iron", flags: 0x49 | 0x10, stack: 30})),
+		chest("piece_chest", 114, -200, true, inventory(item{name: "Iron", flags: 0x49 | 0x80, stack: 30})),
 		chest("piece_chest_wood", 116, -200, true, inventory(
 			item{name: "Resin", flags: 0x49, stack: 12},
 			item{x: 6, y: 3, flags: 0x29, stack: 4, crafterID: fakeCrafterID, crafter: "Freya"},

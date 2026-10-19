@@ -21,6 +21,7 @@ import (
 //	      u8 flags
 //	      flags&0x04: u16 quality     (absent: quality 1)
 //	      flags&0x08: u16 stack       (absent: a stack of 1)
+//	      flags&0x10: i32 style variant (absent: 0); read past, not shown
 //	      flags&0x20: i64 crafter id, string crafter name (.NET 7-bit length)
 //	      flags&0x40: i32 item prefab hash (GetStableHashCode of the prefab name)
 //	      u8 extra flags (0x01: spawned by a cheat); read past unchecked,
@@ -30,11 +31,16 @@ import (
 //	flags: 0x01 picked up by a player (set on everything a player has held;
 //	            clear on the loot the game puts into world chests)
 //	       0x04 quality follows      0x08 stack follows
-//	       0x20 crafter follows      0x40 prefab hash follows
-//	       0x02 equipped, 0x10 variant (i32) follows, 0x80 custom data
-//	            (count, then key/value strings) follows: never seen in a
-//	            container, so a blob with any of them is refused rather than
-//	            decoded on an untested path.
+//	       0x10 variant follows      0x20 crafter follows
+//	       0x40 prefab hash follows
+//	       0x02 equipped, 0x80 custom data (count, then key/value strings)
+//	            follows: never seen in a container, so a blob with either is
+//	            refused rather than decoded on an untested path.
+//
+// The variant is the style an item was crafted in (a shield's or a cape's
+// paint, for one). ItemDrop.ItemData.Save writes it as an i32 between the
+// stack and the crafter whenever it is not 0, and ItemData.Load reads it back
+// in that place.
 //
 // An item without 0x40 (or with a zero hash) has no prefab. The game reads it
 // to its end and leaves it out (Inventory.Load adds an item only when its
@@ -55,6 +61,12 @@ import (
 // with every prefab hash resolved. Any other version (pre-1.0 saves carried a
 // different item layout, a later one may again) is refused.
 //
+// None of those inventories held a variant. A chest on l-1.0.20 with an item
+// of flag byte 0x71 (picked up, variant, crafter, prefab) was refused for it
+// (#179). The variant's place and width are taken from the game build's own
+// ItemDrop.ItemData.Save and ItemData.Load (decompiled from l-1.0.20), not
+// from a captured save.
+//
 // The crafter id is a platform id: it is read past and never kept.
 
 const (
@@ -66,9 +78,10 @@ const (
 	itemPickedUp = 0x01
 	itemQuality  = 0x04
 	itemStack    = 0x08
+	itemVariant  = 0x10
 	itemCrafter  = 0x20
 	itemPrefab   = 0x40
-	itemKnown    = itemPickedUp | itemQuality | itemStack | itemCrafter | itemPrefab
+	itemKnown    = itemPickedUp | itemQuality | itemStack | itemVariant | itemCrafter | itemPrefab
 )
 
 // rawItem is one decoded stack; the crafter name is gated at assembly.
@@ -167,6 +180,9 @@ func parseInventory(blob []byte) (items []rawItem, skipped int, err error) {
 		}
 		if flags&itemStack != 0 {
 			it.stack = int(r.u16())
+		}
+		if flags&itemVariant != 0 {
+			r.i32() // style variant: not shown
 		}
 		if flags&itemCrafter != 0 {
 			r.i64() // crafter id: platform id, dropped
