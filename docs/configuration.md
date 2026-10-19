@@ -966,7 +966,9 @@ Then the agent:
 6. waits up to 20 minutes for the world to load and, with crossplay, for a
    new join code, and posts it to Discord and phones.
 
-Waiting and the countdown can be cancelled; from the save on, the run goes
+A run restarts only a running game: if the game is stopped (the image's
+updater may be installing an update) when the run would save, it ends failed
+without touching anything. Waiting and the countdown can be cancelled; from the save on, the run goes
 to the end. A failed backup or check never leaves the server down: the world
 was not touched, so the server is started again and the run ends failed,
 with a Discord and phone alert. The copy shows up in the restore list. Only
@@ -976,4 +978,6 @@ settings now are refused, and settings waiting for an empty server wait for
 it (its restart applies them); backups and update checks still run.
 
 The run lives in the agent, so it carries on when skald-web restarts. A
-restart of the agent itself (it restarts with the game pod) ends it.
+restart of the agent itself ends it; if that happens while the game is
+stopped for the backup, the agent starts the game (and the updater) again
+when it comes back. Copies from failed runs count toward the five as well.

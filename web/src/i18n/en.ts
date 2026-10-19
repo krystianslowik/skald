@@ -2363,6 +2363,7 @@ export const en = {
   "admin.safe.reason.save.failed": "The plugin did not save; the stop saves anyway.",
   "admin.safe.reason.save.nosave": "No save reported; the stop saves anyway.",
   "admin.safe.reason.save.busy": "Another action was running.",
+  "admin.safe.reason.save.notrunning": "The game was not running (perhaps updating); nothing was touched.",
   "admin.safe.reason.verify.nobackup": "No backup to check.",
   "admin.safe.reason.recover.world_not_loaded": "The world did not load in time.",
   "admin.safe.reason.recover.join_code_missing": "No join code in time.",

@@ -2352,6 +2352,7 @@ export const pl: Dict = {
   "admin.safe.reason.save.failed": "Wtyczka nie zapisała świata; zatrzymanie i tak go zapisuje.",
   "admin.safe.reason.save.nosave": "Brak wpisu o zapisie; zatrzymanie i tak zapisuje świat.",
   "admin.safe.reason.save.busy": "Trwała inna akcja.",
+  "admin.safe.reason.save.notrunning": "Gra nie działała (może się aktualizowała); nic nie zostało ruszone.",
   "admin.safe.reason.verify.nobackup": "Nie ma kopii do sprawdzenia.",
   "admin.safe.reason.recover.world_not_loaded": "Świat nie wczytał się na czas.",
   "admin.safe.reason.recover.join_code_missing": "Kod dołączenia nie pojawił się na czas.",
