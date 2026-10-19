@@ -249,7 +249,32 @@ export function lazyChunk<P extends object>(load: () => Promise<{ default: Compo
   );
 }
 
-/** Warms a chunk on hover; a failure here is not worth a reload or a console error. */
+/**
+ * Warms a chunk ahead of use; a failure here is not worth a reload or a console
+ * error. Offline it does nothing: the browser would keep the failed import, and
+ * the real one, once back online, would fail with it and reload the page.
+ */
 export const preload = (load: () => Promise<unknown>) => {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return;
   load().catch(() => undefined);
 };
+
+/** An idle callback that does not come within this time runs anyway (a busy page). */
+const IDLE_TIMEOUT_MS = 5000;
+/** Where the browser has no `requestIdleCallback` (Safari): run this long after the call instead. */
+const IDLE_FALLBACK_MS = 2000;
+
+/**
+ * Runs `fn` once the page is idle after its first paint; returns a cancel.
+ * Warming a chunk this way loads it while this build is still on the server:
+ * a tab left open across a deploy then opens it from memory, instead of asking
+ * for a chunk the new build removed and reloading the page.
+ */
+export function whenIdle(fn: () => void): () => void {
+  if (typeof requestIdleCallback === "function" && typeof cancelIdleCallback === "function") {
+    const id = requestIdleCallback(() => fn(), { timeout: IDLE_TIMEOUT_MS });
+    return () => cancelIdleCallback(id);
+  }
+  const id = setTimeout(fn, IDLE_FALLBACK_MS);
+  return () => clearTimeout(id);
+}

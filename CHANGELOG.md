@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- Tapping a player's name on a panel left open while a new release was deployed reloaded the page instead of opening the profile, so it took a second tap. The panel now loads the profile code right after it opens, and the first tap opens the profile.
+
 ## [2026.10.26] - 2026-10-19
 
 ### Added

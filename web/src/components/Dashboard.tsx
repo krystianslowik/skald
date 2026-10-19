@@ -13,7 +13,7 @@ import { JoinPanel } from "./JoinPanel";
 import { Plank } from "./Plank";
 import { Preferences } from "./Preferences";
 import { TabBar } from "./TabBar";
-import { ProfileProvider } from "./PlayerName";
+import { ProfileProvider, preloadProfileSheet } from "./PlayerName";
 import { Ranking } from "./Ranking";
 import { Runes } from "./Runes";
 import { Saga } from "./Saga";
@@ -30,10 +30,12 @@ import { TABS, useRoute, type Tab } from "../lib/useRoute";
 import { AdminProvider, useAdmin } from "./admin/AdminContext";
 import { CompatNotice } from "./Compat";
 import { AdminBoard } from "./admin/AdminBoard";
-import { lazyChunk } from "../lib/chunks";
+import { lazyChunk, whenIdle } from "../lib/chunks";
 import { ChunkBoundary } from "./ErrorBoundary";
 
-// Opened on demand; the chunk is preloaded as soon as a pointer reaches a player name.
+// Opened on demand. The chunk is loaded once the page is idle (a tab left open
+// across a deploy would otherwise find it gone on the first tap and reload, #188),
+// and again as soon as a pointer reaches a player name.
 const ProfileSheet = lazyChunk(() => import("./ProfileSheet"), "ProfileSheet");
 const SettingsSheet = lazyChunk(() => import("./SettingsSheet"), "SettingsSheet");
 const MapView = lazyChunk(() => import("./map/MapView"), "MapView");
@@ -53,6 +55,8 @@ export function Dashboard({ live, onLogout, onUnauthorized = () => {} }: { live:
     setProfile(null);
     opener.current?.focus();
   }, []);
+  // Names are on every board: load the profile sheet now, while this build is still the one on the server.
+  useEffect(() => whenIdle(preloadProfileSheet), []);
   // null = closed; "top" from the header button, "footer" from the pending chip.
   const [settingsOpen, setSettingsOpen] = useState<null | "top" | "footer">(null);
   const settingsOpener = useRef<Element | null>(null);
