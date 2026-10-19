@@ -43,7 +43,7 @@ export function actionTitle(i: Pick<I18n, "t">, name: string): string {
   return key ? i.t(key) : name;
 }
 
-type Tone = "join" | "leave" | "death" | "save" | "slow" | "server" | "action" | "raid" | "settings" | "admin";
+export type Tone = "join" | "leave" | "death" | "save" | "slow" | "server" | "action" | "raid" | "settings" | "admin";
 
 /** Commands whose saga line names a player when there was one ("for X", "near X"). */
 const WITH_PLAYER = new Set(["spawn", "creature-spawn", "creature-kill", "creature-tame", "repair", "fill", "fill-kilns", "fill-smelters", "fill-fermenters", "grow", "map-reveal", "map-pins", "event-start"]);
@@ -247,7 +247,7 @@ export function describe(i: I18n, ev: AgentEvent): { text: string; tone: Tone; p
   }
 }
 
-function Glyph({ tone }: { tone: Tone }) {
+export function Glyph({ tone }: { tone: Tone }) {
   const common = { width: 16, height: 16, viewBox: "0 0 20 20", fill: "none", strokeWidth: 1.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   switch (tone) {
     case "join":

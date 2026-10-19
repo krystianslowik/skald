@@ -4,6 +4,7 @@ import { compress, COMPRESSIBLE_CONTENT_TYPE_REGEX } from "hono/compress";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { matchedRoutes, routePath } from "hono/route";
 import type { AgentAsset, AgentSource, PiecesBox, ToolsRequest } from "./agent";
+import { CATCHUP_SETTLE_MS, catchupSince, summarize } from "./catchup";
 import { ADMIN_COOKIE, ADMIN_IDLE_MS, createAdminSession, createSession, RateLimiter, SESSION_COOKIE, SESSION_TTL_MS, sessionHash, verifyAdminSession, verifySession } from "./auth";
 import type { Hub } from "./hub";
 import { cause, log as defaultLog, type Logger } from "./log";
@@ -23,6 +24,7 @@ import {
   type AccessListName,
   type AccessOp,
   type ActionName,
+  type ApiCatchup,
   type AdminCatalog,
   type AdminCommand,
   type AdminRead,
@@ -475,6 +477,28 @@ export function createApp(deps: AppDeps): Hono {
     if (!profile) return c.json({ error: "not found" }, 404);
     c.header("Cache-Control", "no-store");
     return c.json(profile);
+  });
+
+  // What happened since the viewer's last visit (kept in their browser, sent
+  // as `since`): the events of the window, and the world as it is now for the
+  // browser to compare with what it saw.
+  app.get("/api/catchup", async (c) => {
+    const now = clock();
+    const { since, clamped } = catchupSince(c.req.query("since"), now);
+    const events = deps.hub.storedEvents();
+    // A stream open for a while is past the backlog it replays first.
+    const opened = deps.hub.liveSince();
+    const live = opened !== null && now - opened >= CATCHUP_SETTLE_MS;
+    const summary = summarize(events, since, now, live);
+    const bosses = deps.hub.getState().world.meta?.bosses;
+    const body: ApiCatchup = {
+      ...summary,
+      clamped,
+      bosses: bosses ? bosses.filter((b) => b.defeated).map((b) => b.key) : null,
+      world: deps.map ? await deps.map.facts() : null,
+    };
+    c.header("Cache-Control", "no-store");
+    return c.json(body);
   });
 
   // Streams the agent's zip straight through; nothing is buffered here.

@@ -35,6 +35,15 @@ export function capRecent(newestFirst: AgentEvent[], now = Date.now(), limit = R
  * non-running server state close every open session.
  */
 export function deriveHistory(events: AgentEvent[], now = Date.now()): History {
+  return fold(events, now, false);
+}
+
+/** The players alone (sessions, playtime, deaths up to `now`): the same fold without the series or the events list. */
+export function derivePlayers(events: AgentEvent[], now = Date.now()): PlayerStats[] {
+  return fold(events, now, true).players;
+}
+
+function fold(events: AgentEvent[], now: number, playersOnly: boolean): History {
   const stats = new Map<string, PlayerStats>();
   // Open visits by player key (id, or name from older agents).
   const open = new Map<string, { name: string; at: number }>();
@@ -62,7 +71,7 @@ export function deriveHistory(events: AgentEvent[], now = Date.now()): History {
     for (const key of [...open.keys()]) close(key, at, ts);
   };
   const record = (at: number, value: number) => {
-    if (value === current) return;
+    if (playersOnly || value === current) return;
     current = value;
     if (at < seriesStart) valueAtStart = value;
     else series.push([at, value]);
@@ -113,7 +122,7 @@ export function deriveHistory(events: AgentEvent[], now = Date.now()): History {
   }
 
   const online7d: SeriesPoint[] = [[seriesStart, valueAtStart], ...series, [now, current]];
-  const recent = capRecent(events.filter((e) => e.type !== "player_count" && e.type !== "player_platform" && !UNSTORED_EVENTS.includes(e.type) && !isBridgeRead(e)).reverse(), now);
+  const recent = playersOnly ? [] : capRecent(events.filter((e) => e.type !== "player_count" && e.type !== "player_platform" && !UNSTORED_EVENTS.includes(e.type) && !isBridgeRead(e)).reverse(), now);
   const players = [...stats.values()].sort((a, b) => b.playtimeMs - a.playtimeMs);
   return { players, events: recent, online7d };
 }
