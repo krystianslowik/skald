@@ -9,6 +9,15 @@ above them.
 
 ## [Unreleased]
 
+### Added
+
+- Shared map pins: long press the map on a phone (right click on a computer) to drop a pin with a mark and a one-line note. Everyone on the panel sees it at once, on any platform and without mods, and can claim it, mark it cleared or depleted, or reopen it. Finished pins stay as a record under the Completed filter instead of coming back like in-game pins do; the layers panel filters pins by Group or Mine and by Open or Completed. Pins can be archived, and an archived pin can be deleted for good after a confirm. Each device picks a display name the first time; there are no accounts, so anyone can drop or finish a claim. When two people change the same pin at once, the second is told and sees the first one's change instead of overwriting it. Pins belong to the world they were placed in: a new or imported world starts with none. Where an unlocked admin long presses, the panel asks whether to add a pin or open the admin actions. The portal route finder offers shared pins as destinations, and while it waits for a tap to set the start, a tap or long press on the map (or on a pin) sets the start instead of adding a pin.
+- For operators: shared pins are kept in `DB_PATH` with the history (up to 500; the oldest archived pin makes room for a new one).
+
+### Changed
+
+- A long press on the map (a finger or a pen) now takes 0.6 s and allows a little movement, and Android's menu after a long press no longer fires it a second time. With a mouse, the map's actions are on the right click; holding the left button no longer counts as a long press.
+
 ### Fixed
 
 - Tapping a player's name on a panel left open while a new release was deployed reloaded the page instead of opening the profile, so it took a second tap. The panel now loads the profile code right after it opens, and the first tap opens the profile.

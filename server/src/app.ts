@@ -13,6 +13,7 @@ import type { NotifyChange, NotifySettings } from "./notify";
 import { checkOrigin, type OriginPolicy } from "./origin";
 import { pushRoutes, pushSessionTag, type PushService } from "./push";
 import { mountTasks, type TaskRoutesDeps } from "./taskroutes";
+import { mountPins, type PinRoutesDeps } from "./pins";
 import {
   ACCESS_LISTS,
   ACCESS_OPS,
@@ -81,6 +82,8 @@ export interface AppDeps {
   log?: Logger;
   /** The shared task board; without it /api/tasks answers 404. */
   tasks?: TaskRoutesDeps;
+  /** The shared web map pins; without them /api/pins answers 404. */
+  pins?: PinRoutesDeps;
 }
 
 /**
@@ -472,6 +475,7 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   if (deps.tasks) mountTasks(app, { clientKey: (c) => clientIp(c, deps.trustedIpHeader ?? ""), ...deps.tasks });
+  if (deps.pins) mountPins(app, { clientKey: (c) => clientIp(c, deps.trustedIpHeader ?? ""), ...deps.pins });
 
   app.get("/api/players", (c) => {
     c.header("Cache-Control", "no-store");

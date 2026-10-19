@@ -1,6 +1,8 @@
 import type { Hub } from "./hub";
 import type { Task } from "./taskmodel";
 import type { TaskEvent } from "./tasks";
+import type { PinEvent } from "./pins";
+import type { WebPin } from "./pintypes";
 import type { AgentState, LiveMessage, LiveWireMessage } from "./types";
 
 /**
@@ -31,6 +33,7 @@ export interface LiveSocketData {
   unsubscribe?: () => void;
   unwatch?: () => void;
   untasks?: () => boolean;
+  unpins?: () => boolean;
   send?: (m: LiveMessage) => void;
 }
 
@@ -80,21 +83,63 @@ export interface TaskFeed {
   subscribe(fn: (ev: TaskEvent) => void): () => void;
 }
 
+/** The web map pins of the world on the map: the list now and every change. */
+export interface PinFeed {
+  list(): WebPin[];
+  subscribe(fn: (ev: PinEvent) => void): () => void;
+}
+
+/** What /live carries besides the agent's news. */
+export interface LiveFeeds {
+  tasks?: TaskFeed;
+  pins?: PinFeed;
+}
+
+/**
+ * A feed's sockets: each gets the whole list as one frame when it opens, then
+ * one frame per change, serialised once for every socket. The list frame is
+ * cached until the next change.
+ */
+function fanOut<E>(listMessage: () => LiveMessage, change: (ev: E) => LiveMessage | "list") {
+  const sockets = new Set<LiveSocket>();
+  let listFrame: string | null = null;
+  const list = () => (listFrame ??= JSON.stringify(listMessage()));
+  return {
+    on(ev: E): void {
+      listFrame = null;
+      const m = change(ev);
+      // A new list (the pins of another world) goes to every socket whole.
+      const frame = m === "list" ? list() : JSON.stringify(m);
+      for (const ws of sockets) ws.send(frame, true);
+    },
+    open(ws: LiveSocket): () => boolean {
+      ws.send(list(), true);
+      sockets.add(ws);
+      return () => sockets.delete(ws);
+    },
+  };
+}
+
 /**
  * `tasks`: every socket gets the whole task list when it opens (a page back
  * from a dropped link is whole again), then each change as one task.
  */
-export function liveSocket(hub: Hub, tasks?: TaskFeed) {
-  // A socket gets the whole list when it opens, then one task per change,
-  // serialised once and sent as the same frame to every socket.
-  const taskSockets = new Set<LiveSocket>();
-  // The whole list as one frame for opening sockets, made again only after a change.
-  let listFrame: string | null = null;
-  tasks?.subscribe((ev) => {
-    listFrame = null;
-    const frame = JSON.stringify((ev.kind === "put" ? { type: "task", task: ev.task } : { type: "task_gone", id: ev.id }) satisfies LiveMessage);
-    for (const ws of taskSockets) ws.send(frame, true);
-  });
+export function liveSocket(hub: Hub, feeds: LiveFeeds = {}) {
+  const { tasks, pins } = feeds;
+  const taskFan = tasks
+    ? fanOut<TaskEvent>(
+        () => ({ type: "tasks", tasks: tasks.list() }),
+        (ev) => (ev.kind === "put" ? { type: "task", task: ev.task } : { type: "task_gone", id: ev.id }),
+      )
+    : null;
+  if (taskFan) tasks!.subscribe((ev) => taskFan.on(ev));
+  const pinFan = pins
+    ? fanOut<PinEvent>(
+        () => ({ type: "pins", pins: pins.list() }),
+        (ev) => (ev.kind === "put" ? { type: "pin", pin: ev.pin } : ev.kind === "gone" ? { type: "pin_gone", id: ev.id } : "list"),
+      )
+    : null;
+  if (pinFan) pins!.subscribe((ev) => pinFan.on(ev));
   const watch = (ws: LiveSocket, on: boolean) => {
     if (on && !ws.data.unwatch && ws.data.send) ws.data.unwatch = hub.watchPositions(ws.data.send);
     if (!on && ws.data.unwatch) {
@@ -113,12 +158,8 @@ export function liveSocket(hub: Hub, tasks?: TaskFeed) {
       ws.data.send = send;
       send({ type: "state", state: hub.getState(), online: hub.online });
       ws.data.unsubscribe = hub.subscribe(send, { history: ws.data.history });
-      if (tasks) {
-        listFrame ??= JSON.stringify({ type: "tasks", tasks: tasks.list() } satisfies LiveMessage);
-        ws.send(listFrame, true);
-        taskSockets.add(ws);
-        ws.data.untasks = () => taskSockets.delete(ws);
-      }
+      if (taskFan) ws.data.untasks = taskFan.open(ws);
+      if (pinFan) ws.data.unpins = pinFan.open(ws);
       watch(ws, ws.data.positions);
     },
     message(ws: LiveSocket, raw: string | Buffer): void {
@@ -140,6 +181,7 @@ export function liveSocket(hub: Hub, tasks?: TaskFeed) {
     close(ws: LiveSocket): void {
       ws.data.unsubscribe?.();
       ws.data.untasks?.();
+      ws.data.unpins?.();
       watch(ws, false);
     },
   };

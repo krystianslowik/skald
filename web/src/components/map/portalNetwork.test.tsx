@@ -6,27 +6,28 @@ import { mockMap } from "@server/mapmock";
 import { I18nProvider, makeI18n } from "../../i18n";
 import { buildMarkers } from "../../lib/mapgeo";
 import type { ApiMap } from "../../types";
+import type { WebPin } from "@server/pintypes";
 import type { MapCanvasHandle } from "./MapCanvas";
 import { distance, PortalSheet, usePortalNet, type PortalNet } from "./PortalNetwork";
 
 /** The hook's state, for tests that act on it the way the map does (a tap while picking). */
 let lastNet: PortalNet | null = null;
 
-function Harness({ map, canvas, onRing }: { map: ApiMap; canvas: React.RefObject<MapCanvasHandle | null>; onRing: (ids: readonly string[]) => void }) {
+function Harness({ map, canvas, onRing, webPins }: { map: ApiMap; canvas: React.RefObject<MapCanvasHandle | null>; onRing: (ids: readonly string[]) => void; webPins?: WebPin[] }) {
   const markers = buildMarkers(map, makeI18n("en").lookup);
-  const net = usePortalNet(map, markers);
+  const net = usePortalNet(map, markers, webPins);
   lastNet = net;
   return <PortalSheet map={map} markers={markers} net={net} canvas={canvas} onRing={onRing} onClose={() => {}} />;
 }
 
-function setup(map: ApiMap, locale: "en" | "pl" = "en") {
+function setup(map: ApiMap, locale: "en" | "pl" = "en", webPins?: WebPin[]) {
   const flyTo = vi.fn();
   const canvas = createRef<MapCanvasHandle>() as { current: MapCanvasHandle | null };
   canvas.current = { flyTo, reveal: vi.fn(), zoomBy: vi.fn(), fit: vi.fn(), project: () => [0, 0], storeyAt: () => null };
   const onRing = vi.fn();
   render(
     <I18nProvider locale={locale}>
-      <Harness map={map} canvas={canvas} onRing={onRing} />
+      <Harness map={map} canvas={canvas} onRing={onRing} webPins={webPins} />
     </I18nProvider>,
   );
   return { flyTo, onRing };
@@ -107,6 +108,16 @@ describe("PortalSheet", () => {
     setup({ ...map, locations: [...map.locations, ghost] });
     const bosses = within(screen.getByLabelText("To")).getByRole("group", { name: "Boss altars" });
     expect(within(bosses).queryByText(/Moder/)).not.toBeInTheDocument();
+  });
+
+  it("offers the shared pins of the world as destinations", () => {
+    const pin = (id: string, note: string, x: number, z: number): WebPin => ({ id, x, z, icon: "dungeon", note, author: "Ragnar", version: 1, createdAt: 1, updatedAt: 1, state: "new", claimedBy: null, stateBy: "Ragnar", stateAt: 1, archived: false });
+    setup(named(), "en", [pin("w1", "Crypt by the river", 1200, -800), { ...pin("w2", "", 40, 60), icon: "ore" }]);
+    const pins = within(screen.getByLabelText("To")).getByRole("group", { name: "Pins" });
+    expect(within(pins).getByRole("option", { name: "Crypt by the river" })).toBeInTheDocument();
+    expect(within(pins).getByRole("option", { name: /^Ore or mine x 40/ })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: "webpin:w1" } });
+    expect(within(screen.getByRole("region", { name: "Route finder" })).getAllByText(/on foot/).length).toBeGreaterThan(0);
   });
 
   it("offers only found boss altars", () => {

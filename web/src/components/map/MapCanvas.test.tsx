@@ -218,3 +218,153 @@ describe("MapCanvas floor plans and nature (#160)", () => {
     again.view.unmount();
   });
 });
+
+describe("MapCanvas page marks and long presses", () => {
+  function mountWith(props: { onLongPress?: (p: { x: number; z: number }) => void; pickOverlay?: (x: number, y: number, touch: boolean) => (() => void) | null; onSelect?: () => void }) {
+    const ref = createRef<MapCanvasHandle>();
+    const view = render(
+      <I18nProvider locale="en">
+        <MapCanvas ref={ref} map={map} mask={null} markers={[]} layers={DEFAULT_LAYERS} selected={null} onSelect={props.onSelect ?? (() => {})} onLongPress={props.onLongPress} pickOverlay={props.pickOverlay} />
+      </I18nProvider>,
+    );
+    const el = view.getByRole("img");
+    let t = 0;
+    const fire = (type: string, x: number, y: number, o: { id?: number; pointerType?: string; button?: number } = {}) => {
+      const e = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(e, { pointerId: o.id ?? 1, pointerType: o.pointerType ?? "touch", button: o.button ?? 0, clientX: x, clientY: y });
+      Object.defineProperty(e, "timeStamp", { value: t });
+      act(() => {
+        el.dispatchEvent(e);
+      });
+      return e;
+    };
+    const wait = (ms: number) => {
+      t += ms;
+      act(() => {
+        vi.advanceTimersByTime(ms);
+      });
+    };
+    return { ref, fire, wait };
+  }
+
+  it("gives a tap on a page mark to the mark, and a drag from it to the map", () => {
+    const open = vi.fn();
+    const onSelect = vi.fn();
+    const m = mountWith({ onSelect, pickOverlay: (x, y) => (Math.hypot(x - 200, y - 300) < 20 ? open : null) });
+    m.fire("pointerdown", 200, 300);
+    m.fire("pointerup", 200, 300);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(onSelect).not.toHaveBeenCalled();
+    // A drag that starts on the mark pans the map and opens nothing.
+    m.wait(400);
+    const before = m.ref.current!.project(0, 0);
+    m.fire("pointerdown", 200, 300);
+    m.fire("pointermove", 260, 340);
+    m.fire("pointerup", 260, 340);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(m.ref.current!.project(0, 0)).not.toEqual(before);
+  });
+
+  it("answers a finger's long press once, even with a little wander and the contextmenu after it", () => {
+    const onLongPress = vi.fn();
+    const m = mountWith({ onLongPress });
+    m.fire("pointerdown", 100, 100);
+    m.fire("pointermove", 106, 104);
+    m.wait(500);
+    expect(onLongPress).not.toHaveBeenCalled();
+    m.wait(150);
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    const menu = m.fire("contextmenu", 106, 104);
+    expect((menu as Event).defaultPrevented).toBe(true);
+    m.fire("pointerup", 106, 104);
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    // Wandering too far is a pan, not a press.
+    m.fire("pointerdown", 100, 100);
+    m.fire("pointermove", 130, 100);
+    m.wait(700);
+    m.fire("pointerup", 130, 100);
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes a right click as a long press, or as opening the page mark under it", () => {
+    const onLongPress = vi.fn();
+    const open = vi.fn();
+    const m = mountWith({ onLongPress, pickOverlay: (x, y) => (Math.hypot(x - 200, y - 300) < 20 ? open : null) });
+    m.fire("pointerdown", 50, 50, { pointerType: "mouse", button: 2 });
+    expect(m.fire("contextmenu", 50, 50).defaultPrevented).toBe(true);
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    m.fire("pointerdown", 200, 300, { pointerType: "mouse", button: 2 });
+    expect(m.fire("contextmenu", 200, 300).defaultPrevented).toBe(true);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("MapCanvas long press by mouse and pen", () => {
+  it("does not take a mouse held still after a short drag as a long press, and lets a pen's right click through", () => {
+    const onLongPress = vi.fn();
+    const ref = createRef<MapCanvasHandle>();
+    const view = render(
+      <I18nProvider locale="en">
+        <MapCanvas ref={ref} map={map} mask={null} markers={[]} layers={DEFAULT_LAYERS} selected={null} onSelect={() => {}} onLongPress={onLongPress} />
+      </I18nProvider>,
+    );
+    const el = view.getByRole("img");
+    const fire = (type: string, x: number, y: number, pointerType: string, button = 0) => {
+      const e = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(e, { pointerId: 1, pointerType, button, clientX: x, clientY: y });
+      act(() => {
+        el.dispatchEvent(e);
+      });
+      return e;
+    };
+    fire("pointerdown", 100, 100, "mouse");
+    fire("pointermove", 107, 100, "mouse");
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+    fire("pointerup", 107, 100, "mouse");
+    expect(onLongPress).not.toHaveBeenCalled();
+    // Nor a left button held still: a mouse right clicks.
+    fire("pointerdown", 100, 100, "mouse");
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+    fire("pointerup", 100, 100, "mouse");
+    expect(onLongPress).not.toHaveBeenCalled();
+    fire("pointerdown", 60, 60, "pen", 2);
+    expect(fire("contextmenu", 60, 60, "pen").defaultPrevented).toBe(true);
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("MapCanvas long press across re-renders", () => {
+  it("keeps a held press when the parent passes a new long-press callback", () => {
+    const calls: string[] = [];
+    const onSelect = () => {};
+    const ui = (n: number) => (
+      <I18nProvider locale="en">
+        <MapCanvas map={map} mask={null} markers={[]} layers={DEFAULT_LAYERS} selected={null} onSelect={onSelect} onLongPress={() => calls.push(`cb${n}`)} onTapWorld={() => calls.push(`tap${n}`)} />
+      </I18nProvider>
+    );
+    const view = render(ui(1));
+    const el = view.getByRole("img");
+    const fire = (type: string) => {
+      const e = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(e, { pointerId: 1, pointerType: "touch", button: 0, clientX: 80, clientY: 80 });
+      act(() => {
+        el.dispatchEvent(e);
+      });
+    };
+    fire("pointerdown");
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    view.rerender(ui(2));
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    fire("pointerup");
+    expect(calls).toEqual(["cb2"]);
+  });
+});
