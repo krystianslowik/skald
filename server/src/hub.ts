@@ -314,6 +314,33 @@ export class Hub {
     if (ev.type === "settings_apply" && ev.data.state === "applied" && !this.stopped) void this.pollState();
   }
 
+  /** The epoch of events the panel makes itself, apart from every agent's. */
+  static readonly LOCAL_EPOCH = "skald-web";
+  /** The last seq given to such an event. */
+  private localSeq = 0;
+
+  /**
+   * Stores and sends an event the panel made itself (a task marked done), so
+   * the saga shows it like the agent's. It never touches the agent's
+   * sequence: its own epoch, and a millisecond clock for a seq that does not
+   * repeat.
+   */
+  record(type: AgentEventType, data: Record<string, unknown>): void {
+    const now = this.opts.clock();
+    this.localSeq = Math.max(now, this.localSeq + 1);
+    const ev: AgentEvent = { seq: this.localSeq, ts: new Date(now).toISOString(), type, data };
+    try {
+      if (!this.store.insert(Hub.LOCAL_EPOCH, ev)) return;
+    } catch (err) {
+      this.opts.log.warn("saga entry not stored", { cause: cause(err) });
+      return;
+    }
+    this.eventsCache = null;
+    this.historyCache = null;
+    this.profilesCache = null;
+    this.emit({ type: "event", event: ev, stored: true });
+  }
+
   private emit(m: LiveMessage): void {
     for (const [fn, history] of this.listeners) {
       if (m.type === "history" && !history) continue;

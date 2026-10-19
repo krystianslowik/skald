@@ -49,7 +49,7 @@
 | `PROM_NAMESPACE` | `$POD_NAMESPACE`, else `valheim` | Namespace label in the cAdvisor queries |
 | `PROM_CONTAINER` | `valheim` | Container label of the game server |
 | `PROM_POD_REGEX` | `valheim-[a-z0-9]+-[a-z0-9]+` | Pod regex for the network series (anchored by PromQL) |
-| `DB_PATH` | `/data/skald.db` | SQLite file for the event history, the panel's Discord webhook and the phone notification keys and devices |
+| `DB_PATH` | `/data/skald.db` | SQLite file for the event history, the panel's Discord webhook the phone notification keys and devices, and the shared tasks |
 | `BIND` | `0.0.0.0:8080` | Listen address |
 | `METRICS_BIND` | (empty = off) | Prometheus listener, e.g. `0.0.0.0:9465`, serving `GET /metrics` with `skald_build_info`. No session, like the agent's `METRICS_ADDR`: restrict it with a NetworkPolicy or firewall. The panel port never serves `/metrics` |
 | `WEB_ROOT` | `../web/dist` | Built SPA, relative to the working directory |

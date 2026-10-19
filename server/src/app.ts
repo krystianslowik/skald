@@ -12,6 +12,7 @@ import type { MapCache, MapView } from "./map";
 import type { NotifyChange, NotifySettings } from "./notify";
 import { checkOrigin, type OriginPolicy } from "./origin";
 import { pushRoutes, pushSessionTag, type PushService } from "./push";
+import { mountTasks, type TaskRoutesDeps } from "./taskroutes";
 import {
   ACCESS_LISTS,
   ACCESS_OPS,
@@ -76,6 +77,8 @@ export interface AppDeps {
   update?: () => { version: string; url: string } | null;
   /** Failure lines; the process-wide JSON logger by default. */
   log?: Logger;
+  /** The shared task board; without it /api/tasks answers 404. */
+  tasks?: TaskRoutesDeps;
 }
 
 /**
@@ -465,6 +468,8 @@ export function createApp(deps: AppDeps): Hono {
     if (len) headers.set("Content-Length", len);
     return new Response(up.body, { status: 200, headers });
   });
+
+  if (deps.tasks) mountTasks(app, deps.tasks);
 
   app.get("/api/players", (c) => {
     c.header("Cache-Control", "no-store");

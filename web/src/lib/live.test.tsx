@@ -2,6 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyAgentState } from "../types";
 import { getLivePositions, PLATE_TOP, stackPlates, useLivePositions, type PlateBox } from "./live";
+import { resetTasks, useTasks } from "./tasks";
 import { useValheim } from "./useValheim";
 
 /** Records what the page sends over /live. */
@@ -197,5 +198,20 @@ describe("name plates of players standing together", () => {
 
   it("copes with a full server in one spot", () => {
     noOverlaps(rects(Array.from({ length: 64 }, (_, i) => plate(500 + (i % 3), 500 + (i % 5)))));
+  });
+});
+
+describe("shared tasks over the socket", () => {
+  it("hands every task list the server sends to the task board", () => {
+    resetTasks();
+    const { page, sock } = connect();
+    const board = renderHook(() => useTasks());
+    const forge = { id: 1, title: "Forge", owner: "Astrid", status: "todo", note: "", target: null, materials: [], createdAt: "2026-10-19T10:00:00Z", updatedAt: "2026-10-19T10:00:00Z", doneAt: null };
+    act(() => sock.push({ type: "tasks", tasks: [forge] }));
+    expect(board.result.current?.map((t) => t.title)).toEqual(["Forge"]);
+    act(() => sock.push({ type: "tasks", tasks: [] }));
+    expect(board.result.current).toEqual([]);
+    board.unmount();
+    page.unmount();
   });
 });

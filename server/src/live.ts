@@ -1,4 +1,5 @@
 import type { Hub } from "./hub";
+import type { Task } from "./taskmodel";
 import type { AgentState, LiveMessage, LiveWireMessage } from "./types";
 
 /**
@@ -28,6 +29,7 @@ export interface LiveSocketData {
   history: boolean;
   unsubscribe?: () => void;
   unwatch?: () => void;
+  untasks?: () => void;
   send?: (m: LiveMessage) => void;
 }
 
@@ -71,7 +73,17 @@ export function wire(m: LiveMessage): LiveWireMessage {
   return { type: "state", state: state as Partial<AgentState>, online: m.online, partial: true };
 }
 
-export function liveSocket(hub: Hub) {
+/** The shared tasks, as the socket needs them: the list now and every change. */
+export interface TaskFeed {
+  list(): Task[];
+  subscribe(fn: (tasks: Task[]) => void): () => void;
+}
+
+/**
+ * `tasks`: every socket gets the whole task list when it opens (a page back
+ * from a dropped link is whole again) and after every change.
+ */
+export function liveSocket(hub: Hub, tasks?: TaskFeed) {
   const watch = (ws: LiveSocket, on: boolean) => {
     if (on && !ws.data.unwatch && ws.data.send) ws.data.unwatch = hub.watchPositions(ws.data.send);
     if (!on && ws.data.unwatch) {
@@ -90,6 +102,10 @@ export function liveSocket(hub: Hub) {
       ws.data.send = send;
       send({ type: "state", state: hub.getState(), online: hub.online });
       ws.data.unsubscribe = hub.subscribe(send, { history: ws.data.history });
+      if (tasks) {
+        send({ type: "tasks", tasks: tasks.list() });
+        ws.data.untasks = tasks.subscribe((list) => send({ type: "tasks", tasks: list }));
+      }
       watch(ws, ws.data.positions);
     },
     message(ws: LiveSocket, raw: string | Buffer): void {
@@ -110,6 +126,7 @@ export function liveSocket(hub: Hub) {
     },
     close(ws: LiveSocket): void {
       ws.data.unsubscribe?.();
+      ws.data.untasks?.();
       watch(ws, false);
     },
   };

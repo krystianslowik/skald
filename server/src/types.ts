@@ -1,6 +1,8 @@
 // Shared wire types. Kept free of Bun/Node imports: the web package compiles
 // this file through its `@server/*` path alias.
 
+import type { Task } from "./taskmodel";
+
 export type ServerStatus = "starting" | "running" | "stopping" | "stopped" | "unknown";
 export type PlayfabState = "ok" | "connecting" | "error";
 export type ActionName = "backup" | "restart" | "update";
@@ -307,7 +309,9 @@ export type AgentEventType =
   | "settings_apply"
   | "admin"
   | "compat"
-  | "positions";
+  | "positions"
+  /** Not from the agent: a shared task marked done on the panel (title, owner), for the saga. */
+  | "task";
 
 /** High-frequency types that are broadcast live but never stored in history. */
 export const UNSTORED_EVENTS: readonly AgentEventType[] = ["log", "net_stats", "positions", "compat"];
@@ -479,7 +483,9 @@ export type LiveMessage =
    * the wire such a message is `partial` and carries only those slices.
    */
   | { type: "state"; state: AgentState; online: boolean; changed?: StateSlice[] }
-  | { type: "positions"; t: number; players: LivePlayer[] };
+  | { type: "positions"; t: number; players: LivePlayer[] }
+  /** Every shared task, after any change to one of them. */
+  | { type: "tasks"; tasks: Task[] };
 
 /** A top-level part of the agent's state; `now` is not one (it moves on every read). */
 export type StateSlice = Exclude<keyof AgentState, "now">;
