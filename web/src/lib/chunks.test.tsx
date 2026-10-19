@@ -298,6 +298,74 @@ describe("a lazy chunk that fails offline or with the server down", () => {
       await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     });
 
+    describe("a failed import that names no chunk (WebKit, a chunk outside the build's list)", () => {
+      it("holds the reload while the entry cannot be fetched, instead of reloading into a blank page", async () => {
+        const { recoverChunk } = await import("./chunks");
+        fetchChunk.mockImplementation(async (u: string) => {
+          if (u === entry) throw new TypeError("Load failed");
+          return new Response("export default 1", { status: 200 });
+        });
+        expect(await recoverChunk([])).toBe("down");
+        expect(fetchChunk.mock.calls.map(([u]) => u)).toContain(entry);
+        expect(reload).not.toHaveBeenCalled();
+      });
+
+      it("on the page: shows the offline note while the entry cannot be fetched, not a blank reload", async () => {
+        fetchChunk.mockImplementation(async (u: string) => {
+          if (u === entry) throw new TypeError("Load failed");
+          return new Response("export default 1", { status: 200 });
+        });
+        Sheet("en", lazyChunk<object>(() => Promise.reject(safariMiss()), "NotInTheBuild"));
+        await vi.waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(en["crash.offline"]));
+        expect(reload).not.toHaveBeenCalled();
+      });
+
+      it("fetches the page's scripts with ordinary requests, then reloads once", async () => {
+        const { recoverChunk } = await import("./chunks");
+        const fetched: string[] = [];
+        fetchChunk.mockImplementation(async (u: string, init?: RequestInit) => {
+          if (init?.cache !== "no-store") fetched.push(u);
+          return new Response("export default 1", { status: 200 });
+        });
+        let beforeReload: string[] = [];
+        reload.mockImplementation(() => void (beforeReload = [...fetched]));
+        expect(await recoverChunk([undefined])).toBe("reloading");
+        expect(beforeReload).toEqual(expect.arrayContaining([entry, shared]));
+      });
+
+      it("one of the page's scripts is gone (a deploy): reloads once", async () => {
+        const { recoverChunk } = await import("./chunks");
+        fetchChunk.mockImplementation(async (u: string) => new Response("", { status: u === entry ? 404 : 200 }));
+        expect(await recoverChunk([])).toBe("reloading");
+        expect(reload).toHaveBeenCalledTimes(1);
+      });
+
+      it("the service worker still has the scripts but the server is down: holds the reload", async () => {
+        // sw.js answers ordinary /assets requests from its cache; only a no-store request reaches the server.
+        const { recoverChunk } = await import("./chunks");
+        fetchChunk.mockImplementation(async (_u: string, init?: RequestInit) => {
+          if (init?.cache === "no-store") throw new TypeError("Load failed");
+          return new Response("export default 1", { status: 200 });
+        });
+        expect(await recoverChunk([])).toBe("down");
+        expect(reload).not.toHaveBeenCalled();
+      });
+
+      it("reloaded a moment ago and the build is current: waits for the guard, not called an update", async () => {
+        const { recoverChunk } = await import("./chunks");
+        afterReload();
+        expect(await recoverChunk([])).toBe("held");
+        expect(reload).not.toHaveBeenCalled();
+      });
+
+      it("outside a build (no page scripts to ask for): reloads once, as before", async () => {
+        const { recoverChunk } = await import("./chunks");
+        document.head.querySelectorAll("[data-t]").forEach((el) => el.remove());
+        expect(await recoverChunk([])).toBe("reloading");
+        expect(fetchChunk).not.toHaveBeenCalled();
+      });
+    });
+
     it("gone from the server (a deploy): reloads at once without fetching the old build's scripts", async () => {
       fetchChunk.mockResolvedValue(new Response("Not found", { status: 404 }));
       Sheet("en", failing());

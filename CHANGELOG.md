@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- On the map, players standing together no longer hide each other's names: their name plates stack one under the other below the dots, on phones and desktops alike.
+- When the server is unreachable while a part of the page fails to load, Safari now keeps the "no connection" note and waits for the server instead of reloading into a blank page, also when it could not tell which part failed.
+
 ## [2026.10.18] - 2026-10-19
 
 ### Added
