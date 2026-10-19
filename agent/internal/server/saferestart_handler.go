@@ -56,6 +56,10 @@ func (b runBridge) Save(ctx context.Context, actor string) error {
 	return err
 }
 
+// ResumeSafeRestart starts the game again if a safe restart stopped it and
+// the agent died before the start. Call once at startup.
+func (s *Server) ResumeSafeRestart() { s.safe.Resume() }
+
 // safeRestartActive: a run is waiting, counting down or restarting. Plain
 // restarts, restores and settings applies are refused meanwhile.
 func (s *Server) safeRestartActive() bool { return s.safe != nil && s.safe.Active() }

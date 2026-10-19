@@ -257,6 +257,47 @@ type Runner struct {
 	cancellable bool
 	cancelledBy string
 	done        chan struct{}
+	// down: the run stopped the game and has not started it again (run
+	// goroutine only); downUpdater: it stopped the updater too.
+	down, downUpdater bool
+}
+
+// marker records a stopped game on disk, so an agent that dies before the
+// start can start it again when it comes back (Resume).
+func (r *Runner) marker() string {
+	return filepath.Join(r.opt.ConfigDir, restore.SkaldDir, ".safe-restart-down")
+}
+
+// Resume starts the game (and the updater) again if a run stopped them and
+// the agent died before the start. Called once when the agent starts.
+func (r *Runner) Resume() {
+	raw, err := os.ReadFile(r.marker())
+	if err != nil {
+		return
+	}
+	updater := strings.TrimSpace(string(raw)) == "updater"
+	r.opt.Logger.Warn("safe restart: the agent stopped mid-run; starting the game again")
+	if err := r.startGame(updater); err != nil {
+		r.opt.Logger.Error("safe restart: could not start the game again", "err", err)
+		return
+	}
+	_ = os.Remove(r.marker())
+}
+
+// markDown writes or clears the marker.
+func (r *Runner) markDown(down, updater bool) {
+	r.down, r.downUpdater = down, updater
+	if !down {
+		_ = os.Remove(r.marker())
+		return
+	}
+	body := ""
+	if updater {
+		body = "updater"
+	}
+	if err := os.MkdirAll(filepath.Dir(r.marker()), 0o755); err == nil {
+		_ = os.WriteFile(r.marker(), []byte(body), 0o644)
+	}
 }
 
 // New returns a runner with defaults filled in.
@@ -446,6 +487,12 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 	defer func() {
 		if p := recover(); p != nil {
 			r.opt.Logger.Error("safe restart panicked", "panic", p)
+			// Never leave the game down.
+			if r.down {
+				if err := r.startGame(r.downUpdater); err == nil {
+					r.markDown(false, false)
+				}
+			}
 			r.finish(RunFailed, fmt.Errorf("internal error"))
 		}
 	}()
@@ -484,6 +531,15 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 	}
 	defer unlock()
 
+	// Only a running game is restarted: a stopped one may be the image's
+	// updater at work, which must not be cut off.
+	if st := r.serverState(); st != "RUNNING" {
+		err := fmt.Errorf("the game is %s; try again when it is running", strings.ToLower(st))
+		r.set(StepSave, Failed, "notrunning", err)
+		r.finish(RunFailed, err)
+		return
+	}
+
 	r.save()
 
 	r.opt.Restarting(true)
@@ -501,7 +557,15 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 		err = fmt.Errorf("stop: %w", err)
 		r.set(StepStop, Failed, "", err)
 		// The game may still run; make sure it does.
-		_ = r.startGame(updater)
+		r.set(StepStart, Running, "", nil)
+		if serr := r.startGame(updater); serr != nil {
+			serr = fmt.Errorf("start: %w", serr)
+			r.set(StepStart, Failed, "", serr)
+			err = errors.Join(err, serr)
+		} else {
+			r.markDown(false, false)
+			r.set(StepStart, OK, "", nil)
+		}
 		endRestart()
 		r.finish(RunFailed, err)
 		return
@@ -539,6 +603,7 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 		r.finish(RunFailed, errors.Join(runErr, err))
 		return
 	}
+	r.markDown(false, false)
 	endRestart()
 	unlock()
 	r.set(StepStart, OK, "", nil)
@@ -546,11 +611,13 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 	if err := r.recoverGame(startedAt); err != nil {
 		runErr = errors.Join(runErr, err)
 	}
+	if archive != "" {
+		r.prune(archive)
+	}
 	if runErr != nil {
 		r.finish(RunFailed, runErr)
 		return
 	}
-	r.prune(archive)
 	r.finish(RunDone, nil)
 }
 
@@ -598,9 +665,9 @@ func sleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// waitEmpty waits for an empty server held EmptyFor (or a stopped one), or
-// for the deadline. A server on its way up or down is waited out: the
-// players of a booting server are not in yet. It returns only ctx's error.
+// waitEmpty waits for an empty server held EmptyFor, or for the deadline. A
+// server on its way up or down is waited out: the players of a booting
+// server are not in yet. It returns only ctx's error.
 func (r *Runner) waitEmpty(ctx context.Context) error {
 	v := r.View()
 	if !v.Request.WhenEmpty {
@@ -612,12 +679,12 @@ func (r *Runner) waitEmpty(ctx context.Context) error {
 	for {
 		n, status := r.players()
 		now := r.opt.Now()
-		settled := status == state.StatusRunning || status == state.StatusUnknown
-		if n == 0 && (settled || status == "stopped") {
+		settled := status == state.StatusRunning || status == state.StatusUnknown || status == "stopped"
+		if n == 0 && settled {
 			if since.IsZero() {
 				since = now
 			}
-			if status == "stopped" || now.Sub(since) >= r.opt.EmptyFor {
+			if now.Sub(since) >= r.opt.EmptyFor {
 				r.set(StepWait, OK, "empty", nil)
 				return nil
 			}
@@ -778,15 +845,34 @@ func (r *Runner) stop() (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), r.opt.ActionTimeout)
 	defer cancel()
 	updater := r.processRunning(ctx, restore.UpdaterProgram)
+	// From here the game may be down: an agent that dies now starts it again on its return.
+	r.markDown(true, updater)
 	if updater {
+		// It ran: start it again afterwards even if this stop fails.
 		if err := r.opt.Supervisor.StopProcess(ctx, restore.UpdaterProgram, true); err != nil && !supervisor.IsFault(err, supervisor.FaultNotRunning) {
-			return false, err
+			return true, err
 		}
 	}
 	if err := r.opt.Supervisor.StopProcess(ctx, restore.ServerProgram, true); err != nil && !supervisor.IsFault(err, supervisor.FaultNotRunning) {
 		return updater, err
 	}
 	return updater, nil
+}
+
+// serverState is the game's supervisord state, or "UNKNOWN".
+func (r *Runner) serverState() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	infos, err := r.opt.Supervisor.GetAllProcessInfo(ctx)
+	if err != nil {
+		return "UNKNOWN"
+	}
+	for _, p := range infos {
+		if p.Name == restore.ServerProgram {
+			return p.StateName
+		}
+	}
+	return "UNKNOWN"
 }
 
 func (r *Runner) processRunning(ctx context.Context, name string) bool {

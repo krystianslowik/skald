@@ -184,6 +184,7 @@ func main() {
 	srv = s
 	go checker.Run(ctx, 5*time.Second)
 	go s.RunSettingsWatcher(ctx)
+	go s.ResumeSafeRestart()
 	if br != nil {
 		// Live positions only while a browser has the map or a player list
 		// open (or an older skald-web is connected) and someone plays.

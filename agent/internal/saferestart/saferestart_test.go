@@ -22,12 +22,13 @@ import (
 const world = "Testheim"
 
 type fakeSup struct {
-	mu        sync.Mutex
-	state     map[string]string
-	calls     []string
-	failStop  error
-	failStart error
-	onStart   func()
+	mu              sync.Mutex
+	state           map[string]string
+	calls           []string
+	failStop        error
+	failUpdaterStop error
+	failStart       error
+	onStart         func()
 	// whileStopped runs once the game is down (the world is quiet).
 	whileStopped func()
 }
@@ -52,6 +53,10 @@ func (f *fakeSup) StopProcess(_ context.Context, name string, _ bool) error {
 	if name == restore.ServerProgram && f.failStop != nil {
 		f.mu.Unlock()
 		return f.failStop
+	}
+	if name == restore.UpdaterProgram && f.failUpdaterStop != nil {
+		f.mu.Unlock()
+		return f.failUpdaterStop
 	}
 	f.state[name] = "STOPPED"
 	hook := f.whileStopped
@@ -453,11 +458,64 @@ func TestWaitSitsOutAStartingServer(t *testing.T) {
 	if v := r.View(); v.Step != StepWait || v.State != RunActive {
 		t.Fatalf("went ahead on a booting server: %+v", v)
 	}
-	h.game.set(func(s *state.Snapshot) { s.Status = "stopped" })
+	h.game.set(func(s *state.Snapshot) { s.Status = state.StatusRunning })
 	r.Wait()
 	if v := r.View(); v.State != RunDone || v.step(StepWait).Reason != "empty" {
 		t.Fatalf("view %+v", v)
 	}
+}
+
+func TestNeverStopsAGameThatIsNotRunning(t *testing.T) {
+	h := newHarness(t)
+	// The image's updater has stopped the game to install an update.
+	h.sup.state[restore.ServerProgram] = "STOPPED"
+	v := h.run(Request{})
+	if v.State != RunFailed || v.step(StepSave).Reason != "notrunning" {
+		t.Fatalf("view %+v", v)
+	}
+	if len(h.sup.Calls()) != 0 {
+		t.Errorf("touched supervisord: %v", h.sup.Calls())
+	}
+	if h.locked {
+		t.Error("lock held")
+	}
+}
+
+func TestResumeStartsAGameAnAgentLeftDown(t *testing.T) {
+	h := newHarness(t)
+	h.sup.state[restore.ServerProgram] = "STOPPED"
+	h.sup.state[restore.UpdaterProgram] = "STOPPED"
+	r := New(h.opt)
+	r.markDown(true, true)
+	if _, err := os.Stat(r.marker()); err != nil {
+		t.Fatal(err)
+	}
+	New(h.opt).Resume()
+	if got := strings.Join(h.sup.Calls(), ","); got != "start valheim-server,start valheim-updater" {
+		t.Errorf("calls %s", got)
+	}
+	if _, err := os.Stat(r.marker()); err == nil {
+		t.Error("marker left behind")
+	}
+	// Nothing to do without one.
+	New(h.opt).Resume()
+	if len(h.sup.Calls()) != 2 {
+		t.Errorf("calls %v", h.sup.Calls())
+	}
+}
+
+func TestStopFailureOfTheUpdaterStillStartsItAgain(t *testing.T) {
+	h := newHarness(t)
+	h.sup.failUpdaterStop = errors.New("timeout")
+	v := h.run(Request{})
+	if v.State != RunFailed {
+		t.Fatalf("state %s", v.State)
+	}
+	calls := strings.Join(h.sup.Calls(), ",")
+	if !strings.HasSuffix(calls, "start valheim-server,start valheim-updater") {
+		t.Errorf("calls %s", calls)
+	}
+	wantStates(t, v, map[string]string{StepStop: Failed, StepStart: OK})
 }
 
 func TestErrorsCarryNoPaths(t *testing.T) {
@@ -653,6 +711,9 @@ func TestVerifyFailureKeepsTheGameUpAndTheRunFails(t *testing.T) {
 	// Kept for inspection.
 	if _, err := os.Stat(filepath.Join(h.dir, restore.SkaldDir, v.Archive)); err != nil {
 		t.Errorf("archive gone: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(h.dir, restore.SkaldDir, ".safe-restart-down")); err == nil {
+		t.Error("down marker left after the start")
 	}
 }
 
