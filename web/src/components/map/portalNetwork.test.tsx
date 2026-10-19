@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { gateMap } from "@server/mapgate";
@@ -7,11 +7,15 @@ import { I18nProvider, makeI18n } from "../../i18n";
 import { buildMarkers } from "../../lib/mapgeo";
 import type { ApiMap } from "../../types";
 import type { MapCanvasHandle } from "./MapCanvas";
-import { distance, PortalSheet, usePortalNet } from "./PortalNetwork";
+import { distance, PortalSheet, usePortalNet, type PortalNet } from "./PortalNetwork";
+
+/** The hook's state, for tests that act on it the way the map does (a tap while picking). */
+let lastNet: PortalNet | null = null;
 
 function Harness({ map, canvas, onRing }: { map: ApiMap; canvas: React.RefObject<MapCanvasHandle | null>; onRing: (ids: readonly string[]) => void }) {
   const markers = buildMarkers(map, makeI18n("en").lookup);
   const net = usePortalNet(map, markers);
+  lastNet = net;
   return <PortalSheet map={map} markers={markers} net={net} canvas={canvas} onRing={onRing} onClose={() => {}} />;
 }
 
@@ -72,6 +76,37 @@ describe("PortalSheet", () => {
     const { t, number } = makeI18n("en");
     expect(distance(994, t, number)).toBe("990 m");
     expect(distance(996, t, number)).toBe("1 km");
+  });
+
+  it("starts at a tapped base by its name, not as a bare point", () => {
+    const map = named();
+    setup(map);
+    const markers = buildMarkers(map, makeI18n("en").lookup);
+    const swamp = markers.find((m) => m.id === "base:1")!;
+    act(() => lastNet!.setPicking(true));
+    act(() => lastNet!.onTap(swamp));
+    expect((screen.getByLabelText("From") as HTMLSelectElement).value).toBe("base:1");
+    expect(lastNet!.start?.label).toBe("Base near Swamp camp");
+  });
+
+  it("shows nothing for a route that goes nowhere", () => {
+    const map = named();
+    setup(map);
+    const markers = buildMarkers(map, makeI18n("en").lookup);
+    const pin = markers.find((m) => m.data.type === "pin")!;
+    // A tapped point right on the destination: no legs, so no route and no "0 m".
+    act(() => lastNet!.onTap({ x: pin.x, z: pin.z }));
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: pin.id } });
+    expect(lastNet!.route).toBeNull();
+    expect(screen.queryByText(/on foot/)).not.toBeInTheDocument();
+  });
+
+  it("does not offer an altar the game has not placed, even if it lies in explored land", () => {
+    const map = named();
+    const ghost = { kind: "boss" as const, name: "Dragonqueen", x: 40, z: 40, placed: false, explored: true };
+    setup({ ...map, locations: [...map.locations, ghost] });
+    const bosses = within(screen.getByLabelText("To")).getByRole("group", { name: "Boss altars" });
+    expect(within(bosses).queryByText(/Moder/)).not.toBeInTheDocument();
   });
 
   it("offers only found boss altars", () => {

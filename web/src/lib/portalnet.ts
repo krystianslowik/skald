@@ -100,6 +100,9 @@ export function noWarnings(w: PortalWarnings): boolean {
  */
 export const HOP_M = 60;
 
+/** Walking legs shorter than this are counted but not listed. */
+export const MIN_LEG_M = 1;
+
 /** A point a route passes: the start, the end, or a portal. */
 export interface Stop extends Spot {
   portal?: MapPortal;
@@ -124,7 +127,8 @@ const dist = (a: Spot, b: Spot) => Math.hypot(a.x - b.x, a.z - b.z);
  * The shortest way from `from` to `to`: straight walking legs between
  * portals, and hops through connected pairs (each costing `hop` metres).
  * Walking ignores water and mountains; it is the crow's line between stops.
- * With no portal worth taking the route is one walking leg.
+ * With no portal worth taking the route is one walking leg; a start on the
+ * end has none.
  */
 export function findRoute(from: Spot, to: Spot, portals: readonly MapPortal[], hop = HOP_M): Route {
   const pair = partners(portals);
@@ -180,7 +184,8 @@ export function findRoute(from: Spot, to: Spot, portals: readonly MapPortal[], h
     }
     const m = dist(a, b);
     walk += m;
-    legs.push({ kind: "walk", from: a, to: b, m });
+    // A step onto a portal on the same spot is not worth a line of its own.
+    if (m >= MIN_LEG_M) legs.push({ kind: "walk", from: a, to: b, m });
   }
   return { legs, walk, hops, direct: dist(from, to) };
 }

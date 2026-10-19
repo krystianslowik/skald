@@ -117,9 +117,16 @@ describe("findRoute", () => {
     const hop = r.legs.find((l) => l.kind === "hop");
     expect(hop?.kind === "hop" && hop.to.id).toBe("0,3000");
   });
-  it("is one zero-length walk from a spot to itself", () => {
+  it("has no legs from a spot to itself", () => {
     const r = findRoute({ x: 7, z: 7 }, { x: 7, z: 7 }, NET);
-    expect(r.legs).toEqual([{ kind: "walk", from: { x: 7, z: 7 }, to: { x: 7, z: 7 }, m: 0 }]);
+    expect(r.legs).toEqual([]);
+    expect(r.walk).toBe(0);
+  });
+  it("leaves out a step of less than a metre onto a portal, but counts it", () => {
+    const pair = [P("a", 0, 0, "t", "b"), P("b", 5000, 0, "t", "a")];
+    const r = findRoute({ x: 0.4, z: 0 }, { x: 5000, z: 300 }, pair);
+    expect(r.legs.map((l) => l.kind)).toEqual(["hop", "walk"]);
+    expect(r.walk).toBeCloseTo(300.4, 5);
   });
 });
 

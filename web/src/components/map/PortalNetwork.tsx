@@ -20,7 +20,7 @@ interface End {
   z: number;
 }
 
-/** Route ends by group, for the two pickers; `from` offers bases, players online and the tapped point, `to` the rest. */
+/** Route ends by group, for the two pickers; `from` offers bases, players online, pins and the tapped point, `to` everything but players and the point. */
 interface Ends {
   bases: End[];
   bosses: End[];
@@ -41,8 +41,8 @@ function endsOf(markers: readonly Marker[], t: I18n["t"], lookup: I18n["lookup"]
       out.bases.push({ ...end, label: d.name || (near ? t("portals.baseNear", { place: near.name }) : `${t("map.base.title")} ${t("map.coords", { x: m.x, z: m.z })}`) });
     }
     // Only altars someone has found: the server already dropped what the viewer may not see.
-    else if (d.type === "location" && d.kind === "boss" && d.explored) out.bosses.push(end);
-    else if (d.type === "location" && (d.kind === "trader" || d.kind === "start") && d.explored) out.places.push(end);
+    else if (d.type === "location" && d.kind === "boss" && d.placed && d.explored) out.bosses.push(end);
+    else if (d.type === "location" && (d.kind === "trader" || d.kind === "start") && d.placed && d.explored) out.places.push(end);
     else if (d.type === "pin") out.pins.push(d.name ? end : { ...end, label: `${end.label} ${t("map.coords", { x: m.x, z: m.z })}` });
   }
   for (const list of [out.bosses, out.places, out.pins]) list.sort((a, b) => a.label.localeCompare(b.label));
@@ -81,18 +81,22 @@ export interface PortalNet {
   picking: boolean;
   setPicking: (on: boolean) => void;
   /** A tap on the map while picking. */
-  onTap: (p: Spot) => void;
+  onTap: (p: Spot & { id?: string }) => void;
   ends: Ends;
   route: Route | null;
   clear: () => void;
 }
+
+/** How finely a chosen player's start follows them. */
+const PLAYER_STEP_M = 5;
 
 /** Where one player is, as "x,z", "" when they are offline; re-renders only when that player moves. */
 function usePlayerAt(key: string | null): string {
   return useSyncExternalStore(subscribeLivePositions, () => {
     if (!key) return "";
     const p = getLivePositions().players.find((q) => `player:${q.id ?? q.name}` === key);
-    return p ? `${p.x},${p.z}` : "";
+    // To the nearest 5 m: the map re-renders when the player moves that far, not with every sample.
+    return p ? `${Math.round(p.x / PLAYER_STEP_M) * PLAYER_STEP_M},${Math.round(p.z / PLAYER_STEP_M) * PLAYER_STEP_M}` : "";
   });
 }
 
@@ -104,12 +108,20 @@ export function usePortalNet(map: ApiMap, markers: readonly Marker[]): PortalNet
   const [to, setToState] = useState<End | null>(null);
   const [spot, setSpot] = useState<Spot | null>(null);
   const [picking, setPicking] = useState(false);
-  const onTap = useCallback((p: Spot) => {
+  const onTap = useCallback((p: Spot & { id?: string }) => {
+    // A tapped base or pin starts the route under its own name.
+    const mark = p.id ? [...ends.bases, ...ends.pins].find((e) => e.key === p.id) : undefined;
+    if (mark) {
+      setFromState(mark);
+      setToState((cur) => (cur?.key === mark.key ? null : cur));
+      setPicking(false);
+      return;
+    }
     const at = { x: Math.round(p.x), z: Math.round(p.z) };
     setSpot(at);
     setFromState({ key: "spot", label: "", ...at });
     setPicking(false);
-  }, []);
+  }, [ends]);
   const setFrom = useCallback(
     (e: End | null) => {
       setFromState(e);
@@ -135,7 +147,12 @@ export function usePortalNet(map: ApiMap, markers: readonly Marker[]): PortalNet
   const ex = end?.x;
   const ez = end?.z;
   const route = useMemo(
-    () => (sx === undefined || sz === undefined || ex === undefined || ez === undefined ? null : findRoute({ x: sx, z: sz }, { x: ex, z: ez }, map.portals)),
+    () => {
+      if (sx === undefined || sz === undefined || ex === undefined || ez === undefined) return null;
+      const r = findRoute({ x: sx, z: sz }, { x: ex, z: ez }, map.portals);
+      // Already there: no route to show.
+      return r.legs.length > 0 ? r : null;
+    },
     [sx, sz, ex, ez, map.portals],
   );
   const clear = useCallback(() => {
@@ -157,7 +174,7 @@ function placesOf(markers: readonly Marker[], t: I18n["t"], lookup: I18n["lookup
     const d = m.data;
     // Unnamed bases and pins say nothing about where a portal is.
     if (d.type === "base" || d.type === "pin") out.push({ name: d.name ?? "", x: m.x, z: m.z });
-    else if (d.type === "location" && d.explored && d.kind !== "dungeon") out.push({ name: markerTitle(m, t, lookup), x: m.x, z: m.z });
+    else if (d.type === "location" && d.placed && d.explored && d.kind !== "dungeon") out.push({ name: markerTitle(m, t, lookup), x: m.x, z: m.z });
   }
   return out;
 }
@@ -376,13 +393,14 @@ function RouteFinder({
             value={fromValue}
             onChange={(e) => {
               const k = e.target.value;
-              net.setFrom(k === "spot" ? { key: "spot", label: "", x: net.spot?.x ?? 0, z: net.spot?.z ?? 0 } : ([...ends.bases, ...players].find((c) => c.key === k) ?? null));
+              net.setFrom(k === "spot" ? { key: "spot", label: "", x: net.spot?.x ?? 0, z: net.spot?.z ?? 0 } : ([...ends.bases, ...players, ...ends.pins].find((c) => c.key === k) ?? null));
             }}
             className="field min-w-0 flex-1 px-2 py-2 text-sm coarse:min-h-11"
           >
             {fromValue === "" && <option value="">{t("portals.chooseFrom")}</option>}
             {group(t("portals.group.bases"), ends.bases)}
             {group(t("portals.group.players"), offline ? [...players, { ...net.from!, label: t("portals.offline", { name: net.from!.label }) }] : players)}
+            {group(t("portals.group.pins"), ends.pins)}
             <option value="spot">{net.spot ? t("portals.spotAt", { x: number(net.spot.x), z: number(net.spot.z) }) : t("portals.spot")}</option>
           </select>
           <button type="button" aria-pressed={net.picking} onClick={() => net.setPicking(!net.picking)} className="plaque press shrink-0 px-2.5 text-xs font-bold coarse:min-h-11">
@@ -402,7 +420,7 @@ function RouteFinder({
           {group(t("portals.group.bases"), ends.bases.filter((e) => e.key !== fromValue))}
           {group(t("portals.group.bosses"), ends.bosses)}
           {group(t("portals.group.places"), ends.places)}
-          {group(t("portals.group.pins"), ends.pins)}
+          {group(t("portals.group.pins"), ends.pins.filter((e) => e.key !== fromValue))}
         </select>
       </div>
       {offline && <p className="mt-2 text-xs text-flame">{t("portals.offlineNote", { name: net.from!.label })}</p>}
