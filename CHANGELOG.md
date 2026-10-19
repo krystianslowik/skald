@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.19] - 2026-10-19
+
 ### Fixed
 
 - On the map, players standing together no longer hide each other's names: their name plates stack one under the other below the dots, on phones and desktops alike.
