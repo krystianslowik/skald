@@ -49,7 +49,7 @@
 | `PROM_NAMESPACE` | `$POD_NAMESPACE`, else `valheim` | Namespace label in the cAdvisor queries |
 | `PROM_CONTAINER` | `valheim` | Container label of the game server |
 | `PROM_POD_REGEX` | `valheim-[a-z0-9]+-[a-z0-9]+` | Pod regex for the network series (anchored by PromQL) |
-| `DB_PATH` | `/data/skald.db` | SQLite file for the event history, the panel's Discord webhook the phone notification keys and devices, and the shared tasks |
+| `DB_PATH` | `/data/skald.db` | SQLite file for the event history, the panel's Discord webhook, the phone notification keys and devices, and the shared tasks |
 | `BIND` | `0.0.0.0:8080` | Listen address |
 | `METRICS_BIND` | (empty = off) | Prometheus listener, e.g. `0.0.0.0:9465`, serving `GET /metrics` with `skald_build_info`. No session, like the agent's `METRICS_ADDR`: restrict it with a NetworkPolicy or firewall. The panel port never serves `/metrics` |
 | `WEB_ROOT` | `../web/dist` | Built SPA, relative to the working directory |
@@ -814,7 +814,9 @@ behind your access layer, or set an admin password:
 - The panel password then only views (the map, live players and the saga
   included), with one exception: the shared task board. Tasks belong to the
   group, so anyone signed in adds, edits, finishes and deletes them
-  (`/api/tasks`), and a finished task adds a "Task done" line to the saga.
+  (`/api/tasks`, at most 30 changes a minute from one address), and the
+  first time a task is finished it adds a "Task done" line to the saga (the
+  newest 50 such lines are kept).
 - Admin commands, restarts, backups, updates and saving or applying server
   settings answer 403 until the browser unlocks an admin session with the
   admin password (`POST /api/admin/unlock`, rate-limited like the login: 5

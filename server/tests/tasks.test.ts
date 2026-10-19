@@ -1,4 +1,5 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
+import { RateLimiter } from "../src/auth";
 import { Hono } from "hono";
 import type { AgentSource } from "../src/agent";
 import { createApp } from "../src/app";
@@ -301,12 +302,134 @@ describe("tasks over /live and in the saga", () => {
     hub.record("task", doneEvent({ title: "Karve", owner: "Astrid" } as Task));
     hub.record("task", doneEvent({ title: "Karve", owner: "" } as Task));
     expect(got).toEqual([
-      { type: "event", stored: true, event: { seq: t, ts: "2026-10-19T12:00:00.000Z", type: "task", data: { title: "Karve", owner: "Astrid" } } },
-      { type: "event", stored: true, event: { seq: t + 1, ts: "2026-10-19T12:00:00.000Z", type: "task", data: { title: "Karve" } } },
+      { type: "event", stored: true, event: { seq: -1, ts: "2026-10-19T12:00:00.000Z", type: "task", data: { title: "Karve", owner: "Astrid" } } },
+      { type: "event", stored: true, event: { seq: -2, ts: "2026-10-19T12:00:00.000Z", type: "task", data: { title: "Karve" } } },
     ]);
     expect(hub.history().events.map((e) => e.type)).toEqual(["task", "task"]);
     // The agent's own stream still starts from 1 and is not deduped against these.
     hub.ingest("agent-epoch", { seq: 1, ts: "2026-10-19T12:00:01Z", type: "death", data: { name: "Bjorn" } });
     expect(history.count()).toBe(3);
   });
+
+  it("numbers panel events below zero, so no agent seq comparison ever picks one (restore progress takes the newest seq)", async () => {
+    const path = `${import.meta.dir}/.seq-${process.pid}.db`;
+    try {
+      let history = new HistoryStore(path);
+      let hub = new Hub({} as AgentSource, history);
+      hub.ingest("agent-epoch", { seq: 7, ts: "2026-10-19T12:00:00Z", type: "admin", data: { command: "restore", step: "begin", result: "ok" } });
+      hub.record("task", { title: "Forge" });
+      hub.record("task", { title: "Smelter" });
+      expect(Math.max(...hub.history().events.map((e) => e.seq))).toBe(7);
+      history.close();
+      // After a restart the count goes on below the lowest stored one.
+      history = new HistoryStore(path);
+      hub = new Hub({} as AgentSource, history);
+      const got: LiveMessage[] = [];
+      hub.subscribe((m) => got.push(m));
+      hub.record("task", { title: "Karve" });
+      expect(got[0]!.type === "event" && got[0]!.event.seq).toBe(-3);
+      expect(history.count()).toBe(4);
+      history.close();
+    } finally {
+      for (const f of [path, `${path}-wal`, `${path}-shm`]) await Bun.file(f).delete().catch(() => {});
+    }
+  });
+
+  it("keeps only the newest task lines, so tasks cannot crowd the saga", () => {
+    const history = new HistoryStore(":memory:");
+    const hub = new Hub({} as AgentSource, history);
+    hub.ingest("agent-epoch", { seq: 1, ts: "2026-10-19T12:00:00Z", type: "death", data: { name: "Bjorn" } });
+    for (let i = 0; i < Hub.TASK_LINES + 5; i++) hub.record("task", { title: `t${i}` });
+    const events = hub.history().events;
+    expect(events.filter((e) => e.type === "task")).toHaveLength(Hub.TASK_LINES);
+    expect(events.some((e) => e.type === "death")).toBe(true);
+    expect(events.find((e) => e.type === "task")!.data.title).toBe(`t${Hub.TASK_LINES + 4}`);
+  });
+
+  it("serialises the list once per change, whatever the number of sockets", () => {
+    const hub = new Hub({} as AgentSource, new HistoryStore(":memory:"));
+    const store = new TaskStore(":memory:");
+    const live = liveSocket(hub, store);
+    const socks = [0, 1, 2].map(() => new FakeSocket(liveSocketData(new URL("http://x/live?topics="))));
+    for (const s of socks) live.open(s);
+    const spy = spyOn(JSON, "stringify");
+    try {
+      store.create({ title: "Forge" });
+      const lists = spy.mock.calls.filter(([v]) => (v as { type?: string })?.type === "tasks");
+      expect(lists).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
+    for (const s of socks) expect(s.tasks().at(-1)).toEqual(["Forge"]);
+  });
 });
+
+describe("conflicts and limits", () => {
+  it("counts revisions and refuses a stale status or material change, not a stale note", () => {
+    const store = new TaskStore(":memory:");
+    store.create({ title: "Forge", materials: [{ item: "Copper", qty: 6 }] });
+    expect(store.get(1)!.rev).toBe(0);
+    expect(store.update(1, { status: "doing" }, 0).ok).toBe(true);
+    expect(store.get(1)!.rev).toBe(1);
+    // A page that still holds rev 0:
+    const stale = store.update(1, { status: "done" }, 0);
+    expect(stale).toMatchObject({ ok: false, error: "stale", task: { rev: 1, status: "doing" } });
+    expect(store.update(1, { materials: [] }, 0)).toMatchObject({ ok: false, error: "stale" });
+    expect(store.update(1, { note: "by the river" }, 0).ok).toBe(true);
+    expect(store.update(1, { status: "done" }, 2).ok).toBe(true);
+  });
+
+  it("gives no saga line for a task created already done", () => {
+    const store = new TaskStore(":memory:");
+    const made = store.create({ title: "Old work", status: "done" });
+    expect(made.ok && made.completed).toBe(false);
+    store.update(1, { status: "todo" });
+    const again = store.update(1, { status: "done" });
+    expect(again.ok && again.completed).toBe(false);
+  });
+
+  it("keeps a schema version for the table", () => {
+    const store = new TaskStore(":memory:");
+    expect(store.schemaVersion()).toBe(1);
+  });
+
+  const app = (over: Partial<Parameters<typeof mountTasks>[1]> = {}) => {
+    const store = new TaskStore(":memory:");
+    const a = new Hono();
+    mountTasks(a, { store, ...over });
+    const send = (method: string, path: string, body?: unknown) =>
+      a.request(path, { method, headers: body === undefined ? {} : { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { store, send };
+  };
+
+  it("answers 409 with the current task when an edit is stale", async () => {
+    const { send } = app();
+    await send("POST", "/api/tasks", { title: "Forge" });
+    await send("PATCH", "/api/tasks/1", { status: "doing", rev: 0 });
+    const res = await send("PATCH", "/api/tasks/1", { status: "done", rev: 0 });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ok: false, error: "stale", task: { status: "doing", rev: 1 } });
+    expect((await send("PATCH", "/api/tasks/1", { status: "done", rev: "x" })).status).toBe(400);
+  });
+
+  it("limits writes per client", async () => {
+    const { send } = app({ limiter: new RateLimiter(3, 60_000, 60_000), clientKey: () => "203.0.113.7" });
+    for (let i = 0; i < 3; i++) expect((await send("POST", "/api/tasks", { title: `t${i}` })).status).toBe(201);
+    const res = await send("POST", "/api/tasks", { title: "one too many" });
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("60");
+    // Reading is never limited.
+    expect((await send("GET", "/api/tasks")).status).toBe(200);
+  });
+
+  it("answers 503 when the database is busy", async () => {
+    const { store, send } = app();
+    spyOn(store, "create").mockImplementation(() => {
+      throw Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+    });
+    const res = await send("POST", "/api/tasks", { title: "Forge" });
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("1");
+  });
+});
+

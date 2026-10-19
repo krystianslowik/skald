@@ -29,7 +29,7 @@ export interface LiveSocketData {
   history: boolean;
   unsubscribe?: () => void;
   unwatch?: () => void;
-  untasks?: () => void;
+  untasks?: () => boolean;
   send?: (m: LiveMessage) => void;
 }
 
@@ -84,6 +84,14 @@ export interface TaskFeed {
  * from a dropped link is whole again) and after every change.
  */
 export function liveSocket(hub: Hub, tasks?: TaskFeed) {
+  // The task list is serialised once per change and the same frame goes to every socket.
+  const taskSockets = new Set<LiveSocket>();
+  let taskFrame: string | null = null;
+  const frameOf = (list: Task[]) => JSON.stringify({ type: "tasks", tasks: list } satisfies LiveMessage);
+  tasks?.subscribe((list) => {
+    taskFrame = frameOf(list);
+    for (const ws of taskSockets) ws.send(taskFrame, true);
+  });
   const watch = (ws: LiveSocket, on: boolean) => {
     if (on && !ws.data.unwatch && ws.data.send) ws.data.unwatch = hub.watchPositions(ws.data.send);
     if (!on && ws.data.unwatch) {
@@ -103,8 +111,10 @@ export function liveSocket(hub: Hub, tasks?: TaskFeed) {
       send({ type: "state", state: hub.getState(), online: hub.online });
       ws.data.unsubscribe = hub.subscribe(send, { history: ws.data.history });
       if (tasks) {
-        send({ type: "tasks", tasks: tasks.list() });
-        ws.data.untasks = tasks.subscribe((list) => send({ type: "tasks", tasks: list }));
+        taskFrame ??= frameOf(tasks.list());
+        ws.send(taskFrame, true);
+        taskSockets.add(ws);
+        ws.data.untasks = () => taskSockets.delete(ws);
       }
       watch(ws, ws.data.positions);
     },

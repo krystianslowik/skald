@@ -26,6 +26,8 @@ export interface Task {
   materials: TaskMaterial[];
   createdAt: string;
   updatedAt: string;
+  /** Counts the task's changes from 0; an edit names the one it started from, so a stale one is refused. */
+  rev: number;
   /** When it was last marked done; null while open. */
   doneAt: string | null;
 }

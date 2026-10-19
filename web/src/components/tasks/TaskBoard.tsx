@@ -48,7 +48,7 @@ const TaskCard = memo(function TaskCard({ task, stock, onOpen, onUnauthorized }:
   const i18n = useI18n();
   const { t } = i18n;
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<null | "stale" | "failed">(null);
   const needs = useMemo(() => (stock ? stillMissing(shortfall(task.materials, stock)) : null), [task.materials, stock]);
   const where = targetLabel(i18n, task);
   const done = task.status === "done";
@@ -56,10 +56,10 @@ const TaskCard = memo(function TaskCard({ task, stock, onOpen, onUnauthorized }:
     if (busy) return;
     navigator.vibrate?.(6);
     setBusy(true);
-    const r = await updateTask(task.id, { status: nextStatus(task.status) });
+    const r = await updateTask(task.id, { status: nextStatus(task.status) }, task.rev);
     setBusy(false);
     if (!r.ok && r.error === "unauthorized") onUnauthorized?.();
-    setFailed(!r.ok && r.error !== "unauthorized");
+    setFailed(r.ok || r.error === "unauthorized" ? null : r.error === "stale" ? "stale" : "failed");
   };
   const meta = [task.owner, where].filter(Boolean).join(" · ");
   return (
@@ -83,7 +83,7 @@ const TaskCard = memo(function TaskCard({ task, stock, onOpen, onUnauthorized }:
         {!done && task.materials.length > 0 && (needs === null ? null : needs.length > 0 ? <MissingLine needs={needs} /> : <span className="mt-1.5 block text-xs font-bold text-select-hi">{t("tasks.allInStores")}</span>)}
         {failed && (
           <span role="alert" className="mt-1 block text-xs text-blood">
-            {t("tasks.saveFailed")}
+            {failed === "stale" ? t("tasks.error.staleCard") : t("tasks.saveFailed")}
           </span>
         )}
       </button>
@@ -101,13 +101,14 @@ export function TaskBoard({ saveKey, players, onUnauthorized }: { saveKey: strin
   const reduced = useReducedMotion();
   const tasks = useTasks(onUnauthorized);
   const { stock, load } = useStock(saveKey);
-  // null: closed; "new": a blank sheet; a number: that task.
-  const [open, setOpen] = useState<number | "new" | null>(null);
+  // null: closed; "new": a blank sheet; a task: that task as it was when opened.
+  const [open, setOpen] = useState<Task | "new" | null>(null);
   const [showDone, setShowDone] = useState(false);
   const { open: openTasks, done } = useMemo(() => sortTasks(tasks ?? []), [tasks]);
-  const onOpen = useCallback((task: Task) => setOpen(task.id), []);
+  const onOpen = useCallback((task: Task) => setOpen(task), []);
   const close = useCallback(() => setOpen(null), []);
-  const editing = typeof open === "number" ? (tasks?.find((x) => x.id === open) ?? null) : null;
+  const editing = open !== null && open !== "new" ? open : null;
+  const gone = editing !== null && !!tasks && !tasks.some((x) => x.id === editing.id);
   const spring = { type: "spring", bounce: 0, visualDuration: 0.3 } as const;
   const stockNote = load.status === "off" ? t("tasks.storesOff") : load.status === "failed" ? t("tasks.storesFailed") : null;
 
@@ -152,10 +153,10 @@ export function TaskBoard({ saveKey, players, onUnauthorized }: { saveKey: strin
           {showDone && <div className="mt-1">{list(done)}</div>}
         </div>
       )}
-      {open !== null && (open === "new" || editing) && (
+      {open !== null && (
         <ChunkBoundary overlay onClose={close}>
           <Suspense fallback={null}>
-            <TaskSheet key={open} task={editing} stock={stock} players={players} onClose={close} onUnauthorized={onUnauthorized} />
+            <TaskSheet key={editing?.id ?? "new"} task={editing} gone={gone} stock={stock} players={players} onClose={close} onUnauthorized={onUnauthorized} />
           </Suspense>
         </ChunkBoundary>
       )}

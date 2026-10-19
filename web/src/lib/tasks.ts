@@ -19,9 +19,14 @@ function publish(next: Task[]): void {
   for (const f of subs) f();
 }
 
+/** Tasks the socket has reported gone: no late answer to this page's own write brings one back. */
+const deleted = new Set<number>();
+
 /** The whole list, as the server sent it over /live. */
 export function setTasks(next: Task[]): void {
   generation += 1;
+  const ids = new Set(next.map((t) => t.id));
+  for (const t of current ?? []) if (!ids.has(t.id)) deleted.add(t.id);
   publish(next);
 }
 
@@ -66,13 +71,18 @@ export function useTasks(onUnauthorized?: () => void): Task[] | null {
  * since reported deleted.
  */
 function upsert(task: Task, created: boolean): void {
+  if (deleted.has(task.id)) return;
   const list = current ?? [];
   const have = list.find((t) => t.id === task.id);
-  if (have ? have.updatedAt > task.updatedAt : !created) return;
+  if (have ? have.rev > task.rev : !created) return;
   publish(have ? list.map((t) => (t.id === task.id ? task : t)) : [...list, task]);
 }
 
-export type TaskResult = { ok: true; task?: Task } | { ok: false; error: "unauthorized" | "invalid" | "too_many" | "not_found" | "failed"; field?: TaskInputError };
+export type TaskResult =
+  | { ok: true; task?: Task }
+  /** `stale`: someone changed the task first; `task` is the server's copy now. */
+  | { ok: false; error: "stale"; task: Task }
+  | { ok: false; error: "unauthorized" | "invalid" | "too_many" | "not_found" | "busy" | "failed"; field?: TaskInputError };
 
 async function send(method: string, path: string, body?: unknown): Promise<TaskResult> {
   let res: Response;
@@ -95,7 +105,9 @@ async function send(method: string, path: string, body?: unknown): Promise<TaskR
   }
   if (res.ok) return { ok: true, task: data.task };
   if (res.status === 400 && data.error === "invalid") return { ok: false, error: "invalid", field: data.field };
+  if (res.status === 409 && data.error === "stale" && data.task) return { ok: false, error: "stale", task: data.task };
   if (res.status === 409) return { ok: false, error: "too_many" };
+  if (res.status === 429 || res.status === 503) return { ok: false, error: "busy" };
   if (res.status === 404) return { ok: false, error: "not_found" };
   return { ok: false, error: "failed" };
 }
@@ -106,9 +118,15 @@ export async function createTask(input: TaskInput): Promise<TaskResult> {
   return r;
 }
 
-export async function updateTask(id: number, input: TaskInput): Promise<TaskResult> {
-  const r = await send("PATCH", `/api/tasks/${id}`, input);
+/**
+ * `rev`: the revision the edit started from. A status or material change
+ * someone else overtook comes back `stale`, and the list takes the server's
+ * copy at once.
+ */
+export async function updateTask(id: number, input: TaskInput, rev?: number): Promise<TaskResult> {
+  const r = await send("PATCH", `/api/tasks/${id}`, rev === undefined ? input : { ...input, rev });
   if (r.ok && r.task) upsert(r.task, false);
+  else if (!r.ok && r.error === "stale") upsert(r.task, false);
   return r;
 }
 
@@ -147,6 +165,7 @@ export function sortTasks(tasks: readonly Task[]): { open: Task[]; done: Task[] 
 /** Tests: forget the list. */
 export function resetTasks(): void {
   current = null;
+  deleted.clear();
   generation = 0;
   reading = null;
 }

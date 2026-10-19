@@ -316,21 +316,32 @@ export class Hub {
 
   /** The epoch of events the panel makes itself, apart from every agent's. */
   static readonly LOCAL_EPOCH = "skald-web";
-  /** The last seq given to such an event. */
-  private localSeq = 0;
+  /** Task lines kept in the history: enough for the saga, never enough to crowd out the game's own events. */
+  static readonly TASK_LINES = 50;
+  /** The last seq given to such an event; null until read from the store. */
+  private localSeq: number | null = null;
 
   /**
    * Stores and sends an event the panel made itself (a task marked done), so
    * the saga shows it like the agent's. It never touches the agent's
-   * sequence: its own epoch, and a millisecond clock for a seq that does not
-   * repeat.
+   * sequence: its own epoch, and seqs counting down from -1, so a page that
+   * takes the newest seq of the events it has (the restore sheet does) never
+   * picks one of these.
    */
   record(type: AgentEventType, data: Record<string, unknown>): void {
     const now = this.opts.clock();
-    this.localSeq = Math.max(now, this.localSeq + 1);
-    const ev: AgentEvent = { seq: this.localSeq, ts: new Date(now).toISOString(), type, data };
+    let seq: number;
+    try {
+      this.localSeq ??= Math.min(0, this.store.minSeq(Hub.LOCAL_EPOCH));
+      seq = --this.localSeq;
+    } catch (err) {
+      this.opts.log.warn("saga entry not stored", { cause: cause(err) });
+      return;
+    }
+    const ev: AgentEvent = { seq, ts: new Date(now).toISOString(), type, data };
     try {
       if (!this.store.insert(Hub.LOCAL_EPOCH, ev)) return;
+      if (type === "task") this.store.keepNewest("task", Hub.TASK_LINES);
     } catch (err) {
       this.opts.log.warn("saga entry not stored", { cause: cause(err) });
       return;

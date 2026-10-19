@@ -43,9 +43,31 @@ const qtyStep = (n: number) => (n >= 100 ? 10 : n >= 20 ? 5 : 1);
  * One task, new or existing: title, status, who does it, what for, the
  * material list (by hand or from a recipe, each line with what the stores
  * hold) and a note. Deleting needs a second tap.
+ *
+ * `task` is the task as it was when the sheet opened: edits are measured
+ * against it, not against copies other pages send meanwhile, so saving a note
+ * never undoes someone else's status change. `gone`: someone deleted it
+ * meanwhile; the sheet stays, with what was typed, and saving adds it anew.
  */
-export default function TaskSheet({ task, stock, players, onClose, onUnauthorized }: { task: Task | null; stock: ReadonlyMap<string, number> | null; players: readonly string[]; onClose: () => void; onUnauthorized?: () => void }) {
+export default function TaskSheet({
+  task,
+  gone = false,
+  stock,
+  players,
+  onClose,
+  onUnauthorized,
+}: {
+  task: Task | null;
+  gone?: boolean;
+  stock: ReadonlyMap<string, number> | null;
+  players: readonly string[];
+  onClose: () => void;
+  onUnauthorized?: () => void;
+}) {
   const { t, lookup, number } = useI18n();
+  // What this edit started from; moves on only when the server says it is stale.
+  const [opened, setOpened] = useState(task);
+  const editing = opened !== null && !gone;
   const ids = useId();
   const [title, setTitle] = useState(task?.title ?? "");
   const [owner, setOwner] = useState(task?.owner ?? "");
@@ -67,7 +89,15 @@ export default function TaskSheet({ task, stock, players, onClose, onUnauthorize
   const input = (): TaskInput => ({ title, owner, status, note, target: target(), materials });
 
   const failText = (r: Exclude<TaskResult, { ok: true }>) =>
-    r.error === "invalid" && r.field ? t(`tasks.error.${r.field}`) : r.error === "too_many" ? t("tasks.error.tooMany", { n: TASK_LIMITS.tasks }) : r.error === "not_found" ? t("tasks.error.gone") : t("tasks.saveFailed");
+    r.error === "invalid" && r.field
+      ? t(`tasks.error.${r.field}`)
+      : r.error === "too_many"
+        ? t("tasks.error.tooMany", { n: TASK_LIMITS.tasks })
+        : r.error === "not_found"
+          ? t("tasks.error.gone")
+          : r.error === "stale"
+            ? t("tasks.error.stale")
+            : t("tasks.saveFailed");
 
   const save = async () => {
     if (busy) return;
@@ -77,25 +107,31 @@ export default function TaskSheet({ task, stock, players, onClose, onUnauthorize
       return;
     }
     // An edit sends only what changed here: someone else's change to another field stays.
-    const diff = task ? changedFields(task, checked.value as Required<TaskInput>) : checked.value;
-    if (task && Object.keys(diff).length === 0) return onClose();
+    const diff = editing ? changedFields(opened, checked.value as Required<TaskInput>) : checked.value;
+    if (editing && Object.keys(diff).length === 0) return onClose();
     setBusy(true);
-    const r = task ? await updateTask(task.id, diff) : await createTask(diff);
+    const r = editing ? await updateTask(opened.id, diff, opened.rev) : await createTask(diff);
     setBusy(false);
     if (r.ok) onClose();
     else if (r.error === "unauthorized") onUnauthorized?.();
-    else setError({ field: r.field, text: failText(r) });
+    else if (r.error === "stale") {
+      // Someone moved the task on or changed its list first: theirs is shown, the text typed here stays.
+      setOpened(r.task);
+      setStatus(r.task.status);
+      setMaterials(r.task.materials);
+      setError({ text: failText(r) });
+    } else setError({ field: r.field, text: failText(r) });
   };
 
   const remove = async () => {
-    if (!task || busy) return;
+    if (!editing || busy) return;
     if (!armed) {
       navigator.vibrate?.(10);
       setArmed(true);
       return;
     }
     setBusy(true);
-    const r = await deleteTask(task.id);
+    const r = await deleteTask(opened.id);
     setBusy(false);
     if (r.ok || r.error === "not_found") onClose();
     else if (r.error === "unauthorized") onUnauthorized?.();
@@ -146,7 +182,7 @@ export default function TaskSheet({ task, stock, players, onClose, onUnauthorize
           <div className="min-w-0 flex-1">
             <p className="label-caps">{t("tasks.kicker")}</p>
             <h2 id={`${ids}-h`} className="plank-title truncate text-2xl">
-              {task ? t("tasks.edit") : t("tasks.new")}
+              {opened ? t("tasks.edit") : t("tasks.new")}
             </h2>
           </div>
           <SheetClose label={t("tasks.close")} escLabel={t("key.esc")} onClose={close} />
@@ -154,20 +190,25 @@ export default function TaskSheet({ task, stock, players, onClose, onUnauthorize
       )}
       footer={
         <div className="material shrink-0 border-t border-iron/50 px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-7">
+          {gone && (
+            <p role="alert" className="mb-2 text-xs text-blood">
+              {t("tasks.error.goneKeep")}
+            </p>
+          )}
           {error && !error.field && (
             <p role="alert" className="mb-2 text-xs text-blood">
               {error.text}
             </p>
           )}
           <div className="flex items-center gap-2">
-            {task && (
+            {editing && (
               <Btn onClick={() => void remove()} disabled={busy} className={armed ? "text-blood! ring-2 ring-blood" : "text-ash!"}>
                 {armed ? t("tasks.deleteConfirm") : t("tasks.delete")}
               </Btn>
             )}
             <span className="flex-1" />
             <Btn primary onClick={() => void save()} disabled={busy}>
-              {task ? t("tasks.save") : t("tasks.create")}
+              {editing ? t("tasks.save") : t("tasks.create")}
             </Btn>
           </div>
         </div>

@@ -47,8 +47,10 @@ export const RECIPES: readonly Recipe[] = [
   { id: "defeated_eikthyr", kind: "offering", materials: m({ TrophyDeer: 2 }), target: boss("defeated_eikthyr") },
   { id: "defeated_gdking", kind: "offering", materials: m({ AncientSeed: 3 }), target: boss("defeated_gdking") },
   { id: "defeated_bonemass", kind: "offering", materials: m({ WitheredBone: 10 }), target: boss("defeated_bonemass") },
+  // Eggs count wherever the index sees them: chests, and carts, the usual way to haul them (they cannot go through a portal).
   { id: "defeated_dragon", kind: "offering", materials: m({ DragonEgg: 3 }), target: boss("defeated_dragon") },
   { id: "defeated_goblinking", kind: "offering", materials: m({ GoblinTotem: 5 }), target: boss("defeated_goblinking") },
+  { id: "defeated_fader", kind: "offering", materials: m({ BellFragment: 3 }), target: boss("defeated_fader") },
 ];
 
 /**

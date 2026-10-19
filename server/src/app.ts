@@ -469,7 +469,7 @@ export function createApp(deps: AppDeps): Hono {
     return new Response(up.body, { status: 200, headers });
   });
 
-  if (deps.tasks) mountTasks(app, deps.tasks);
+  if (deps.tasks) mountTasks(app, { clientKey: (c) => clientIp(c, deps.trustedIpHeader ?? ""), ...deps.tasks });
 
   app.get("/api/players", (c) => {
     c.header("Cache-Control", "no-store");

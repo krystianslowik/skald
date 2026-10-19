@@ -8,7 +8,12 @@ export type TaskChange =
       /** The change finished the task for the first time: worth a saga line. Reopening and finishing it again is not. */
       completed: boolean;
     }
-  | { ok: false; error: "not_found" | "too_many" };
+  | { ok: false; error: "not_found" | "too_many" }
+  /** The edit started from an older revision and changes the status or the materials: `task` is the current one. */
+  | { ok: false; error: "stale"; task: Task };
+
+/** The table's layout version, kept beside it, for a later migration to read. */
+const SCHEMA_VERSION = 1;
 
 /**
  * The group's shared tasks, in the panel database. Opened on its own
@@ -27,15 +32,21 @@ export class TaskStore {
   constructor(path: string, private readonly clock: () => number = Date.now) {
     this.db = new Database(path, { create: true });
     this.db.exec("PRAGMA journal_mode = WAL");
-    // The history connection may be mid-write (a prune, a vacuum): wait rather than fail.
-    this.db.exec("PRAGMA busy_timeout = 5000");
+    // The history connection may be mid-write: wait a moment, then the route answers 503 rather than hang.
+    this.db.exec("PRAGMA busy_timeout = 250");
     this.db.exec("PRAGMA secure_delete = ON");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS tasks (
         id   INTEGER PRIMARY KEY AUTOINCREMENT,
         data TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS tasks_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
+    this.db.query("INSERT OR IGNORE INTO tasks_meta (key, value) VALUES ('schema', ?)").run(String(SCHEMA_VERSION));
+  }
+
+  schemaVersion(): number {
+    return Number((this.db.query("SELECT value FROM tasks_meta WHERE key = 'schema'").get() as { value: string } | null)?.value ?? 0);
   }
 
   /** Every task, oldest first. */
@@ -46,7 +57,7 @@ export class TaskStore {
       this.cache = rows.map((r) => {
         const { logged, ...task } = JSON.parse(r.data) as Task & { logged?: boolean };
         if (logged) this.logged.add(r.id);
-        return { ...task, id: r.id };
+        return { ...task, rev: task.rev ?? 0, id: r.id };
       });
     }
     return this.cache;
@@ -71,20 +82,29 @@ export class TaskStore {
       createdAt: now,
       updatedAt: now,
       doneAt: status === "done" ? now : null,
+      rev: 0,
     };
     const done = status === "done";
     const res = this.db.query("INSERT INTO tasks (data) VALUES (?)").run(JSON.stringify(done ? { ...task, logged: true } : task));
     const created = { ...task, id: Number(res.lastInsertRowid) };
+    // Already done when added (old work written down): no saga line, now or later.
     if (done) this.logged.add(created.id);
     this.changed([...this.list(), created]);
-    return { ok: true, task: created, completed: done };
+    return { ok: true, task: created, completed: false };
   }
 
-  update(id: number, input: TaskInput): TaskChange {
+  /**
+   * `baseRev`: the revision the edit started from. A status or material change
+   * made on an older one is refused as stale (someone moved the task on, or
+   * changed its list, meanwhile); text fields are sent only when changed, so
+   * they need no check.
+   */
+  update(id: number, input: TaskInput, baseRev?: number): TaskChange {
     const prev = this.get(id);
     if (!prev) return { ok: false, error: "not_found" };
+    if (baseRev !== undefined && baseRev !== prev.rev && (input.status !== undefined || input.materials !== undefined)) return { ok: false, error: "stale", task: prev };
     const now = new Date(this.clock()).toISOString();
-    const next: Task = { ...prev, ...input, id, updatedAt: now };
+    const next: Task = { ...prev, ...input, id, updatedAt: now, rev: prev.rev + 1 };
     const finished = prev.status !== "done" && next.status === "done";
     if (finished) next.doneAt = now;
     else if (next.status !== "done") next.doneAt = null;

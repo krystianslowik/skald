@@ -118,6 +118,18 @@ export class HistoryStore {
     this.db.exec("VACUUM");
   }
 
+  /** The lowest seq stored under an epoch, or 0 when none: where the panel's own events go on counting down from. */
+  minSeq(epoch: string): number {
+    return (this.db.query("SELECT MIN(seq) AS m FROM events WHERE epoch = ?").get(epoch) as { m: number | null }).m ?? 0;
+  }
+
+  /** Deletes all but the newest `keep` rows of a type (by time). Returns the number deleted. */
+  keepNewest(type: AgentEventType, keep: number): number {
+    return this.db
+      .query("DELETE FROM events WHERE type = ? AND id NOT IN (SELECT id FROM events WHERE type = ? ORDER BY ts DESC, id DESC LIMIT ?)")
+      .run(type, type, keep).changes;
+  }
+
   /** Latest stored event of a type, for on-change dedupe after a restart. */
   last(type: AgentEventType): AgentEvent | null {
     const r = this.db
