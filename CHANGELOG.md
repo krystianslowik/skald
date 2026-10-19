@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.18] - 2026-10-19
+
 ### Added
 
 - Close up, the map shows the ground itself: grass, forest floor, combed plains, swamp puddles, sparkling snow and cracked ash, bare rock with faint layers on steep slopes, and contour lines every 2 m and 10 m that fade out before they crowd. Contour lines have their own switch in the map's layers, on by default.
