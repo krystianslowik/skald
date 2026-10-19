@@ -682,6 +682,8 @@ export const pl: Dict = {
   "portals.group.places": "Miejsca",
   "portals.group.pins": "Znaczniki",
   "portals.baseNear": "Baza przy: {place}",
+  "portals.offline": "{name} (poza grą)",
+  "portals.offlineNote": "{name} nie gra teraz: trasa wróci, gdy wróci do gry.",
   "portals.spot": "Punkt na mapie",
   "portals.spotAt": "Punkt {x}, {z}",
   "portals.pickSpot": "Stuknij mapę",

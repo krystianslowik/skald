@@ -232,7 +232,11 @@ function SaveMap({
   const routeLayer = useRef<PortalRouteLayerHandle>(null);
   const [portalsOpen, setPortalsOpen] = useState(false);
   const [ring, setRing] = useState<readonly string[]>([]);
-  const highlighted = useMemo(() => (focusMarks || ring.length ? new Set([...(focusMarks?.values() ?? [])].map((m) => m.id).concat(ring)) : undefined), [focusMarks, ring]);
+  const highlighted = useMemo(() => {
+    const ids = new Set<string>(ring);
+    if (focusMarks) for (const m of focusMarks.values()) ids.add(m.id);
+    return ids.size > 0 ? ids : undefined;
+  }, [focusMarks, ring]);
 
   // Keep the selection when a new save arrives, by id.
   useEffect(() => {
@@ -574,11 +578,6 @@ function SaveMap({
           </div>
         )}
         {!portalsOpen && <RouteChip net={net} onOpen={() => setPortalsOpen(true)} />}
-        {net.picking && !portalsOpen && (
-          <p role="status" className="material rounded-[2px] px-3 py-1.5 text-xs text-select-hi">
-            {t("portals.picking")}
-          </p>
-        )}
         {stale && (
           <p role="status" className="material rounded-[2px] px-3 py-1.5 text-xs text-flame">
             {t("map.stale")}
@@ -599,7 +598,10 @@ function SaveMap({
         )}
       </div>
 
-      {portalsOpen && <PortalSheet map={map} markers={markers} net={net} canvas={canvas} onRing={setRing} onClose={() => setPortalsOpen(false)} />}
+      {portalsOpen && <PortalSheet map={map} markers={markers} net={net} canvas={canvas} onRing={setRing} onClose={() => {
+            setPortalsOpen(false);
+            net.setPicking(false);
+          }} />}
       {phone ? (
         sel && (
           <Sheet

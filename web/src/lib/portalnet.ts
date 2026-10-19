@@ -63,11 +63,13 @@ export function portalGroups(portals: readonly MapPortal[], showNames: boolean):
     }
     return [...pairs, ...lone];
   }
+  // A tag of only spaces is no tag.
   const tags = new Map<string, MapPortal[]>();
   for (const p of portals) {
-    const list = tags.get(p.tag);
+    const tag = p.tag.trim() === "" ? "" : p.tag;
+    const list = tags.get(tag);
     if (list) list.push(p);
-    else tags.set(p.tag, [p]);
+    else tags.set(tag, [p]);
   }
   return [...tags.entries()]
     .map(([tag, list]) => ({ tag, portals: list.sort(byPlace) }))

@@ -693,6 +693,8 @@ export const en = {
   "portals.group.places": "Places",
   "portals.group.pins": "Pins",
   "portals.baseNear": "Base near {place}",
+  "portals.offline": "{name} (offline)",
+  "portals.offlineNote": "{name} is not online now: the route comes back when they are.",
   "portals.spot": "A point on the map",
   "portals.spotAt": "Point at {x}, {z}",
   "portals.pickSpot": "Tap the map",

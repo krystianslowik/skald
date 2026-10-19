@@ -64,6 +64,13 @@ describe("portalWarnings", () => {
     expect(w.crowded).toEqual([]);
     expect(w.noPartner).toHaveLength(2);
   });
+  it("treats a tag of only spaces as no tag", () => {
+    const blank = [P("a", 0, 0, " "), P("b", 1, 0, " "), P("c", 2, 0, "  ")];
+    const w = portalWarnings(blank, true);
+    expect(w.untagged).toHaveLength(3);
+    expect(w.crowded).toEqual([]);
+    expect(portalGroups(blank, true).map((g) => g.tag)).toEqual([""]);
+  });
   it("is quiet for a clean network", () => {
     expect(noWarnings(portalWarnings(NET.slice(0, 4), true))).toBe(true);
     expect(noWarnings(portalWarnings([], true))).toBe(true);

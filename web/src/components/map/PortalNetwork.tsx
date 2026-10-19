@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
 import { useI18n } from "../../i18n";
-import { useLivePositions } from "../../lib/live";
-import { mainBase, type Marker } from "../../lib/mapgeo";
+import { getLivePositions, subscribeLivePositions, useLivePositions } from "../../lib/live";
+import type { Marker } from "../../lib/mapgeo";
 import { findRoute, nearestPlace, noWarnings, partners, portalGroups, portalWarnings, type Place, type Route, type Spot } from "../../lib/portalnet";
 import { PHONE, useMedia } from "../../lib/useMedia";
-import type { ApiMap, MapPortal } from "../../types";
+import type { ApiMap, LivePlayer, MapPortal } from "../../types";
 import { Sheet, SheetClose } from "../Sheet";
 import type { MapCanvasHandle } from "./MapCanvas";
 import { markerTitle } from "./MapDetails";
@@ -20,17 +20,16 @@ interface End {
   z: number;
 }
 
-/** Route ends by group, for the two pickers; `from` never offers bosses or pins, `to` never players or the tapped point. */
+/** Route ends by group, for the two pickers; `from` offers bases, players online and the tapped point, `to` the rest. */
 interface Ends {
   bases: End[];
-  players: End[];
   bosses: End[];
   places: End[];
   pins: End[];
 }
 
-function endsOf(markers: readonly Marker[], players: readonly { id?: string; name: string; x: number; z: number }[], t: I18n["t"], lookup: I18n["lookup"]): Ends {
-  const out: Ends = { bases: [], players: [], bosses: [], places: [], pins: [] };
+function endsOf(markers: readonly Marker[], t: I18n["t"], lookup: I18n["lookup"]): Ends {
+  const out: Ends = { bases: [], bosses: [], places: [], pins: [] };
   // An unnamed base goes by the closest named pin or place, else by where it is.
   const named = placesOf(markers.filter((m) => m.data.type !== "base"), t, lookup);
   const bases = markers.filter((m) => m.data.type === "base").sort((a, b) => (b.data as { pieces: number }).pieces - (a.data as { pieces: number }).pieces);
@@ -46,16 +45,36 @@ function endsOf(markers: readonly Marker[], players: readonly { id?: string; nam
     else if (d.type === "location" && (d.kind === "trader" || d.kind === "start") && d.explored) out.places.push(end);
     else if (d.type === "pin") out.pins.push(d.name ? end : { ...end, label: `${end.label} ${t("map.coords", { x: m.x, z: m.z })}` });
   }
-  for (const p of players) out.players.push({ key: `player:${p.id ?? p.name}`, label: p.name, x: p.x, z: p.z });
   for (const list of [out.bosses, out.places, out.pins]) list.sort((a, b) => a.label.localeCompare(b.label));
   return out;
 }
 
+/** Players online as route starts (the picker reads them only while the sheet is open). */
+export function playerEnds(players: readonly LivePlayer[]): End[] {
+  return players.map((p) => ({ key: `player:${p.id ?? p.name}`, label: p.name, x: p.x, z: p.z }));
+}
+
+/**
+ * The mark a chosen end stands for in this save. Mark ids are indexes
+ * ("pin:2"), so a new save can shift them: the end is found by its kind and
+ * place, and is gone (null) when nothing of its kind stands there any more.
+ */
+function current(e: End | null, ends: Ends): End | null {
+  if (!e) return null;
+  const kind = e.key.split(":")[0];
+  const all = [...ends.bases, ...ends.bosses, ...ends.places, ...ends.pins];
+  return all.find((c) => c.key === e.key && c.x === e.x && c.z === e.z) ?? all.find((c) => c.x === e.x && c.z === e.z && c.key.split(":")[0] === kind) ?? null;
+}
+
 export interface PortalNet {
-  from: string;
-  to: string;
-  setFrom: (key: string) => void;
-  setTo: (key: string) => void;
+  /** The start as chosen (a mark, a player, or "spot"), and as it stands now: null when it is gone or offline. */
+  from: End | null;
+  start: End | null;
+  /** The destination as chosen, and as it stands now. */
+  to: End | null;
+  end: End | null;
+  setFrom: (e: End | null) => void;
+  setTo: (e: End | null) => void;
   /** The tapped start point, once there is one. */
   spot: Spot | null;
   /** Waiting for a tap on the map to set the start. */
@@ -64,37 +83,53 @@ export interface PortalNet {
   /** A tap on the map while picking. */
   onTap: (p: Spot) => void;
   ends: Ends;
-  /** The start and end in use, when both are set. */
-  start: End | null;
-  end: End | null;
   route: Route | null;
   clear: () => void;
 }
 
+/** Where one player is, as "x,z", "" when they are offline; re-renders only when that player moves. */
+function usePlayerAt(key: string | null): string {
+  return useSyncExternalStore(subscribeLivePositions, () => {
+    if (!key) return "";
+    const p = getLivePositions().players.find((q) => `player:${q.id ?? q.name}` === key);
+    return p ? `${p.x},${p.z}` : "";
+  });
+}
+
 /** The route finder's state; it lives with the map so the route stays drawn when the sheet closes. */
 export function usePortalNet(map: ApiMap, markers: readonly Marker[]): PortalNet {
-  const { t, lookup } = useI18n();
-  const live = useLivePositions();
-  const ends = useMemo(() => endsOf(markers, live.players, t, lookup), [markers, live.players, t, lookup]);
-  const [from, setFrom] = useState(() => mainBase(markers)?.id ?? "");
-  const [to, setTo] = useState("");
+  const { t, lookup, number } = useI18n();
+  const ends = useMemo(() => endsOf(markers, t, lookup), [markers, t, lookup]);
+  const [from, setFromState] = useState<End | null>(() => ends.bases[0] ?? null);
+  const [to, setToState] = useState<End | null>(null);
   const [spot, setSpot] = useState<Spot | null>(null);
   const [picking, setPicking] = useState(false);
   const onTap = useCallback((p: Spot) => {
-    setSpot({ x: Math.round(p.x), z: Math.round(p.z) });
-    setFrom("spot");
+    const at = { x: Math.round(p.x), z: Math.round(p.z) };
+    setSpot(at);
+    setFromState({ key: "spot", label: "", ...at });
     setPicking(false);
   }, []);
-  const chooseFrom = useCallback(
-    (key: string) => {
-      setFrom(key);
-      if (key === "spot" && !spot) setPicking(true);
+  const setFrom = useCallback(
+    (e: End | null) => {
+      setFromState(e);
+      // A route from a place to itself is no route.
+      setToState((cur) => (cur && e && cur.key === e.key ? null : cur));
+      if (e?.key === "spot" && !spot) setPicking(true);
     },
     [spot],
   );
-  const find = (key: string, groups: End[][]) => groups.flat().find((e) => e.key === key) ?? null;
-  const start = from === "spot" ? (spot ? { key: "spot", label: t("portals.spotAt", { x: spot.x, z: spot.z }), ...spot } : null) : find(from, [ends.bases, ends.players]);
-  const end = find(to, [ends.bases, ends.bosses, ends.places, ends.pins]);
+  const setTo = useCallback((e: End | null) => setToState(e), []);
+  const player = from?.key.startsWith("player:") ? from.key : null;
+  const playerAt = usePlayerAt(player);
+  let start: End | null;
+  if (!from) start = null;
+  else if (from.key === "spot") start = spot ? { key: "spot", label: t("portals.spotAt", { x: number(spot.x), z: number(spot.z) }), ...spot } : null;
+  else if (player) {
+    const [x, z] = playerAt.split(",").map(Number);
+    start = playerAt ? { ...from, x: x!, z: z! } : null;
+  } else start = current(from, ends);
+  const end = current(to, ends);
   const sx = start?.x;
   const sz = start?.z;
   const ex = end?.x;
@@ -104,15 +139,15 @@ export function usePortalNet(map: ApiMap, markers: readonly Marker[]): PortalNet
     [sx, sz, ex, ez, map.portals],
   );
   const clear = useCallback(() => {
-    setTo("");
+    setToState(null);
     setPicking(false);
   }, []);
-  return { from, to, setFrom: chooseFrom, setTo, spot, picking, setPicking, onTap, ends, start, end, route, clear };
+  return { from, start, to, end, setFrom, setTo, spot, picking, setPicking, onTap, ends, route, clear };
 }
 
 /** Metres for people: tens of metres up close, kilometres with one decimal further out. */
 export function distance(m: number, t: I18n["t"], number: I18n["number"]): string {
-  return m < 1000 ? t("portals.m", { n: number(Math.round(m / 10) * 10) }) : t("portals.km", { n: number(m / 1000, 1) });
+  return Math.round(m / 10) * 10 < 1000 ? t("portals.m", { n: number(Math.round(m / 10) * 10) }) : t("portals.km", { n: number(m / 1000, 1) });
 }
 
 /** Named places a portal is described by: bases, pins, found locations. */
@@ -311,6 +346,11 @@ function RouteFinder({
 }) {
   const { t, tn, number } = useI18n();
   const { ends, route, start, end } = net;
+  const live = useLivePositions();
+  const players = useMemo(() => playerEnds(live.players), [live.players]);
+  // A player who logged off stays chosen (with a note) so the route comes back when they do.
+  const offline = !!net.from?.key.startsWith("player:") && !start;
+  const fromValue = net.from?.key === "spot" ? "spot" : net.from?.key.startsWith("player:") ? net.from.key : (net.start?.key ?? "");
   const fromId = "portal-route-from";
   const toId = "portal-route-to";
   const option = (e: End) => (
@@ -331,10 +371,18 @@ function RouteFinder({
           {t("portals.from")}
         </label>
         <div className="flex min-w-0 gap-2">
-          <select id={fromId} value={net.from} onChange={(e) => net.setFrom(e.target.value)} className="field min-w-0 flex-1 px-2 py-2 text-sm coarse:min-h-11">
-            {!start && net.from !== "spot" && <option value="">{t("portals.chooseFrom")}</option>}
+          <select
+            id={fromId}
+            value={fromValue}
+            onChange={(e) => {
+              const k = e.target.value;
+              net.setFrom(k === "spot" ? { key: "spot", label: "", x: net.spot?.x ?? 0, z: net.spot?.z ?? 0 } : ([...ends.bases, ...players].find((c) => c.key === k) ?? null));
+            }}
+            className="field min-w-0 flex-1 px-2 py-2 text-sm coarse:min-h-11"
+          >
+            {fromValue === "" && <option value="">{t("portals.chooseFrom")}</option>}
             {group(t("portals.group.bases"), ends.bases)}
-            {group(t("portals.group.players"), ends.players)}
+            {group(t("portals.group.players"), offline ? [...players, { ...net.from!, label: t("portals.offline", { name: net.from!.label }) }] : players)}
             <option value="spot">{net.spot ? t("portals.spotAt", { x: number(net.spot.x), z: number(net.spot.z) }) : t("portals.spot")}</option>
           </select>
           <button type="button" aria-pressed={net.picking} onClick={() => net.setPicking(!net.picking)} className="plaque press shrink-0 px-2.5 text-xs font-bold coarse:min-h-11">
@@ -344,14 +392,20 @@ function RouteFinder({
         <label htmlFor={toId} className="text-label">
           {t("portals.to")}
         </label>
-        <select id={toId} value={net.to} onChange={(e) => net.setTo(e.target.value)} className="field min-w-0 px-2 py-2 text-sm coarse:min-h-11">
+        <select
+          id={toId}
+          value={end?.key ?? ""}
+          onChange={(e) => net.setTo([...ends.bases, ...ends.bosses, ...ends.places, ...ends.pins].find((c) => c.key === e.target.value) ?? null)}
+          className="field min-w-0 px-2 py-2 text-sm coarse:min-h-11"
+        >
           <option value="">{t("portals.chooseTo")}</option>
-          {group(t("portals.group.bases"), ends.bases.filter((e) => e.key !== net.from))}
+          {group(t("portals.group.bases"), ends.bases.filter((e) => e.key !== fromValue))}
           {group(t("portals.group.bosses"), ends.bosses)}
           {group(t("portals.group.places"), ends.places)}
           {group(t("portals.group.pins"), ends.pins)}
         </select>
       </div>
+      {offline && <p className="mt-2 text-xs text-flame">{t("portals.offlineNote", { name: net.from!.label })}</p>}
       {net.picking && (
         <p role="status" className="mt-2 text-xs text-select-hi">
           {t("portals.picking")}

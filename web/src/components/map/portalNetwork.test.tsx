@@ -7,7 +7,7 @@ import { I18nProvider, makeI18n } from "../../i18n";
 import { buildMarkers } from "../../lib/mapgeo";
 import type { ApiMap } from "../../types";
 import type { MapCanvasHandle } from "./MapCanvas";
-import { PortalSheet, usePortalNet } from "./PortalNetwork";
+import { distance, PortalSheet, usePortalNet } from "./PortalNetwork";
 
 function Harness({ map, canvas, onRing }: { map: ApiMap; canvas: React.RefObject<MapCanvasHandle | null>; onRing: (ids: readonly string[]) => void }) {
   const markers = buildMarkers(map, makeI18n("en").lookup);
@@ -58,6 +58,20 @@ describe("PortalSheet", () => {
     expect(screen.getByText("3 portale nie prowadzą nigdzie")).toBeInTheDocument();
     expect(screen.queryByText(/nie ma nazwy|nie mają nazwy/)).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Pary portali" })).toBeInTheDocument();
+  });
+
+  it("drops the destination when it becomes the start", () => {
+    setup(named());
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: "base:1" } });
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: "base:1" } });
+    expect((screen.getByLabelText("To") as HTMLSelectElement).value).toBe("");
+    expect(screen.queryByText(/on foot/)).not.toBeInTheDocument();
+  });
+
+  it("rounds before it picks metres or kilometres", () => {
+    const { t, number } = makeI18n("en");
+    expect(distance(994, t, number)).toBe("990 m");
+    expect(distance(996, t, number)).toBe("1 km");
   });
 
   it("offers only found boss altars", () => {

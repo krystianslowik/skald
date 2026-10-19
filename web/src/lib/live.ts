@@ -68,6 +68,9 @@ export function useLivePositions(): LiveSample {
 
 export const getLivePositions = (): LiveSample => current;
 
+/** For a component that needs one player's position, not every sample (useSyncExternalStore with a selector). */
+export const subscribeLivePositions = subscribe;
+
 /** Beyond this jump (a portal, a teleport) a marker moves at once instead of gliding. */
 const SNAP_M = 250;
 
