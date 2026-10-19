@@ -164,3 +164,74 @@ self.addEventListener("fetch", (event) => {
     );
   }
 });
+
+/** A path on the panel itself, else "/": nothing in a push may send a tap elsewhere ("//x", "/\\x" and full URLs included). */
+const panelPath = (path) => {
+  try {
+    const u = new URL(typeof path === "string" ? path : "/", self.location.origin);
+    return u.origin === self.location.origin ? u.pathname + u.search + u.hash : "/";
+  } catch {
+    return "/";
+  }
+};
+
+// Phone push (/api/push): the server sends { title, body, tag, url } as JSON.
+// Every push shows a notification: Safari drops a subscription whose pushes
+// show nothing. A tag keeps one notification per kind of news on the device.
+self.addEventListener("push", (event) => {
+  let msg = {};
+  try {
+    msg = event.data ? event.data.json() : {};
+  } catch {
+    msg = { body: event.data ? event.data.text() : "" };
+  }
+  const title = typeof msg.title === "string" && msg.title ? msg.title : "Skald";
+  const url = panelPath(msg.url);
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: typeof msg.body === "string" ? msg.body : "",
+      tag: typeof msg.tag === "string" && msg.tag ? `skald-${msg.tag}` : undefined,
+      // A replaced notification (more friends at the fire) is news again.
+      renotify: typeof msg.tag === "string" && msg.tag !== "",
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      data: { url },
+    }),
+  );
+});
+
+// A tap opens the panel where the news is: an open panel window is focused and
+// moved there, else a new one opens.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = new URL(panelPath(event.notification.data && event.notification.data.url), self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      const win = list.find((c) => new URL(c.url).origin === self.location.origin);
+      if (win) return win.focus().then((c) => (c && c.url !== target && "navigate" in c ? c.navigate(target) : c));
+      return self.clients.openWindow(target);
+    }),
+  );
+});
+
+// The browser renewed the subscription on its own: tell the server, keeping
+// this device's choice. Best effort; without a session it is refused, and the
+// device turns push on again from Settings.
+self.addEventListener("pushsubscriptionchange", (event) => {
+  const old = event.oldSubscription;
+  event.waitUntil(
+    (async () => {
+      const post = (path, body, method = "POST") =>
+        fetch(path, { method, credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!old) return;
+      const res = await post("/api/push/device", { endpoint: old.endpoint });
+      const prefs = res.ok ? (await res.json()).prefs : null;
+      if (!prefs) return;
+      const sub = event.newSubscription || (await self.registration.pushManager.subscribe(old.options));
+      const json = sub.toJSON();
+      const saved = await post("/api/push", { subscription: { endpoint: json.endpoint, keys: json.keys }, prefs }, "PUT");
+      // Only once the new one is saved; same endpoint with new keys: the PUT already replaced the row.
+      if (saved.ok && json.endpoint !== old.endpoint) await post("/api/push", { endpoint: old.endpoint }, "DELETE");
+    })().catch(() => undefined),
+  );
+});

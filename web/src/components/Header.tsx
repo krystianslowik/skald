@@ -13,6 +13,8 @@ import { AdminGlyph } from "./admin/glyphs";
 import { preload } from "../lib/chunks";
 import type { LogoutResult } from "../lib/api";
 import type { WorldClock as Clock } from "../types";
+import { dropPushAfterLogout } from "../lib/push";
+import { NotifyButton } from "./Notifications";
 
 /**
  * The Log out button's press: the panel leaves only once the server ended the
@@ -29,6 +31,8 @@ export function useLogout(onLogout: () => Promise<LogoutResult>) {
     setBusy(true);
     try {
       const r = await onLogout();
+      // A signed-out device gets no more news; a failed sign-out keeps it.
+      if (r === "ok") void dropPushAfterLogout();
       if (r !== "ok") {
         const reason = r === "refused" ? t("login.refused") : r === "offline" ? t("logout.offline") : t("logout.failed");
         toast?.(false, t("logout.notDone", { reason }));
@@ -166,6 +170,7 @@ export const Header = memo(function Header({
                 <SettingsGlyph size={18} className="text-current" />
               </button>
             )}
+            <NotifyButton />
             <SoundToggle />
             <EmbersToggle />
             <LocaleToggle />

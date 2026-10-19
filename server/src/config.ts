@@ -48,6 +48,8 @@ export interface Config {
   discordWebhookUrl: string;
   /** Which notifications go to Discord (DISCORD_NOTIFY); all when unset. */
   discordNotify: NotifyKind[];
+  /** VAPID contact for push services (PUSH_CONTACT): a mailto: or https: URL. */
+  pushContact: string;
   /** Prometheus listener (METRICS_BIND, e.g. 0.0.0.0:9465); empty means off. */
   metricsBind: string;
   /** Ask GitHub for a newer Skald release (SKALD_UPDATE_CHECK, off with `off`). */
@@ -137,6 +139,10 @@ export function loadConfig(env: Env = process.env): Config {
   // The URL is a secret: the error names the variable, never the value.
   if (discordWebhookUrl && !/^https?:\/\//.test(discordWebhookUrl)) throw new Error("DISCORD_WEBHOOK_URL must be an http(s) URL");
   const discordNotify = parseNotifyKinds(opt("DISCORD_NOTIFY", ""));
+  const publicOrigins = parsePublicOrigins(opt("PUBLIC_ORIGIN", ""));
+  // Push services may write to this address about the panel's notifications.
+  const pushContact = opt("PUSH_CONTACT", "").trim() || publicOrigins.find((o) => o.startsWith("https://")) || "https://github.com/krystianslowik/skald";
+  if (!/^(mailto:[^\s@]+@[^\s@]+|https:\/\/\S+)$/.test(pushContact)) throw new Error("PUSH_CONTACT must be a mailto: address or an https:// URL");
 
   return {
     bind: opt("BIND", "0.0.0.0:8080"),
@@ -158,12 +164,13 @@ export function loadConfig(env: Env = process.env): Config {
     timeZone,
     cookieSecure: mock ? false : opt("COOKIE_SECURE", "true") !== "false",
     trustedIpHeader: opt("TRUSTED_IP_HEADER", ""),
-    publicOrigins: parsePublicOrigins(opt("PUBLIC_ORIGIN", "")),
+    publicOrigins,
     mapSpoilers: ["1", "true", "yes", "on"].includes(opt("MAP_SPOILERS", "false").toLowerCase()),
     mockBridge: opt("MOCK_BRIDGE", "on").toLowerCase(),
     mockCompat: opt("MOCK_COMPAT", "ok").toLowerCase(),
     discordWebhookUrl,
     discordNotify,
+    pushContact,
     metricsBind: opt("METRICS_BIND", "").trim(),
     updateCheck: !["off", "false", "0", "no"].includes(opt("SKALD_UPDATE_CHECK", "on").trim().toLowerCase()),
   };

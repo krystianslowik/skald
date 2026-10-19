@@ -49,12 +49,13 @@
 | `PROM_NAMESPACE` | `$POD_NAMESPACE`, else `valheim` | Namespace label in the cAdvisor queries |
 | `PROM_CONTAINER` | `valheim` | Container label of the game server |
 | `PROM_POD_REGEX` | `valheim-[a-z0-9]+-[a-z0-9]+` | Pod regex for the network series (anchored by PromQL) |
-| `DB_PATH` | `/data/skald.db` | SQLite file for the event history |
+| `DB_PATH` | `/data/skald.db` | SQLite file for the event history, the panel's Discord webhook and the phone notification keys and devices |
 | `BIND` | `0.0.0.0:8080` | Listen address |
 | `METRICS_BIND` | (empty = off) | Prometheus listener, e.g. `0.0.0.0:9465`, serving `GET /metrics` with `skald_build_info`. No session, like the agent's `METRICS_ADDR`: restrict it with a NetworkPolicy or firewall. The panel port never serves `/metrics` |
 | `WEB_ROOT` | `../web/dist` | Built SPA, relative to the working directory |
 | `DISCORD_WEBHOOK_URL` | (empty) | A Discord channel webhook for notifications. Optional: an admin can set the webhook in the admin sheet instead. Set, it wins over the panel, which then shows it read-only. A secret: it is never logged or sent to the browser. See [Discord notifications](#discord-notifications) |
 | `DISCORD_NOTIFY` | all | Which notifications `DISCORD_WEBHOOK_URL` sends, comma-separated: `join`, `leave`, `death`, `raid`, `server`, `join_code`, `version`, `compat`, `failure`. Without `DISCORD_WEBHOOK_URL` it is only the panel's starting choice. An unknown name stops skald-web at startup |
+| `PUSH_CONTACT` | the first `https://` `PUBLIC_ORIGIN`, else the Skald project page | Who the push services (Google, Apple, Mozilla, Microsoft) can contact about this panel's [phone notifications](#phone-notifications): a `mailto:` address or an `https://` URL. Anything else stops skald-web at startup |
 | `MAP_SPOILERS` | `false` | `true` shows every boss altar, trader and dungeon of the seed on the world map. Off, only places someone has been to are sent to the browser |
 | `MOCK_AGENT` | (unset) | `1` runs against a built-in fake server (development, `bun run dev` from a source checkout; release images have no mock and exit at startup). It also turns `COOKIE_SECURE` off and keeps the history in memory unless `DB_PATH` is set |
 | `MOCK_BRIDGE` | `on` | With `MOCK_AGENT=1`: the fake bridge's state, `on`, `off`, `untested` or `disabled` |
@@ -198,6 +199,51 @@ NetworkPolicy allows no internet egress; uncomment its internet rule.
 
 A kind list saved in the panel before `compat` existed does not include it:
 tick it in the admin sheet to get the compatibility summaries.
+
+## Phone notifications
+
+Every signed-in viewer can turn on notifications for their own device under
+Settings, Notifications (the bell in the header on a desktop). They are opt-in
+per device and per kind of news:
+
+| Choice | When |
+|---|---|
+| A friend joins | A player joins; optionally only the first one while the fire was empty. Friends arriving within 15 minutes add to one notification ("Ragnar, Freya, and Bjorn arrive at the fire") |
+| The server is back up | The server runs again after a stop, with the join code; a new join code on its own too |
+| A boss is defeated | A boss turns defeated in the save (seen at the next world save) |
+| A raid starts | A raid starts |
+| Someone falls | A player dies |
+| A backup or restart fails | A backup, restart, update check or settings apply failed |
+| The game is updated | A new game build, and Skald's compatibility check of it |
+
+Each device also has quiet hours, read in its own time zone: what happens then
+is not sent, not even later. A device gets at most 12 notifications in 10
+minutes. Notifications speak the language the panel is in on that device. A
+tap opens the panel where the news is.
+
+It is standard Web Push, no third-party service: skald-web makes a VAPID key
+pair on its first start and keeps it, with each device's subscription and
+choice, in its database (`DB_PATH`). Keep that file in your backups: without
+the key every device has to turn notifications on again. The file then holds
+the VAPID private key and every device's push address, so treat its backups
+as secret, like the Discord webhook: whoever has them can send notifications
+in the panel's name to those devices. Notifications follow the sign-in:
+signing out turns them off for every device that sign-in turned them on for,
+and a new `PANEL_PASSWORD_HASH` or `SESSION_SECRET` turns them off on every
+device at the next start, so changing either also shuts out the phones of
+whoever had the old one. One sign-in can turn notifications on for at most 5
+devices, a panel keeps at most 100, and turning on and test notifications are
+limited to 20 a minute per client address. A device whose browser dropped the
+subscription is forgotten at the next notification. skald-web needs outbound
+HTTPS to the push services (`fcm.googleapis.com`, `*.push.apple.com`,
+`updates.push.services.mozilla.com`, `*.notify.windows.com`); it posts only to
+those hosts. On Kubernetes, the example NetworkPolicy's internet rule (see
+Discord above) covers them.
+
+On iPhone and iPad (iOS 16.4 or later) notifications only reach the panel
+added to the Home Screen: open the panel in Safari, tap Share, then Add to
+Home Screen, and turn notifications on from the panel opened there. The panel
+must be served over HTTPS for any browser to offer push.
 
 ## Compatibility check
 

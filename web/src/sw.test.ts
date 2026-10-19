@@ -17,7 +17,7 @@ interface Env {
 }
 
 /** One worker; pass the same `stores` to two workers to share the browser's Cache Storage. */
-function boot(network: (url: string) => Response | Promise<Response>, source = SOURCE, stores: Stores = new Map(), env: Env = {}) {
+function boot(network: (url: string, init?: RequestInit) => Response | Promise<Response>, source = SOURCE, stores: Stores = new Map(), env: Env = {}) {
   const open = async (name: string) => {
     if (env.noStorage) throw new DOMException("no storage", "SecurityError");
     let s = stores.get(name);
@@ -52,15 +52,41 @@ function boot(network: (url: string) => Response | Promise<Response>, source = S
     },
   };
   const handlers: Record<string, Handler> = {};
+  /** What the worker showed, opened and focused. */
+  const shown: { title: string; options: NotificationOptions & { renotify?: boolean } }[] = [];
+  const opened: string[] = [];
+  const windows: { url: string; focused: boolean; navigated: string | null; focus(): Promise<unknown>; navigate(u: string): Promise<unknown> }[] = [];
   const self = {
     location: { origin: ORIGIN },
     navigator: env.quota ? { storage: { estimate: async () => ({ quota: env.quota }) } } : undefined,
     addEventListener: (type: string, fn: Handler) => void (handlers[type] = fn),
     skipWaiting: async () => undefined,
-    clients: { claim: async () => undefined },
+    clients: {
+      claim: async () => undefined,
+      matchAll: async () => windows,
+      openWindow: async (url: string) => void opened.push(url),
+    },
+    registration: { showNotification: async (title: string, options: NotificationOptions) => void shown.push({ title, options }) },
   };
-  const fetch = async (r: Request | string) => {
-    if (typeof r === "string") return network(r);
+  const openWindowAt = (url: string) => {
+    const w = {
+      url,
+      focused: false,
+      navigated: null as string | null,
+      focus: async () => ((w.focused = true), w),
+      navigate: async (u: string) => ((w.navigated = u), w),
+    };
+    windows.push(w);
+    return w;
+  };
+  /** Fires an event with extra fields and waits for what the worker extended it with. */
+  const dispatch = async (type: string, fields: Record<string, unknown>) => {
+    let wait: Promise<unknown> = Promise.resolve();
+    handlers[type]!({ ...fields, waitUntil: (p) => void (wait = p) } as Parameters<Handler>[0]);
+    await wait;
+  };
+  const fetch = async (r: Request | string, init?: RequestInit) => {
+    if (typeof r === "string") return network(r, init);
     const u = new URL(r.url);
     return network(u.pathname + u.search);
   };
@@ -87,7 +113,7 @@ function boot(network: (url: string) => Response | Promise<Response>, source = S
     handlers.fetch!({ request: new Request(ORIGIN + path, init), waitUntil: () => undefined, respondWith: () => void (answered = true) });
     return answered;
   };
-  return { stores, run, get, answers };
+  return { stores, run, get, answers, dispatch, shown, opened, openWindowAt };
 }
 
 const html = () => new Response("<!doctype html><title>Skald</title>", { headers: { "Content-Type": "text/html; charset=utf-8" } });
@@ -296,5 +322,74 @@ describe("stampServiceWorker", () => {
     expect(a).not.toBe(b);
     expect(buildId(["x", "y"])).toBe(buildId(["y", "x"]));
     expect(() => stampServiceWorker("const VERSION = 'v1';", [])).toThrow();
+  });
+});
+
+describe("service worker push", () => {
+  const push = (payload: unknown) => ({ data: { json: () => (typeof payload === "string" ? JSON.parse(payload) : payload), text: () => String(payload) } });
+
+  it("shows every push, tagged per kind, and keeps where a tap goes", async () => {
+    const sw = boot(() => html());
+    await sw.dispatch("push", push({ title: "At the fire", body: "Ragnar arrives at the fire", tag: "join", url: "/#saga" }));
+    expect(sw.shown).toEqual([
+      { title: "At the fire", options: { body: "Ragnar arrives at the fire", tag: "skald-join", renotify: true, icon: "/icon-192.png", badge: "/icon-192.png", data: { url: "/#saga" } } },
+    ]);
+  });
+
+  it("still shows something for a push it cannot read, and never sends a tap off the panel", async () => {
+    const sw = boot(() => html());
+    await sw.dispatch("push", { data: { json: () => JSON.parse("not json"), text: () => "plain words" } });
+    await sw.dispatch("push", push({ title: "", body: 5, url: "//evil.example/x" }));
+    await sw.dispatch("push", push({ url: "https://evil.example/" }));
+    await sw.dispatch("push", push({ url: "/\\evil.example/x" }));
+    expect(sw.shown.map((n) => [n.title, n.options.body, n.options.tag, (n.options.data as { url: string }).url])).toEqual([
+      ["Skald", "plain words", undefined, "/"],
+      ["Skald", "", undefined, "/"],
+      ["Skald", "", undefined, "/"],
+      ["Skald", "", undefined, "/"],
+    ]);
+  });
+
+  it("on a renewed subscription with the same endpoint, saves the new keys and deletes nothing", async () => {
+    const calls: { method: string; url: string; body: unknown }[] = [];
+    const sw = boot((url, init = {}) => {
+      calls.push({ method: init.method ?? "GET", url, body: JSON.parse(init.body as string) });
+      return Response.json({ ok: true, prefs: { kinds: ["raid"] } });
+    });
+    const sub = (keys: string) => ({ endpoint: "https://fcm.googleapis.com/fcm/send/x", options: {}, toJSON: () => ({ endpoint: "https://fcm.googleapis.com/fcm/send/x", keys: { p256dh: keys, auth: "a" } }) });
+    await sw.dispatch("pushsubscriptionchange", { oldSubscription: sub("old"), newSubscription: sub("new") });
+    expect(calls.map((c) => c.method)).toEqual(["POST", "PUT"]);
+    expect((calls[1]!.body as { subscription: { keys: { p256dh: string } } }).subscription.keys.p256dh).toBe("new");
+  });
+
+  it("keeps the old endpoint when saving the renewed one fails", async () => {
+    const calls: string[] = [];
+    const sw = boot((url, init = {}) => {
+      calls.push(init.method ?? "GET");
+      if (init.method === "PUT") return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
+      return Response.json({ ok: true, prefs: { kinds: ["raid"] } });
+    });
+    const sub = (endpoint: string) => ({ endpoint, options: {}, toJSON: () => ({ endpoint, keys: { p256dh: "p", auth: "a" } }) });
+    await sw.dispatch("pushsubscriptionchange", { oldSubscription: sub("https://fcm.googleapis.com/fcm/send/old"), newSubscription: sub("https://fcm.googleapis.com/fcm/send/new") });
+    expect(calls).toEqual(["POST", "PUT"]);
+  });
+
+  it("on a tap, focuses an open panel and moves it to the news, else opens one", async () => {
+    const sw = boot(() => html());
+    let closed = 0;
+    const tap = (url: string) => ({ notification: { data: { url }, close: () => void closed++ } });
+    await sw.dispatch("notificationclick", tap("/#saga"));
+    expect(sw.opened).toEqual([`${ORIGIN}/#saga`]);
+    const win = sw.openWindowAt(`${ORIGIN}/`);
+    await sw.dispatch("notificationclick", tap("/#settings"));
+    expect(win.focused).toBe(true);
+    expect(win.navigated).toBe(`${ORIGIN}/#settings`);
+    expect(sw.opened).toHaveLength(1);
+    expect(closed).toBe(2);
+    // A tag forged into the stored data still never leaves the panel.
+    win.url = `${ORIGIN}/#saga`;
+    await sw.dispatch("notificationclick", tap("/\\evil.example/x"));
+    expect(win.navigated).toBe(`${ORIGIN}/`);
+    expect(sw.opened.every((u) => u.startsWith(`${ORIGIN}/`))).toBe(true);
   });
 });
