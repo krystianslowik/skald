@@ -36,7 +36,8 @@ const EXPLAINED_MS = 10 * 60 * 1000;
  * are not news; join codes are never part of it.
  */
 export function summarize(events: AgentEvent[], since: number, now: number, live = true): Omit<ApiCatchup, "clamped" | "bosses" | "world"> {
-  const newest = Date.parse(events.at(-1)?.ts ?? "");
+  // Agent events only: a panel-made line (a finished task) is stamped with the panel's clock and would carry `until` past a backlog still being replayed.
+  const newest = Date.parse(events.findLast((e) => e.type !== "task")?.ts ?? "");
   // Just short of the newest event: a twin with the same time stored a moment later falls in the next window too.
   const until = live ? now : Math.max(since, Math.min(now, Number.isFinite(newest) ? newest - 1 : since));
   const upTo = (t: number) => {

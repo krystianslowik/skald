@@ -64,6 +64,12 @@ describe("summarize", () => {
     expect(s.players).toEqual([{ name: "Freya", playtimeMs: 150 * MIN, sessions: 0, deaths: 0, online: true }]);
   });
 
+  it("ignores panel-made task lines when it stops short of the newest event", () => {
+    const events = [ev(10, "player_join", { name: "Freya" }), ev(100, "task", { title: "Forge", owner: "Freya" })];
+    const s = summarize(events, T0, T0 + 120 * MIN, false);
+    expect(s.until).toBe(new Date(T0 + 10 * MIN - 1).toISOString());
+  });
+
   it("stops short of the newest stored event while the stream is down or catching up", () => {
     const events = [ev(0, "player_join", { name: "Freya" }), ev(0, "player_count", { count: 1 }), ev(90, "death", { name: "Freya" }), ev(100, "raid", { name: "army_eikthyr" })];
     const s = summarize(events, T0 + 50 * MIN, T0 + 200 * MIN, false);
