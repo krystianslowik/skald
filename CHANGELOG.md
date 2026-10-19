@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.22] - 2026-10-19
+
 ### Added
 
 - Phone notifications: under Settings, Notifications (the bell in the desktop header), each device can turn on push notifications for a friend joining (optionally only the first of the evening), the server coming back up with its join code, a boss defeated, a raid, a death, a failed backup or restart, and a game update, with quiet hours of its own. Notifications come in the language the panel is in and open the panel on a tap. On iPhone and iPad, add the panel to the Home Screen first (iOS 16.4 or later). Signing out turns them off on that device, and changing the panel password or `SESSION_SECRET` turns them off on every device.
