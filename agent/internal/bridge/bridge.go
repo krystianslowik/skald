@@ -537,12 +537,37 @@ func (c *Client) Players(ctx context.Context) ([]Player, error) {
 	for _, id := range inUse {
 		reserved[id] = true
 	}
+	// Peers of one tracker player (a reconnect the server still holds)
+	// are one entry: the one with a character, else the newer (later
+	// listed).
+	pick := map[string]int{}
 	for i := range out {
-		if id := ids[peers[i].UID]; id != "" && !taken[id] {
-			out[i].ID = id
-			taken[id] = true
+		id := ids[peers[i].UID]
+		if id == "" {
+			continue
+		}
+		if j, ok := pick[id]; !ok || out[i].HasCharacter || !out[j].HasCharacter {
+			pick[id] = i
 		}
 	}
+	drop := map[int]bool{}
+	for i := range out {
+		if id := ids[peers[i].UID]; id != "" {
+			if pick[id] == i {
+				out[i].ID = id
+				taken[id] = true
+			} else {
+				drop[i] = true
+			}
+		}
+	}
+	kept := out[:0]
+	for i := range out {
+		if !drop[i] {
+			kept = append(kept, out[i])
+		}
+	}
+	out = kept
 	for i := range out {
 		if out[i].ID != "" {
 			continue

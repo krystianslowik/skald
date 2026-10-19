@@ -682,3 +682,25 @@ func TestPlayersSharingANameGetIDs(t *testing.T) {
 		t.Fatalf("players = %v, want %v", got, want)
 	}
 }
+
+// Two peers of one tracker player (a reconnect the server still holds) are
+// one entry: the one with a character, else the newer.
+func TestPeersOfOnePlayerAreOneEntry(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"ok":true,"data":{"time":1,"players":[
+			{"uid":200,"name":"Ragnar","platformId":"Xbox_2533274800000001","hasCharacter":false},
+			{"uid":300,"name":"Ragnar","platformId":"Xbox_2533274800000001","hasCharacter":true,"position":{"x":5,"y":0,"z":6}}]}}`)
+	}))
+	t.Cleanup(srv.Close)
+	c := New(Options{URL: srv.URL, Token: testToken, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		OnPlayers: func(time.Time, []Peer) (map[string]string, []string) {
+			return map[string]string{"200": "Ragnar", "300": "Ragnar"}, []string{"Ragnar"}
+		}})
+	players, err := c.Players(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(players) != 1 || players[0].ID != "Ragnar" || !players[0].HasCharacter || players[0].X != 5 {
+		t.Fatalf("players = %+v", players)
+	}
+}

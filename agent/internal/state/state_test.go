@@ -854,6 +854,58 @@ func TestPeerUnderAnotherNameIsNotAnOrphan(t *testing.T) {
 	}
 }
 
+// A player's account is remembered from earlier reads: its own peer
+// reporting none for once (dead, respawning) does not make it keep the
+// reconnect the log attached to it by mistake.
+func TestAccountRememberedWhenAPeerReportsNone(t *testing.T) {
+	h := events.New(100, 100)
+	tr := New(h)
+	tr.SetStatus("running")
+	feed(t, tr, `Got character ZDOID from Ragnar : 100:1`, `Got character ZDOID from Ragnar : 200:1`)
+	tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "xbox", "A"}, {"200", "Ragnar", "steam", "B"}})
+	feed(t, tr, "+1m", `Got character ZDOID from Ragnar : 300:1`)
+	tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "xbox", ""}, {"300", "Ragnar", "steam", "B"}})
+	if got, want := byID(tr), map[string]string{"Ragnar": "Ragnar/xbox", "Ragnar#2": "Ragnar/steam"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("players = %v, want %v", got, want)
+	}
+	if want := []string{"+Ragnar=Ragnar", "+Ragnar=Ragnar#2"}; !reflect.DeepEqual(joinsLeaves(h), want) {
+		t.Errorf("sequence = %v, want %v", joinsLeaves(h), want)
+	}
+}
+
+// A peer a read missed and the log brings back is not expired any more:
+// its leave lowers the count once.
+func TestPeerBackAfterExpiryLowersTheCountOnce(t *testing.T) {
+	tr := New(events.New(100, 100))
+	tr.SetStatus("running")
+	feed(t, tr,
+		`Got character ZDOID from Ragnar : 100:1`,
+		`Got character ZDOID from Freya : 400:1`,
+		// Three with a client still loading.
+		`Player joined server "Midgard" that has join code 482915, now 3 player(s)`,
+	)
+	tr.SetPeers(after(tr), []Peer{{"400", "Freya", "steam", "F"}})
+	feed(t, tr, "+1m",
+		`Got character ZDOID from Ragnar : 100:2`,
+		`Destroying abandoned non persistent zdo 100:2 owner 100`,
+	)
+	if s := tr.Snapshot(); s.PlayersReported != 2 {
+		t.Fatalf("reported = %d, want 2", s.PlayersReported)
+	}
+}
+
+// A player listed without a peer (from a death line) is no id the bridge
+// must avoid: the plugin's peer for that character gets it.
+func TestPeerlessPlayerIDIsNotInUse(t *testing.T) {
+	tr := New(events.New(100, 100))
+	tr.SetStatus("running")
+	feed(t, tr, `Got character ZDOID from Freya : 0:0`, `Got character ZDOID from Ragnar : 100:1`)
+	_, inUse := tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "xbox", "A"}, {"400", "Freya", "steam", "F"}})
+	if want := []string{"Ragnar"}; !reflect.DeepEqual(inUse, want) {
+		t.Fatalf("in use = %v, want %v", inUse, want)
+	}
+}
+
 // SetPeers hands back the id of each listed peer the tracker knows.
 func TestSetPeersReturnsIDs(t *testing.T) {
 	tr := New(events.New(100, 100))
