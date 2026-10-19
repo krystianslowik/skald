@@ -95,6 +95,16 @@ describe("notificationsFor", () => {
     expect(notificationsFor([join("Ragnar")], prefs(), ctx, mem, T0 + 200_000, 60_000)[0]!.body).toBe("Ragnar arrives at the fire");
   });
 
+  it("closes the group a fixed time after its first notification, and a first join starts a new one", () => {
+    const mem = { sent: [] };
+    notificationsFor([join("Ragnar", true)], prefs(), ctx, mem, T0, 60_000);
+    notificationsFor([join("Freya")], prefs(), ctx, mem, T0 + 50_000, 60_000);
+    // 70 s after the group's first notification: a new group, though the last one was 20 s ago.
+    expect(notificationsFor([join("Bjorn")], prefs(), ctx, mem, T0 + 70_000, 60_000)[0]!.body).toBe("Bjorn arrives at the fire");
+    // The fire went out and someone lit it again: whoever came before has left.
+    expect(notificationsFor([join("Astrid", true)], prefs(), ctx, mem, T0 + 80_000, 60_000)[0]!.body).toBe("Astrid arrives at the fire");
+  });
+
   it("with firstJoinOnly, tells only of the join that lit the fire", () => {
     const mem = { sent: [] };
     expect(notificationsFor([join("Freya")], prefs({ firstJoinOnly: true }), ctx, mem, T0, 60_000)).toEqual([]);
@@ -229,6 +239,38 @@ describe("PushService", () => {
     expect(push.wants("raid")).toBe(false);
   });
 
+  it("forgets every device when the panel password changed", async () => {
+    const store = new PushStore(":memory:");
+    stores.push(store);
+    const first = new PushService({ store, contact: "mailto:jarl@example.com", log: silentLog, resetKey: "a" });
+    await first.init();
+    const ua = await newBrowserKeys();
+    await first.subscribe({ endpoint: `${FCM}1`, keys: ua.keys }, prefs());
+    const same = new PushService({ store, contact: "mailto:jarl@example.com", log: silentLog, resetKey: "a" });
+    await same.init();
+    expect(store.count()).toBe(1);
+    const changed = new PushService({ store, contact: "mailto:jarl@example.com", log: silentLog, resetKey: "b" });
+    await changed.init();
+    expect(store.count()).toBe(0);
+    expect(changed.wants("join")).toBe(false);
+    expect(changed.publicKey).toBe(first.publicKey);
+  });
+
+  it("logs a failure in the background instead of rejecting", async () => {
+    const net = fakePushService(() => 400);
+    const { push, store } = await service(net.fetchImpl);
+    await subscribe(push, 1);
+    // The database goes away under a delivery: the error must not escape as an unhandled rejection.
+    const setFails = store.setFails.bind(store);
+    store.setFails = () => {
+      throw new Error("database is locked");
+    };
+    push.batch([{ kind: "raid", raid: "wolves" }], { joinCode: "" });
+    await push.idle();
+    store.setFails = setFails;
+    expect(net.calls).toHaveLength(1);
+  });
+
   it("drops what goes past the rate limit", async () => {
     const net = fakePushService();
     const { push } = await service(net.fetchImpl, { rateMax: 2 });
@@ -341,6 +383,15 @@ describe("the notifier's sinks", () => {
     await w.n.idle();
     expect(w.discord).toEqual([]);
     expect(w.batches).toEqual([[{ kind: "join", name: "Bjorn", first: true }]]);
+  });
+
+  it("count a join as the first again once a state shows nobody online, though the leave was lost", async () => {
+    const w = wired();
+    w.n.handle(state((s) => (s.players = [{ name: "Ragnar", since: new Date(T0 - 60_000).toISOString() }])));
+    w.n.handle(state((s) => (s.players = [])));
+    w.n.handle(live(ev(1, "player_join", { name: "Freya" })));
+    await Bun.sleep(60);
+    expect(w.batches).toEqual([[{ kind: "join", name: "Freya", first: true }]]);
   });
 
   it("are not woken for kinds no device wants", async () => {

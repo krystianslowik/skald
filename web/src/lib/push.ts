@@ -173,12 +173,17 @@ export async function sendTestPush(): Promise<TestResult> {
   return { ok: false, retryAfter: res.status === 429 ? Number(res.headers.get("Retry-After")) || 10 : undefined };
 }
 
-/** On sign-out: this device stops getting push. Never throws; signing out goes on regardless. */
-export async function dropPushOnLogout(): Promise<void> {
+/**
+ * After a sign-out the server ended: the browser drops its subscription, so
+ * the push service answers the next notification with "gone" and the server
+ * forgets the device. Never throws.
+ */
+export async function dropPushAfterLogout(): Promise<void> {
   if (!pushRemembered()) return;
+  remember(false);
   try {
-    await disablePush();
+    await (await subscription())?.unsubscribe();
   } catch {
-    // signed out anyway
+    // forgotten by the server at the latest after its 404/410
   }
 }

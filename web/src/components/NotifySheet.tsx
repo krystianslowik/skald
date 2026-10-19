@@ -67,24 +67,33 @@ export default function NotifySheet({ onClose }: { onClose: () => void }) {
     }
   };
 
-  /** Saves a change; puts the old choice back if the server did not take it. */
-  const change = async (next: PushPrefs) => {
+  // Saves go one at a time and only the newest choice is sent, so the server
+  // never ends on an older one; a failure shows what the server kept.
+  const latest = useRef<PushPrefs | null>(null);
+  const saving = useRef<Promise<void>>(Promise.resolve());
+  const change = (next: PushPrefs) => {
     if (!prefs) return;
-    const before = prefs;
     setPrefs(next);
     setNote(null);
-    try {
-      if (!(await savePrefs({ ...next, locale }))) throw new Error("not saved");
-    } catch (e) {
-      if (live.current) setPrefs(before);
-      fail(e);
-    }
+    latest.current = { ...next, locale };
+    saving.current = saving.current.then(async () => {
+      const want = latest.current;
+      if (!want) return;
+      latest.current = null;
+      try {
+        if (!(await savePrefs(want))) throw new Error("not saved");
+      } catch (e) {
+        fail(e);
+        const kept = await loadDevice().catch(() => undefined);
+        if (live.current && kept !== undefined && latest.current === null) setPrefs(kept);
+      }
+    });
   };
 
   const toggleKind = (k: PushKind) => {
     if (!prefs) return;
     const on = prefs.kinds.includes(k);
-    void change({ ...prefs, kinds: on ? prefs.kinds.filter((x) => x !== k) : PUSH_KINDS.filter((x) => x === k || prefs.kinds.includes(x)) });
+    change({ ...prefs, kinds: on ? prefs.kinds.filter((x) => x !== k) : PUSH_KINDS.filter((x) => x === k || prefs.kinds.includes(x)) });
   };
 
   const test = async () => {
@@ -143,7 +152,7 @@ export default function NotifySheet({ onClose }: { onClose: () => void }) {
                       {k === "join" && prefs.kinds.includes("join") && (
                         <div className="pl-5">
                           <Row label={t("push.firstJoin")} hint={t("push.firstJoin.hint")}>
-                            <Switch on={prefs.firstJoinOnly} toggle={() => void change({ ...prefs, firstJoinOnly: !prefs.firstJoinOnly })} label={t("push.firstJoin")} title={t("push.firstJoin")} />
+                            <Switch on={prefs.firstJoinOnly} toggle={() => change({ ...prefs, firstJoinOnly: !prefs.firstJoinOnly })} label={t("push.firstJoin")} title={t("push.firstJoin")} />
                           </Row>
                         </div>
                       )}
@@ -155,7 +164,7 @@ export default function NotifySheet({ onClose }: { onClose: () => void }) {
                     {t("push.quiet")}
                   </h3>
                   <Row label={t("push.quiet")} hint={t("push.quiet.hint")}>
-                    <Switch on={!!quiet} toggle={() => void change({ ...prefs, quiet: quiet ? null : DEFAULT_QUIET })} label={t("push.quiet")} title={t("push.quiet")} />
+                    <Switch on={!!quiet} toggle={() => change({ ...prefs, quiet: quiet ? null : DEFAULT_QUIET })} label={t("push.quiet")} title={t("push.quiet")} />
                   </Row>
                   {quiet && (
                     <div className="flex items-end gap-4 py-3">
@@ -168,7 +177,7 @@ export default function NotifySheet({ onClose }: { onClose: () => void }) {
                             value={quiet[end]}
                             onChange={(e) => {
                               const v = e.target.value.slice(0, 5);
-                              if (/^\d\d:\d\d$/.test(v)) void change({ ...prefs, quiet: { ...quiet, [end]: v } });
+                              if (/^\d\d:\d\d$/.test(v)) change({ ...prefs, quiet: { ...quiet, [end]: v } });
                             }}
                             className="field mt-1.5 w-full px-3 py-2 text-base text-bone coarse:min-h-11"
                           />

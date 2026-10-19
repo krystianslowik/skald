@@ -222,7 +222,7 @@ function escapeMd(s: string): string {
 }
 
 // Valheim reports its build as "l-1.0.17".
-function gameVersion(v: string): string {
+export function gameVersion(v: string): string {
   return v.replace(/^[a-z]-/, "");
 }
 
@@ -427,6 +427,8 @@ export class DiscordNotifier {
     try {
       if (m.type === "state") {
         this.seed(m.state, m.online);
+        // A leave lost in a long reconnect must not keep a player at the fire for good.
+        if (m.online && m.state.players.length === 0) this.joinedAt.clear();
         this.bosses(m.state, m.online);
       }
       else if (m.type === "event") this.event(m.event);

@@ -13,7 +13,7 @@ import { AdminGlyph } from "./admin/glyphs";
 import { preload } from "../lib/chunks";
 import type { LogoutResult } from "../lib/api";
 import type { WorldClock as Clock } from "../types";
-import { dropPushOnLogout } from "../lib/push";
+import { dropPushAfterLogout } from "../lib/push";
 import { NotifyButton } from "./Notifications";
 
 /**
@@ -30,9 +30,9 @@ export function useLogout(onLogout: () => Promise<LogoutResult>) {
     busyRef.current = true;
     setBusy(true);
     try {
-      // While the session still lets it tell the server: a signed-out device gets no more news.
-      await dropPushOnLogout();
       const r = await onLogout();
+      // A signed-out device gets no more news; a failed sign-out keeps it.
+      if (r === "ok") void dropPushAfterLogout();
       if (r !== "ok") {
         const reason = r === "refused" ? t("login.refused") : r === "offline" ? t("logout.offline") : t("logout.failed");
         toast?.(false, t("logout.notDone", { reason }));

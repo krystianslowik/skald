@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { HttpAgent, type AgentSource } from "./agent";
 import { createApp, panelOriginPolicy } from "./app";
 import { upgradeLive } from "./auth";
@@ -80,7 +81,12 @@ const notifier = new DiscordNotifier({ url: "", kinds: cfg.discordNotify, locale
 hub.subscribe((m) => notifier.handle(m));
 const notify = new NotifySettings({ notifier, store, envUrl: cfg.discordWebhookUrl, envKinds: cfg.discordNotify });
 // Phone push takes the same news. VAPID keys are made on the first start and kept in DB_PATH.
-const push = new PushService({ store: new PushStore(cfg.dbPath), contact: cfg.pushContact, allowLocal: cfg.mock });
+const push = new PushService({
+  store: new PushStore(store.connection),
+  contact: cfg.pushContact,
+  allowLocal: cfg.mock,
+  resetKey: createHash("sha256").update(`skald-push|${passwordHash}`).digest("hex"),
+});
 await push.init();
 notifier.addSink(push);
 hub.start();

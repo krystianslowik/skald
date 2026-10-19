@@ -4,7 +4,7 @@
 import { Database } from "bun:sqlite";
 import { Hono, type Context } from "hono";
 import { cause, log as defaultLog, type Logger } from "./log";
-import { fill, RAIDS, type Item, type ItemKind, type NotifySink } from "./notify";
+import { fill, gameVersion, RAIDS, type Item, type ItemKind, type NotifySink } from "./notify";
 import { PUSH_DEFAULT_KINDS, PUSH_KINDS, QUIET_TIME, type PushInfo, type PushKind, type PushPayload, type PushPrefs, type PushSubscriptionInput } from "./pushtypes";
 import type { Locale } from "./types";
 import { buildPushRequest, checkKeys, generateVapidKeys, loadVapidKeys, type VapidKeys } from "./webpush";
@@ -159,6 +159,7 @@ const STRINGS = {
 
 type Key = keyof (typeof STRINGS)["en"];
 
+/** As the panel names them (web/src/i18n, `boss.*`). */
 const BOSSES: Record<Locale, Record<string, string>> = {
   en: {
     defeated_eikthyr: "Eikthyr",
@@ -175,18 +176,17 @@ const BOSSES: Record<Locale, Record<string, string>> = {
     defeated_eikthyr: "Eikthyr",
     defeated_gdking: "Starzec",
     defeated_bonemass: "Kościoszlam",
-    defeated_dragon: "Moder",
+    defeated_dragon: "Modera",
     defeated_goblinking: "Yagluth",
     defeated_queen: "Królowa",
-    defeated_frozenking: "Kall Fimbulbringer",
-    defeated_frozenking_p3: "Kall Fimbulbringer",
+    defeated_frozenking: "Kall Zwiastun Mrozu",
+    defeated_frozenking_p3: "Kall Zwiastun Mrozu",
     defeated_fader: "Fader",
   },
 };
 
 const BODY_MAX = 300;
 const clip = (s: string) => (s.length > BODY_MAX ? `${s.slice(0, BODY_MAX - 1)}…` : s);
-const gameVersion = (v: string) => v.replace(/^[a-z]-/, "");
 
 /** Names as one list; past three, the first two and how many more. */
 function nameList(names: readonly string[], locale: Locale): string {
@@ -218,17 +218,20 @@ export function notificationsFor(items: readonly Item[], prefs: PushPrefs, ctx: 
     return true;
   });
   const out: PushPayload[] = [];
-  const names = (kind: "join" | "death", list: string[]) => {
+  // The window runs from the first notification of a group, so it closes even on a busy evening.
+  const names = (kind: "join" | "death", list: string[], fresh = false) => {
     const last = mem[kind];
-    const merged = last && now - last.at < collapseMs ? [...new Set([...last.names, ...list])] : [...new Set(list)];
-    mem[kind] = { names: merged, at: now };
+    const open = !fresh && last && now - last.at < collapseMs;
+    const merged = open ? [...new Set([...last.names, ...list])] : [...new Set(list)];
+    mem[kind] = { names: merged, at: open ? last.at : now };
     return merged;
   };
 
   let joins = mine.filter((it): it is Extract<Item, { kind: "join" }> => it.kind === "join");
   if (prefs.firstJoinOnly && !joins.some((j) => j.first)) joins = [];
   if (joins.length > 0) {
-    const all = names("join", joins.map((j) => j.name));
+    // Someone lighting an empty fire starts a new group: whoever came before has left.
+    const all = names("join", joins.map((j) => j.name), joins.some((j) => j.first));
     out.push({ title: s["join.title"], body: clip(fill(all.length > 1 ? s.joinMany : s.join, { names: nameList(all, prefs.locale) })), tag: "join", url: "/" });
   }
   const deaths = mine.filter((it): it is Extract<Item, { kind: "death" }> => it.kind === "death");
@@ -285,15 +288,14 @@ interface Row {
 
 /**
  * The devices and the VAPID keys, in skald-web's own database (DB_PATH),
- * through a connection of its own so the history store stays as it is.
+ * on the history store's connection.
  */
 export class PushStore {
   private db: Database;
 
-  constructor(path: string) {
-    this.db = new Database(path, { create: true });
-    this.db.exec("PRAGMA journal_mode = WAL");
-    this.db.exec("PRAGMA busy_timeout = 2000");
+  /** `db`: the history store's connection, so the file has one writer; a path opens its own (tests). */
+  constructor(db: Database | string) {
+    this.db = typeof db === "string" ? new Database(db, { create: true }) : db;
     this.db.exec("PRAGMA secure_delete = ON");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -328,7 +330,10 @@ export class PushStore {
   }
 
   get(endpoint: string): PushDevice | null {
-    return this.all().find((d) => d.endpoint === endpoint) ?? null;
+    const r = this.db.query("SELECT endpoint, p256dh, auth, prefs, fails FROM push_devices WHERE endpoint = ?").get(endpoint) as Row | null;
+    if (!r) return null;
+    const prefs = parsePrefs(safeJson(r.prefs));
+    return typeof prefs === "string" ? null : { endpoint: r.endpoint, p256dh: r.p256dh, auth: r.auth, prefs, fails: r.fails };
   }
 
   count(): number {
@@ -352,6 +357,10 @@ export class PushStore {
     return this.db.query("DELETE FROM push_devices WHERE endpoint = ?").run(endpoint).changes > 0;
   }
 
+  clear(): void {
+    this.db.exec("DELETE FROM push_devices");
+  }
+
   close(): void {
     this.db.close();
   }
@@ -368,11 +377,17 @@ function safeJson(text: string): unknown {
 // ---- delivery -----------------------------------------------------------------
 
 const META_VAPID = "push.vapid";
+const META_RESET = "push.reset";
 
 export interface PushServiceOptions {
   store: PushStore;
   /** VAPID `sub`: who push services can reach about this panel (mailto: or https:). */
   contact: string;
+  /**
+   * Changes when the panel password does: every device is forgotten then, as
+   * a new password is meant to shut out who had the old one.
+   */
+  resetKey?: string;
   fetchImpl?: typeof fetch;
   clock?: () => number;
   log?: Logger;
@@ -430,7 +445,16 @@ export class PushService implements NotifySink {
   /** Loads the VAPID keys, or makes and stores them on the first start. */
   async init(): Promise<void> {
     const store = this.opt.store;
+    if (this.opt.resetKey !== undefined) {
+      const was = store.getMeta(META_RESET);
+      if (was !== null && was !== this.opt.resetKey) {
+        store.clear();
+        this.logger.info("push: the panel password changed, every device has to turn notifications on again", { route: "push" });
+      }
+      store.setMeta(META_RESET, this.opt.resetKey);
+    }
     this.vapid = await loadVapidKeys(store.getMeta(META_VAPID));
+    this.refresh();
     if (this.vapid) return;
     this.vapid = await generateVapidKeys();
     store.setMeta(META_VAPID, JSON.stringify(this.vapid));
@@ -511,7 +535,7 @@ export class PushService implements NotifySink {
           break;
         }
         mem.sent.push(now);
-        this.track(this.send(d, n, n.tag === "server" || n.tag === "raid" ? "high" : "normal").then(() => undefined));
+        this.track(this.send(d, n, n.tag === "server" || n.tag === "raid" ? "high" : "normal"));
       }
     }
   }
@@ -521,7 +545,12 @@ export class PushService implements NotifySink {
     while (this.inflight.size > 0) await Promise.all([...this.inflight]);
   }
 
-  private track(p: Promise<void>): void {
+  /** Never rejects: a database or network error in the background is logged, not a crash. */
+  private track(work: Promise<unknown>): void {
+    const p: Promise<void> = work.then(
+      () => undefined,
+      (e) => this.logger.warn("push: delivery failed", { route: "push", cause: cause(e).replace(/https?:\/\/\S+/g, "[endpoint]") }),
+    );
     this.inflight.add(p);
     void p.finally(() => this.inflight.delete(p));
   }
@@ -537,11 +566,11 @@ export class PushService implements NotifySink {
     try {
       const { url, init } = await buildPushRequest({ endpoint: d.endpoint, keys: { p256dh: d.p256dh, auth: d.auth }, payload: JSON.stringify(payload), topic: payload.tag, urgency }, this.vapid, this.opt.contact, this.clock());
       res = await this.fetchImpl(url, { ...init, redirect: "error", signal: AbortSignal.timeout(this.o.timeoutMs) });
+      await res.body?.cancel().catch(() => undefined);
     } catch (e) {
       this.logger.warn("push: delivery failed", { route: "push", cause: cause(e).replace(/https?:\/\/\S+/g, "[endpoint]") });
       return { ok: false, error: "failed" };
     }
-    await res.body?.cancel();
     if (res.ok) {
       if (d.fails) this.opt.store.setFails(d.endpoint, 0);
       return { ok: true };

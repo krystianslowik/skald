@@ -18,6 +18,11 @@ interface Row {
 export class HistoryStore {
   private db: Database;
 
+  /** The connection, for the push store's tables in the same file (one writer). */
+  get connection(): Database {
+    return this.db;
+  }
+
   constructor(path: string) {
     this.db = new Database(path, { create: true });
     this.db.exec("PRAGMA journal_mode = WAL");

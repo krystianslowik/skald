@@ -221,7 +221,8 @@ self.addEventListener("pushsubscriptionchange", (event) => {
       const sub = event.newSubscription || (await self.registration.pushManager.subscribe(old.options));
       const json = sub.toJSON();
       await post("/api/push", { subscription: { endpoint: json.endpoint, keys: json.keys }, prefs }, "PUT");
-      await post("/api/push", { endpoint: old.endpoint }, "DELETE");
+      // Same endpoint with new keys: the PUT already replaced the row.
+      if (json.endpoint !== old.endpoint) await post("/api/push", { endpoint: old.endpoint }, "DELETE");
     })().catch(() => undefined),
   );
 });

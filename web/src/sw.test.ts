@@ -17,7 +17,7 @@ interface Env {
 }
 
 /** One worker; pass the same `stores` to two workers to share the browser's Cache Storage. */
-function boot(network: (url: string) => Response | Promise<Response>, source = SOURCE, stores: Stores = new Map(), env: Env = {}) {
+function boot(network: (url: string, init?: RequestInit) => Response | Promise<Response>, source = SOURCE, stores: Stores = new Map(), env: Env = {}) {
   const open = async (name: string) => {
     if (env.noStorage) throw new DOMException("no storage", "SecurityError");
     let s = stores.get(name);
@@ -85,8 +85,8 @@ function boot(network: (url: string) => Response | Promise<Response>, source = S
     handlers[type]!({ ...fields, waitUntil: (p) => void (wait = p) } as Parameters<Handler>[0]);
     await wait;
   };
-  const fetch = async (r: Request | string) => {
-    if (typeof r === "string") return network(r);
+  const fetch = async (r: Request | string, init?: RequestInit) => {
+    if (typeof r === "string") return network(r, init);
     const u = new URL(r.url);
     return network(u.pathname + u.search);
   };
@@ -346,6 +346,18 @@ describe("service worker push", () => {
       ["Skald", "", undefined, "/"],
       ["Skald", "", undefined, "/"],
     ]);
+  });
+
+  it("on a renewed subscription with the same endpoint, saves the new keys and deletes nothing", async () => {
+    const calls: { method: string; url: string; body: unknown }[] = [];
+    const sw = boot((url, init = {}) => {
+      calls.push({ method: init.method ?? "GET", url, body: JSON.parse(init.body as string) });
+      return Response.json({ ok: true, prefs: { kinds: ["raid"] } });
+    });
+    const sub = (keys: string) => ({ endpoint: "https://fcm.googleapis.com/fcm/send/x", options: {}, toJSON: () => ({ endpoint: "https://fcm.googleapis.com/fcm/send/x", keys: { p256dh: keys, auth: "a" } }) });
+    await sw.dispatch("pushsubscriptionchange", { oldSubscription: sub("old"), newSubscription: sub("new") });
+    expect(calls.map((c) => c.method)).toEqual(["POST", "PUT"]);
+    expect((calls[1]!.body as { subscription: { keys: { p256dh: string } } }).subscription.keys.p256dh).toBe("new");
   });
 
   it("on a tap, focuses an open panel and moves it to the news, else opens one", async () => {

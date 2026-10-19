@@ -144,6 +144,19 @@ export interface PushRequest {
   urgency?: "very-low" | "low" | "normal" | "high";
 }
 
+/** Signed tokens kept per key, push service and contact until an hour before they expire. */
+const tokens = new Map<string, { header: string; until: number }>();
+
+async function cachedAuthorization(endpoint: string, keys: VapidKeys, contact: string, nowMs: number): Promise<string> {
+  const id = `${keys.publicKey}|${new URL(endpoint).origin}|${contact}`;
+  const hit = tokens.get(id);
+  if (hit && nowMs < hit.until) return hit.header;
+  const header = await vapidAuthorization(endpoint, keys, contact, nowMs);
+  if (tokens.size > 64) tokens.clear();
+  tokens.set(id, { header, until: nowMs + (VAPID_TTL_S - 3600) * 1000 });
+  return header;
+}
+
 /** The HTTP request a push service expects for one message. */
 export async function buildPushRequest(r: PushRequest, vapid: VapidKeys, contact: string, nowMs: number): Promise<{ url: string; init: RequestInit }> {
   const body = await encryptPayload(enc.encode(r.payload), r.keys);
@@ -152,7 +165,7 @@ export async function buildPushRequest(r: PushRequest, vapid: VapidKeys, contact
     "Content-Encoding": "aes128gcm",
     TTL: String(r.ttl ?? 6 * 60 * 60),
     Urgency: r.urgency ?? "normal",
-    Authorization: await vapidAuthorization(r.endpoint, vapid, contact, nowMs),
+    Authorization: await cachedAuthorization(r.endpoint, vapid, contact, nowMs),
   };
   if (r.topic) headers.Topic = r.topic.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32);
   return { url: r.endpoint, init: { method: "POST", headers, body } };
