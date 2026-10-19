@@ -196,12 +196,14 @@ export function RestoreSection() {
   const canRead = admin.unlocked;
   // Fresh on open, and whenever the restore's own events arrive.
   const lastRestore = admin.events.find((e) => e.type === "admin" && e.data.command === "restore")?.seq ?? 0;
+  // A safe restart's backup joins the list too.
+  const safeArchive = admin.safeRestart?.archive;
   useEffect(() => {
     if (!canRead) return;
     getRestoreInfo()
       .then((r) => setInfo(r.data))
       .catch(() => undefined);
-  }, [canRead, lastRestore]);
+  }, [canRead, lastRestore, safeArchive]);
 
   const blocked = info?.reason ? t(REASON[info.reason]) : info?.running ? t("admin.restore.running") : null;
   return (

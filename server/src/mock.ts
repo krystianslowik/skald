@@ -6,6 +6,7 @@ import { mockNature, natureIn } from "./mocknature";
 import { mockPieces, piecesIn } from "./mockpieces";
 import { mockIcons, type MockIcons } from "./mockicons";
 import { mockCompat } from "./mockcompat";
+import { MockSafeRestart } from "./mocksaferestart";
 import { MOCK_TERRAIN_RADIUS, MOCK_TILE_BUILD, mockTerrain, mockTerrainTile, mockTilesDoc, packHeights } from "./mockterrain";
 import { addDays, calendar } from "./profiles";
 import { buildArgs, changedKeys, normalize, parseArgs, validateSettings } from "./settings";
@@ -246,6 +247,7 @@ export class MockAgent implements AgentSource {
   private access = { admins: ["V_76561190000000002", "X_1234500000000003"], bans: ["Steam_76561190000000005", "Xbox_2533274900000009"] };
   private skaldBackups: { name: string; sizeBytes: number; modifiedAt: string }[] = [];
   private restoring = false;
+  private readonly safe: MockSafeRestart;
 
   constructor(
     private readonly clock: () => number = Date.now,
@@ -254,7 +256,46 @@ export class MockAgent implements AgentSource {
     private readonly bridgeMode = "on",
     /** The compatibility check's outcome (MOCK_COMPAT): ok, warn, fail, pending or none. */
     private readonly compatMode = "ok",
+    /** How a safe restart goes (MOCK_RESTART): ok, or the step that fails. */
+    restartMode = "ok",
   ) {
+    this.safe = new MockSafeRestart(
+      {
+        clock: () => this.clock(),
+        players: () => this.state.players.map((p) => p.name),
+        running: () => this.state.server.status === "running",
+        leave: (name) => this.leave(name),
+        bridgeOn: () => {
+          const st = this.bridgeStatus();
+          return st.available && (st.tested || st.acknowledged);
+        },
+        broadcast: (text, actor) => void this.runBridge("broadcast", { text, type: "center" }, actor),
+        save: () => this.save(),
+        setStatus: (status) => this.setStatus(status),
+        boot: (code) => {
+          this.state.server.serverStartedAt = new Date(this.clock()).toISOString();
+          if (code) this.bootComplete(code);
+          else {
+            this.setStatus("running");
+            this.count();
+          }
+        },
+        newCode: newJoinCode,
+        lock: () => {
+          if (this.busy) return false;
+          this.busy = true;
+          return true;
+        },
+        unlock: () => {
+          this.busy = false;
+        },
+        addBackup: (b) => this.skaldBackups.unshift(b),
+        worldBytes: () => this.state.world.sizeBytes,
+        emit: (type, data) => this.emit(type, data),
+        after: (ms, fn) => void this.timers.push(setTimeout(fn, ms)),
+      },
+      restartMode,
+    );
     const now = this.clock();
     this.state = {
       now: new Date(now).toISOString(),
@@ -366,6 +407,7 @@ export class MockAgent implements AgentSource {
     }
     const icons = this.icons();
     st.icons = { available: true, build: icons.build, count: Object.keys(JSON.parse(icons.map).items).length };
+    st.safeRestart = this.safe.view();
     st.terrain = {
       enabled: true,
       available: true,
@@ -465,6 +507,7 @@ export class MockAgent implements AgentSource {
   }
 
   async action(name: ActionName): Promise<ActionResponse> {
+    if (name === "restart" && this.safe.active()) return { status: 409, body: { ok: false, message: "a safe restart is running" } };
     if (this.busy) return { status: 409, body: { ok: false, message: "another action is in progress" } };
     this.busy = true;
     const done = (ms: number, fn: () => void) => this.timers.push(setTimeout(() => {
@@ -584,6 +627,7 @@ export class MockAgent implements AgentSource {
 
   private applySettings(mode: ApplyMode): Proxied {
     if (mode === "now") {
+      if (this.safe.active()) return { status: 409, body: { ok: false, message: "a safe restart is running" } };
       if (this.busy) return { status: 409, body: { ok: false, message: "another action is in progress" } };
       this.disarm();
       this.fireApply("now");
@@ -629,7 +673,7 @@ export class MockAgent implements AgentSource {
       return;
     }
     this.emptySince ??= now;
-    if (now - this.emptySince < MOCK_EMPTY_MS || this.busy) return;
+    if (now - this.emptySince < MOCK_EMPTY_MS || this.busy || this.safe.active()) return;
     this.disarm();
     this.fireApply("when_empty");
   }
@@ -1052,6 +1096,11 @@ export class MockAgent implements AgentSource {
         return this.restore(req.body, req.actor);
       case "compat-run":
         return this.compatRun(req.actor);
+      case "safe-restart":
+        if (this.restoring || this.busy) return fail(409, "another action is in progress");
+        return this.safe.start(req.body, req.actor);
+      case "safe-restart-cancel":
+        return this.safe.cancel(req.actor);
     }
   }
 
@@ -1080,6 +1129,7 @@ export class MockAgent implements AgentSource {
     const from = body.source === "skald" ? this.skaldBackups : this.state.backups;
     if (!from.some((b) => b.name === body.backup)) return fail(400, "no such backup");
     if (this.state.players.length > 0) return fail(409, "players are online");
+    if (this.safe.active()) return fail(409, "a safe restart is running");
     if (this.busy) return fail(409, "another action is in progress");
     this.busy = true;
     this.restoring = true;
@@ -1183,7 +1233,7 @@ export class MockAgent implements AgentSource {
 
   private join(name: string): void {
     // Nobody new sits down while the server waits to empty for new settings.
-    if (this.state.server.status !== "running" || this.armedSince || this.state.players.some((p) => p.name === name)) return;
+    if (this.state.server.status !== "running" || this.armedSince || this.safe.waiting() || this.state.players.some((p) => p.name === name)) return;
     const platform = platformOf(name);
     const uid = 100_000_000 + Math.floor(Math.random() * 900_000_000);
     this.uids.set(name, uid);

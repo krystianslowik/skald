@@ -80,12 +80,12 @@ function outcome(status: number, body: AdminResult | null, fallback: string): Ad
 /** POST /api/admin/{command}; the name rides along URI-encoded (header values are bytes). */
 export const runAdmin = (command: AdminCommand, body: Record<string, unknown> = {}) => postAdmin(`/api/admin/${command}`, body);
 
-/** Any admin POST, signed with this device's name. */
-export async function postAdmin(path: string, body: Record<string, unknown> = {}): Promise<AdminOutcome> {
+/** Any admin POST (or DELETE), signed with this device's name. */
+export async function postAdmin(path: string, body: Record<string, unknown> = {}, method: "POST" | "DELETE" = "POST"): Promise<AdminOutcome> {
   let res: Response;
   try {
     res = await fetch(path, {
-      method: "POST",
+      method,
       credentials: "same-origin",
       headers: { "Content-Type": "application/json", "X-Skald-Name": encodeURIComponent(storedActorName()) },
       body: JSON.stringify(body),

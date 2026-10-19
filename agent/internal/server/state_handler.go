@@ -9,6 +9,7 @@ import (
 	"github.com/krystianslowik/skald/agent/internal/compat"
 	"github.com/krystianslowik/skald/agent/internal/files"
 	"github.com/krystianslowik/skald/agent/internal/icons"
+	"github.com/krystianslowik/skald/agent/internal/saferestart"
 	"github.com/krystianslowik/skald/agent/internal/settings"
 	"github.com/krystianslowik/skald/agent/internal/state"
 	"github.com/krystianslowik/skald/agent/internal/terrain"
@@ -34,6 +35,8 @@ type stateResponse struct {
 	// Compat is the last compatibility check with the game build; null
 	// without a checker.
 	Compat *compat.View `json:"compat"`
+	// SafeRestart is the current or last safe restart; null before the first.
+	SafeRestart *saferestart.View `json:"safeRestart"`
 }
 
 type serverState struct {
@@ -118,6 +121,8 @@ func (s *Server) stateHandler(w http.ResponseWriter, r *http.Request) {
 		Icons:    s.opt.Icons.Info(),
 		Terrain:  terrainInfo(s.opt.Terrain),
 		Compat:   s.compatView(),
+
+		SafeRestart: s.safe.View(),
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

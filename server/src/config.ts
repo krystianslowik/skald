@@ -44,6 +44,8 @@ export interface Config {
   mockBridge: string;
   /** MOCK_COMPAT: the mock's compatibility check, ok, warn, fail, pending or none. */
   mockCompat: string;
+  /** MOCK_RESTART: how the mock's safe restart goes, ok or fail-save|backup|verify|start|recover. */
+  mockRestart: string;
   /** Discord webhook for notifications; empty means off. A secret: never logged. */
   discordWebhookUrl: string;
   /** Which notifications go to Discord (DISCORD_NOTIFY); all when unset. */
@@ -168,6 +170,7 @@ export function loadConfig(env: Env = process.env): Config {
     mapSpoilers: ["1", "true", "yes", "on"].includes(opt("MAP_SPOILERS", "false").toLowerCase()),
     mockBridge: opt("MOCK_BRIDGE", "on").toLowerCase(),
     mockCompat: opt("MOCK_COMPAT", "ok").toLowerCase(),
+    mockRestart: opt("MOCK_RESTART", "ok").toLowerCase(),
     discordWebhookUrl,
     discordNotify,
     pushContact,

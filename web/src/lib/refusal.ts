@@ -79,6 +79,10 @@ const RULES: Rule[] = [
   { re: NOT_PICKED_UP, key: "admin.refusal.busy" },
   { re: /^(the bridge did not answer|command did not finish) in time$/, key: "admin.refusal.timeout" },
   { re: /^agent unreachable$/, key: "admin.refusal.agentDown" },
+  // A safe restart (agent/internal/saferestart).
+  { re: /^a safe restart is (already )?running$/, key: "admin.refusal.safeRunning" },
+  { re: /^the restart is past the point where it can be cancelled$/, key: "admin.refusal.safeTooLate" },
+  { re: /^no safe restart is running$/, key: "admin.refusal.safeNone" },
 ];
 
 /** The refusal in the panel's language, or null when the text is not a known one. */

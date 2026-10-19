@@ -71,6 +71,10 @@ func (s *Server) restorePost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
+	if s.safeRestartActive() {
+		writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": "a safe restart is running"})
+		return
+	}
 	if !s.busy.TryLock() {
 		writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "error": "another action is in progress"})
 		return

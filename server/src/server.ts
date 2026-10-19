@@ -55,7 +55,7 @@ if (cfg.mock) {
     process.exit(1);
   } else {
     const m = await import("./mock");
-    const mock = new m.MockAgent(Date.now, cfg.timeZone, cfg.mockBridge, cfg.mockCompat);
+    const mock = new m.MockAgent(Date.now, cfg.timeZone, cfg.mockBridge, cfg.mockCompat, cfg.mockRestart);
     mock.start();
     agent = mock;
     mockMetrics = m.mockMetrics;

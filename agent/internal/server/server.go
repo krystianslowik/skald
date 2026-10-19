@@ -14,6 +14,7 @@ import (
 	"github.com/krystianslowik/skald/agent/internal/compat"
 	"github.com/krystianslowik/skald/agent/internal/events"
 	"github.com/krystianslowik/skald/agent/internal/icons"
+	"github.com/krystianslowik/skald/agent/internal/saferestart"
 	"github.com/krystianslowik/skald/agent/internal/settings"
 	"github.com/krystianslowik/skald/agent/internal/state"
 	"github.com/krystianslowik/skald/agent/internal/supervisor"
@@ -67,6 +68,12 @@ type Options struct {
 	PingEvery time.Duration
 	// ActionTimeout bounds stop/start during a restart; 5 min when zero.
 	ActionTimeout time.Duration
+	// Crossplay says whether the game runs with -crossplay, so a safe
+	// restart waits for a join code; nil means no.
+	Crossplay func() bool
+	// RecoverTimeout bounds a safe restart's wait for the world and the
+	// join code after the start; 20 min when zero.
+	RecoverTimeout time.Duration
 	// Version is the Skald release the agent was built from; "dev" when empty.
 	Version string
 }
@@ -82,6 +89,8 @@ type Server struct {
 	restarting atomic.Bool
 	// restoring is set while a world restore runs (restarting is too).
 	restoring atomic.Bool
+	// safe runs safe restarts (wait, warn, back up, verify, restart).
+	safe *saferestart.Runner
 	// procs is the last supervisor answer, shared by /state and /metrics.
 	procMu sync.Mutex
 	procs  procSnapshot
@@ -113,7 +122,9 @@ func New(opt Options) *Server {
 	if opt.Version == "" {
 		opt.Version = "dev"
 	}
-	return &Server{opt: opt, startedAt: time.Now().UTC(), world: world.NewReader(opt.ConfigDir, opt.WorldName)}
+	s := &Server{opt: opt, startedAt: time.Now().UTC(), world: world.NewReader(opt.ConfigDir, opt.WorldName)}
+	s.safe = s.newSafeRestart()
+	return s
 }
 
 func (s *Server) Handler() http.Handler {
@@ -152,6 +163,9 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux.HandleFunc("GET /restore", s.restoreGet)
 	mux.HandleFunc("POST /restore", s.restorePost)
+	mux.HandleFunc("GET /restart/safe", s.safeRestartGet)
+	mux.HandleFunc("POST /restart/safe", s.safeRestartPost)
+	mux.HandleFunc("DELETE /restart/safe", s.safeRestartDelete)
 	if s.opt.Bridge != nil {
 		mux.HandleFunc("GET /bridge/status", s.bridgeStatus)
 		mux.HandleFunc("GET /bridge/players", s.bridgePlayers)

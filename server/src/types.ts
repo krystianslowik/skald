@@ -131,6 +131,67 @@ export interface AgentState {
   terrain?: TerrainInfo | null;
   /** The compatibility check with the game build; null from agents older than 2026.10.12. */
   compat?: CompatView | null;
+  /** The current or last safe restart; null before the first, missing from older agents. */
+  safeRestart?: SafeRestartRun | null;
+}
+
+// ---- safe restart (agent /restart/safe, /state.safeRestart) -------------------
+
+/** Steps of a safe restart, in order. */
+export const SAFE_RESTART_STEPS = ["wait", "countdown", "save", "stop", "backup", "verify", "start", "recover"] as const;
+export type SafeRestartStepName = (typeof SAFE_RESTART_STEPS)[number];
+export type SafeRestartStepState = "pending" | "running" | "ok" | "skipped" | "warn" | "error" | "cancelled";
+export type SafeRestartState = "running" | "done" | "failed" | "cancelled";
+
+/** POST /api/admin/safe-restart. */
+export interface SafeRestartRequest {
+  whenEmpty: boolean;
+  /** With whenEmpty: go ahead anyway this long after the start; 0 waits for good. */
+  deadlineMinutes: number;
+  /** The countdown with players on; 0 restarts without one. */
+  warnMinutes: number;
+  /** Of the in-game warnings; the server's locale. */
+  locale?: Locale;
+}
+
+export const SAFE_RESTART_MAX_DEADLINE = 24 * 60;
+export const SAFE_RESTART_MAX_WARN = 30;
+
+export interface SafeRestartStep {
+  name: SafeRestartStepName;
+  state: SafeRestartStepState;
+  at?: string;
+  /** A short code: why a step was skipped or only warns (nobridge, empty, deadline, ...). */
+  reason?: string;
+  error?: string;
+}
+
+/** One run, as /state and every `restart_run` event carry it. */
+export interface SafeRestartRun {
+  id: string;
+  actor: string;
+  request: SafeRestartRequest;
+  state: SafeRestartState;
+  step: SafeRestartStepName | "";
+  steps: SafeRestartStep[];
+  startedAt: string;
+  endedAt?: string;
+  /** While waiting for an empty server: the run goes ahead here. */
+  deadline?: string;
+  /** The end of the countdown. */
+  restartAt?: string;
+  /** The deadline came with players still on. */
+  forced: boolean;
+  /** Warnings went out in game. */
+  warned: boolean;
+  archive?: string;
+  archiveBytes?: number;
+  archiveSha256?: string;
+  joinCode?: string;
+  cancelledBy?: string;
+  error?: string;
+  /** Something to look at in a run that went through: the game had to be signalled harder to stop. */
+  warning?: string;
 }
 
 // ---- compatibility check (agent GET /compat, /state.compat) -----------------
@@ -309,6 +370,7 @@ export type AgentEventType =
   | "settings_apply"
   | "admin"
   | "compat"
+  | "restart_run"
   | "positions"
   /** Not from the agent: a shared task marked done on the panel (title, owner), for the saga. */
   | "task";
@@ -989,8 +1051,8 @@ export type AccessApplies = "now" | "restart" | "start";
 
 export type RestoreSource = "image" | "skald";
 
-/** Pre-restore copies Skald writes before replacing the world. */
-export const SKALD_BACKUP_NAME = /^pre-restore-\d{8}-\d{6}\.zip$/;
+/** Copies Skald writes: before replacing the world, and in a safe restart. */
+export const SKALD_BACKUP_NAME = /^pre-(restore|restart)-\d{8}-\d{6}\.zip$/;
 
 export interface RestoreBackup {
   name: string;

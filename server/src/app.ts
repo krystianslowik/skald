@@ -21,6 +21,8 @@ import {
   ADMIN_READS,
   BACKUP_NAME,
   NOTIFY_KINDS,
+  SAFE_RESTART_MAX_DEADLINE,
+  SAFE_RESTART_MAX_WARN,
   SKALD_BACKUP_NAME,
   type AccessListName,
   type AccessOp,
@@ -892,6 +894,21 @@ export function createApp(deps: AppDeps): Hono {
     if (typeof confirm !== "string" || !world || confirm !== world) return c.json({ ok: false, error: "type the world name to confirm" }, 400);
     return passTools(c, { op: "restore", body: { source, backup, confirm }, actor: actorFor(c) });
   });
+
+  // ---- admin: safe restart ----------------------------------------------------
+  // The run lives in the agent (it survives a restart of this server); these
+  // pass it on. The in-game warnings speak the server's language.
+  const minutes = (v: unknown, max: number) => (v === undefined ? 0 : Number.isInteger(v) && (v as number) >= 0 && (v as number) <= max ? (v as number) : null);
+  app.post("/api/admin/safe-restart", async (c) => {
+    const body = await objectBody(c);
+    if (body instanceof Response) return body;
+    const whenEmpty = body.whenEmpty === undefined ? false : body.whenEmpty;
+    const deadlineMinutes = minutes(body.deadlineMinutes, SAFE_RESTART_MAX_DEADLINE);
+    const warnMinutes = minutes(body.warnMinutes, SAFE_RESTART_MAX_WARN);
+    if (typeof whenEmpty !== "boolean" || deadlineMinutes === null || warnMinutes === null) return c.json({ ok: false, error: "bad request body" }, 400);
+    return passTools(c, { op: "safe-restart", body: { whenEmpty, deadlineMinutes: whenEmpty ? deadlineMinutes : 0, warnMinutes, locale: deps.locale ?? "en" }, actor: actorFor(c) });
+  });
+  app.delete("/api/admin/safe-restart", (c) => passTools(c, { op: "safe-restart-cancel", actor: actorFor(c) }));
 
   app.post("/api/admin/:command", async (c) => {
     const command = c.req.param("command") as AdminCommand;

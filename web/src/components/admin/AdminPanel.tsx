@@ -16,6 +16,7 @@ import { HoldButton } from "./HoldButton";
 import { SkaldVersion } from "../SkaldVersion";
 import { AdminHead, BridgeBanner, Btn, Chip, HealthBar, Section, TargetChips, useArmed } from "./parts";
 import { AccessLists, RestoreSection } from "./WorldTools";
+import { SafeRestartSection } from "./SafeRestart";
 import { CompatRows } from "../Compat";
 
 type Style = "center" | "topleft" | "narrator";
@@ -78,6 +79,7 @@ export function AdminPanel({ picked, section, onClose }: { picked?: { x: number;
         )}
         {admin.bridgeOn ? <BridgeTools catalog={catalog} picked={pickedTarget} reload={reload} /> : <p className="mt-2 text-sm text-ash">{t("admin.noBridge")}</p>}
 
+        <SafeRestartSection />
         <CompatSection />
         <Notify />
         <AccessLists />

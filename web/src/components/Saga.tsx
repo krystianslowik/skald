@@ -5,6 +5,7 @@ import { gameVersion } from "../lib/format";
 import { sagaRows, type SagaRow } from "../lib/saga";
 import { gameClock } from "../lib/admin";
 import { refusalReason } from "../lib/refusal";
+import { describeSafeRestart } from "../lib/safeRestart";
 import { itemLabel } from "../lib/storage";
 import { useI18n, type I18n, type TextKey } from "../i18n";
 import { PlayerName } from "./PlayerName";
@@ -246,6 +247,10 @@ export function describe(i: I18n, ev: AgentEvent): { text: string; tone: Tone; p
       const title = String(d.title ?? "");
       if (!title) return null;
       return { text: typeof d.owner === "string" && d.owner ? t("saga.taskBy", { title, owner: d.owner }) : t("saga.task", { title }), tone: "action" };
+    }
+    case "restart_run": {
+      const line = describeSafeRestart(i, d);
+      return line ? { text: line.text, tone: line.failed ? "death" : "action" } : null;
     }
     default:
       return null;

@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Added
+
+- Safe restart, in the admin sheet: wait until nobody plays (or until a deadline you choose, then warn whoever is still on), count down in game with the admin plugin and on Discord and phones, save, stop, back up the world and check the backup (size, checksum, a complete world), start again, wait for the world and the new join code, and post the code. Each step shows live in the admin sheet and the run lands in the Saga. It can be cancelled while it waits or counts down. If the backup or its check fails, the server is started again anyway and Discord and phones get an alert. Needs the admin password when one is set.
+- For operators: safe restart backups go to `/config/skald-backups/pre-restart-<time>.zip` and appear in the restore list; the newest five checked ones are kept, and a copy that fails its check is kept as `failed-pre-restart-<time>.zip` outside the list. The game is restarted through the image's updater, so a pending game update is installed on the way. If the agent restarts while the game is down for the backup, it starts the game again when it comes back. The run is in the agent, so deploying this release needs the new `skald-agent` image, which restarts the game pod: back up first. It also needs the new `skald-web`; the bridge plugin is unchanged.
+
 ### Fixed
 
 - Portal route finder: tapping a base or pin while picking the start now starts there under its name, and pins can be picked as a start. A route whose start is already at the destination is no longer shown as "0 m on foot". Steps of under a metre (onto a portal on the same spot) are left out of the list. Boss altars and places the game has not built yet are no longer offered, even inside explored land. A player chosen as the start no longer makes the map redraw with every position update.

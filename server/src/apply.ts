@@ -1,4 +1,4 @@
-import { isPlatform, type AgentEvent, type AgentState, type CompatResult } from "./types";
+import { isPlatform, type AgentEvent, type AgentState, type CompatResult, type SafeRestartRun } from "./types";
 
 /**
  * Which online player a join, leave or platform event is about: its id, or
@@ -64,6 +64,9 @@ export function applyEvent<S extends AgentState>(s: S, ev: AgentEvent): S {
       const result = d.result && typeof d.result === "object" ? (d.result as CompatResult) : (s.compat?.result ?? null);
       return { ...s, compat: { running: d.running === true, result } };
     }
+    case "restart_run":
+      // Every event carries the whole run.
+      return d.run && typeof d.run === "object" ? { ...s, safeRestart: d.run as SafeRestartRun } : s;
     case "playfab":
       return { ...s, server: { ...s.server, playfab: String(d.state) as AgentState["server"]["playfab"] } };
     case "settings_changed":

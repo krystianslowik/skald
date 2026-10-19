@@ -31,6 +31,12 @@ func (s *Server) actionHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, actionResult{false, "unknown action " + name})
 		return
 	}
+	// A safe restart owns the game until it ends; backups and update checks
+	// still go.
+	if name == "restart" && s.safeRestartActive() {
+		writeJSON(w, http.StatusConflict, actionResult{false, "a safe restart is running"})
+		return
+	}
 	if !s.busy.TryLock() {
 		writeJSON(w, http.StatusConflict, actionResult{false, "another action is in progress"})
 		return

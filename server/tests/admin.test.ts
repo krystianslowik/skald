@@ -7,7 +7,7 @@ import { Hub } from "../src/hub";
 import { MockAgent, mockRefusal } from "../src/mock";
 import { createLogger, type Logger } from "../src/log";
 import { DiscordNotifier, NOTIFY_KINDS, NotifySettings, TEST_COOLDOWN_MS, type NotifyKind } from "../src/notify";
-import { emptyAgentState, type AdminStatus, type AgentEvent, type LiveMessage } from "../src/types";
+import { emptyAgentState, type AdminStatus, type AgentEvent, type LiveMessage, type Locale } from "../src/types";
 
 const PANEL = await Bun.password.hash("ognisko");
 const ADMIN = await Bun.password.hash("jarl");
@@ -25,6 +25,8 @@ function fakeAgent(calls: BridgeRequest[], status = 200, toolCalls: ToolsRequest
       if (req.op === "restore-info") return { status: 200, body: { ok: true, data: { world: "Testheim", running: false, playersOnline: false, backups: [] } } };
       if (req.op === "restore") return { status: 202, body: { ok: true, data: { backup: req.body.backup } } };
       if (req.op === "compat-run") return { status: 202, body: { ok: true } };
+      if (req.op === "safe-restart") return { status: 202, body: { ok: true, data: { id: "20261010-100000" } } };
+      if (req.op === "safe-restart-cancel") return { status: 409, body: { ok: false, error: "the restart is past the point where it can be cancelled" } };
       return { status: 200, body: { ok: true, data: { applies: "restart" } } };
     },
     async getLogs() {
@@ -66,7 +68,7 @@ function fakeAgent(calls: BridgeRequest[], status = 200, toolCalls: ToolsRequest
   };
 }
 
-async function setup(opts: { admin?: boolean; bridgeStatus?: number; notify?: NotifySettings; log?: Logger } = {}) {
+async function setup(opts: { admin?: boolean; bridgeStatus?: number; notify?: NotifySettings; log?: Logger; locale?: Locale } = {}) {
   const calls: BridgeRequest[] = [];
   const toolCalls: ToolsRequest[] = [];
   const agent = fakeAgent(calls, opts.bridgeStatus, toolCalls);
@@ -89,6 +91,7 @@ async function setup(opts: { admin?: boolean; bridgeStatus?: number; notify?: No
     clock: () => t,
     notify: opts.notify,
     log: opts.log,
+    locale: opts.locale,
   });
   return { app, hub, calls, toolCalls, advance: (ms: number) => (t += ms) };
 }
@@ -493,6 +496,31 @@ describe("admin and ban lists, world restore", () => {
     expect((await post(app, "/api/admin/restore", cookie, body)).status).toBe(202);
     expect((await post(app, "/api/admin/restore", cookie, { ...body, source: "skald", backup: "pre-restore-20261010-100000.zip" })).status).toBe(202);
     expect(toolCalls.filter((c) => c.op === "restore")).toHaveLength(2);
+  });
+});
+
+describe("safe restart", () => {
+  it("needs an admin, checks the numbers and speaks the server's language in game", async () => {
+    const { app, toolCalls } = await setup({ admin: true, locale: "pl" });
+    const cookie = await signIn(app);
+    expect((await post(app, "/api/admin/safe-restart", cookie, {})).status).toBe(403);
+    expect((await app.request("/api/admin/safe-restart", { method: "DELETE", headers: { Cookie: cookie } })).status).toBe(403);
+    const unlock = await post(app, "/api/admin/unlock", cookie, { password: "jarl" });
+    const both = `${cookie}; ${adminCookie(unlock)}`;
+    for (const bad of [{ whenEmpty: "yes" }, { warnMinutes: 31 }, { warnMinutes: -1 }, { warnMinutes: 2.5 }, { whenEmpty: true, deadlineMinutes: 24 * 60 + 1 }, "[1]"]) {
+      expect((await post(app, "/api/admin/safe-restart", both, bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(toolCalls).toHaveLength(0);
+    const res = await post(app, "/api/admin/safe-restart", both, { whenEmpty: true, deadlineMinutes: 60, warnMinutes: 5, locale: "en" }, { "X-Skald-Name": "Jarl" });
+    expect(res.status).toBe(202);
+    // The locale is the server's, not the browser's.
+    expect(toolCalls.at(-1)).toEqual({ op: "safe-restart", body: { whenEmpty: true, deadlineMinutes: 60, warnMinutes: 5, locale: "pl" }, actor: "Jarl" });
+    // Without waiting for empty, a deadline means nothing.
+    await post(app, "/api/admin/safe-restart", both, { deadlineMinutes: 60 });
+    expect(toolCalls.at(-1)).toMatchObject({ body: { whenEmpty: false, deadlineMinutes: 0, warnMinutes: 0 } });
+    const del = await app.request("/api/admin/safe-restart", { method: "DELETE", headers: { Cookie: both, "CF-Connecting-IP": "9.9.9.9" } });
+    expect(del.status).toBe(409);
+    expect(toolCalls.at(-1)).toMatchObject({ op: "safe-restart-cancel" });
   });
 });
 
