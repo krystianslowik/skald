@@ -954,30 +954,54 @@ choose:
 Then the agent:
 
 1. asks the game to save (admin plugin only) and waits for the save line;
-2. pauses the image's updater and stops the server through supervisord,
-   which waits for the shutdown save;
+2. checks once more that it can write the config volume and that the free
+   space there is at least the world's size, writes a note that it is about
+   to stop the game (`skald-backups/.safe-restart-down`, synced to disk),
+   pauses the image's updater, checks the game still runs, and stops it
+   through supervisord, which waits for the shutdown save;
 3. zips the stopped world into `skald-backups/pre-restart-<time>.zip`, with
    its sha256 in a `.sha256` file next to it;
 4. checks the copy: the size, the sha256 of the file read back, every entry
    read through its CRC, and a complete world: the newest finished save's
-   `.db2` and `.fwl2` (or the pre-1.0 `.db` and `.fwl`);
-5. starts the server and the updater again (the image updates the game on
-   start when it does that);
+   `.db2`, `.fwl2` and `.chunks` index, and as many chunk files as the world
+   has on disk (or the pre-1.0 `.db` and `.fwl`);
+5. starts the updater again, which starts the server itself after its update
+   check, as the image does on boot: an update is installed before the server
+   comes up, so the join code posted next is not replaced by an update right
+   after. Without the updater (or if it has not started the server within 20
+   minutes) the agent starts the server, waiting first until it has fully
+   stopped and trying up to three times;
 6. waits up to 20 minutes for the world to load and, with crossplay, for a
    new join code, and posts it to Discord and phones.
 
 A run restarts only a running game: if the game is stopped (the image's
-updater may be installing an update) when the run would save, it ends failed
-without touching anything. Waiting and the countdown can be cancelled; from the save on, the run goes
-to the end. A failed backup or check never leaves the server down: the world
-was not touched, so the server is started again and the run ends failed,
-with a Discord and phone alert. The copy shows up in the restore list. Only
-the newest five `pre-restart-*.zip` are kept; `pre-restore-*.zip` are never
-deleted. While a safe restart runs, a plain restart, a restore and applying
-settings now are refused, and settings waiting for an empty server wait for
-it (its restart applies them); backups and update checks still run.
+updater may be installing an update) when the run would save or stop it, it
+ends failed without touching anything. So does a run that cannot write the
+config volume, has too little free space, or cannot write its note. Waiting,
+the countdown and the save can be cancelled; once the stop begins, the run
+goes to the end. Players who were warned hear when a restart is off. A
+failed backup or check never leaves the server down: the world was not
+touched, so the server is started again and the run ends failed, with a
+Discord and phone alert. A copy that fails its check is renamed to
+`failed-pre-restart-<time>.zip`: kept for a look, but not in the restore list
+and not counted. Only the newest five checked `pre-restart-*.zip` are kept,
+and only a run with a checked copy removes older ones; `pre-restore-*.zip`
+are never deleted. While a safe restart runs, a plain restart, a restore and
+applying settings now are refused, and settings waiting for an empty server
+wait for it (its restart applies them); backups and update checks still run.
 
 The run lives in the agent, so it carries on when skald-web restarts. A
-restart of the agent itself ends it; if that happens while the game is
-stopped for the backup, the agent starts the game (and the updater) again
-when it comes back. Copies from failed runs count toward the five as well.
+restart of the agent itself ends it. If the agent comes back to its note
+(within the time a run can take), it waits for supervisord and starts the
+game again only if supervisord shows the game, and the updater it had
+paused, stopped; if the updater runs, the image is in charge and the agent
+leaves it alone. Either way the run is reported as failed, on Discord and
+phones too. Half-written copies are removed when the agent starts.
+
+The game's shutdown is the image's: supervisord's `valheim-server` program
+has `stopwaitsecs=90`, `stopasgroup=false`, `killasgroup=true`, and the
+image's `valheim-server` script sends the game SIGINT, then SIGTERM after
+about 29 seconds and SIGKILL after about 58, with supervisord's SIGKILL to
+the group at 90 seconds. A world save takes well under a second to a few
+seconds, and the safe restart saves just before the stop, so the shutdown
+save has little to write.
