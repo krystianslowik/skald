@@ -5,7 +5,7 @@ import { ChunkBoundary } from "../components/ErrorBoundary";
 import { I18nProvider } from "../i18n";
 import { en } from "../i18n/en";
 import { pl } from "../i18n/pl";
-import { chunkUrl, failedChunkUrl, isChunkError, lazyChunk, page, probeChunk, reloadOnce } from "./chunks";
+import { chunkUrl, failedChunkUrl, isChunkError, lazyChunk, page, preload, probeChunk, reloadOnce } from "./chunks";
 
 /** Per-tab storage for the loop guard; Node's own experimental global shadows jsdom's. */
 function memorySession() {
@@ -36,6 +36,17 @@ function afterReload() {
   page.reloading = false;
   reload.mockClear();
 }
+
+describe("preload", () => {
+  it("warms a chunk online, and leaves it alone offline, where the browser would keep the failure for the real import", () => {
+    const load = vi.fn(async () => ({}));
+    preload(load);
+    expect(load).toHaveBeenCalledTimes(1);
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    preload(load);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("isChunkError", () => {
   it("knows the browsers' and Vite's chunk-load errors, and nothing else", () => {
