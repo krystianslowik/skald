@@ -190,6 +190,8 @@ export interface SafeRestartRun {
   joinCode?: string;
   cancelledBy?: string;
   error?: string;
+  /** Something to look at in a run that went through: the game had to be signalled harder to stop. */
+  warning?: string;
 }
 
 // ---- compatibility check (agent GET /compat, /state.compat) -----------------

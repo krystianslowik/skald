@@ -27,7 +27,7 @@ export type Item =
    * cancel of one players were warned about.
    */
   | { kind: "restart"; phase: "warning"; minutes: number }
-  | { kind: "restart"; phase: "done"; code: string }
+  | { kind: "restart"; phase: "done"; code: string; killed?: boolean }
   | { kind: "restart"; phase: "failed"; error: string; archive: string }
   | { kind: "restart"; phase: "cancelled" }
   /** A boss whose key turned defeated since the last state; not a Discord kind, only sinks take it. */
@@ -118,6 +118,7 @@ const STRINGS = {
     "restart.failed": "The safe restart failed ({error}). The backup is kept as {archive}.",
     "restart.failedNoArchive": "The safe restart failed ({error}).",
     "restart.cancelled": "The server restart is called off.",
+    "restart.killed": "The game did not shut down in time and had to be stopped harder: check the world.",
     "action.backup": "Backup",
     "action.restart": "Server restart",
     "action.update": "Update check",
@@ -174,6 +175,7 @@ const STRINGS = {
     "restart.failed": "Bezpieczny restart nie powiódł się ({error}). Kopia zostaje jako {archive}.",
     "restart.failedNoArchive": "Bezpieczny restart nie powiódł się ({error}).",
     "restart.cancelled": "Restart serwera odwołany.",
+    "restart.killed": "Gra nie zamknęła się na czas i trzeba było ją zatrzymać siłą: sprawdźcie świat.",
     "action.backup": "Kopia świata",
     "action.restart": "Restart serwera",
     "action.update": "Sprawdzenie aktualizacji",
@@ -340,8 +342,10 @@ function restartLine(it: Extract<Item, { kind: "restart" }>, locale: Locale): st
   switch (it.phase) {
     case "warning":
       return it.minutes > 0 ? fill(s["restart.warning"], { n: String(it.minutes) }) : s["restart.now"];
-    case "done":
-      return it.code ? fill(s["restart.done"], { code: escapeMd(it.code) }) : s["restart.doneNoCode"];
+    case "done": {
+      const line = it.code ? fill(s["restart.done"], { code: escapeMd(it.code) }) : s["restart.doneNoCode"];
+      return it.killed ? `${line}\n${s["restart.killed"]}` : line;
+    }
     case "failed":
       return it.archive ? fill(s["restart.failed"], { error: escapeMd(it.error), archive: escapeMd(it.archive) }) : fill(s["restart.failedNoArchive"], { error: escapeMd(it.error) });
     case "cancelled":
@@ -725,7 +729,7 @@ export class DiscordNotifier {
     }
     if (result === "done") {
       if (run.joinCode) this.joinCode = run.joinCode;
-      return this.add({ kind: "restart", phase: "done", code: run.joinCode ?? "" });
+      return this.add({ kind: "restart", phase: "done", code: run.joinCode ?? "", ...(run.warning ? { killed: true } : {}) });
     }
     if (result === "failed") {
       this.add({ kind: "restart", phase: "failed", error: run.error ?? "", archive: run.archive ?? "" });

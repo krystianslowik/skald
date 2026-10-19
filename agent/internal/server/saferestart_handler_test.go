@@ -109,3 +109,19 @@ func TestSafeRestartRoutes(t *testing.T) {
 		t.Fatalf("after the run = %d", r.StatusCode)
 	}
 }
+
+func TestShutdownTimedOutReadsTheLog(t *testing.T) {
+	h := newHarness(t)
+	before := time.Now().Add(-time.Second)
+	h.hub.Publish("log", map[string]any{"line": "Shutting down Valheim server with PID 42"})
+	if h.s.shutdownTimedOut(before) {
+		t.Fatal("found a timeout in a clean shutdown")
+	}
+	h.hub.Publish("log", map[string]any{"line": "Timeout while waiting for server to shut down - sending SIGTERM to PGID 42"})
+	if !h.s.shutdownTimedOut(before) {
+		t.Fatal("missed the timeout line")
+	}
+	if h.s.shutdownTimedOut(time.Now().Add(time.Minute)) {
+		t.Fatal("an older line counted")
+	}
+}

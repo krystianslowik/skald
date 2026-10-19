@@ -166,6 +166,13 @@ describe("safe restart section", () => {
     expect(screen.getByText("Sprawdź kopię")).toBeInTheDocument();
   });
 
+  it("says when the game had to be stopped harder", () => {
+    api();
+    const steps = Object.fromEntries(SAFE_RESTART_STEPS.map((s) => [s, "ok" as const]));
+    show(fixture(run({ state: "done", step: "recover", endedAt: "2026-10-09T20:05:00Z", warning: "the game did not shut down in time" }, { ...steps, stop: "warn" })));
+    expect(screen.getByText("The game did not shut down in time and had to be stopped harder: check the world.")).toBeInTheDocument();
+  });
+
   it("says who cancelled", () => {
     api();
     show(fixture(run({ state: "cancelled", step: "wait", cancelledBy: "Astrid", endedAt: "2026-10-09T20:01:00Z" }, { wait: "cancelled" })));

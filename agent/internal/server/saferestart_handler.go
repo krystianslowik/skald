@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/krystianslowik/skald/agent/internal/bridge"
 	"github.com/krystianslowik/skald/agent/internal/saferestart"
@@ -34,10 +36,25 @@ func (s *Server) newSafeRestart() *saferestart.Runner {
 		Publish: func(step, result string, v saferestart.View) {
 			s.opt.Hub.Publish("restart_run", map[string]any{"step": step, "result": result, "actor": v.Actor, "run": v})
 		},
-		Logger:         s.opt.Logger,
-		ActionTimeout:  s.opt.ActionTimeout,
-		RecoverTimeout: s.opt.RecoverTimeout,
+		Logger:           s.opt.Logger,
+		ActionTimeout:    s.opt.ActionTimeout,
+		RecoverTimeout:   s.opt.RecoverTimeout,
+		ShutdownTimedOut: s.shutdownTimedOut,
 	})
+}
+
+// shutdownLine is the image's valheim-server script giving up on a graceful
+// stop ("Timeout while waiting for server to shut down - sending SIGTERM ...").
+const shutdownLine = "Timeout while waiting for server to shut down"
+
+// shutdownTimedOut looks for that line in the log since a time.
+func (s *Server) shutdownTimedOut(since time.Time) bool {
+	for _, l := range s.opt.Hub.Logs(2000) {
+		if !l.TS.Before(since) && strings.Contains(l.Line, shutdownLine) {
+			return true
+		}
+	}
+	return false
 }
 
 // runBridge is the plugin as the run uses it. Its commands are audited like

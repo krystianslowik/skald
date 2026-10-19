@@ -2370,6 +2370,8 @@ export const en = {
   "admin.safe.reason.stop.nospace": "Not enough free space for the backup; nothing was touched.",
   "admin.safe.reason.stop.marker": "The agent could not note the stop on disk; nothing was touched.",
   "admin.safe.reason.start.interrupted": "The agent restarted during the run.",
+  "admin.safe.reason.stop.killed": "The game did not shut down in time and was stopped harder.",
+  "admin.safe.killed": "The game did not shut down in time and had to be stopped harder: check the world.",
   "admin.safe.reason.verify.nobackup": "No backup to check.",
   "admin.safe.reason.recover.world_not_loaded": "The world did not load in time.",
   "admin.safe.reason.recover.join_code_missing": "No join code in time.",

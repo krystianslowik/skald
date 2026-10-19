@@ -615,7 +615,8 @@ func TestResumeLeavesTheImageInCharge(t *testing.T) {
 		updater  bool
 	}{
 		{"updater running", "STOPPED", "RUNNING", true},
-		{"game running", "RUNNING", "STOPPED", true},
+		// (With the updater paused by the run, see TestResumeStartsAnUpdaterLeftStopped...)
+		{"game running", "RUNNING", "STOPPED", false},
 		{"game stopping", "STOPPING", "STOPPED", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -681,6 +682,57 @@ func TestResumeKeepsAnotherRunsMarker(t *testing.T) {
 	}
 }
 
+func TestResumeStartsAnUpdaterLeftStoppedWithTheGameRunning(t *testing.T) {
+	h := newHarness(t)
+	// The agent died between pausing the updater and stopping the game.
+	h.sup.set(restore.ServerProgram, "RUNNING")
+	h.sup.set(restore.UpdaterProgram, "STOPPED")
+	h.leaveMarker(time.Second, true)
+	New(h.opt).Resume()
+	if got := strings.Join(h.sup.Calls(), ","); got != "start valheim-updater" {
+		t.Errorf("calls %s", got)
+	}
+	if h.markerLeft() || h.locked {
+		t.Errorf("marker %v lock %v", h.markerLeft(), h.locked)
+	}
+}
+
+func TestResumeWaitsForTheBootstrap(t *testing.T) {
+	h := newHarness(t)
+	h.opt.ResumeWait = 2 * time.Second
+	h.sup.set(restore.ServerProgram, "STOPPED")
+	h.sup.set(restore.UpdaterProgram, "STOPPED")
+	h.sup.set(BootstrapProgram, "RUNNING")
+	h.leaveMarker(time.Second, true)
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		// The bootstrap starts the updater, which starts the game.
+		h.sup.set(restore.UpdaterProgram, "RUNNING")
+		h.sup.set(restore.ServerProgram, "RUNNING")
+		h.sup.set(BootstrapProgram, "EXITED")
+	}()
+	New(h.opt).Resume()
+	if len(h.sup.Calls()) != 0 {
+		t.Errorf("acted during the bootstrap: %v", h.sup.Calls())
+	}
+}
+
+func TestStopThatHadToKillIsAWarning(t *testing.T) {
+	h := newHarness(t)
+	var since time.Time
+	h.opt.ShutdownTimedOut = func(t time.Time) bool { since = t; return true }
+	v := h.run(Request{})
+	if v.State != RunDone || v.Warning == "" {
+		t.Fatalf("view %+v", v)
+	}
+	if s := v.step(StepStop); s.State != Warn || s.Reason != "killed" {
+		t.Errorf("stop %+v", s)
+	}
+	if since.IsZero() || since.Before(v.StartedAt) {
+		t.Errorf("looked from %v", since)
+	}
+}
+
 func TestResumeIgnoresAStaleMarker(t *testing.T) {
 	h := newHarness(t)
 	h.sup.set(restore.ServerProgram, "STOPPED")
@@ -688,8 +740,12 @@ func TestResumeIgnoresAStaleMarker(t *testing.T) {
 	// Older than any run could last (2 x 1 s + 0.5 s here).
 	h.leaveMarker(time.Minute, true)
 	New(h.opt).Resume()
-	if len(h.sup.Calls()) != 0 || len(h.Events()) != 0 || h.markerLeft() {
-		t.Errorf("calls %v events %v marker %v", h.sup.Calls(), h.Events(), h.markerLeft())
+	if len(h.sup.Calls()) != 0 || h.markerLeft() {
+		t.Errorf("calls %v marker %v", h.sup.Calls(), h.markerLeft())
+	}
+	// The owner still hears about it.
+	if ev := h.Events(); len(ev) != 1 || ev[0] != "end:failed" {
+		t.Errorf("events %v", ev)
 	}
 }
 
@@ -702,9 +758,12 @@ func TestResumeGivesUpWhenSupervisordNeverAnswers(t *testing.T) {
 	if len(h.sup.Calls()) != 0 {
 		t.Errorf("calls %v", h.sup.Calls())
 	}
-	// Kept for the next start.
+	// Kept for the next start, and the owner hears about it.
 	if !h.markerLeft() {
 		t.Error("marker removed")
+	}
+	if ev := h.Events(); len(ev) != 1 || ev[0] != "end:failed" {
+		t.Errorf("events %v", ev)
 	}
 }
 
@@ -955,7 +1014,9 @@ func TestUpdaterThatDoesNotStartTheGame(t *testing.T) {
 	if v.State != RunDone {
 		t.Fatalf("state %s error %q", v.State, v.Error)
 	}
-	if got := strings.Join(h.sup.Calls(), ","); !strings.HasSuffix(got, "start valheim-updater,start valheim-server") {
+	// The updater is stopped (it may be installing something of its own),
+	// the game started, and the updater started again.
+	if got := strings.Join(h.sup.Calls(), ","); !strings.HasSuffix(got, "start valheim-updater,stop valheim-updater,start valheim-server,start valheim-updater") {
 		t.Errorf("calls %s", got)
 	}
 }

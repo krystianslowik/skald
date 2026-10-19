@@ -971,8 +971,9 @@ Then the agent:
    check, as the image does on boot: an update is installed before the server
    comes up, so the join code posted next is not replaced by an update right
    after. Without the updater (or if it ends, or has not started the server
-   within 20 minutes) the agent starts the server, waiting first until it has
-   fully stopped and trying up to three times;
+   within 20 minutes) the agent stops the updater (it may be busy with an
+   install of its own), starts the server, waiting first until it has fully
+   stopped and trying up to three times, and starts the updater again;
 6. waits up to 20 minutes for the world to load and, with crossplay, for a
    new join code, and posts it to Discord and phones.
 
@@ -994,10 +995,12 @@ wait for it (its restart applies them); backups and update checks still run.
 
 The run lives in the agent, so it carries on when skald-web restarts. A
 restart of the agent itself ends it. If the agent comes back to its note
-(written less than half an hour before), it waits for supervisord and for
-the game to settle, and starts the game again only if supervisord shows the
+(written less than half an hour before), it waits for supervisord, for the
+image's `valheim-bootstrap` to finish and for the game to settle, and starts the game again only if supervisord shows the
 game, and the updater it had paused, stopped; if the updater runs, the image
-is in charge and the agent leaves it alone. Either way the run is reported as failed, on Discord and
+is in charge and the agent leaves it alone. If the game still runs but the
+updater the run paused is stopped, it starts the updater again. An older
+note, or a supervisord that never answers, is reported too. Either way the run is reported as failed, on Discord and
 phones too. Half-written copies are removed when the agent starts.
 
 The game's shutdown is the image's: supervisord's `valheim-server` program
@@ -1006,4 +1009,5 @@ image's `valheim-server` script sends the game SIGINT, then SIGTERM after
 about 29 seconds and SIGKILL after about 58, with supervisord's SIGKILL to
 the group at 90 seconds. A world save takes well under a second to a few
 seconds, and the safe restart saves just before the stop, so the shutdown
-save has little to write.
+save has little to write. If the image logs that the game did not shut down
+in time, the stop step and the run's end (panel and Discord) say so.

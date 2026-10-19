@@ -2359,6 +2359,8 @@ export const pl: Dict = {
   "admin.safe.reason.stop.nospace": "Za mało wolnego miejsca na kopię; nic nie zostało ruszone.",
   "admin.safe.reason.stop.marker": "Agent nie zdołał zapisać informacji o zatrzymaniu; nic nie zostało ruszone.",
   "admin.safe.reason.start.interrupted": "Agent zrestartował się w trakcie.",
+  "admin.safe.reason.stop.killed": "Gra nie zamknęła się na czas i została zatrzymana siłą.",
+  "admin.safe.killed": "Gra nie zamknęła się na czas i trzeba było ją zatrzymać siłą: sprawdźcie świat.",
   "admin.safe.reason.verify.nobackup": "Nie ma kopii do sprawdzenia.",
   "admin.safe.reason.recover.world_not_loaded": "Świat nie wczytał się na czas.",
   "admin.safe.reason.recover.join_code_missing": "Kod dołączenia nie pojawił się na czas.",

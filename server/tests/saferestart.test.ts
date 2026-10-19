@@ -100,6 +100,13 @@ describe("Discord news of a safe restart", () => {
     expect(all).not.toContain("Server stopped");
   });
 
+  it("says when the game had to be stopped harder", async () => {
+    const { n, contents } = discord();
+    for (const e of fullRun("done", { warning: "the game did not shut down in time" })) n.handle(live(e));
+    await settle(n);
+    expect(contents.join("\n")).toContain("New join code: **771203**\nThe game did not shut down in time and had to be stopped harder: check the world.");
+  });
+
   it("calls off only what it announced", async () => {
     const a = discord();
     const r = run();
