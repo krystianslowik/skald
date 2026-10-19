@@ -48,19 +48,20 @@ const (
 	UpdaterProgram = "valheim-updater"
 )
 
-// Backup sources: the image's own zips, and Skald's pre-restore copies.
+// Backup sources: the image's own zips, and Skald's own copies (taken before
+// a restore, and by a safe restart).
 const (
 	SourceImage = "image"
 	SourceSkald = "skald"
 )
 
-// SkaldDir is where pre-restore copies go, under CONFIG_DIR. Not the image's
+// SkaldDir is where Skald's copies go, under CONFIG_DIR. Not the image's
 // backups/, whose pruning would count them.
 const SkaldDir = "skald-backups"
 
 var (
 	imageName = regexp.MustCompile(`^worlds-\d{8}-\d{6}\.zip$`)
-	skaldName = regexp.MustCompile(`^pre-restore-\d{8}-\d{6}\.zip$`)
+	skaldName = regexp.MustCompile(`^pre-(restore|restart)-\d{8}-\d{6}\.zip$`)
 )
 
 // Limits on an archive, so a broken or hostile zip cannot fill the volume.
@@ -84,7 +85,7 @@ type Backup struct {
 	ModifiedAt time.Time `json:"modifiedAt"`
 }
 
-// List returns the image's backups and Skald's pre-restore copies, newest
+// List returns the image's backups and Skald's own copies, newest
 // first. Never nil.
 func List(configDir string) []Backup {
 	out := []Backup{}
@@ -320,15 +321,20 @@ func extractOne(root *os.Root, e entry) error {
 // archive's path and sha256; a .sha256 file goes next to it. A world with no
 // files yields an archive with no entries.
 func SafetyCopy(configDir, world, dir string, now time.Time) (string, string, error) {
+	return Archive(configDir, world, dir, "pre-restore", now)
+}
+
+// Archive is SafetyCopy with another name prefix: dir/<prefix>-<time>.zip.
+func Archive(configDir, world, dir, prefix string, now time.Time) (string, string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", "", err
 	}
-	name := "pre-restore-" + now.UTC().Format("20060102-150405") + ".zip"
+	name := prefix + "-" + now.UTC().Format("20060102-150405") + ".zip"
 	final := filepath.Join(dir, name)
 	if _, err := os.Lstat(final); err == nil {
-		return "", "", errors.New("a safety copy with this time already exists")
+		return "", "", errors.New("a copy with this time already exists")
 	}
-	tmp, err := os.CreateTemp(dir, ".pre-restore-*.tmp")
+	tmp, err := os.CreateTemp(dir, "."+prefix+"-*.tmp")
 	if err != nil {
 		return "", "", err
 	}

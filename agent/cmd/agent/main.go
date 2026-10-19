@@ -147,17 +147,18 @@ func main() {
 		compatBridge = br
 	}
 	var srv *server.Server // set below; the checker starts after it
+	crossplay := func() bool {
+		return cfg.Crossplay || slices.Contains(strings.Fields(srv.EffectiveArgs(ctx)), "-crossplay")
+	}
 	checker := compat.New(compat.Options{
-		State:   tracker.Snapshot,
-		Map:     worldMap,
-		Terrain: terr.Info,
-		Bridge:  compatBridge,
-		Crossplay: func() bool {
-			return cfg.Crossplay || slices.Contains(strings.Fields(srv.EffectiveArgs(ctx)), "-crossplay")
-		},
-		Path:    compatPath,
-		Publish: func(typ string, data map[string]any) { hub.Publish(typ, data) },
-		Logger:  logger,
+		State:     tracker.Snapshot,
+		Map:       worldMap,
+		Terrain:   terr.Info,
+		Bridge:    compatBridge,
+		Crossplay: crossplay,
+		Path:      compatPath,
+		Publish:   func(typ string, data map[string]any) { hub.Publish(typ, data) },
+		Logger:    logger,
 	})
 	s := server.New(server.Options{
 		Token:      cfg.AgentToken,
@@ -176,6 +177,7 @@ func main() {
 		Bridge:     br,
 		Access:     access.New(cfg.ConfigDir),
 		Compat:     checker,
+		Crossplay:  crossplay,
 		Logger:     logger,
 		Version:    version,
 	})

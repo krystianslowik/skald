@@ -87,6 +87,10 @@ func (s *Server) settingsApply(w http.ResponseWriter, r *http.Request) {
 	}
 	switch body.Mode {
 	case "now":
+		if s.safeRestartActive() {
+			writeJSON(w, http.StatusConflict, actionResult{false, "a safe restart is running"})
+			return
+		}
 		if !s.busy.TryLock() {
 			writeJSON(w, http.StatusConflict, actionResult{false, "another action is in progress"})
 			return
@@ -191,6 +195,10 @@ func (s *Server) applyTick(ctx context.Context, now time.Time) {
 		return
 	}
 	if now.Sub(s.zeroSince) < EmptyFor {
+		return
+	}
+	// A safe restart owns the game; its restart applies the settings too.
+	if s.safeRestartActive() {
 		return
 	}
 	if !s.busy.TryLock() {
