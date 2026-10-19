@@ -215,6 +215,8 @@ services:
       # Optional Discord notifications; empty: set the webhook in the admin sheet.
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       DISCORD_NOTIFY: ${DISCORD_NOTIFY:-}
+      # Phone notifications: contact for the push services (mailto: or https://).
+      PUSH_CONTACT: ${PUSH_CONTACT:-}
       SKALD_TZ: ${TZ:-UTC}
       # Plain http on localhost/LAN needs this off, or the browser never sends
       # the session cookie back. Set it to "true" as soon as HTTPS fronts Skald.

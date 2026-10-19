@@ -125,7 +125,7 @@ export default function NotifySheet({ onClose }: { onClose: () => void }) {
         {support !== "ok" ? null : prefs === undefined ? null : (
           <>
             <div className="mt-2">
-              <Row label={t("push.device")} hint={t("push.installShort")}>
+              <Row label={t("push.device")} hint={on ? undefined : t("push.installShort")}>
                 <Switch on={on} toggle={() => void toggleDevice()} label={t("push.device")} title={on ? t("push.device.on") : t("push.device.off")} disabled={busy} />
               </Row>
             </div>
