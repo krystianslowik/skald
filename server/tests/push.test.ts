@@ -357,8 +357,8 @@ describe("the notifier's sinks", () => {
     expect(w.discord).toEqual([]);
     expect(w.batches).toEqual([
       [
-        { kind: "join", name: "Ragnar", first: true },
-        { kind: "join", name: "Freya", first: false },
+        { kind: "join", name: "Ragnar", key: "Ragnar", first: true },
+        { kind: "join", name: "Freya", key: "Freya", first: false },
       ],
     ]);
   });
@@ -382,7 +382,7 @@ describe("the notifier's sinks", () => {
     await Bun.sleep(60);
     await w.n.idle();
     expect(w.discord).toEqual([]);
-    expect(w.batches).toEqual([[{ kind: "join", name: "Bjorn", first: true }]]);
+    expect(w.batches).toEqual([[{ kind: "join", name: "Bjorn", key: "Bjorn", first: true }]]);
   });
 
   it("count a join as the first again once a state shows nobody online, though the leave was lost", async () => {
@@ -391,7 +391,7 @@ describe("the notifier's sinks", () => {
     w.n.handle(state((s) => (s.players = [])));
     w.n.handle(live(ev(1, "player_join", { name: "Freya" })));
     await Bun.sleep(60);
-    expect(w.batches).toEqual([[{ kind: "join", name: "Freya", first: true }]]);
+    expect(w.batches).toEqual([[{ kind: "join", name: "Freya", key: "Freya", first: true }]]);
   });
 
   it("are not woken for kinds no device wants", async () => {
