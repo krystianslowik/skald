@@ -221,6 +221,14 @@ describe("PushService", () => {
     expect(store.getMeta("push.vapid")).toContain("privateJwk");
   });
 
+  it("takes a safe restart's news for a device with only failures on", async () => {
+    const net = fakePushService();
+    const { push } = await service(net.fetchImpl);
+    await subscribe(push, 1, { kinds: ["failure"] });
+    expect(push.wants("restart")).toBe(true);
+    expect(push.wants("server")).toBe(false);
+  });
+
   it("sends each device its own encrypted notification, in its own language", async () => {
     const net = fakePushService();
     const { push } = await service(net.fetchImpl);

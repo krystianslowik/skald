@@ -129,6 +129,23 @@ describe("Discord news of a safe restart", () => {
     expect(contents).toEqual(["The server is back after a safe restart. New join code: **771203**"]);
   });
 
+  it("lets news through while the run only waits, and lifts its hold when the agent forgets the run", async () => {
+    const a = discord();
+    const w = run({ request: { whenEmpty: true, deadlineMinutes: 0, warnMinutes: 5 } });
+    for (const e of [step("begin", "running", w), step("wait", "running", w), ev("join_code", { code: "555111" })]) a.n.handle(live(e));
+    await settle(a.n);
+    expect(a.contents).toEqual(["New join code: **555111**"]);
+
+    const b = discord();
+    const r = run({ step: "stop" });
+    for (const e of [step("begin", "running", r), step("countdown", "skipped", r), step("stop", "running", r)]) b.n.handle(live(e));
+    // The agent restarted: its state has no run, and no end ever comes.
+    b.n.handle(state((s) => (s.safeRestart = null)));
+    b.n.handle(live(ev("join_code", { code: "555222" })));
+    await settle(b.n);
+    expect(b.contents.join("\n")).toContain("New join code: **555222**");
+  });
+
   it("files the news under the Discord kinds: a failure is a failure, the rest is server news", async () => {
     const f = discord(["failure"]);
     for (const e of fullRun("failed", { error: "start: SPAWN_ERROR" })) f.n.handle(live(e));

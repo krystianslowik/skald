@@ -223,6 +223,10 @@ export class MockSafeRestart {
   private save(): void {
     this.cancellable = false;
     if (this.cancelled) return this.stop("countdown");
+    if (!this.host.running()) {
+      this.set("save", "error", "notrunning", "the game is stopped; try again when it is running");
+      return this.finish("failed", "the game is stopped; try again when it is running");
+    }
     if (!this.host.lock()) {
       this.set("save", "error", "busy", "another action is in progress");
       return this.finish("failed", "another action is in progress");

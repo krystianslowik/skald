@@ -523,6 +523,8 @@ export class PushService implements NotifySink {
   }
 
   wants(kind: ItemKind): boolean {
+    // A safe restart's failure is a failure, its other news server news: pushKind sorts them per item.
+    if (kind === "restart") return this.inUse.has("server") || this.inUse.has("failure");
     const k = KIND_OF[kind];
     return k !== undefined && this.inUse.has(k);
   }

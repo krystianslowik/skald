@@ -35,6 +35,9 @@ export type Item =
 
 export type ItemKind = Item["kind"];
 
+/** The steps of a safe restart from which it holds the server news. */
+const HOLDING: ReadonlySet<string> = new Set(["save", "stop", "backup", "verify", "start", "recover"]);
+
 /** The Discord kind an item goes out under: a safe restart's failure is a failure, the rest is server news. */
 export function discordKind(item: Item): NotifyKind | null {
   if (item.kind === "restart") return item.phase === "failed" ? "failure" : "server";
@@ -452,14 +455,17 @@ export class DiscordNotifier {
   private outbox: string[] = [];
   private sending: Promise<void> | null = null;
   private stopped = false;
-  /**
-   * The safe restart in progress (its id): its own messages say what the
-   * server and join code news would, so that news waits for its end.
-   */
+  /** The safe restart in progress (its id). */
   private restartRun: string | null = null;
+  /**
+   * From its save to its end the run's own messages say what the server and
+   * join code news would, so that news waits; while it only waits or counts
+   * down, the news goes out as usual.
+   */
+  private restartHold = false;
   /** Its heads-up went out (a cancel is then news too). */
   private restartWarned = false;
-  /** The join code when it began. */
+  /** The join code when the hold began. */
   private restartCode = "";
 
   constructor(private readonly o: NotifierOptions) {
@@ -484,6 +490,7 @@ export class DiscordNotifier {
     try {
       if (m.type === "state") {
         this.seed(m.state, m.online);
+        if (m.online) this.restartGone(m.state);
         // A leave lost in a long reconnect must not keep a player at the fire for good.
         if (m.online && m.state.players.length === 0) this.joinedAt.clear();
         this.bosses(m.state, m.online);
@@ -601,7 +608,7 @@ export class DiscordNotifier {
         if (!code || code === this.joinCode) return;
         this.joinCode = code;
         // A safe restart's end carries it.
-        if (this.restartRun) return;
+        if (this.restartHold) return;
         return this.add({ kind: "join_code", code });
       }
       case "version": {
@@ -647,6 +654,20 @@ export class DiscordNotifier {
     this.restartRun = run.id;
     this.restartCode = this.joinCode;
     this.restartWarned = run.step !== "" && run.step !== "wait";
+    this.restartHold = HOLDING.has(run.step);
+  }
+
+  /**
+   * A run this notifier holds news for, but which the agent no longer runs
+   * (an agent restart ends a run without its end event): the hold is lifted.
+   */
+  private restartGone(st: AgentState): void {
+    if (!this.restartRun) return;
+    const r = st.safeRestart;
+    if (r && r.state === "running" && r.id === this.restartRun) return;
+    this.restartRun = null;
+    this.restartHold = false;
+    this.restartWarned = false;
   }
 
   /**
@@ -662,11 +683,15 @@ export class DiscordNotifier {
     if (step === "begin") {
       this.restartRun = run.id;
       this.restartWarned = false;
-      this.restartCode = this.joinCode;
+      this.restartHold = false;
       return;
     }
     if (step !== "end") {
       if (this.restartRun !== run.id) this.joinRun(run);
+      if (HOLDING.has(step) && !this.restartHold) {
+        this.restartHold = true;
+        this.restartCode = this.joinCode;
+      }
       const countdown = step === "countdown" && result === "running";
       const goingDown = step === "stop" && result === "running" && !this.restartWarned;
       if (countdown || goingDown) {
@@ -677,11 +702,15 @@ export class DiscordNotifier {
     }
     this.restartRun = null;
     const warned = this.restartWarned;
+    const held = this.restartHold;
     this.restartWarned = false;
+    this.restartHold = false;
     // What the server did meanwhile was told by the run; nothing to catch up on.
-    if (this.serverTimer) clearTimeout(this.serverTimer);
-    this.serverTimer = null;
-    this.announcedStatus = this.status;
+    if (held) {
+      if (this.serverTimer) clearTimeout(this.serverTimer);
+      this.serverTimer = null;
+      this.announcedStatus = this.status;
+    }
     if (result === "done") {
       if (run.joinCode) this.joinCode = run.joinCode;
       return this.add({ kind: "restart", phase: "done", code: run.joinCode ?? "" });
@@ -691,7 +720,7 @@ export class DiscordNotifier {
       // The game may be up with a new code all the same.
       const code = run.joinCode || this.joinCode;
       if (run.joinCode) this.joinCode = run.joinCode;
-      if (code && code !== this.restartCode) this.add({ kind: "join_code", code });
+      if (held && code && code !== this.restartCode) this.add({ kind: "join_code", code });
       return;
     }
     if (result === "cancelled" && warned) this.add({ kind: "restart", phase: "cancelled" });
@@ -707,7 +736,7 @@ export class DiscordNotifier {
     if (status === this.status) return;
     this.status = status;
     // A safe restart tells its own story.
-    if (this.restartRun) return;
+    if (this.restartHold) return;
     if (status !== "stopped" && status !== "starting" && status !== "running") return;
     if (this.serverTimer) clearTimeout(this.serverTimer);
     this.serverTimer = setTimeout(() => {
