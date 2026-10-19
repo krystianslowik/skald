@@ -121,7 +121,7 @@ describe("MockAgent 1.0 crossplay", () => {
       expect(st.world.meta?.bosses?.filter((b) => b.defeated).map((b) => b.key)).toEqual(["defeated_eikthyr", "defeated_gdking", "defeated_bonemass"]);
       expect(st.world.meta?.modifiers).toMatchObject({ resources: "muchmore", portals: "casual" });
       const join = seen.find((e) => e.type === "player_join");
-      expect(join?.data).toEqual({ name: "Bjorn", platform: "playstation" });
+      expect(join?.data).toEqual({ name: "Bjorn", id: "Bjorn", platform: "playstation" });
       const lines = seen.filter((e) => e.type === "log").map((e) => String(e.data.line));
       expect(lines.some((l) => /Player joined server ".*" that has join code \d+, now \d+ player\(s\)/.test(l))).toBe(true);
       expect(lines.some((l) => l.endsWith("received local Platform ID PlayStation_***"))).toBe(true);

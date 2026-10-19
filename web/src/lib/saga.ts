@@ -1,3 +1,4 @@
+import { playerKey } from "./apply";
 import type { AgentEvent } from "../types";
 
 /** A save this slow (ms) is worth its own line, with a warning tone. */
@@ -22,7 +23,8 @@ const localDay = (ts: string) => new Date(ts).toDateString();
  * Shapes the newest-first recent events into saga lines: a join and its leave
  * become one visit line, a version after a different one reads as an update,
  * and consecutive routine saves and backups of one day fold into a single row.
- * `online` (when known) is the truth for a visit still being on; a join closed
+ * `online` (when known, the online players' ids, else names) is the truth
+ * for a visit still being on; a join closed
  * by a server stop, or by a leave the window lost, stays a plain join line.
  */
 export function sagaRows(newestFirst: AgentEvent[], online?: ReadonlySet<string>, dayOf: (ts: string) => string = localDay): SagaRow[] {
@@ -38,13 +40,13 @@ export function sagaRows(newestFirst: AgentEvent[], online?: ReadonlySet<string>
       case "player_join":
         if (!name) break;
         // A repeated join while the visit is on says nothing new (as in deriveHistory).
-        if (open.has(name)) hidden.add(e);
-        else open.set(name, e);
+        if (open.has(playerKey(e.data))) hidden.add(e);
+        else open.set(playerKey(e.data), e);
         break;
       case "player_leave": {
-        const join = open.get(name);
+        const join = open.get(playerKey(e.data));
         if (!join) break;
-        open.delete(name);
+        open.delete(playerKey(e.data));
         visitOf.set(e, join);
         hidden.add(join);
         break;
@@ -61,8 +63,8 @@ export function sagaRows(newestFirst: AgentEvent[], online?: ReadonlySet<string>
     }
   }
   const openVisits = new Set<AgentEvent>();
-  for (const [name, join] of open) {
-    if (!online || online.has(name)) openVisits.add(join);
+  for (const [key, join] of open) {
+    if (!online || online.has(key)) openVisits.add(join);
   }
 
   const rows: SagaRow[] = [];

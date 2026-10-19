@@ -209,13 +209,15 @@ export function useValheim(onUnauthorized: () => void): Valheim {
       // Markers leave with their players, and all of them with the server.
       if (ev.type === "player_leave" || (ev.type === "server_state" && ev.data.status !== "running")) {
         const live = getLivePositions();
+        // Markers carry names only: a leave takes every marker of that name,
+        // and one still playing under it comes back with the next sample.
         const players = ev.type === "player_leave" ? live.players.filter((p) => p.name !== ev.data.name) : [];
         if (players.length !== live.players.length) setLivePositions({ t: live.t, players });
       }
       setState((s) => {
         if (!s) return s;
         const next = applyEvent(s, ev);
-        if (!stored || ev.type === "player_count") return next;
+        if (!stored || ev.type === "player_count" || ev.type === "player_platform") return next;
         return { ...next, history: { ...next.history, events: addEvent(next.history.events, ev) } };
       });
     };

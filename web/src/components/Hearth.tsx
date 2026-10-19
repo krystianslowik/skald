@@ -18,7 +18,7 @@ export const Hearth = memo(function Hearth({ players }: { players: Player[] }) {
       <AnimatePresence mode="popLayout">
         {players.map((p) => (
           <motion.figure
-            key={p.name}
+            key={p.id ?? p.name}
             layout={!reduced}
             className="flex w-23 flex-col items-center text-center"
             initial={reduced ? { opacity: 0 } : { opacity: 0, y: 18, scale: 0.85, filter: "brightness(0) blur(4px)" }}

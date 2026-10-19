@@ -10,6 +10,7 @@ import { createLogStore } from "../../lib/useValheim";
 import { preloadLazyChunks } from "../../test-preload";
 import { emptyAgentState, NOTIFY_KINDS, type AccessState, type AdminStatus, type AgentEvent, type ApiState, type NotifyConfig, type RestoreInfo } from "../../types";
 import { restoreProgress, RestoreSheet } from "./WorldTools";
+import { platformOf } from "./parts";
 import { AdminProvider, toastTop, useAdmin, type Admin } from "./AdminContext";
 import { BRIDGE_PLUGIN_VERSION } from "@server/bridgeplugin";
 
@@ -919,6 +920,37 @@ describe("admin lines in the saga", () => {
     expect(describeAdmin(pl, mead)).toBe("k napełnił fermentatory (2, Brzeczka miodowa: Pyszna) obok: Freya");
     expect(describeAdmin(en, { actor: "k", command: "fill-fermenters", result: "ok", fermenters: 0, full: 3, added: {} })).toBe("k added nothing to the fermenters: they are busy or do not take that base");
     expect(describeAdmin(pl, { actor: "k", command: "fill-fermenters", result: "ok", fermenters: 0, added: {}, player: "Freya" })).toBe("k nie znalazł fermentatorów do napełnienia obok: Freya");
+  });
+});
+
+describe("players sharing a name (#23)", () => {
+  it("lists both at the fire, each with its own position, without key clashes", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    api(status());
+    const st = fixture();
+    st.players = [
+      { id: "Ragnar", name: "Ragnar", since: "2026-10-09T19:30:00Z", platform: "xbox" },
+      { id: "Ragnar#2", name: "Ragnar", since: "2026-10-09T19:40:00Z", platform: "steam" },
+    ];
+    render(<Dashboard live={{ state: st, logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
+    const dialog = await openAdmin();
+    const rows = await within(dialog).findAllByRole("button", { name: /Ragnar/ });
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    expect(errors.mock.calls.filter((c) => String(c[0]).includes("same key"))).toEqual([]);
+    errors.mockRestore();
+  });
+
+  it("glide each marker on its own and tell a platform only when it is one", () => {
+    const g = new Glide();
+    const two = (x: number) => [
+      { id: "Ragnar", name: "Ragnar", platform: "xbox" as const, x, z: 0, health: 1, maxHealth: 1 },
+      { id: "Ragnar#2", name: "Ragnar", platform: "steam" as const, x: -x, z: 0, health: 1, maxHealth: 1 },
+    ];
+    g.step(two(100), 0.016, false);
+    expect(g.at("Ragnar")).toMatchObject({ x: 100 });
+    expect(g.at("Ragnar#2")).toMatchObject({ x: -100 });
+    expect(platformOf([{ name: "Ragnar", platform: "xbox" }, { name: "Ragnar", platform: "steam" }], "Ragnar")).toBeUndefined();
+    expect(platformOf([{ name: "Ragnar", platform: "xbox" }, { name: "Freya", platform: "steam" }], "Ragnar")).toBe("xbox");
   });
 });
 

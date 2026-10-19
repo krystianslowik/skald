@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -118,6 +119,15 @@ type Options struct {
 	Timeout time.Duration
 	// HTTP overrides the client (tests).
 	HTTP *http.Client
+	// OnPlayers hears every player list read: when the read began and each
+	// connected peer, by its peer id, with its character's name and its
+	// platform (unknown when the game reports none). It must not call back
+	// into the client.
+	OnPlayers func(readAt time.Time, peers []Peer)
+	// PlayerID names the listed player a peer id belongs to ("Ragnar#2"),
+	// "" when none, to tell apart players sharing a name. It is asked
+	// after OnPlayers and must not call back into the client.
+	PlayerID func(uid string) string
 }
 
 // Client calls the plugin and keeps the private name <-> id tables.
@@ -442,6 +452,9 @@ func (c *Client) saveAck(build string) {
 // Player is one connected player as the web may see it: no uid, no platform
 // or PlayFab id.
 type Player struct {
+	// ID is the player's id as /state lists it: the name, or "Ragnar#2"
+	// for a second player with the name. Never a peer or platform id.
+	ID           string   `json:"id"`
 	Name         string   `json:"name"`
 	Platform     string   `json:"platform"`
 	X            float64  `json:"x"`
@@ -465,6 +478,7 @@ type rawPlayer struct {
 
 // Players reads the connected players and refreshes the private tables.
 func (c *Client) Players(ctx context.Context) ([]Player, error) {
+	readAt := time.Now()
 	data, err := c.call(ctx, http.MethodGet, "/v1/players", "", nil)
 	if err != nil {
 		return nil, err
@@ -478,6 +492,7 @@ func (c *Client) Players(ctx context.Context) ([]Player, error) {
 		return nil, &Error{http.StatusBadGateway, "bad player list"}
 	}
 	out := make([]Player, 0, len(body.Players))
+	peers := make([]Peer, 0, len(body.Players))
 	c.mu.Lock()
 	c.uidByName = map[string]string{}
 	c.nameByUID = map[string]string{}
@@ -496,6 +511,7 @@ func (c *Client) Players(ctx context.Context) ([]Player, error) {
 		if id != "" {
 			c.userIDByName[strings.ToLower(p.Name)] = id
 		}
+		peers = append(peers, Peer{UID: uid, Name: p.Name, Platform: platformOf(id)})
 		out = append(out, Player{
 			Name:         p.Name,
 			Platform:     platformOf(id),
@@ -508,8 +524,62 @@ func (c *Client) Players(ctx context.Context) ([]Player, error) {
 		})
 	}
 	c.mu.Unlock()
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	if c.opt.OnPlayers != nil {
+		c.opt.OnPlayers(readAt, peers)
+	}
+	// Ids unique within the list, also for peers the tracker has not
+	// listed yet (still loading, or not in the log yet).
+	taken := map[string]bool{}
+	for i := range out {
+		id := ""
+		if c.opt.PlayerID != nil {
+			id = c.opt.PlayerID(peers[i].UID)
+		}
+		if id == "" || taken[id] {
+			id = out[i].Name
+			for n := 2; taken[id]; n++ {
+				id = out[i].Name + "#" + strconv.Itoa(n)
+			}
+		}
+		taken[id] = true
+		out[i].ID = id
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out, nil
+}
+
+// Peer is one connected peer as OnPlayers hears it. UID is the game's peer
+// id; it stays inside the agent.
+type Peer struct {
+	UID, Name, Platform string
+}
+
+// SyncPlayers reads the player list every `every` while wanted() says a
+// read would settle something, so OnPlayers hears of new peers whether or
+// not a browser has the map open. Reads for the map count too: wanted()
+// turns false once they settled it. A failed read waits a minute.
+func (c *Client) SyncPlayers(ctx context.Context, every time.Duration, wanted func() bool) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	var wait time.Time // after a failed read, the plugin gets a minute
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		if time.Now().Before(wait) || !wanted() {
+			continue
+		}
+		if _, err := c.Players(ctx); err != nil {
+			wait = time.Now().Add(time.Minute)
+		}
+	}
 }
 
 // platformOf reads the platform type off an id like Xbox_2533... or Steam_7656....
@@ -794,6 +864,7 @@ func (c *Client) redact(msg string) string {
 
 // Position is one marker of the `positions` event: the map is 2D, so no y.
 type Position struct {
+	ID        string   `json:"id"`
 	Name      string   `json:"name"`
 	Platform  string   `json:"platform"`
 	X         float64  `json:"x"`
@@ -828,7 +899,7 @@ func (c *Client) RunPositions(ctx context.Context, every time.Duration, wanted f
 			if !p.HasCharacter {
 				continue
 			}
-			list = append(list, Position{Name: p.Name, Platform: p.Platform, X: round1(p.X), Z: round1(p.Z), Health: p.Health, MaxHealth: p.MaxHealth})
+			list = append(list, Position{ID: p.ID, Name: p.Name, Platform: p.Platform, X: round1(p.X), Z: round1(p.Z), Health: p.Health, MaxHealth: p.MaxHealth})
 		}
 		c.publishPositions(list)
 	}

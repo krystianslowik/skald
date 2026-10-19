@@ -87,4 +87,23 @@ describe("sagaRows", () => {
     const rows = sagaRows(feed(ev(0, "version", { version: "l-1.0.19" }), ev(60, "version", { version: "l-1.0.19" }), ev(120, "version", { version: "l-1.0.20" })), undefined, sameDay);
     expect(rows.map((r) => r.kind === "event" && Boolean(r.updated))).toEqual([true, false, false]);
   });
+
+  it("keeps two players sharing a name as two visits (#23)", () => {
+    const rows = sagaRows(
+      feed(ev(0, "player_join", { name: "Ragnar", id: "Ragnar" }), ev(10, "player_join", { name: "Ragnar", id: "Ragnar#2" }), ev(20, "player_leave", { name: "Ragnar", id: "Ragnar#2" })),
+      new Set(["Ragnar"]),
+      sameDay,
+    );
+    const visits = rows.filter((r) => r.kind === "visit");
+    expect(visits.map((r) => r.kind === "visit" && [r.join.data.id, r.leave?.data.id ?? null])).toEqual([
+      ["Ragnar#2", "Ragnar#2"],
+      ["Ragnar", null],
+    ]);
+  });
+
+  it("does not show a stale visit as on because another player with the name is online", () => {
+    // The leave of "Ragnar#2" was lost; only the first Ragnar is online.
+    const rows = sagaRows(feed(ev(0, "player_join", { name: "Ragnar", id: "Ragnar#2" })), new Set(["Ragnar"]), sameDay);
+    expect(rows[0]!.kind).toBe("event");
+  });
 });

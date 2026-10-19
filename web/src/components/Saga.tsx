@@ -1,6 +1,6 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { memo, useId, useMemo, useState, type ReactNode } from "react";
-import type { AgentEvent, Platform } from "../types";
+import { isPlatform, type AgentEvent, type Platform } from "../types";
 import { gameVersion } from "../lib/format";
 import { sagaRows, type SagaRow } from "../lib/saga";
 import { gameClock } from "../lib/admin";
@@ -74,8 +74,7 @@ export function fillText(i: Pick<I18n, "lookup" | "intl">, d: Record<string, unk
   return new Intl.ListFormat(i.intl, { type: "conjunction" }).format(labels);
 }
 
-const PLATFORMS: readonly Platform[] = ["xbox", "steam", "playstation", "nintendo"];
-const platformKey = (p: unknown): Platform => (PLATFORMS as readonly unknown[]).includes(p) ? (p as Platform) : "unknown";
+const platformKey = (p: unknown): Platform => (isPlatform(p) ? p : "unknown");
 
 /** One step of a world restore: each outcome its own line, failures saying what was kept. */
 function describeRestore(i: I18n, d: Record<string, unknown>, actor: string): string {
@@ -361,7 +360,7 @@ function FeedLine({ d, time, quiet = false }: { d: Line; time?: ReactNode; quiet
 }
 
 /** The event scroll: newest first, grouped by day; routine saves fold away, a visit is one line. */
-export const Saga = memo(function Saga({ events, online }: { events: AgentEvent[]; online?: readonly { name: string }[] }) {
+export const Saga = memo(function Saga({ events, online }: { events: AgentEvent[]; online?: readonly { id?: string; name: string }[] }) {
   const i18n = useI18n();
   const { t, clock, fullDate } = i18n;
   const reduced = useReducedMotion();
@@ -369,7 +368,7 @@ export const Saga = memo(function Saga({ events, online }: { events: AgentEvent[
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const rows = useMemo(() => {
     const shown = events.filter((e) => describe(i18n, e) !== null);
-    return sagaRows(shown, online ? new Set(online.map((p) => p.name)) : undefined).flatMap((row) => {
+    return sagaRows(shown, online ? new Set(online.map((p) => p.id ?? p.name)) : undefined).flatMap((row) => {
       const d = rowLine(i18n, row);
       return d ? [{ row, d }] : [];
     });

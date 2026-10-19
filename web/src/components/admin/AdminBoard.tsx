@@ -43,9 +43,9 @@ function BoardPlayers() {
   return (
     <ul className="mt-2 divide-y divide-iron/25">
       {admin.players.map((p) => {
-        const lp = live.players.find((x) => x.name === p.name);
+        const lp = live.players.find((x) => (x.id ?? x.name) === (p.id ?? p.name));
         return (
-          <li key={p.name}>
+          <li key={p.id ?? p.name}>
             <button type="button" onClick={() => admin.open({ kind: "player", name: p.name })} onPointerDown={preloadAdmin} className="press flex min-h-12 w-full items-center gap-3 text-left">
               <PlatformGlyph platform={p.platform} size={16} className="text-label" />
               <span className="w-24 shrink-0 truncate font-bold text-bone">{p.name}</span>

@@ -66,7 +66,7 @@ export function AccessLists() {
               <p className="label-caps mb-1.5">{t("admin.access.online")}</p>
               <ul className="divide-y divide-iron/25">
                 {state.online.map((p) => (
-                  <li key={p.name} className="flex min-h-12 flex-wrap items-center gap-2 py-1.5">
+                  <li key={p.id ?? p.name} className="flex min-h-12 flex-wrap items-center gap-2 py-1.5">
                     <PlatformGlyph platform={p.platform} className="text-label" />
                     <span className="min-w-24 flex-1 truncate font-bold text-bone">{p.name}</span>
                     {p.admin && <span className="text-xs text-flame">{t("admin.access.isAdmin")}</span>}

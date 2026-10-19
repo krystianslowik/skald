@@ -77,7 +77,7 @@ export function PlayerSheet({ name, onClose }: { name: string; onClose: () => vo
             {admin.players
               .filter((p) => p.name !== name)
               .map((p) => (
-                <Chip key={p.name} on={false} disabled={off || busy === "tp"} onClick={() => void teleport({ toPlayer: p.name }, p.name)}>
+                <Chip key={p.id ?? p.name} on={false} disabled={off || busy === "tp"} onClick={() => void teleport({ toPlayer: p.name }, p.name)}>
                   <PlatformGlyph platform={p.platform} />
                   {t("admin.player.toPlayer", { name: p.name })}
                 </Chip>

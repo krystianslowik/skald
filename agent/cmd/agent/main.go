@@ -71,6 +71,16 @@ func main() {
 		AckPath:      ackPath,
 		Hub:          hub,
 		Logger:       logger,
+		// The plugin knows whose each peer is and its platform; the log
+		// only guesses both.
+		OnPlayers: func(readAt time.Time, peers []bridge.Peer) {
+			list := make([]state.Peer, len(peers))
+			for i, p := range peers {
+				list[i] = state.Peer{UID: p.UID, Name: p.Name, Platform: p.Platform}
+			}
+			tracker.SetPeers(readAt, list)
+		},
+		PlayerID: tracker.IDOf,
 	})
 	if br == nil {
 		logger.Info("bridge disabled", "reason", "BRIDGE_TOKEN not set")
@@ -178,6 +188,11 @@ func main() {
 		go br.RunPositions(ctx, 2*time.Second, func() bool {
 			snap := tracker.Snapshot()
 			return hub.Subscribers() > 0 && s.PositionsWanted() && (snap.PlayersReported > 0 || len(snap.Players) > 0) && !s.Restarting()
+		})
+		// The plugin's word on new peers, also while nobody has the map
+		// open; only until it has settled them.
+		go br.SyncPlayers(ctx, 5*time.Second, func() bool {
+			return tracker.PeersWanted() && !s.Restarting()
 		})
 	}
 	go func() {

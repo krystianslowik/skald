@@ -10,7 +10,20 @@ export const ACTION_NAMES: readonly ActionName[] = ["backup", "restart", "update
 /** Platform type from the PlayFab handshake; the raw platform ID is never sent. */
 export type Platform = "xbox" | "steam" | "playstation" | "nintendo" | "unknown";
 
+/** Every platform the agent reports, unknown last. */
+export const PLATFORMS: readonly Platform[] = ["xbox", "steam", "playstation", "nintendo", "unknown"];
+
+/** Whether a value from an event is one of the platforms. */
+export function isPlatform(p: unknown): p is Platform {
+  return (PLATFORMS as readonly unknown[]).includes(p);
+}
+
 export interface Player {
+  /**
+   * Tells apart players online at once whose characters share a name: the
+   * name itself, then "Ragnar#2" and so on. Missing from older agents.
+   */
+  id?: string;
   name: string;
   since: string;
   /** Missing from agents older than 0.4.0. */
@@ -280,6 +293,7 @@ export type AgentEventType =
   | "player_count"
   | "player_join"
   | "player_leave"
+  | "player_platform"
   | "death"
   | "world_saved"
   | "world_backup"
@@ -811,6 +825,8 @@ export interface AdminStatus {
 
 /** A connected player as the agent serves it: never a platform or peer id. */
 export interface LivePlayer {
+  /** The player's id as /state lists it ("Ragnar#2"); missing from older agents. */
+  id?: string;
   name: string;
   platform: Platform;
   x: number;
@@ -884,6 +900,8 @@ export interface AccessList {
 
 /** A player at the fire, as the lists see them: never an id. */
 export interface AccessOnline {
+  /** The player's id as /state lists it ("Ragnar#2"); missing from older agents. */
+  id?: string;
   name: string;
   platform: Platform;
   admin: boolean;

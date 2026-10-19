@@ -132,6 +132,21 @@ describe("DiscordNotifier", () => {
     expect(d.calls[0]!.signal).not.toBeNull();
   });
 
+  it("names two players sharing a name twice, each leave with its own visit (#23)", async () => {
+    const d = fakeDiscord();
+    let now = T0;
+    const n = new DiscordNotifier({ url: URL_, kinds: NOTIFY_KINDS, locale: "en", fetchImpl: d.fetchImpl, clock: () => now, coalesceMs: 10 });
+    running.push(n);
+    n.handle(live(ev(1, "player_join", { name: "Ragnar", id: "Ragnar" }, T0 + 1000)));
+    n.handle(live(ev(2, "player_join", { name: "Ragnar", id: "Ragnar#2" }, T0 + 2000)));
+    await settle(n);
+    now = T0 + 3600_000;
+    n.handle(live(ev(3, "player_leave", { name: "Ragnar", id: "Ragnar#2" }, T0 + 3600_000 + 2000)));
+    n.handle(live(ev(4, "player_leave", { name: "Ragnar", id: "Ragnar" }, T0 + 2 * 3600_000 + 1000)));
+    await settle(n);
+    expect(d.contents()).toEqual(["Ragnar and Ragnar arrive at the fire", "Ragnar (1 h) and Ragnar (2 h) walk into the dark"]);
+  });
+
   it("gives a leave the visit length, also for players online at boot", async () => {
     const d = fakeDiscord();
     let now = T0;

@@ -450,9 +450,9 @@ function Players() {
       ) : (
         <ul className="divide-y divide-iron/25">
           {admin.players.map((p) => {
-            const lp = live.players.find((x) => x.name === p.name);
+            const lp = live.players.find((x) => (x.id ?? x.name) === (p.id ?? p.name));
             return (
-              <li key={p.name}>
+              <li key={p.id ?? p.name}>
                 <button type="button" onClick={() => admin.open({ kind: "player", name: p.name })} className="press flex min-h-12 w-full items-center gap-3 py-1.5 text-left">
                   <PlatformGlyph platform={p.platform} size={16} className="text-label" />
                   <span className="w-28 shrink-0 truncate font-bold text-bone">{p.name}</span>

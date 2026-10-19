@@ -1,3 +1,4 @@
+import { playerKey } from "./apply";
 import { isBridgeRead, UNSTORED_EVENTS, type AgentEvent, type AgentEventType, type History, type PlayerStats, type SeriesPoint } from "./types";
 
 /** The window of the players-online series and of routine events in the list; also how long rows only it uses are kept. */
@@ -35,7 +36,8 @@ export function capRecent(newestFirst: AgentEvent[], now = Date.now(), limit = R
  */
 export function deriveHistory(events: AgentEvent[], now = Date.now()): History {
   const stats = new Map<string, PlayerStats>();
-  const open = new Map<string, number>();
+  // Open visits by player key (id, or name from older agents).
+  const open = new Map<string, { name: string; at: number }>();
   const seriesStart = now - WEEK_MS;
   const series: SeriesPoint[] = [];
   let current = 0;
@@ -50,14 +52,14 @@ export function deriveHistory(events: AgentEvent[], now = Date.now()): History {
     s.lastSeen = ts;
     return s;
   };
-  const close = (name: string, at: number, ts: string) => {
-    const start = open.get(name);
-    if (start === undefined) return;
-    open.delete(name);
-    stat(name, ts).playtimeMs += Math.max(0, at - start);
+  const close = (key: string, at: number, ts: string) => {
+    const visit = open.get(key);
+    if (visit === undefined) return;
+    open.delete(key);
+    stat(visit.name, ts).playtimeMs += Math.max(0, at - visit.at);
   };
   const closeAll = (at: number, ts: string) => {
-    for (const name of [...open.keys()]) close(name, at, ts);
+    for (const key of [...open.keys()]) close(key, at, ts);
   };
   const record = (at: number, value: number) => {
     if (value === current) return;
@@ -73,15 +75,15 @@ export function deriveHistory(events: AgentEvent[], now = Date.now()): History {
     switch (ev.type) {
       case "player_join":
         if (!name) break;
-        if (!open.has(name)) {
-          open.set(name, at);
+        if (!open.has(playerKey(ev.data))) {
+          open.set(playerKey(ev.data), { name, at });
           stat(name, ev.ts).sessions += 1;
         }
         record(at, Math.max(current, open.size));
         break;
       case "player_leave":
         if (!name) break;
-        close(name, at, ev.ts);
+        close(playerKey(ev.data), at, ev.ts);
         record(at, open.size);
         break;
       case "death":
@@ -104,14 +106,14 @@ export function deriveHistory(events: AgentEvent[], now = Date.now()): History {
   }
 
   const nowIso = new Date(now).toISOString();
-  for (const [name, start] of open) {
+  for (const { name, at: start } of open.values()) {
     const s = stat(name, nowIso);
     s.playtimeMs += Math.max(0, now - start);
     s.online = true;
   }
 
   const online7d: SeriesPoint[] = [[seriesStart, valueAtStart], ...series, [now, current]];
-  const recent = capRecent(events.filter((e) => e.type !== "player_count" && !UNSTORED_EVENTS.includes(e.type) && !isBridgeRead(e)).reverse(), now);
+  const recent = capRecent(events.filter((e) => e.type !== "player_count" && e.type !== "player_platform" && !UNSTORED_EVENTS.includes(e.type) && !isBridgeRead(e)).reverse(), now);
   const players = [...stats.values()].sort((a, b) => b.playtimeMs - a.playtimeMs);
   return { players, events: recent, online7d };
 }

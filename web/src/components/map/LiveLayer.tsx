@@ -38,6 +38,7 @@ export const LiveLayer = forwardRef<LiveLayerHandle, { canvas: RefObject<MapCanv
     const c = canvas.current;
     if (!c) return;
     // Reads first (positions, plate sizes), then writes, so a frame lays out once.
+    // Markers, plates and sizes are keyed by the player's id (players can share a name).
     const names: string[] = [];
     const boxes: PlateBox[] = [];
     for (const name of els.current.keys()) {
@@ -111,10 +112,10 @@ export const LiveLayer = forwardRef<LiveLayerHandle, { canvas: RefObject<MapCanv
         const hp = p.health != null && p.maxHealth ? Math.max(0, Math.min(1, p.health / p.maxHealth)) : null;
         return (
           <div
-            key={p.name}
+            key={p.id ?? p.name}
             ref={(el) => {
-              if (el) els.current.set(p.name, el);
-              else els.current.delete(p.name);
+              if (el) els.current.set(p.id ?? p.name, el);
+              else els.current.delete(p.id ?? p.name);
             }}
             className="absolute left-0 top-0 will-change-transform"
             style={{ transform: "translate3d(-999px,-999px,0)" }}
@@ -130,8 +131,8 @@ export const LiveLayer = forwardRef<LiveLayerHandle, { canvas: RefObject<MapCanv
             </button>
             <button
               ref={(el) => {
-                if (el) plates.current.set(p.name, el);
-                else plates.current.delete(p.name);
+                if (el) plates.current.set(p.id ?? p.name, el);
+                else plates.current.delete(p.id ?? p.name);
               }}
               type="button"
               tabIndex={-1}

@@ -182,7 +182,7 @@ export function TargetChips({ value, onChange, allowBase = true, allowMap = true
       {admin.players
         .filter((p) => p.name !== exclude)
         .map((p) => (
-          <Chip key={p.name} on={isPlayer(p.name)} onClick={() => onChange({ player: p.name })}>
+          <Chip key={p.id ?? p.name} on={isPlayer(p.name)} onClick={() => onChange({ player: p.name })}>
             <PlatformGlyph platform={p.platform} />
             {p.name}
           </Chip>
@@ -254,6 +254,8 @@ export function HealthBar({ health, max, className = "" }: { health: number | nu
   );
 }
 
+/** A player's platform; undefined when the name is not online, or when players sharing it are on different platforms. */
 export function platformOf(players: { name: string; platform?: Platform }[], name: string): Platform | undefined {
-  return players.find((p) => p.name === name)?.platform;
+  const all = new Set(players.filter((p) => p.name === name).map((p) => p.platform));
+  return all.size === 1 ? [...all][0] : undefined;
 }

@@ -1,4 +1,5 @@
-import type { AgentEvent, Badge, DailyPlay, Platform, PlayerProfile } from "./types";
+import { playerKey } from "./apply";
+import { isPlatform, type AgentEvent, type Badge, type DailyPlay, type Platform, type PlayerProfile } from "./types";
 
 /**
  * Player profiles: per-player stats, daily playtime, streaks and badges,
@@ -99,8 +100,6 @@ interface Folded {
   platforms: Map<string, Platform>;
 }
 
-const PLATFORMS: readonly Platform[] = ["xbox", "steam", "playstation", "nintendo", "unknown"];
-
 /** Same open/close rules as `deriveHistory`. */
 export function foldSessions(events: AgentEvent[], now: number): Folded {
   const sessions = new Map<string, Session[]>();
@@ -109,7 +108,8 @@ export function foldSessions(events: AgentEvent[], now: number): Folded {
   const firstSeen = new Map<string, number>();
   const lastSeen = new Map<string, number>();
   const platforms = new Map<string, Platform>();
-  const open = new Map<string, number>();
+  // Open visits by player key (id, or name from older agents).
+  const open = new Map<string, { name: string; at: number }>();
 
   const seen = (name: string, at: number) => {
     if (!firstSeen.has(name)) firstSeen.set(name, at);
@@ -120,15 +120,15 @@ export function foldSessions(events: AgentEvent[], now: number): Folded {
     list.push(s);
     sessions.set(s.name, list);
   };
-  const close = (name: string, at: number) => {
-    const start = open.get(name);
-    if (start === undefined) return;
-    open.delete(name);
-    seen(name, at);
-    push({ name, start, end: Math.max(start, at), open: false });
+  const close = (key: string, at: number) => {
+    const visit = open.get(key);
+    if (visit === undefined) return;
+    open.delete(key);
+    seen(visit.name, at);
+    push({ name: visit.name, start: visit.at, end: Math.max(visit.at, at), open: false });
   };
   const closeAll = (at: number) => {
-    for (const name of [...open.keys()]) close(name, at);
+    for (const key of [...open.keys()]) close(key, at);
   };
 
   for (const ev of events) {
@@ -138,17 +138,23 @@ export function foldSessions(events: AgentEvent[], now: number): Folded {
     switch (ev.type) {
       case "player_join": {
         if (!name) break;
-        if (!open.has(name)) {
-          open.set(name, at);
+        if (!open.has(playerKey(ev.data))) {
+          open.set(playerKey(ev.data), { name, at });
           if (!sessions.has(name)) sessions.set(name, []);
         }
         seen(name, at);
-        const p = ev.data.platform as Platform;
-        if (PLATFORMS.includes(p) && (p !== "unknown" || !platforms.has(name))) platforms.set(name, p);
+        const p = ev.data.platform;
+        if (isPlatform(p) && (p !== "unknown" || !platforms.has(name))) platforms.set(name, p);
+        break;
+      }
+      case "player_platform": {
+        // The admin plugin corrected the platform the log guessed at the join.
+        const p = ev.data.platform;
+        if (name && isPlatform(p) && p !== "unknown") platforms.set(name, p);
         break;
       }
       case "player_leave":
-        if (name) close(name, at);
+        if (name) close(playerKey(ev.data), at);
         break;
       case "death":
         if (!name) break;
@@ -166,7 +172,7 @@ export function foldSessions(events: AgentEvent[], now: number): Folded {
         break;
     }
   }
-  for (const [name, start] of open) {
+  for (const { name, at: start } of open.values()) {
     push({ name, start, end: Math.max(start, now), open: true });
     lastSeen.set(name, now);
   }

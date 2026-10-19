@@ -1,11 +1,13 @@
+import { playerKey } from "./apply";
 import { NOTIFY_KINDS, type AgentEvent, type AgentState, type CompatResult, type LiveMessage, type Locale, type NotifyChange, type NotifyConfig, type NotifyKind } from "./types";
 
 export { NOTIFY_KINDS, type NotifyChange, type NotifyKind };
 
 /** One line waiting to go out; joins, leaves and deaths of a batch share a line. */
 type Item =
-  | { kind: "join"; name: string }
-  | { kind: "leave"; name: string; ms: number | null }
+  // key tells apart players sharing a name ("Ragnar#2"); the name otherwise.
+  | { kind: "join"; name: string; key?: string }
+  | { kind: "leave"; name: string; key?: string; ms: number | null }
   | { kind: "death"; name: string }
   | { kind: "raid"; raid: string }
   | { kind: "server"; status: "stopped" | "starting" | "running" }
@@ -220,12 +222,14 @@ export function formatBatch(items: readonly Item[], locale: Locale): string[] {
     if (COALESCED.has(it.kind)) {
       if (done.has(it.kind)) continue;
       done.add(it.kind);
-      // One label per name: a leave carries the visit, repeated deaths a count.
+      // One label per player (its id; deaths carry only the name): a leave
+      // carries the visit, repeated deaths a count.
       const labels = new Map<string, string>();
       const deaths = new Map<string, number>();
       for (const x of items) {
         if (x.kind !== it.kind) continue;
         const name = (x as { name: string }).name;
+        const who = x.kind === "join" || x.kind === "leave" ? (x.key ?? name) : name;
         let label = escapeMd(name);
         if (x.kind === "leave" && x.ms !== null) label += ` (${duration(x.ms, locale)})`;
         if (x.kind === "death") {
@@ -233,7 +237,7 @@ export function formatBatch(items: readonly Item[], locale: Locale): string[] {
           deaths.set(name, n);
           if (n > 1) label += ` (${n}×)`;
         }
-        labels.set(name, label);
+        labels.set(who, label);
       }
       const names = [...labels.values()];
       lines.push(fill(s[(names.length > 1 ? `${it.kind}Many` : it.kind) as Key], { names: list(names) }));
@@ -453,15 +457,15 @@ export class DiscordNotifier {
       case "player_join": {
         const name = String(d.name ?? "");
         if (!name) return;
-        this.joinedAt.set(name, ts);
-        return this.add({ kind: "join", name });
+        this.joinedAt.set(playerKey(d), ts);
+        return this.add({ kind: "join", name, key: playerKey(d) });
       }
       case "player_leave": {
         const name = String(d.name ?? "");
         if (!name) return;
-        const at = this.joinedAt.get(name);
-        this.joinedAt.delete(name);
-        return this.add({ kind: "leave", name, ms: at === undefined ? null : Math.max(0, ts - at) });
+        const at = this.joinedAt.get(playerKey(d));
+        this.joinedAt.delete(playerKey(d));
+        return this.add({ kind: "leave", name, key: playerKey(d), ms: at === undefined ? null : Math.max(0, ts - at) });
       }
       case "player_count":
         if (Number(d.count) === 0) this.joinedAt.clear();
