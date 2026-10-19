@@ -78,6 +78,21 @@ export function makeI18n(locale: Locale): I18n {
     return typeof v === "string" ? fill(v, vars) : undefined;
   };
   const bytesFmt = new Intl.NumberFormat(intl, { maximumFractionDigits: 1 });
+  // Built once: toLocale*String with options builds a new formatter on every call, and a tab
+  // full of timestamps paid for that in the middle of its fade-in. A bad timestamp reads
+  // "Invalid Date" as before instead of throwing.
+  const fmt = (o: Intl.DateTimeFormatOptions) => {
+    const f = new Intl.DateTimeFormat(intl, o);
+    return (v: number | string | Date) => {
+      const d = new Date(v);
+      return Number.isNaN(d.getTime()) ? String(d) : f.format(d);
+    };
+  };
+  const clockFmt = fmt({ hour: "2-digit", minute: "2-digit" });
+  const clockSecFmt = fmt({ hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const fullDateFmt = fmt({ dateStyle: "medium", timeStyle: "short" });
+  const dateFmt = fmt({ dateStyle: "medium" });
+  const dayFmt = fmt({ weekday: "long", day: "numeric", month: "long" });
   const bytes = (n: number) => {
     const units = ["B", "KB", "MB", "GB", "TB"];
     let v = n;
@@ -121,10 +136,10 @@ export function makeI18n(locale: Locale): I18n {
     },
     bytes,
     rate: (b) => `${bytes(b)}/s`,
-    clock: (v) => new Date(v).toLocaleTimeString(intl, { hour: "2-digit", minute: "2-digit" }),
-    clockSec: (v) => new Date(v).toLocaleTimeString(intl, { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-    fullDate: (v) => new Date(v).toLocaleString(intl, { dateStyle: "medium", timeStyle: "short" }),
-    date: (v) => new Date(v).toLocaleDateString(intl, { dateStyle: "medium" }),
+    clock: clockFmt,
+    clockSec: clockSecFmt,
+    fullDate: fullDateFmt,
+    date: dateFmt,
     dayLabel(iso, now = Date.now()) {
       const d = new Date(iso);
       const today = new Date(now);
@@ -132,7 +147,7 @@ export function makeI18n(locale: Locale): I18n {
       const diff = Math.round((startOf(today) - startOf(d)) / 86_400_000);
       if (diff === 0) return t("day.today");
       if (diff === 1) return t("day.yesterday");
-      return d.toLocaleDateString(intl, { weekday: "long", day: "numeric", month: "long" });
+      return dayFmt(d);
     },
     modifiers(args) {
       const out: string[] = [];

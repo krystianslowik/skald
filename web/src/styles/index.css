@@ -533,8 +533,14 @@ body {
 
 .sheet-scrim {
   background: rgba(0, 0, 0, 0.62);
+}
+/* Only once the sheet rests (Sheet.tsx): a blur that moves with the slide re-samples
+   the whole screen every frame, which weaker GPUs cannot keep up with. */
+.sheet-scrim-rest {
   -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
+  /* Eases in once the sheet has landed, when nothing else moves; it goes at once when a close starts. */
+  transition: -webkit-backdrop-filter 0.2s ease-out, backdrop-filter 0.2s ease-out;
 }
 
 /* ---- HUD meters ----------------------------------------------------------- */
@@ -656,6 +662,8 @@ body {
   }
   .sheet-scrim {
     background: rgba(0, 0, 0, 0.82);
+  }
+  .sheet-scrim-rest {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
