@@ -12,6 +12,8 @@ const DRAG_SLOP = 6;
 /** Critically damped: settles without overshoot. */
 export const SETTLE = { type: "spring" as const, bounce: 0, visualDuration: 0.35 };
 const FADE = { duration: 0.2, ease: "easeOut" as const };
+/** The scrim's class while the sheet rests open (styles/index.css). */
+export const SCRIM_REST = "sheet-scrim-rest";
 
 /**
  * A wooden board that slides in: a bottom sheet on phones and a side sheet on
@@ -62,6 +64,7 @@ export function Sheet({
 }) {
   const reduced = useReducedMotion() ?? false;
   const panel = useRef<HTMLDivElement>(null);
+  const scrimEl = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const headerEl = useRef<HTMLElement>(null);
   const [vertical] = useState(() => typeof window !== "undefined" && (window.matchMedia?.(BOTTOM_SHEET).matches ?? false));
@@ -120,13 +123,21 @@ export function Sheet({
     motionAnim.current?.stop();
     fadeAnim.current?.stop();
   };
+  /**
+   * The scrim's blur only while the sheet rests: a backdrop blur re-samples the
+   * whole screen every frame it changes, and sliding a sheet over it cost weaker
+   * GPUs most of their frames. Set on the element, so nothing re-renders.
+   */
+  const rest = (on: boolean) => scrimEl.current?.classList.toggle(SCRIM_REST, on);
 
   /** Spring to open or closed from wherever the sheet is now, carrying the release velocity. */
   const settle = (to: "open" | "closed", velocity = 0) => {
     stop();
+    rest(false);
     closing.current = to === "closed";
     const finish = () => {
       if (closing.current) done.current();
+      else rest(true);
     };
     const target = to === "open" ? restAt() : size.current;
     // Leaving gives up the history entry (stepped back over right away, so the next Back is a
@@ -137,7 +148,7 @@ export function Sheet({
     if (reduced) {
       // No slides: cross-fade out, or ease back into place after a drag.
       if (to === "closed") fadeAnim.current = animate(fade, 0, { ...FADE, onComplete: finish });
-      else motionAnim.current = animate(offset, target, FADE);
+      else motionAnim.current = animate(offset, target, { ...FADE, onComplete: finish });
       return;
     }
     // A flick that throws the sheet back open earns a little bounce; everything else lands softly.
@@ -157,7 +168,7 @@ export function Sheet({
     if (reduced) {
       offset.jump(restAt());
       heightCb.current?.(s - restAt());
-      fadeAnim.current = animate(fade, 1, FADE);
+      fadeAnim.current = animate(fade, 1, { ...FADE, onComplete: () => rest(true) });
     } else {
       offset.jump(s);
       settle("open");
@@ -231,6 +242,8 @@ export function Sheet({
         if (Math.abs(d) < DRAG_SLOP) return;
         active = true;
         dragged.current = true;
+        // A drag is motion, a press is not: a tap on the header leaves the blur alone.
+        rest(false);
       }
       const travel = base + d;
       offset.set(dragOffset(travel, size.current));
@@ -245,6 +258,9 @@ export function Sheet({
         // A press that never moved: resume whatever was happening.
         if (wasClosing) settle("closed");
         else if (offset.get() !== 0) settle("open");
+        // The reduced-motion fade-in was stopped by the press: finish it, then rest.
+        else if (fade.get() < 1) fadeAnim.current = animate(fade, 1, { ...FADE, onComplete: () => rest(true) });
+        else rest(true);
         return;
       }
       if (ev.type === "pointercancel") return settle("open");
@@ -293,6 +309,7 @@ export function Sheet({
     <div className={`fixed inset-0 z-50 ${modal ? "" : "pointer-events-none"}`}>
       {modal && (
         <motion.div
+          ref={scrimEl}
           aria-hidden
           className="sheet-scrim absolute inset-0"
           style={{ opacity: scrim }}
