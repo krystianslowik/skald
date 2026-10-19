@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- Portal route finder: tapping a base or pin while picking the start now starts there under its name, and pins can be picked as a start. A route whose start is already at the destination is no longer shown as "0 m on foot". Steps of under a metre (onto a portal on the same spot) are left out of the list. Boss altars and places the game has not built yet are no longer offered, even inside explored land. A player chosen as the start no longer makes the map redraw with every position update.
+
 ## [2026.10.25] - 2026-10-19
 
 ### Added
