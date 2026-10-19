@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.28] - 2026-10-19
+
 ### Fixed
 
 - Sheets and drawers slide more smoothly, most of all on phones and on PCs with a weaker graphics card: the soft blur behind an open sheet now appears once the sheet has landed instead of being redrawn on every frame of the slide. Switching tabs on a phone is quicker too, because times and dates are no longer formatted the slow way.
