@@ -1,5 +1,5 @@
 import { createContext, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { AdminCatalog, AdminCommand, AdminStatus, AgentEvent, ApiState, CompatView, MapContainer, Platform, RestoreBackup } from "../../types";
+import type { AdminCatalog, AdminCommand, AdminStatus, AgentEvent, ApiState, CompatView, MapContainer, Platform, RestoreBackup, SafeRestartRun } from "../../types";
 import { getAdminStatus, postAdmin, runAdmin, type AdminOutcome, type KitLine } from "../../lib/admin";
 import { Unauthorized } from "../../lib/api";
 import { failText } from "../../lib/refusal";
@@ -94,8 +94,8 @@ export interface Admin {
   unlocked: boolean;
   refresh(): void;
   run(command: AdminCommand, body?: Record<string, unknown>, opts?: { quiet?: boolean; done?: Done }): Promise<AdminOutcome>;
-  /** Any other admin POST (lists, restore), with the same unlock-and-retry and toasts. */
-  post(path: string, body: Record<string, unknown>, opts?: { quiet?: boolean; done?: Done }): Promise<AdminOutcome>;
+  /** Any other admin POST (lists, restore) or DELETE, with the same unlock-and-retry and toasts. */
+  post(path: string, body: Record<string, unknown>, opts?: { quiet?: boolean; done?: Done; method?: "POST" | "DELETE" }): Promise<AdminOutcome>;
   open(view: AdminView): void;
   close(): void;
   /** Ask for the admin password; resolves true once unlocked. */
@@ -118,6 +118,8 @@ export interface Admin {
   versions: { web: string; agent?: string };
   /** The compatibility check with the game build; null from agents before it. */
   compat: CompatView | null;
+  /** The current or last safe restart: null before the first, undefined from agents before it. */
+  safeRestart: SafeRestartRun | null | undefined;
 }
 
 const AdminCtx = createContext<Admin | null>(null);
@@ -226,7 +228,7 @@ export function AdminProvider({
     [unlock, refresh, toast, i18n],
   );
   const run = useCallback<Admin["run"]>((command, body = {}, opts) => call(() => runAdmin(command, body), opts), [call]);
-  const post = useCallback<Admin["post"]>((path, body, opts) => call(() => postAdmin(path, body), opts), [call]);
+  const post = useCallback<Admin["post"]>((path, body, opts) => call(() => postAdmin(path, body, opts?.method), opts), [call]);
 
   const startPick = useCallback(
     (req: PickRequest) => {
@@ -305,8 +307,9 @@ export function AdminProvider({
       events: state.history.events,
       versions,
       compat: state.compat ?? null,
+      safeRestart: state.safeRestart,
     }),
-    [status, present, bridgeOn, blocker, unlocked, refresh, run, post, unlock, pick, startPick, completePick, cancelPick, toast, state.players, mainBase, state.server.world, state.history.events, versions, state.compat],
+    [status, present, bridgeOn, blocker, unlocked, refresh, run, post, unlock, pick, startPick, completePick, cancelPick, toast, state.players, mainBase, state.server.world, state.history.events, versions, state.compat, state.safeRestart],
   );
 
   return (
