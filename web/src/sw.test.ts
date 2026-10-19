@@ -341,8 +341,10 @@ describe("service worker push", () => {
     await sw.dispatch("push", { data: { json: () => JSON.parse("not json"), text: () => "plain words" } });
     await sw.dispatch("push", push({ title: "", body: 5, url: "//evil.example/x" }));
     await sw.dispatch("push", push({ url: "https://evil.example/" }));
+    await sw.dispatch("push", push({ url: "/\\evil.example/x" }));
     expect(sw.shown.map((n) => [n.title, n.options.body, n.options.tag, (n.options.data as { url: string }).url])).toEqual([
       ["Skald", "plain words", undefined, "/"],
+      ["Skald", "", undefined, "/"],
       ["Skald", "", undefined, "/"],
       ["Skald", "", undefined, "/"],
     ]);
@@ -372,5 +374,10 @@ describe("service worker push", () => {
     expect(win.navigated).toBe(`${ORIGIN}/#settings`);
     expect(sw.opened).toHaveLength(1);
     expect(closed).toBe(2);
+    // A tag forged into the stored data still never leaves the panel.
+    win.url = `${ORIGIN}/#saga`;
+    await sw.dispatch("notificationclick", tap("/\\evil.example/x"));
+    expect(win.navigated).toBe(`${ORIGIN}/`);
+    expect(sw.opened.every((u) => u.startsWith(`${ORIGIN}/`))).toBe(true);
   });
 });

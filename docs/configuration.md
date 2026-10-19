@@ -224,10 +224,16 @@ tap opens the panel where the news is.
 It is standard Web Push, no third-party service: skald-web makes a VAPID key
 pair on its first start and keeps it, with each device's subscription and
 choice, in its database (`DB_PATH`). Keep that file in your backups: without
-the key every device has to turn notifications on again. Signing out turns
-notifications off on that device, and a new `PANEL_PASSWORD_HASH` turns them
-off on every device at the next start, so a changed password also shuts out
-the phones of whoever had the old one. A device whose browser dropped the
+the key every device has to turn notifications on again. The file then holds
+the VAPID private key and every device's push address, so treat its backups
+as secret, like the Discord webhook: whoever has them can send notifications
+in the panel's name to those devices. Notifications follow the sign-in:
+signing out turns them off for every device that sign-in turned them on for,
+and a new `PANEL_PASSWORD_HASH` or `SESSION_SECRET` turns them off on every
+device at the next start, so changing either also shuts out the phones of
+whoever had the old one. One sign-in can turn notifications on for at most 5
+devices, a panel keeps at most 100, and turning on and test notifications are
+limited to 20 a minute per client address. A device whose browser dropped the
 subscription is forgotten at the next notification. skald-web needs outbound
 HTTPS to the push services (`fcm.googleapis.com`, `*.push.apple.com`,
 `updates.push.services.mozilla.com`, `*.notify.windows.com`); it posts only to

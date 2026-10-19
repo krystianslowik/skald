@@ -74,6 +74,7 @@ export const pl: Dict = {
   "push.unsupported": "Ta przeglądarka nie odbiera powiadomień z panelu.",
   "push.denied": "Powiadomienia są zablokowane dla tej strony. Zezwól na nie w ustawieniach przeglądarki lub telefonu i spróbuj ponownie.",
   "push.failed": "Nie udało się. Spróbuj ponownie za chwilę.",
+  "push.full": "Za dużo urządzeń ma włączone powiadomienia. Wyloguj się lub wyłącz je na urządzeniach, których już nie używasz.",
   "push.loading": "Sprawdzam to urządzenie...",
   "push.events": "Daj znać, gdy",
   "push.kind.join": "Ktoś przychodzi do ogniska",

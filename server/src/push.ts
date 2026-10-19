@@ -2,7 +2,10 @@
 // as a sink), sent with Web Push to every device that asked, in the device's
 // language, filtered by its own choice and quiet hours.
 import { Database } from "bun:sqlite";
+import { createHash } from "node:crypto";
 import { Hono, type Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
+import type { RateLimiter } from "./auth";
 import { cause, log as defaultLog, type Logger } from "./log";
 import { fill, gameVersion, RAIDS, type Item, type ItemKind, type NotifySink } from "./notify";
 import { PUSH_DEFAULT_KINDS, PUSH_KINDS, QUIET_TIME, type PushInfo, type PushKind, type PushPayload, type PushPrefs, type PushSubscriptionInput } from "./pushtypes";
@@ -305,7 +308,9 @@ export class PushStore {
         auth     TEXT NOT NULL,
         prefs    TEXT NOT NULL,
         created  INTEGER NOT NULL,
-        fails    INTEGER NOT NULL DEFAULT 0
+        fails    INTEGER NOT NULL DEFAULT 0,
+        -- A hash of the session that subscribed it: a few devices per session, all forgotten on its sign-out.
+        session  TEXT NOT NULL DEFAULT ''
       );
     `);
   }
@@ -340,13 +345,24 @@ export class PushStore {
     return (this.db.query("SELECT COUNT(*) AS n FROM push_devices").get() as { n: number }).n;
   }
 
-  put(d: Omit<PushDevice, "fails">, now: number): void {
+  put(d: Omit<PushDevice, "fails">, now: number, session = ""): void {
     this.db
       .query(
-        `INSERT INTO push_devices (endpoint, p256dh, auth, prefs, created, fails) VALUES (?, ?, ?, ?, ?, 0)
-         ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, prefs = excluded.prefs, fails = 0`,
+        `INSERT INTO push_devices (endpoint, p256dh, auth, prefs, created, fails, session) VALUES (?, ?, ?, ?, ?, 0, ?)
+         ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, prefs = excluded.prefs, fails = 0, session = excluded.session`,
       )
-      .run(d.endpoint, d.p256dh, d.auth, JSON.stringify(d.prefs), now);
+      .run(d.endpoint, d.p256dh, d.auth, JSON.stringify(d.prefs), now, session);
+  }
+
+  countSession(session: string): number {
+    return (this.db.query("SELECT COUNT(*) AS n FROM push_devices WHERE session = ?").get(session) as { n: number }).n;
+  }
+
+  /** Removes a session's devices; returns their endpoints. */
+  removeSession(session: string): string[] {
+    const rows = this.db.query("SELECT endpoint FROM push_devices WHERE session = ?").all(session) as { endpoint: string }[];
+    this.db.query("DELETE FROM push_devices WHERE session = ?").run(session);
+    return rows.map((r) => r.endpoint);
   }
 
   setFails(endpoint: string, fails: number): void {
@@ -395,6 +411,8 @@ export interface PushServiceOptions {
   allowLocal?: boolean;
   /** Devices one panel keeps at most. */
   maxDevices?: number;
+  /** Devices one signed-in session may subscribe. */
+  maxPerSession?: number;
   /** Joins and deaths within this long of the last one add to its notification. */
   collapseMs?: number;
   /** Notifications per device within `rateWindowMs`; past it they are dropped. */
@@ -404,8 +422,11 @@ export interface PushServiceOptions {
 }
 
 export type PushResult = { ok: true } | { ok: false; error: "not_subscribed" | "busy" | "failed" | "gone"; retryAfter?: number };
-export type SubscribeResult = { ok: true; prefs: PushPrefs } | { ok: false; error: "bad_endpoint" | "bad_keys" | "full"; message: string };
+export type SubscribeResult = { ok: true; prefs: PushPrefs } | { ok: false; error: "bad_endpoint" | "bad_keys" | "full" | "session_full"; message: string };
 
+/** How long a push service keeps news for an offline device: a join code goes stale with the next restart. */
+const CODE_TTL_S = 60 * 60;
+const NEWS_TTL_S = 6 * 60 * 60;
 /** Refusals in a row (other than "gone") after which a device is forgotten. */
 const MAX_FAILS = 10;
 /** Test pushes: at most one per device per this long. */
@@ -426,7 +447,7 @@ export class PushService implements NotifySink {
   private readonly inflight = new Set<Promise<void>>();
   /** Which choices some device has on, so the notifier skips news nobody wants. */
   private inUse = new Set<PushKind>();
-  private readonly o: Required<Pick<PushServiceOptions, "maxDevices" | "collapseMs" | "rateMax" | "rateWindowMs" | "timeoutMs">>;
+  private readonly o: Required<Pick<PushServiceOptions, "maxDevices" | "maxPerSession" | "collapseMs" | "rateMax" | "rateWindowMs" | "timeoutMs">>;
 
   constructor(private readonly opt: PushServiceOptions) {
     this.fetchImpl = opt.fetchImpl ?? fetch;
@@ -434,6 +455,7 @@ export class PushService implements NotifySink {
     this.logger = opt.log ?? defaultLog;
     this.o = {
       maxDevices: opt.maxDevices ?? 100,
+      maxPerSession: opt.maxPerSession ?? 5,
       collapseMs: opt.collapseMs ?? 15 * 60_000,
       rateMax: opt.rateMax ?? 12,
       rateWindowMs: opt.rateWindowMs ?? 10 * 60_000,
@@ -449,7 +471,9 @@ export class PushService implements NotifySink {
       const was = store.getMeta(META_RESET);
       if (was !== null && was !== this.opt.resetKey) {
         store.clear();
-        this.logger.info("push: the panel password changed, every device has to turn notifications on again", { route: "push" });
+        this.memory.clear();
+        this.testedAt.clear();
+        this.logger.info("push: the panel password or session secret changed, every device has to turn notifications on again", { route: "push" });
       }
       store.setMeta(META_RESET, this.opt.resetKey);
     }
@@ -459,7 +483,7 @@ export class PushService implements NotifySink {
     this.vapid = await generateVapidKeys();
     store.setMeta(META_VAPID, JSON.stringify(this.vapid));
     // New keys: subscriptions made with the old ones would be refused by every push service.
-    for (const d of store.all()) store.remove(d.endpoint);
+    for (const d of store.all()) this.forget(d.endpoint);
     this.refresh();
   }
 
@@ -477,7 +501,8 @@ export class PushService implements NotifySink {
     return k !== undefined && this.inUse.has(k);
   }
 
-  async subscribe(sub: PushSubscriptionInput, prefs: PushPrefs): Promise<SubscribeResult> {
+  /** `session`: a hash of the subscribing session; it may hold `maxPerSession` devices. */
+  async subscribe(sub: PushSubscriptionInput, prefs: PushPrefs, session = ""): Promise<SubscribeResult> {
     const endpoint = parseEndpoint(sub?.endpoint, this.opt.allowLocal);
     if (!endpoint) return { ok: false, error: "bad_endpoint", message: "not a push service this panel sends to" };
     const keys = sub.keys ?? { p256dh: "", auth: "" };
@@ -488,8 +513,11 @@ export class PushService implements NotifySink {
       return { ok: false, error: "bad_keys", message: "the subscription's keys are not usable" };
     }
     const store = this.opt.store;
-    if (!store.get(endpoint) && store.count() >= this.o.maxDevices) return { ok: false, error: "full", message: `at most ${this.o.maxDevices} devices` };
-    store.put({ endpoint, p256dh: keys.p256dh, auth: keys.auth, prefs }, this.clock());
+    if (!store.get(endpoint)) {
+      if (session && store.countSession(session) >= this.o.maxPerSession) return { ok: false, error: "session_full", message: `at most ${this.o.maxPerSession} devices per sign-in` };
+      if (store.count() >= this.o.maxDevices) return { ok: false, error: "full", message: `at most ${this.o.maxDevices} devices` };
+    }
+    store.put({ endpoint, p256dh: keys.p256dh, auth: keys.auth, prefs }, this.clock(), session);
     this.refresh();
     return { ok: true, prefs };
   }
@@ -502,11 +530,24 @@ export class PushService implements NotifySink {
   unsubscribe(endpoint: unknown): boolean {
     const e = parseEndpoint(endpoint, this.opt.allowLocal);
     if (!e) return false;
-    this.memory.delete(e);
-    this.testedAt.delete(e);
-    const gone = this.opt.store.remove(e);
+    const gone = this.opt.store.get(e) !== null;
+    this.forget(e);
     this.refresh();
     return gone;
+  }
+
+  /** Signing out: every device that session subscribed. */
+  forgetSession(session: string): void {
+    if (!session) return;
+    for (const e of this.opt.store.removeSession(session)) this.forget(e);
+    this.refresh();
+  }
+
+  /** Every removal goes through here, so nothing about a device outlives it. */
+  private forget(endpoint: string): void {
+    this.opt.store.remove(endpoint);
+    this.memory.delete(endpoint);
+    this.testedAt.delete(endpoint);
   }
 
   /** A test notification to one device, outside quiet hours and the rate limit. */
@@ -564,7 +605,7 @@ export class PushService implements NotifySink {
     if (!this.vapid) return { ok: false, error: "failed" };
     let res: Response;
     try {
-      const { url, init } = await buildPushRequest({ endpoint: d.endpoint, keys: { p256dh: d.p256dh, auth: d.auth }, payload: JSON.stringify(payload), topic: payload.tag, urgency }, this.vapid, this.opt.contact, this.clock());
+      const { url, init } = await buildPushRequest({ endpoint: d.endpoint, keys: { p256dh: d.p256dh, auth: d.auth }, payload: JSON.stringify(payload), topic: payload.tag, urgency, ttl: payload.tag === "server" ? CODE_TTL_S : NEWS_TTL_S }, this.vapid, this.opt.contact, this.clock());
       res = await this.fetchImpl(url, { ...init, redirect: "error", signal: AbortSignal.timeout(this.o.timeoutMs) });
       await res.body?.cancel().catch(() => undefined);
     } catch (e) {
@@ -577,8 +618,7 @@ export class PushService implements NotifySink {
     }
     if (res.status === 404 || res.status === 410) {
       // The browser dropped the subscription (unsubscribed, app removed, expired).
-      this.opt.store.remove(d.endpoint);
-      this.memory.delete(d.endpoint);
+      this.forget(d.endpoint);
       this.refresh();
       return { ok: false, error: "gone" };
     }
@@ -588,7 +628,7 @@ export class PushService implements NotifySink {
       const fails = d.fails + 1;
       d.fails = fails;
       if (fails >= MAX_FAILS) {
-        this.opt.store.remove(d.endpoint);
+        this.forget(d.endpoint);
         this.refresh();
       } else this.opt.store.setFails(d.endpoint, fails);
     }
@@ -612,19 +652,37 @@ async function body(c: Context): Promise<Record<string, unknown> | null> {
  * their own device; nothing here changes the server). The origin check on
  * /api/* covers every method that changes something.
  */
-export function pushRoutes(push: Pick<PushService, "info" | "subscribe" | "device" | "unsubscribe" | "test">): Hono {
+export interface PushRouteOptions {
+  /** Subscribing and tests per client address. */
+  limiter: RateLimiter;
+  /** The client address the limiter keys on (TRUSTED_IP_HEADER aware). */
+  clientKey: (c: Context) => string;
+  /** A stable hash of the caller's session. */
+  session: (c: Context) => string;
+}
+
+export function pushRoutes(push: Pick<PushService, "info" | "subscribe" | "device" | "unsubscribe" | "test">, o: PushRouteOptions): Hono {
   const r = new Hono();
+  // Subscriptions are a few hundred bytes; nothing here needs more.
+  r.use("*", bodyLimit({ maxSize: 8 * 1024, onError: (c) => c.json({ ok: false, error: "too_large" }, 413) }));
+  /** null when the caller may go on; otherwise the 429. */
+  const limited = (c: Context) => {
+    const wait = o.limiter.hit(o.clientKey(c));
+    return wait > 0 ? c.json({ ok: false, error: "rate_limited", retryAfter: wait }, 429, { "Retry-After": String(wait) }) : null;
+  };
   r.get("/", (c) => {
     c.header("Cache-Control", "no-store");
     return c.json(push.info());
   });
   r.put("/", async (c) => {
+    const denied = limited(c);
+    if (denied) return denied;
     const b = await body(c);
     if (!b) return c.json({ ok: false, error: "bad_request" }, 400);
     const prefs = parsePrefs(b.prefs);
     if (typeof prefs === "string") return c.json({ ok: false, error: "bad_prefs", message: prefs }, 400);
-    const res = await push.subscribe(b.subscription as PushSubscriptionInput, prefs);
-    if (!res.ok) return c.json(res, res.error === "full" ? 409 : 400);
+    const res = await push.subscribe(b.subscription as PushSubscriptionInput, prefs, o.session(c));
+    if (!res.ok) return c.json(res, res.error === "full" || res.error === "session_full" ? 409 : 400);
     return c.json(res);
   });
   // POST: the endpoint is a capability and stays out of URLs (and access logs).
@@ -641,6 +699,8 @@ export function pushRoutes(push: Pick<PushService, "info" | "subscribe" | "devic
     return c.json({ ok: true });
   });
   r.post("/test", async (c) => {
+    const denied = limited(c);
+    if (denied) return denied;
     const b = await body(c);
     if (!b) return c.json({ ok: false, error: "bad_request" }, 400);
     const res = await push.test(b.endpoint);
@@ -650,4 +710,18 @@ export function pushRoutes(push: Pick<PushService, "info" | "subscribe" | "devic
     return c.json(res, 502);
   });
   return r;
+}
+
+/**
+ * What the devices follow: a new panel password or session secret forgets
+ * them all at the next start, as either one is meant to shut someone out.
+ */
+export function pushResetKey(passwordHash: string, sessionSecret: string): string {
+  const h = (v: string) => createHash("sha256").update(v).digest("hex");
+  return h(`skald-push|${h(passwordHash)}|${h(sessionSecret)}`);
+}
+
+/** A session token's stable, non-reversible tag for the device table. */
+export function pushSessionTag(token: string | undefined): string {
+  return token ? createHash("sha256").update(`skald-push-session|${token}`).digest("hex").slice(0, 32) : "";
 }

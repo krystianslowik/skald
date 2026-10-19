@@ -58,7 +58,7 @@ export default function NotifySheet({ onClose }: { onClose: () => void }) {
         const r = await enablePush(next);
         if (!live.current) return;
         if (r === "ok") setPrefs(next);
-        else setNote({ kind: "error", text: r === "denied" ? t("push.denied") : r === "unsupported" ? t("push.unsupported") : t("push.failed") });
+        else setNote({ kind: "error", text: r === "denied" ? t("push.denied") : r === "unsupported" ? t("push.unsupported") : r === "full" ? t("push.full") : t("push.failed") });
       }
     } catch (e) {
       fail(e);

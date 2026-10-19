@@ -165,6 +165,16 @@ self.addEventListener("fetch", (event) => {
   }
 });
 
+/** A path on the panel itself, else "/": nothing in a push may send a tap elsewhere ("//x", "/\\x" and full URLs included). */
+const panelPath = (path) => {
+  try {
+    const u = new URL(typeof path === "string" ? path : "/", self.location.origin);
+    return u.origin === self.location.origin ? u.pathname + u.search + u.hash : "/";
+  } catch {
+    return "/";
+  }
+};
+
 // Phone push (/api/push): the server sends { title, body, tag, url } as JSON.
 // Every push shows a notification: Safari drops a subscription whose pushes
 // show nothing. A tag keeps one notification per kind of news on the device.
@@ -176,7 +186,7 @@ self.addEventListener("push", (event) => {
     msg = { body: event.data ? event.data.text() : "" };
   }
   const title = typeof msg.title === "string" && msg.title ? msg.title : "Skald";
-  const url = typeof msg.url === "string" && msg.url.startsWith("/") && !msg.url.startsWith("//") ? msg.url : "/";
+  const url = panelPath(msg.url);
   event.waitUntil(
     self.registration.showNotification(title, {
       body: typeof msg.body === "string" ? msg.body : "",
@@ -194,8 +204,7 @@ self.addEventListener("push", (event) => {
 // moved there, else a new one opens.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const path = event.notification.data && typeof event.notification.data.url === "string" ? event.notification.data.url : "/";
-  const target = new URL(path, self.location.origin).href;
+  const target = new URL(panelPath(event.notification.data && event.notification.data.url), self.location.origin).href;
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
       const win = list.find((c) => new URL(c.url).origin === self.location.origin);

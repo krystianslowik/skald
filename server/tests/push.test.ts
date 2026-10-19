@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { AgentSource } from "../src/agent";
 import { createApp } from "../src/app";
-import { createSession, SESSION_COOKIE } from "../src/auth";
+import { createSession, RateLimiter, SESSION_COOKIE } from "../src/auth";
 import { HistoryStore } from "../src/db";
 import { Hub } from "../src/hub";
 import { silentLog } from "../src/log";
 import { DiscordNotifier, NOTIFY_KINDS, type Item } from "../src/notify";
-import { isQuiet, notificationsFor, parseEndpoint, parsePrefs, PUSH_TEST_COOLDOWN_MS, PushService, PushStore, type PushPrefs } from "../src/push";
+import { isQuiet, notificationsFor, pushResetKey, parseEndpoint, parsePrefs, PUSH_TEST_COOLDOWN_MS, PushService, PushStore, type PushPrefs } from "../src/push";
 import { emptyAgentState, type AgentEvent, type AgentState, type LiveMessage } from "../src/types";
 import { decryptPush, newBrowserKeys, type BrowserKeys } from "./pushhelpers";
 
@@ -239,6 +239,14 @@ describe("PushService", () => {
     expect(push.wants("raid")).toBe(false);
   });
 
+  it("follows both the panel password and the session secret", () => {
+    const k = pushResetKey("hash-a", "secret-a");
+    expect(pushResetKey("hash-a", "secret-a")).toBe(k);
+    expect(pushResetKey("hash-b", "secret-a")).not.toBe(k);
+    expect(pushResetKey("hash-a", "secret-b")).not.toBe(k);
+    expect(k).not.toContain("secret");
+  });
+
   it("forgets every device when the panel password changed", async () => {
     const store = new PushStore(":memory:");
     stores.push(store);
@@ -269,6 +277,30 @@ describe("PushService", () => {
     await push.idle();
     store.setFails = setFails;
     expect(net.calls).toHaveLength(1);
+  });
+
+  it("forgets what it remembered about a device that is gone, so a new subscription starts clean", async () => {
+    let status = 201;
+    const net = fakePushService(() => status);
+    const { push } = await service(net.fetchImpl);
+    await subscribe(push, 1);
+    expect(await push.test(`${FCM}1`)).toEqual({ ok: true });
+    status = 410;
+    push.batch([{ kind: "raid", raid: "wolves" }], { joinCode: "" });
+    await push.idle();
+    status = 201;
+    await subscribe(push, 1);
+    expect(await push.test(`${FCM}1`)).toEqual({ ok: true });
+  });
+
+  it("lets a join code expire within the hour at the push service, other news later", async () => {
+    const net = fakePushService();
+    const { push } = await service(net.fetchImpl);
+    await subscribe(push, 1);
+    push.batch([{ kind: "server", status: "running" }, { kind: "raid", raid: "wolves" }], { joinCode: "482915" });
+    await push.idle();
+    const ttl = Object.fromEntries(net.calls.map((c) => [c.headers.Topic, c.headers.TTL]));
+    expect(ttl).toEqual({ server: "3600", raid: "21600" });
   });
 
   it("drops what goes past the rate limit", async () => {
@@ -408,15 +440,52 @@ describe("the notifier's sinks", () => {
 
 describe("/api/push", () => {
   const agent = {} as AgentSource;
-  async function app() {
+  async function app(o: { pushLimiter?: RateLimiter } = {}) {
     const net = fakePushService();
-    const { push } = await service(net.fetchImpl);
-    const a = createApp({ sessionSecret: "secret", passwordHash: "x", secureCookie: true, agent, hub: new Hub(agent, new HistoryStore(":memory:")), metrics: async () => null, push, log: silentLog });
-    const cookie = `${SESSION_COOKIE}=${createSession("secret")}`;
+    const { push, store } = await service(net.fetchImpl);
+    const a = createApp({ sessionSecret: "secret", passwordHash: "x", secureCookie: true, agent, hub: new Hub(agent, new HistoryStore(":memory:")), metrics: async () => null, push, log: silentLog, trustedIpHeader: "CF-Connecting-IP", pushLimiter: o.pushLimiter });
+    let cookie = `${SESSION_COOKIE}=${createSession("secret")}`;
     const call = (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) =>
       a.request(path, { method, headers: { Cookie: cookie, "Content-Type": "application/json", ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
-    return { a, call, push, net };
+    const newSession = () => (cookie = `${SESSION_COOKIE}=${createSession("secret")}`);
+    return { a, call, push, net, store, newSession };
   }
+
+  const put = async (call: Awaited<ReturnType<typeof app>>["call"], n: number, headers: Record<string, string> = {}) =>
+    call("PUT", "/api/push", { subscription: { endpoint: `${FCM}${n}`, keys: (await newBrowserKeys()).keys }, prefs: prefs() }, headers);
+
+  it("limits subscribing and tests per client address", async () => {
+    const { call } = await app({ pushLimiter: new RateLimiter(3, 60_000, 60_000) });
+    for (let i = 0; i < 3; i++) expect((await put(call, i, { "CF-Connecting-IP": "203.0.113.7" })).status).toBe(200);
+    const limited = await put(call, 9, { "CF-Connecting-IP": "203.0.113.7" });
+    expect(limited.status).toBe(429);
+    expect(Number(limited.headers.get("Retry-After"))).toBeGreaterThan(0);
+    expect((await call("POST", "/api/push/test", { endpoint: `${FCM}0` }, { "CF-Connecting-IP": "203.0.113.7" })).status).toBe(429);
+    // Another address is not held by it.
+    expect((await put(call, 9, { "CF-Connecting-IP": "203.0.113.8" })).status).toBe(200);
+  });
+
+  it("lets one session hold only a few devices, and signing out forgets them", async () => {
+    const { a, call, store, newSession } = await app();
+    for (let i = 0; i < 5; i++) expect((await put(call, i)).status).toBe(200);
+    const sixth = await put(call, 5);
+    expect(sixth.status).toBe(409);
+    expect(((await sixth.json()) as { error: string }).error).toBe("session_full");
+    // Changing an existing device's choice is not a new device.
+    expect((await put(call, 4)).status).toBe(200);
+    newSession();
+    expect((await put(call, 5)).status).toBe(200);
+    expect(store.count()).toBe(6);
+    expect((await call("POST", "/api/logout")).status).toBe(200);
+    expect(store.all().map((d) => d.endpoint)).toEqual([`${FCM}0`, `${FCM}1`, `${FCM}2`, `${FCM}3`, `${FCM}4`]);
+    expect((await a.request("/api/logout", { method: "POST" })).status).toBe(200);
+  });
+
+  it("refuses bodies over 8 KiB", async () => {
+    const { call } = await app();
+    const res = await call("PUT", "/api/push", { subscription: { endpoint: `${FCM}1`, keys: { p256dh: "x".repeat(9000), auth: "a" } }, prefs: prefs() });
+    expect(res.status).toBe(413);
+  });
 
   it("needs a signed-in session", async () => {
     const { a } = await app();

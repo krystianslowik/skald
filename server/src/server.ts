@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { HttpAgent, type AgentSource } from "./agent";
 import { createApp, panelOriginPolicy } from "./app";
 import { upgradeLive } from "./auth";
@@ -8,7 +7,7 @@ import { hashPassword } from "./hash";
 import { Hub } from "./hub";
 import { MapCache } from "./map";
 import { DiscordNotifier, NotifySettings } from "./notify";
-import { PushService, PushStore } from "./push";
+import { PushService, PushStore, pushResetKey } from "./push";
 import { metricsFetch, VERSION } from "./buildinfo";
 import { log } from "./log";
 import { cachedMetrics, fetchMetrics } from "./prom";
@@ -85,7 +84,7 @@ const push = new PushService({
   store: new PushStore(store.connection),
   contact: cfg.pushContact,
   allowLocal: cfg.mock,
-  resetKey: createHash("sha256").update(`skald-push|${passwordHash}`).digest("hex"),
+  resetKey: pushResetKey(passwordHash, cfg.sessionSecret),
 });
 await push.init();
 notifier.addSink(push);

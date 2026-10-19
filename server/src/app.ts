@@ -10,7 +10,7 @@ import { cause, log as defaultLog, type Logger } from "./log";
 import type { MapCache, MapView } from "./map";
 import type { NotifyChange, NotifySettings } from "./notify";
 import { checkOrigin, type OriginPolicy } from "./origin";
-import { pushRoutes, type PushService } from "./push";
+import { pushRoutes, pushSessionTag, type PushService } from "./push";
 import {
   ACCESS_LISTS,
   ACCESS_OPS,
@@ -63,7 +63,9 @@ export interface AppDeps {
   /** Discord notifications: the environment's or the panel's webhook. Unset: the feature is off. */
   notify?: Pick<NotifySettings, "on" | "fromEnv" | "view" | "update" | "clear" | "test">;
   /** Phone push notifications; unset: /api/push answers 404. */
-  push?: Pick<PushService, "info" | "subscribe" | "device" | "unsubscribe" | "test">;
+  push?: Pick<PushService, "info" | "subscribe" | "device" | "unsubscribe" | "test" | "forgetSession">;
+  /** Limits push subscribing and tests per client address; 20 a minute by default. */
+  pushLimiter?: RateLimiter;
   verifyPassword?: (password: string, hash: string) => Promise<boolean>;
   clock?: () => number;
   /** This build's Skald release; "dev" when unset. */
@@ -239,6 +241,8 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   app.post("/api/logout", (c) => {
+    // A signed-out session's phones get no more news.
+    if (authed(c)) deps.push?.forgetSession(pushSessionTag(getCookie(c, SESSION_COOKIE)));
     deleteCookie(c, SESSION_COOKIE, { path: "/", secure: deps.secureCookie });
     deleteCookie(c, ADMIN_COOKIE, { path: "/", secure: deps.secureCookie });
     return c.json({ ok: true });
@@ -252,7 +256,16 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   // Phone push: each signed-in viewer turns it on for their own device.
-  if (deps.push) app.route("/api/push", pushRoutes(deps.push));
+  if (deps.push) {
+    app.route(
+      "/api/push",
+      pushRoutes(deps.push, {
+        limiter: deps.pushLimiter ?? new RateLimiter(20, 60_000, 60_000, clock),
+        clientKey: (c) => clientIp(c, deps.trustedIpHeader ?? ""),
+        session: (c) => pushSessionTag(getCookie(c, SESSION_COOKIE)),
+      }),
+    );
+  }
 
   // ---- roles ---------------------------------------------------------------
   // With ADMIN_PASSWORD_HASH, changing anything (actions, settings, admin

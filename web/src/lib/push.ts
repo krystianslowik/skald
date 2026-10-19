@@ -106,7 +106,7 @@ export async function loadDevice(): Promise<PushPrefs | null> {
   return prefs;
 }
 
-export type EnableResult = "ok" | "denied" | "unsupported" | "failed";
+export type EnableResult = "ok" | "denied" | "unsupported" | "full" | "failed";
 
 /**
  * Turns push on for this device. The permission prompt comes first, while
@@ -134,7 +134,13 @@ export async function enablePush(prefs: PushPrefs): Promise<EnableResult> {
       sub = null;
     }
     sub ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
-    return (await savePrefs(prefs, sub)) ? "ok" : "failed";
+    const json = sub.toJSON();
+    const res = await send("/api/push", "PUT", { subscription: { endpoint: json.endpoint, keys: json.keys }, prefs });
+    remember(res.ok);
+    if (res.ok) return "ok";
+    // The server keeps no device for it: the browser's subscription would only wait for a 410.
+    await sub.unsubscribe().catch(() => false);
+    return res.status === 409 ? "full" : "failed";
   } catch (e) {
     if (e instanceof Unauthorized) throw e;
     return "failed";

@@ -139,6 +139,18 @@ describe("NotifySheet", () => {
     expect(sub.unsubscribe).toHaveBeenCalled();
   });
 
+  it("says so when the server keeps no more devices, and drops the browser's subscription", async () => {
+    const b = browser();
+    const fetchImpl = globalThis.fetch;
+    vi.stubGlobal("fetch", async (path: string, init: RequestInit = {}) => (path === "/api/push" && init.method === "PUT" ? Response.json({ ok: false, error: "session_full" }, { status: 409 }) : fetchImpl(path, init)));
+    sheet();
+    const device = await screen.findByRole("switch", { name: "Notifications on this device" });
+    await act(async () => fireEvent.click(device));
+    await screen.findByText(/Too many devices have notifications on/);
+    expect(device).toHaveAttribute("aria-checked", "false");
+    expect(b.sub()).toBeNull();
+  });
+
   it("explains a refused permission and stays off", async () => {
     const b = browser({ permission: "denied" });
     sheet();

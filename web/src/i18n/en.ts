@@ -85,6 +85,7 @@ export const en = {
   "push.unsupported": "This browser cannot get notifications from the panel.",
   "push.denied": "Notifications are blocked for this site. Allow them in the browser's or the phone's settings, then try again.",
   "push.failed": "That did not work. Try again in a moment.",
+  "push.full": "Too many devices have notifications on. Sign out, or turn them off, on devices you no longer use.",
   "push.loading": "Checking this device...",
   "push.events": "Tell me when",
   "push.kind.join": "A friend joins",
