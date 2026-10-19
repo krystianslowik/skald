@@ -124,6 +124,10 @@ describe("pin sheet changes", () => {
     await waitFor(() => expect(held).toHaveLength(1));
     await act(async () => held[0]!.answer(Response.json({ ok: false, error: "not_archived" }, { status: 409 })));
     expect(screen.getByRole("alert")).toHaveTextContent("Archive the pin first");
+    // Closed after it was seen, the sheet opens clean next time.
+    fireEvent.click(screen.getByRole("button", { name: /close/i }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("an edit closes the editor at once and opens it again with the typed text on a refusal", async () => {

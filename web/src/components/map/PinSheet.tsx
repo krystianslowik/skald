@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { cutText, PIN_ICONS, PIN_NAME_MAX, PIN_NOTE_MAX, type PinIcon, type PinState, type WebPin } from "@server/pintypes";
 import { useI18n, type TextKey } from "../../i18n";
 import { changePin, createPin, dismissPinFailure, isDone, PIN_ICON_MARK, pinFailure, pinName, pinPending, removePin, sameName, setPinName, usePinName, type PinCall, type PinChange } from "../../lib/webpins";
@@ -30,8 +30,13 @@ const ERROR_TEXT: Record<Exclude<PinCall, { ok: true }>["error"], TextKey> = {
  * happen next (claim, cleared, depleted, reopen), editing, archiving and, after
  * a confirm, deleting for good. The viewer's name is asked for once per device.
  */
-export function PinSheet({ mode, pins, onClose, onAdded }: { mode: PinSheetMode; pins: readonly WebPin[]; onClose: () => void; onAdded?: (pin: WebPin) => void }) {
+export function PinSheet({ mode, pins, onClose: closeSheet, onAdded }: { mode: PinSheetMode; pins: readonly WebPin[]; onClose: () => void; onAdded?: (pin: WebPin) => void }) {
   const { t } = useI18n();
+  // A failure seen once is enough: the next time this pin's sheet opens, it starts clean.
+  const onClose = () => {
+    if (mode.kind === "view") dismissPinFailure(mode.id);
+    closeSheet();
+  };
   const headingId = useId();
   const pin = mode.kind === "view" ? (pins.find((p) => p.id === mode.id) ?? null) : null;
   const title = mode.kind === "add" ? t("pins.add.title") : pin ? pin.note || t(`pins.icon.${pin.icon}` as TextKey) : t("pins.error.gone");
@@ -208,8 +213,6 @@ function ViewPin({ pin, onClose }: { pin: WebPin; onClose: () => void }) {
   // Changes show at once; the store keeps why the last one failed (and shows the server's copy again).
   const failure = pinFailure(pin.id) ?? null;
   const pending = pinPending(pin.id);
-  // Seen once is enough: the next time the sheet opens, it starts clean.
-  useEffect(() => () => dismissPinFailure(pin.id), [pin.id]);
 
   /** `from`: for an edit, the pin as the form began from; otherwise the server's copy when the change goes out. */
   const change = (c: PinChange, from?: WebPin) => {
