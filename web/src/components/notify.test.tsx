@@ -139,6 +139,26 @@ describe("NotifySheet", () => {
     expect(sub.unsubscribe).toHaveBeenCalled();
   });
 
+  it("flips a switch on the tap, before the server answers", async () => {
+    browser({ subscribed: true });
+    const answer = globalThis.fetch;
+    const held: (() => void)[] = [];
+    // Writes wait until released; the device read answers at once.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((path: string, init: RequestInit = {}) => (init.method === "PUT" || init.method === "DELETE" ? new Promise<Response>((r) => held.push(() => void answer(path, init).then(r))) : answer(path, init))),
+    );
+    sheet();
+    const death = await screen.findByRole("switch", { name: "Someone falls" });
+    fireEvent.click(death);
+    expect(death).toHaveAttribute("aria-checked", "true");
+    const device = screen.getByRole("switch", { name: "Notifications on this device" });
+    fireEvent.click(device);
+    expect(device).toHaveAttribute("aria-checked", "false");
+    await waitFor(() => expect(held.length).toBeGreaterThan(0));
+    await act(async () => held.forEach((f) => f()));
+  });
+
   it("says so when the server keeps no more devices, and drops the browser's subscription", async () => {
     const b = browser();
     const fetchImpl = globalThis.fetch;

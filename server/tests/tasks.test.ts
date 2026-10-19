@@ -265,6 +265,36 @@ describe("/api/tasks", () => {
   });
 });
 
+describe("MOCK_WRITE_DELAY_MS", () => {
+  it("holds task changes before they run, and leaves reads alone", async () => {
+    const hub = new Hub({} as AgentSource, new HistoryStore(":memory:"));
+    const store = new TaskStore(":memory:");
+    const app = createApp({
+      sessionSecret: "secret",
+      passwordHash: await Bun.password.hash("ognisko"),
+      secureCookie: false,
+      agent: {} as AgentSource,
+      hub,
+      metrics: async () => null,
+      tasks: { store },
+      log: silentLog,
+      writeDelayMs: 150,
+    });
+    const login = await app.request("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: "ognisko" }) });
+    const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+    const t0 = performance.now();
+    const created = app.request("/api/tasks", { method: "POST", headers: { cookie, "Content-Type": "application/json" }, body: JSON.stringify({ title: "Mead" }) });
+    // Not run yet: the change waits, so its /live frame cannot come before the answer.
+    await Bun.sleep(50);
+    expect(store.list()).toHaveLength(0);
+    expect((await created).status).toBe(201);
+    expect(performance.now() - t0).toBeGreaterThanOrEqual(140);
+    const t1 = performance.now();
+    expect((await app.request("/api/tasks", { headers: { cookie } })).status).toBe(200);
+    expect(performance.now() - t1).toBeLessThan(100);
+  });
+});
+
 describe("tasks over /live and in the saga", () => {
   class FakeSocket {
     sent: LiveWireMessage[] = [];

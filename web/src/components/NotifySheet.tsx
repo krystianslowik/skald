@@ -51,8 +51,10 @@ export default function NotifySheet({ onClose }: { onClose: () => void }) {
     setNote(null);
     try {
       if (prefs) {
+        // Off at once: the browser drops its subscription whatever the server answers,
+        // so this device gets no more push either way.
+        setPrefs(null);
         await disablePush();
-        if (live.current) setPrefs(null);
       } else {
         const next = defaultPrefs(locale);
         const r = await enablePush(next);

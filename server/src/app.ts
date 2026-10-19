@@ -84,6 +84,8 @@ export interface AppDeps {
   tasks?: TaskRoutesDeps;
   /** The shared web map pins; without them /api/pins answers 404. */
   pins?: PinRoutesDeps;
+  /** Mock mode only (MOCK_WRITE_DELAY_MS): task, pin and push changes wait this long before they run. */
+  writeDelayMs?: number;
 }
 
 /**
@@ -257,6 +259,16 @@ export function createApp(deps: AppDeps): Hono {
     deleteCookie(c, ADMIN_COOKIE, { path: "/", secure: deps.secureCookie });
     return c.json({ ok: true });
   });
+
+  // A slow link for trying the panel's instant changes on the mock: the change
+  // waits before it runs, so neither its answer nor its /live frame comes early.
+  const writeDelay = deps.writeDelayMs ?? 0;
+  if (writeDelay > 0) {
+    app.use("/api/*", async (c, next) => {
+      if (!SAFE_METHODS.has(c.req.method) && /^\/api\/(tasks|pins|push)(\/|$)/.test(c.req.path)) await Bun.sleep(writeDelay);
+      await next();
+    });
+  }
 
   app.get("/api/me", (c) => (authed(c) ? c.json({ authenticated: true }) : c.json({ authenticated: false }, 401)));
 

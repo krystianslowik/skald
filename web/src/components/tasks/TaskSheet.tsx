@@ -4,7 +4,7 @@ import { GUARDED_FIELDS, parseTaskInput, sameValue, shortfall, TASK_LIMITS, TASK
 import { useI18n } from "../../i18n";
 import { BOSSES } from "../../lib/world";
 import { itemLabel } from "../../lib/storage";
-import { changedFields, createTask, deleteTask, expectOf, updateTask, type Task, type TaskInput, type TaskMaterial, type TaskResult, type TaskTarget } from "../../lib/tasks";
+import { changedFields, createTask, expectOf, removeTask, updateTask, type Task, type TaskInput, type TaskMaterial, type TaskResult, type TaskTarget } from "../../lib/tasks";
 import { ItemSearch } from "../admin/ItemPicker";
 import { Btn, Chip, Stepper, useArmed } from "../admin/parts";
 import { Sheet, SheetClose } from "../Sheet";
@@ -153,12 +153,10 @@ export default function TaskSheet({
       setArmed(true);
       return;
     }
-    setBusy(true);
-    const r = await deleteTask(opened.id);
-    setBusy(false);
-    if (r.ok || r.error === "not_found") onClose();
-    else if (r.error === "unauthorized") onUnauthorized?.();
-    else setError({ text: failText(r) });
+    // Off the board at once; if the server refuses, the card comes back and says why.
+    onClose();
+    const r = await removeTask(opened.id);
+    if (!r.ok && r.error === "unauthorized") onUnauthorized?.();
   };
 
   const recipeLabel = (r: Recipe) => lookup(`tasks.recipe.${r.id}`) ?? r.id;
