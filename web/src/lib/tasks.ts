@@ -6,7 +6,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type { Task, TaskExpect, TaskInput, TaskInputError } from "@server/taskmodel";
 import { Unauthorized } from "./api";
-import { Optimistic } from "./optimistic";
+import { Optimistic, writeSignal } from "./optimistic";
 
 export type { Task, TaskExpect, TaskInput, TaskStatus, TaskTarget, TaskMaterial } from "@server/taskmodel";
 export { expectOf } from "@server/taskmodel";
@@ -30,6 +30,8 @@ const optimistic = new Optimistic<number, Task, TaskResult>({
   server: (id) => current?.find((t) => t.id === id),
   ok: (r) => r.ok,
   changed: () => publish(),
+  thrown: () => ({ ok: false, error: "failed" }),
+  gone: (id) => deleted.has(id),
 });
 
 /** Tasks the socket has reported gone: no late answer to this page's own write brings one back. */
@@ -55,7 +57,7 @@ export function putTask(task: Task): void {
   const have = list.find((t) => t.id === task.id);
   if (have && have.rev > task.rev) return;
   // The task moved on since a failed change here: its note no longer fits.
-  if (have && task.rev > have.rev) optimistic.dismiss(task.id);
+  if (have && task.rev > have.rev) optimistic.dismiss(task.id, true);
   publish(have ? list.map((t) => (t.id === task.id ? task : t)) : [...list, task]);
 }
 
@@ -64,7 +66,7 @@ export function dropTask(id: number): void {
   if (current === null) return;
   generation += 1;
   deleted.add(id);
-  optimistic.dismiss(id);
+  optimistic.dismiss(id, true);
   if (current?.some((t) => t.id === id)) publish(current.filter((t) => t.id !== id));
 }
 
@@ -130,6 +132,8 @@ async function send(method: string, path: string, body?: unknown): Promise<TaskR
     res = await fetch(path, {
       method,
       credentials: "same-origin",
+      // A request that never answers would hold the task's later changes forever.
+      signal: writeSignal(),
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -174,7 +178,11 @@ export async function updateTask(id: number, input: TaskInput, expect?: TaskExpe
 
 export async function deleteTask(id: number): Promise<TaskResult> {
   const r = await send("DELETE", `/api/tasks/${id}`);
-  if ((r.ok || r.error === "not_found") && current) publish(current.filter((t) => t.id !== id));
+  if (r.ok || r.error === "not_found") {
+    // Gone for good: an older /live frame or a late answer must not bring it back.
+    deleted.add(id);
+    if (current) publish(current.filter((t) => t.id !== id));
+  }
   return r;
 }
 
@@ -207,6 +215,9 @@ export function removeTask(id: number): Promise<TaskResult> {
     { chained: false },
   );
 }
+
+/** A result a dropped quick change got: the failure of the change before it, already reported there. */
+export const taskResultRepeated = (r: TaskResult): boolean => optimistic.repeated(r);
 
 /** A change to this task is still out. */
 export const taskPending = (id: number): boolean => optimistic.pending(id);

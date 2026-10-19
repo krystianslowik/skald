@@ -159,31 +159,34 @@ describe("NotifySheet", () => {
     await act(async () => held.forEach((f) => f()));
   });
 
-  it("stays off when a save from before turning off fails afterwards", async () => {
-    browser({ subscribed: true });
+  it("turning off waits for a save on its way, drops one not yet sent, and stays off without a false failure", async () => {
+    const b = browser({ subscribed: true });
     const answer = globalThis.fetch;
-    const held: Record<string, () => void> = {};
+    let releasePut: (() => void) | undefined;
+    const order: string[] = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn((path: string, init: RequestInit = {}) =>
-        init.method === "PUT"
-          ? new Promise<Response>((r) => (held.put = () => r(new Response("{}", { status: 500 }))))
-          : init.method === "DELETE"
-            ? new Promise<Response>((r) => (held.del = () => void answer(path, init).then(r)))
-            : answer(path, init),
-      ),
+      vi.fn((path: string, init: RequestInit = {}) => {
+        if (init.method === "PUT" || init.method === "DELETE") order.push(init.method);
+        return init.method === "PUT" ? new Promise<Response>((r) => (releasePut = () => r(new Response("{}", { status: 500 })))) : answer(path, init);
+      }),
     );
     sheet();
     fireEvent.click(await screen.findByRole("switch", { name: "Someone falls" }));
+    await waitFor(() => expect(releasePut).toBeDefined());
+    // A second choice queues behind the first save.
+    fireEvent.click(screen.getByRole("switch", { name: "Quiet hours" }));
     const device = screen.getByRole("switch", { name: "Notifications on this device" });
-    await waitFor(() => expect(held.put).toBeDefined());
-    await act(async () => fireEvent.click(device));
-    await waitFor(() => expect(held.del).toBeDefined());
-    // The save fails while the device is still subscribed: the server's old row comes back.
-    await act(async () => held.put!());
-    await act(async () => new Promise((r) => setTimeout(r, 20)));
+    fireEvent.click(device);
     expect(device).toHaveAttribute("aria-checked", "false");
-    await act(async () => held.del!());
+    await act(async () => new Promise((r) => setTimeout(r, 20)));
+    // No DELETE while the save is out: it would land before the save re-made the device.
+    expect(order).toEqual(["PUT"]);
+    await act(async () => releasePut!());
+    await waitFor(() => expect(order).toEqual(["PUT", "DELETE"]));
+    expect(device).toHaveAttribute("aria-checked", "false");
+    expect(screen.queryByText(/That did not work/)).not.toBeInTheDocument();
+    expect(b.sub()).toBeNull();
   });
 
   it("says so when the server keeps no more devices, and drops the browser's subscription", async () => {

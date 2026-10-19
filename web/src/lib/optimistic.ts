@@ -2,10 +2,13 @@
 // pins). A change shows at once as a patch laid over the server copy, the
 // request goes out, and the patch comes off when the answer is in:
 //
-// - success: the answer (or the /live frame, if it came first) is already the
-//   server copy, so taking the patch off changes nothing on screen;
-// - failure or a 409 stale: the server copy shows again, and the result is
-//   kept as the key's failure so the page can say why.
+// - success: the patch comes off with the HTTP answer. By then the answer is
+//   the server copy (and a /live frame that came first already was), so
+//   taking the patch off changes nothing on screen; a frame before the answer
+//   only makes the patch a no-op, it does not end it;
+// - failure, a 409 stale or no answer within `writeTimeout.ms`: the server
+//   copy shows again, and the result is kept as the key's failure so the page
+//   can say why.
 //
 // Changes to one key go out one at a time. Each is sent with the copy the
 // viewer saw when they made it (the server's, with the changes still out on
@@ -13,6 +16,12 @@
 // has reached the server by then. A failure drops the dependent changes still
 // waiting behind it (a second status tap counted on the first) without sending
 // them; an independent one (a confirmed delete) still goes.
+
+/** How long a change may wait for its answer before it counts as failed (and the page stops waiting on it). */
+export const writeTimeout = { ms: 15_000 };
+
+/** A signal for one change's request: aborts after `writeTimeout.ms`. */
+export const writeSignal = (): AbortSignal => AbortSignal.timeout(writeTimeout.ms);
 
 interface Entry<V> {
   seq: number;
@@ -28,7 +37,7 @@ interface Chain<V, R> {
   tail: Promise<unknown>;
   seq: number;
   /** The last failure, and the newest entry queued when it came: chained entries up to it go unsent. */
-  failed?: { upTo: number; outcome: { result: R } | { error: unknown } };
+  failed?: { upTo: number; result: R };
 }
 
 export interface OptimisticOptions<K, V, R> {
@@ -38,6 +47,10 @@ export interface OptimisticOptions<K, V, R> {
   ok: (result: R) => boolean;
   /** The patches or failures changed: the store shows its list again. */
   changed: () => void;
+  /** The result for a request that threw: `run` never rejects. */
+  thrown: (error: unknown) => R;
+  /** The key is gone for good (deleted over /live): a failure about it is not kept. */
+  gone?: (key: K) => boolean;
 }
 
 export interface RunOptions {
@@ -48,6 +61,8 @@ export interface RunOptions {
 export class Optimistic<K, V, R> {
   private chains = new Map<K, Chain<V, R>>();
   private failures = new Map<K, R>();
+  /** Results handed to changes that were dropped unsent: the same failure again, already reported once. */
+  private repeats = new WeakSet<object>();
 
   constructor(private readonly o: OptimisticOptions<K, V, R>) {}
 
@@ -73,9 +88,17 @@ export class Optimistic<K, V, R> {
     return this.failures.get(key);
   }
 
-  /** Forgets the key's failure (it has been seen, or the server's copy has moved on). */
-  dismiss(key: K): void {
-    if (this.failures.delete(key)) this.o.changed();
+  /** A result a dropped change got: the failure of the change before it, reported there already. */
+  repeated(result: R): boolean {
+    return typeof result === "object" && result !== null && this.repeats.has(result);
+  }
+
+  /**
+   * Forgets the key's failure (it has been seen, or the server's copy has
+   * moved on). `quiet`: the caller shows its list again itself.
+   */
+  dismiss(key: K, quiet = false): void {
+    if (this.failures.delete(key) && !quiet) this.o.changed();
   }
 
   /**
@@ -99,30 +122,30 @@ export class Optimistic<K, V, R> {
     const settle = () => {
       if (c.entries.length === 0 && this.chains.get(key) === c) this.chains.delete(key);
     };
-    const fail = (outcome: NonNullable<Chain<V, R>["failed"]>["outcome"]) => {
+    const fail = (result: R) => {
       // The chained changes still waiting go with it: each counted on this one.
-      c.failed = { upTo: c.seq, outcome };
+      c.failed = { upTo: c.seq, result };
       c.entries = c.entries.filter((e) => e !== entry && !(e.chained && e.seq <= c.seq));
       settle();
-      if ("result" in outcome) this.failures.set(key, outcome.result);
+      if (!this.o.gone?.(key)) this.failures.set(key, result);
       this.o.changed();
     };
 
     const done = c.tail.then(async (): Promise<R> => {
       const f = c.failed;
       if (entry.chained && f && entry.seq <= f.upTo) {
-        if ("result" in f.outcome) return f.outcome.result;
-        throw f.outcome.error;
+        const again = typeof f.result === "object" && f.result !== null ? ({ ...f.result } as R) : f.result;
+        if (typeof again === "object" && again !== null) this.repeats.add(again);
+        return again;
       }
       let result: R;
       try {
         result = await send(seen);
       } catch (error) {
-        fail({ error });
-        throw error;
+        result = this.o.thrown(error);
       }
       if (!this.o.ok(result)) {
-        fail({ result });
+        fail(result);
         return result;
       }
       c.entries = c.entries.filter((e) => e !== entry);
@@ -130,7 +153,7 @@ export class Optimistic<K, V, R> {
       this.o.changed();
       return result;
     });
-    c.tail = done.catch(() => undefined);
+    c.tail = done;
     return done;
   }
 

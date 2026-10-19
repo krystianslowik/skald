@@ -2,7 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../i18n";
-import { createTask, dropTask, putTask, resetTasks, setTasks, updateTask, useTasks, type Task } from "../../lib/tasks";
+import { createTask, deleteTask, dropTask, putTask, resetTasks, setTasks, updateTask, useTasks, type Task } from "../../lib/tasks";
+import { writeTimeout } from "../../lib/optimistic";
 import { renderHook } from "@testing-library/react";
 import type { AgentEvent } from "../../types";
 import { Saga } from "../Saga";
@@ -232,6 +233,75 @@ describe("instant task changes", () => {
     await waitFor(() => expect(held).toHaveLength(2));
     // The guard is what this page showed (doing), not Freya's todo: the server refuses it.
     expect(held[1]!.body).toEqual({ status: "done", expect: { status: "doing" } });
+  });
+
+  it("give up on a request that never answers, so the card is not held for good", async () => {
+    const was = writeTimeout.ms;
+    writeTimeout.ms = 40;
+    try {
+      const sent: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((url: string, init?: RequestInit) => {
+          if (url.startsWith("/api/tasks/") && init?.method === "PATCH") {
+            sent.push(String(init.body));
+            // Never answers; only the page's own timeout ends it.
+            return new Promise<Response>((_, reject) => init.signal?.addEventListener("abort", () => reject(init.signal!.reason)));
+          }
+          return Promise.resolve(Response.json({ tasks: [], containers: [] }));
+        }),
+      );
+      setTasks([task(1)]);
+      inLocale(<TaskBoard saveKey="a" players={[]} />);
+      fireEvent.click(screen.getByRole("button", { name: "Start Task 1" }));
+      expect(screen.getByRole("button", { name: "Mark Task 1 done" })).toBeInTheDocument();
+      expect(await screen.findByRole("alert")).toHaveTextContent("Could not save");
+      expect(screen.getByRole("button", { name: "Start Task 1" }).closest("[aria-busy]")).toBeNull();
+      // The next tap goes out instead of queueing behind the hung one.
+      fireEvent.click(screen.getByRole("button", { name: "Start Task 1" }));
+      await waitFor(() => expect(sent).toHaveLength(2));
+    } finally {
+      writeTimeout.ms = was;
+    }
+  });
+
+  it("ask for the sign-in once, not once per queued tap", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => (init?.method === "PATCH" ? Response.json({ error: "unauthorized" }, { status: 401 }) : Response.json({ tasks: [], containers: [] }))),
+    );
+    const onUnauthorized = vi.fn();
+    setTasks([task(1)]);
+    inLocale(<TaskBoard saveKey="a" players={[]} onUnauthorized={onUnauthorized} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start Task 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark Task 1 done" }));
+    await waitFor(() => expect(onUnauthorized).toHaveBeenCalled());
+    await act(async () => new Promise((r) => setTimeout(r, 20)));
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it("keep a task deleted here gone when its create answer comes late", async () => {
+    let answerCreate: ((r: Response) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url === "/api/tasks" && init?.method === "POST") return new Promise<Response>((r) => (answerCreate = r));
+        if (init?.method === "DELETE") return Promise.resolve(Response.json({ ok: true }));
+        return Promise.resolve(Response.json({ tasks: [], containers: [] }));
+      }),
+    );
+    setTasks([]);
+    inLocale(<TaskBoard saveKey="a" players={[]} />);
+    const creating = createTask({ title: "Mead" });
+    // The socket brings the new task before the answer; it is deleted at once.
+    act(() => putTask(task(9, { title: "Mead" })));
+    await act(() => deleteTask(9));
+    await waitFor(() => expect(answerCreate).toBeDefined());
+    await act(async () => {
+      answerCreate!(Response.json({ ok: true, task: task(9, { title: "Mead" }) }, { status: 201 }));
+      await creating;
+    });
+    expect(screen.queryByText("Mead")).not.toBeInTheDocument();
   });
 
   it("take a deleted task off at once and bring it back with a note if the server refuses", async () => {

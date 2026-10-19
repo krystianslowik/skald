@@ -55,6 +55,10 @@ export default function NotifySheet({ onClose }: { onClose: () => void }) {
         // so this device gets no more push either way. A save still out cannot turn it back on.
         device.current += 1;
         setPrefs(null);
+        // A choice not yet sent is dropped, and one on its way lands first: a save
+        // after the DELETE would make the device again on the server.
+        latest.current = null;
+        await saving.current;
         await disablePush();
       } else {
         const next = defaultPrefs(locale);
@@ -89,6 +93,8 @@ export default function NotifySheet({ onClose }: { onClose: () => void }) {
       try {
         if (!(await savePrefs(want))) throw new Error("not saved");
       } catch (e) {
+        // Turned off meanwhile: a failed save of a choice no longer shown is not news.
+        if (device.current !== gen && !(e instanceof Unauthorized)) return;
         fail(e);
         const kept = await loadDevice().catch(() => undefined);
         if (live.current && kept !== undefined && latest.current === null && device.current === gen) setPrefs(kept);

@@ -2,7 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WebPin } from "@server/pintypes";
 import { I18nProvider } from "../../i18n";
-import { resetPins, setPinName, setPins, usePins } from "../../lib/webpins";
+import { writeTimeout } from "../../lib/optimistic";
+import { putPin, resetPins, setPinName, setPins, usePins } from "../../lib/webpins";
 import { PinSheet } from "./PinSheet";
 
 const pin = (over: Partial<WebPin> = {}): WebPin => ({
@@ -144,5 +145,36 @@ describe("pin sheet changes", () => {
     await act(async () => held[0]!.answer(new Response("{}", { status: 500 })));
     expect(screen.getByDisplayValue("Two rooms")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Crypt" })).toBeInTheDocument();
+  });
+
+  it("give up on a request that never answers and go back to the server's copy", async () => {
+    const was = writeTimeout.ms;
+    writeTimeout.ms = 40;
+    try {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)))),
+      );
+      setPins([pin()]);
+      render(<Harness onClose={() => {}} />);
+      fireEvent.click(screen.getByRole("button", { name: "Claim" }));
+      expect(screen.getByText("Claimed by Freya")).toBeInTheDocument();
+      expect(await screen.findByRole("alert")).toHaveTextContent("No connection to the panel");
+      expect(screen.getByText("New")).toBeInTheDocument();
+    } finally {
+      writeTimeout.ms = was;
+    }
+  });
+
+  it("drop a failure note once a newer copy of the pin arrives", async () => {
+    const held = holdWrites();
+    setPins([pin()]);
+    render(<Harness onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Claim" }));
+    await waitFor(() => expect(held).toHaveLength(1));
+    await act(async () => held[0]!.answer(new Response("{}", { status: 500 })));
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    act(() => putPin(pin({ note: "Two rooms", version: 2 })));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

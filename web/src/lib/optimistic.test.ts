@@ -11,6 +11,7 @@ type Result = { ok: true; item?: Item } | { ok: false; error: "stale"; item: Ite
 /** A store like tasks and pins: server copies kept by version, the shown list with patches on top. */
 function store(initial: Item[]) {
   const server = new Map(initial.map((i) => [i.id, i]));
+  const gone = new Set<string>();
   const frames: Item[][] = [];
   const put = (i: Item) => {
     const have = server.get(i.id);
@@ -18,10 +19,10 @@ function store(initial: Item[]) {
     show();
   };
   const show = () => frames.push([...server.values()].flatMap((i) => o.view(i.id, i) ?? []));
-  const o: Optimistic<string, Item, Result> = new Optimistic<string, Item, Result>({ server: (id) => server.get(id), ok: (r) => r.ok, changed: show });
+  const o: Optimistic<string, Item, Result> = new Optimistic<string, Item, Result>({ server: (id) => server.get(id), ok: (r) => r.ok, changed: show, thrown: () => ({ ok: false, error: "failed" }), gone: (id) => gone.has(id) });
   const shown = () => frames.at(-1) ?? [...server.values()];
   const stateOf = (id: string) => shown().find((i) => i.id === id)?.state;
-  return { o, server, put, frames, shown, stateOf };
+  return { o, server, put, frames, shown, stateOf, gone };
 }
 
 /** A request the test answers by hand. */
@@ -61,11 +62,28 @@ describe("Optimistic", () => {
     expect(s.o.failure("a")).toBeUndefined();
   });
 
-  it("rolls back when the request throws", async () => {
+  it("rolls back when the request throws, and never rejects, not even for the taps queued behind", async () => {
     const s = store([{ id: "a", v: 1, state: "todo" }]);
-    await expect(s.o.run("a", (i) => ({ ...i, state: "done" }), async () => Promise.reject(new Error("boom")))).rejects.toThrow("boom");
+    const one = s.o.run("a", (i) => ({ ...i, state: "doing" }), async () => Promise.reject(new Error("boom")));
+    const two = s.o.run("a", (i) => ({ ...i, state: "done" }), async (): Promise<Result> => ({ ok: true }));
+    expect(await one).toEqual({ ok: false, error: "failed" });
+    const again = await two;
+    expect(again).toEqual({ ok: false, error: "failed" });
+    // The queued tap's copy is marked as a repeat, the first one's is not: report once.
+    expect(s.o.repeated(again)).toBe(true);
+    expect(s.o.repeated(await one)).toBe(false);
     expect(s.stateOf("a")).toBe("todo");
     expect(s.o.pending("a")).toBe(false);
+  });
+
+  it("keeps no failure for a key deleted for good meanwhile", async () => {
+    const s = store([{ id: "a", v: 1, state: "todo" }]);
+    const req = deferred();
+    const done = s.o.run("a", (i) => ({ ...i, state: "done" }), () => req.promise);
+    s.gone.add("a");
+    req.resolve({ ok: false, error: "failed" });
+    await done;
+    expect(s.o.failure("a")).toBeUndefined();
   });
 
   it("on a 409 stale shows the server's copy, not this page's change", async () => {

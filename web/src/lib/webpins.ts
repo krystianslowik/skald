@@ -7,7 +7,7 @@
 import { useSyncExternalStore } from "react";
 import { cutText, DONE_STATES, PIN_ICONS, PIN_NAME_MAX, PIN_STATES, sameName, tidyText, type PinExpect, type PinIcon, type PinState, type WebPin } from "@server/pintypes";
 import type { IconId } from "./mapgeo";
-import { Optimistic } from "./optimistic";
+import { Optimistic, writeSignal } from "./optimistic";
 
 /** The map mark each web pin icon is drawn with (the map's own line drawings). */
 export const PIN_ICON_MARK: Record<PinIcon, IconId> = {
@@ -49,6 +49,8 @@ const optimistic = new Optimistic<string, WebPin, PinCall>({
   server: (id) => byId.get(id),
   ok: (r) => r.ok,
   changed: () => publish(),
+  thrown: () => ({ ok: false, error: "network" }),
+  gone: (id) => gone.has(id),
 });
 
 /** A pin this page can draw: a newer server may know icons or states this build does not. */
@@ -60,6 +62,8 @@ function take(p: WebPin): boolean {
   if (!known(p) || gone.has(p.id)) return false;
   const have = byId.get(p.id);
   if (have && have.version >= p.version) return false;
+  // The pin moved on since a failed change here: its note no longer fits.
+  if (have) optimistic.dismiss(p.id, true);
   byId.set(p.id, p);
   return true;
 }
@@ -85,7 +89,7 @@ export function putPin(p: WebPin): void {
 /** One pin deleted ("pin_gone" on /live). */
 export function dropPin(id: string): void {
   gone.add(id);
-  optimistic.dismiss(id);
+  optimistic.dismiss(id, true);
   if (byId.delete(id)) publish();
 }
 
@@ -122,6 +126,8 @@ async function send(method: string, path: string, body?: unknown): Promise<PinCa
     res = await fetch(path, {
       method,
       credentials: "same-origin",
+      // A request that never answers would hold the pin's later changes forever.
+      signal: writeSignal(),
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });

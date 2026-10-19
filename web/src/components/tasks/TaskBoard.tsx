@@ -3,7 +3,7 @@ import { memo, Suspense, useCallback, useMemo, useState } from "react";
 import { shortfall, stillMissing, stockTotals, type MaterialNeed } from "@server/taskmodel";
 import { useI18n } from "../../i18n";
 import { itemLabel } from "../../lib/storage";
-import { nextStatus, setTaskStatus, sortTasks, taskFailure, taskPending, useTasks, type Task, type TaskResult } from "../../lib/tasks";
+import { nextStatus, setTaskStatus, sortTasks, taskFailure, taskPending, taskResultRepeated, useTasks, type Task, type TaskResult } from "../../lib/tasks";
 import { useStorage, type StorageLoad } from "../../lib/useStorage";
 import { ItemIcon } from "../storage/ItemIcon";
 import { StatusMark, targetLabel } from "./marks";
@@ -77,7 +77,8 @@ const TaskCard = memo(function TaskCard({
   const advance = async () => {
     navigator.vibrate?.(6);
     const r = await setTaskStatus(task.id, nextStatus(task.status));
-    if (!r.ok && r.error === "unauthorized") onUnauthorized?.();
+    // Taps queued behind a refused one get its result again: the sign-in is asked for once.
+    if (!r.ok && r.error === "unauthorized" && !taskResultRepeated(r)) onUnauthorized?.();
   };
   const meta = [task.owner, where].filter(Boolean).join(" · ");
   return (
