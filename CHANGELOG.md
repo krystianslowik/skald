@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.23] - 2026-10-19
+
 ### Added
 
 - A "Since you were last here" card on the home screen, right under the join code: who played and for how long (and how often they died), bosses defeated, places found, new bases and portals, ships and carts built or gone, how much more of the map is explored, raids, game updates, restarts, restores, backups someone asked for, and settings changes. Tap a line to open the player's profile, the map on that spot, the boss path or the saga. Phones show three lines, the rest behind "Show more". "Got it" folds the card to one quiet line until something new happens. Each device remembers when you last tapped "Got it"; before the first time, or more than 30 days after it, the card covers the last 7 days. World changes are compared with what the device saw when you last tapped "Got it"; after a restore or on a different world there are no world lines that time, and the next "Got it" starts comparing afresh.
