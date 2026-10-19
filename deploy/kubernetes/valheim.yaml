@@ -61,7 +61,7 @@ spec:
         # spec still rolls the pod (and so the join code).
         - name: agent
           restartPolicy: Always
-          image: ghcr.io/krystianslowik/skald-agent:2026.10.28
+          image: ghcr.io/krystianslowik/skald-agent:2026.10.29
           imagePullPolicy: IfNotPresent
           ports:
             - name: agent
