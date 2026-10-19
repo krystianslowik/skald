@@ -388,6 +388,60 @@ export interface History {
   online7d: SeriesPoint[];
 }
 
+/** Someone who played, or died, inside a catch-up window. */
+export interface CatchupPlayer {
+  name: string;
+  /** Only the part of their sessions inside the window. */
+  playtimeMs: number;
+  /** Sessions that started inside the window. */
+  sessions: number;
+  deaths: number;
+  online: boolean;
+}
+
+/**
+ * What the world holds now, for the viewer's browser to compare with what it
+ * saw on the last visit. Nothing is kept per viewer on the server.
+ */
+export interface CatchupWorld {
+  /** An opaque, keyed identity of the world (see `worldId`); a different one is a different world. */
+  id: string;
+  /** The world clock at the save; going back means an older world was put back. */
+  netTime: number;
+  portals: { id: string; x: number; z: number }[];
+  bases: { x: number; z: number }[];
+  ships: number;
+  carts: number;
+  /** Boss altars, traders and dungeons someone has found. */
+  places: { kind: MapLocationKind; name: string; x: number; z: number }[];
+  /** Explored land in square metres; null when the save has no map tables. */
+  exploredM2: number | null;
+}
+
+/** Web GET /api/catchup?since=: what happened since a viewer's last visit. */
+export interface ApiCatchup {
+  since: string;
+  until: string;
+  /** No usable `since` (none, or more than 30 days back): the window is the last 7 days. */
+  clamped: boolean;
+  /** The agent stream is down or still replaying: the window stops short of the clock; ask again soon. */
+  partial: boolean;
+  players: CatchupPlayer[];
+  raids: number;
+  /** Backups someone asked for; the game's routine ones are left out. */
+  backups: number;
+  restores: number;
+  /** Stops and starts that were not part of a restore, an update or a settings apply. */
+  restarts: number;
+  /** Game versions the server moved to. */
+  updates: string[];
+  settings: number;
+  /** Defeated bosses by global key, now; null when the save cannot be read. */
+  bosses: string[] | null;
+  /** Null when the world map is off or not ready. */
+  world: CatchupWorld | null;
+}
+
 export interface Metrics {
   cpu: SeriesPoint[];
   memory: SeriesPoint[];

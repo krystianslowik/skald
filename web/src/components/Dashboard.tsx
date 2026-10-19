@@ -4,6 +4,7 @@ import type { Valheim } from "../lib/useValheim";
 import { useI18n } from "../i18n";
 import { Atmosphere } from "./Atmosphere";
 import { Chart } from "./Chart";
+import { Catchup, type CatchupLinks } from "./Catchup";
 import { Chronicle } from "./Chronicle";
 import { Forge } from "./Forge";
 import { Header, OfflineBanner } from "./Header";
@@ -87,6 +88,22 @@ export function Dashboard({ live, onLogout, onUnauthorized = () => {} }: { live:
     [go],
   );
   const clearFocus = useCallback(() => setMapFocus(null), []);
+  // Where the catch-up card's lines lead: the map (on a spot), the saga, the boss path.
+  const catchupLinks = useMemo<CatchupLinks>(
+    () => ({
+      onMap: (at) => {
+        mapOpener.current = document.activeElement;
+        setMapFocus(at ? { ids: [], open: "", at, label: "", key: Date.now() } : null);
+        go("map");
+      },
+      onSaga: () => {
+        if (phone) go("saga");
+        else document.getElementById("saga-h")?.closest("section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      },
+      onProgress: () => document.getElementById("progress-h")?.closest("section")?.scrollIntoView({ behavior: "smooth", block: "center" }),
+    }),
+    [go, phone],
+  );
   useEffect(() => {
     if (!mapOpen) setMapFocus(null);
   }, [mapOpen]);
@@ -218,6 +235,8 @@ export function Dashboard({ live, onLogout, onUnauthorized = () => {} }: { live:
     </Plank>
   );
   const footer = <p className="on-world pt-2 text-center text-xs text-ash">{t("footer.unofficial")}</p>;
+  // Asked again when a stored event or a new save comes in.
+  const catchup = <Catchup pulse={`${saveKey}|${state.history.events[0]?.ts ?? ""}`} links={catchupLinks} />;
 
   return (
     <AdminProvider state={state} online={online} onUnauthorized={onUnauthorized} onShowMap={showMap}>
@@ -235,6 +254,8 @@ export function Dashboard({ live, onLogout, onUnauthorized = () => {} }: { live:
                 <>
                   {header}
                   {join}
+                  {/* After the code: the code is what most people open the panel for. */}
+                  {catchup}
                   {hearth}
                   {world}
                   {progress}
@@ -276,6 +297,7 @@ export function Dashboard({ live, onLogout, onUnauthorized = () => {} }: { live:
               {join}
               {hearth}
             </div>
+            {catchup}
             <div className="grid gap-5 lg:grid-cols-12 lg:gap-6">
               {world}
               {progress}

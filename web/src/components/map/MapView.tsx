@@ -8,6 +8,7 @@ import { COARSE, PHONE, useMedia } from "../../lib/useMedia";
 import { useTerrain } from "../../lib/useTerrain";
 import { useTerrainTiles } from "../../lib/terraintiles";
 import { useWorldMap } from "../../lib/useWorldMap";
+import type { MapPoint } from "../../types";
 import { Sheet, SheetClose } from "../Sheet";
 import { useAdmin } from "../admin/AdminContext";
 import { LiveLayer, type LiveLayerHandle } from "./LiveLayer";
@@ -21,6 +22,9 @@ const LAYERS_KEY = "skald.map.layers";
 /** Storeys picked in the floor switcher, by base, for as long as the page lives. */
 const chosenStoreys = new Map<string, number>();
 
+/** A mark this close to a spot asked for is the one meant. */
+const SPOT_NEAR_M = 48;
+
 /**
  * Containers to pick out on the map (where an item is kept): every one gets a
  * ring, `open` is selected and flown to. A new `key` repeats the move.
@@ -28,6 +32,8 @@ const chosenStoreys = new Map<string, number>();
 export interface MapFocus {
   ids: readonly string[];
   open: string;
+  /** A spot to show instead (from the catch-up card): the mark there is opened when there is one. */
+  at?: MapPoint;
   /** What they have in common, for the chip ("Iron: 3 places"). */
   label: string;
   key: number;
@@ -274,6 +280,16 @@ function SaveMap({
   useEffect(() => {
     if (!focus || !focusMarks || focusDone.current === focus.key) return;
     focusDone.current = focus.key;
+    if (focus.at) {
+      const { x, z } = focus.at;
+      const near = markers.filter((m) => Math.hypot(m.x - x, m.z - z) < SPOT_NEAR_M).sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z))[0];
+      if (near) {
+        setLayers((prev) => (prev[near.layer] ? prev : { ...prev, [near.layer]: true }));
+        choose({ m: near });
+      }
+      canvas.current?.flyTo(x, z, 0.9, FOCUS_MAX_SCALE);
+      return;
+    }
     const target = focusMarks.get(focus.open);
     const need = new Set([...focusMarks.values()].map((m) => m.layer));
     setLayers((prev) => (LAYERS.some((l) => need.has(l) && !prev[l]) ? Object.fromEntries(LAYERS.map((l) => [l, prev[l] || need.has(l)])) as Record<LayerId, boolean> : prev));
@@ -286,7 +302,7 @@ function SaveMap({
     wantStorey.current = chest ? { x: chest.x, z: chest.z, y: chest.y } : null;
     settleStorey();
     canvas.current?.flyTo(target.x, target.z, 0.9, FOCUS_MAX_SCALE);
-  }, [focus, focusMarks, choose, settleStorey]);
+  }, [focus, focusMarks, markers, choose, settleStorey]);
 
   const pickResult = useCallback(
     (m: Marker, level?: number) => {

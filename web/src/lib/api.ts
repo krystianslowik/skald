@@ -1,4 +1,4 @@
-import type { ActionName, ActionResult, ApiState, ApplyMode, LogLine, PlayerProfile, PublicConfig, SettingsInput, SettingsView } from "../types";
+import type { ActionName, ActionResult, ApiCatchup, ApiState, ApplyMode, LogLine, PlayerProfile, PublicConfig, SettingsInput, SettingsView } from "../types";
 
 export class Unauthorized extends Error {}
 
@@ -111,6 +111,32 @@ export async function runAction(name: ActionName): Promise<{ status: number; bod
 }
 
 export const getPlayer = (name: string) => call<PlayerProfile>(`/api/players/${encodeURIComponent(name)}`);
+
+/** What happened since `since` (this browser's last read); the last week without one. */
+export async function getCatchup(since: string | null, signal?: AbortSignal): Promise<ApiCatchup> {
+  const c = await call<ApiCatchup>(`/api/catchup${since ? `?since=${encodeURIComponent(since)}` : ""}`, { signal });
+  // A proxy's or an older server's answer is not a summary: nothing to show rather than a broken card.
+  const w = c?.world;
+  const at = (p: unknown): p is { x: number; z: number } => !!p && typeof p === "object" && Number.isFinite((p as { x?: unknown }).x) && Number.isFinite((p as { z?: unknown }).z);
+  const worldOk =
+    w === null ||
+    (typeof w === "object" &&
+      typeof w.id === "string" &&
+      Number.isFinite(w.netTime) &&
+      Number.isFinite(w.ships) &&
+      Number.isFinite(w.carts) &&
+      (w.exploredM2 === null || Number.isFinite(w.exploredM2)) &&
+      Array.isArray(w.portals) &&
+      w.portals.every((p) => at(p) && typeof p.id === "string") &&
+      Array.isArray(w.bases) &&
+      w.bases.every(at) &&
+      Array.isArray(w.places) &&
+      w.places.every((p) => at(p) && typeof p.kind === "string" && typeof p.name === "string"));
+  const bossesOk = c?.bosses === null || Array.isArray(c?.bosses);
+  const playersOk = Array.isArray(c?.players) && c.players.every((p) => !!p && typeof p.name === "string" && Number.isFinite(p.playtimeMs) && Number.isFinite(p.sessions) && Number.isFinite(p.deaths));
+  if (!c || !playersOk || !Array.isArray(c.updates) || typeof c.since !== "string" || typeof c.until !== "string" || !worldOk || !bossesOk) throw new Error("not a catch-up summary");
+  return c;
+}
 
 /** Same-origin link: the session cookie rides along and the browser streams the zip to disk. */
 export const backupHref = (name: string) => `/api/backups/${encodeURIComponent(name)}`;

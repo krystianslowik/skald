@@ -1,4 +1,6 @@
 import type { MapSourceResult } from "./agent";
+import type { CatchupWorld } from "./types";
+import { worldFacts, worldId } from "./catchup";
 import { gateMap, storageOf } from "./mapgate";
 
 interface Body {
@@ -13,6 +15,8 @@ export type MapView = "map" | "storage";
 interface Cached extends Record<MapView, Body> {
   /** The agent's ETag for the snapshot this was built from. */
   agentEtag: string;
+  /** What the catch-up card compares, cut once per snapshot. */
+  facts: CatchupWorld;
 }
 
 function body(json: string): Body {
@@ -47,6 +51,8 @@ export class MapCache {
     private readonly fetchMap: (etag: string | null) => Promise<MapSourceResult>,
     readonly spoilers: boolean,
     private readonly clock: () => number = Date.now,
+    /** Keys the world identity of the catch-up facts (the session secret). */
+    private readonly worldKey = "",
   ) {}
 
   /** The map, or with "storage" the village stores cut from the same copy. */
@@ -59,6 +65,14 @@ export class MapCache {
     if (!due && this.unreachable) return this.unreachable;
     const res = await this.revalidate();
     return res.ok ? this.serve(res.stale, view) : res;
+  }
+
+  /** The catch-up facts of the same copy; null while there is no map, or no key for the world identity. */
+  async facts(): Promise<CatchupWorld | null> {
+    // Unkeyed, the identity would let a viewer test seed names against it.
+    if (!this.worldKey) return null;
+    const res = await this.get("map");
+    return res.ok && this.cached ? this.cached.facts : null;
   }
 
   /** Concurrent viewers share one agent round trip. */
@@ -108,7 +122,7 @@ export class MapCache {
     }
     const map = gateMap(res.body, this.spoilers);
     // Our own tags: the spoiler setting changes the body for the same agent map.
-    this.cached = { agentEtag: res.etag ?? "", map: body(JSON.stringify(map)), storage: body(JSON.stringify(storageOf(map))) };
+    this.cached = { agentEtag: res.etag ?? "", map: body(JSON.stringify(map)), storage: body(JSON.stringify(storageOf(map))), facts: { ...worldFacts(map), id: worldId(this.worldKey, map.meta.seedName, map.meta.seed) } };
     this.checked(false);
     return this.serve(false);
   }

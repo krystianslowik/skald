@@ -64,6 +64,8 @@ export class Hub {
   private state: AgentState = emptyAgentState();
   private hasState = false;
   private streaming = false;
+  /** When the current agent stream opened. */
+  private streamingAt = 0;
   private stateOk = false;
   private lastSeq = 0;
   private epoch = "";
@@ -117,6 +119,11 @@ export class Hub {
 
   get online(): boolean {
     return this.streaming && this.stateOk;
+  }
+
+  /** When the current agent stream opened (its replayed backlog comes first), or null while offline. */
+  liveSince(): number | null {
+    return this.online ? this.streamingAt : null;
   }
 
   getState(): AgentState {
@@ -181,7 +188,12 @@ export class Hub {
     return value;
   }
 
-  /** The stored events, loaded and parsed once per cache window for both folds. */
+  /** Every stored event, oldest first, for the catch-up summary. */
+  storedEvents(): AgentEvent[] {
+    return this.events(this.opts.clock());
+  }
+
+  /** The stored events, loaded and parsed once per cache window for every fold. */
   private events(now: number): AgentEvent[] {
     if (this.eventsCache && now - this.eventsCache.at < this.opts.historyCacheMs) return this.eventsCache.value;
     const value = this.store.all();
@@ -380,6 +392,7 @@ export class Hub {
         if (this.positionsWatchers.size > 0) this.tellAgent(true);
         this.abort = new AbortController();
         this.streaming = true;
+        this.streamingAt = this.opts.clock();
         this.sendState(this.online);
         await this.agent.stream(since, (ev) => {
           attempt = 0;

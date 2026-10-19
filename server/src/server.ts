@@ -113,7 +113,7 @@ const app = createApp({
   locale: cfg.locale,
   trustedIpHeader: cfg.trustedIpHeader,
   publicOrigins: cfg.publicOrigins,
-  map: new MapCache((etag) => agent.map(etag), cfg.mapSpoilers),
+  map: new MapCache((etag) => agent.map(etag), cfg.mapSpoilers, Date.now, cfg.sessionSecret),
   notify,
   push,
   version: VERSION,
