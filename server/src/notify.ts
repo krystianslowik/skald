@@ -3,10 +3,13 @@ import { NOTIFY_KINDS, type AgentEvent, type AgentState, type CompatResult, type
 
 export { NOTIFY_KINDS, type NotifyChange, type NotifyKind };
 
-/** One line waiting to go out; joins, leaves and deaths of a batch share a line. */
-type Item =
+/**
+ * One piece of news; joins, leaves and deaths of a batch share a line.
+ * `first` on a join: nobody was at the fire before it.
+ */
+export type Item =
   // key tells apart players sharing a name ("Ragnar#2"); the name otherwise.
-  | { kind: "join"; name: string; key?: string }
+  | { kind: "join"; name: string; key?: string; first?: boolean }
   | { kind: "leave"; name: string; key?: string; ms: number | null }
   | { kind: "death"; name: string }
   | { kind: "raid"; raid: string }
@@ -17,10 +20,24 @@ type Item =
   | { kind: "compat"; result: CompatResult; followUp: boolean }
   | { kind: "failure"; what: "admin"; actor: string; command: string; error: string }
   | { kind: "failure"; what: "settings"; error: string }
-  | { kind: "failure"; what: "action"; action: string; error: string };
+  | { kind: "failure"; what: "action"; action: string; error: string }
+  /** A boss whose key turned defeated since the last state; not a Discord kind, only sinks take it. */
+  | { kind: "boss"; key: string };
+
+export type ItemKind = Item["kind"];
+
+/**
+ * Another consumer of the same news (phone push): it sees every batch after
+ * the dedupe, baseline and coalescing, whatever Discord is set to.
+ */
+export interface NotifySink {
+  wants(kind: ItemKind): boolean;
+  /** `joinCode`: the newest join code the notifier knows. Must not throw or wait. */
+  batch(items: readonly Item[], ctx: { joinCode: string }): void;
+}
 
 /** Kinds that wait for company before going out. */
-const COALESCED: ReadonlySet<NotifyKind> = new Set(["join", "leave", "death"]);
+const COALESCED: ReadonlySet<ItemKind> = new Set(["join", "leave", "death"]);
 
 /** Discord's limit on `content`. */
 const CONTENT_MAX = 2000;
@@ -135,7 +152,7 @@ const STRINGS = {
 type Key = keyof (typeof STRINGS)["en"];
 
 /** The raid messages the game shows, as the web's saga words them. */
-const RAIDS: Record<Locale, Record<string, string>> = {
+export const RAIDS: Record<Locale, Record<string, string>> = {
   en: {
     army_eikthyr: "Eikthyr rallies the creatures of the forest",
     army_theelder: "The forest is moving...",
@@ -209,7 +226,7 @@ function gameVersion(v: string): string {
   return v.replace(/^[a-z]-/, "");
 }
 
-function fill(text: string, vars: Record<string, string>): string {
+export function fill(text: string, vars: Record<string, string>): string {
   return text.replace(/\{(\w+)\}/g, (m, k: string) => vars[k] ?? m);
 }
 
@@ -229,7 +246,7 @@ export function formatBatch(items: readonly Item[], locale: Locale): string[] {
   const s = STRINGS[locale];
   const list = (names: string[]) => new Intl.ListFormat(locale, { type: "conjunction" }).format(names);
   const lines: string[] = [];
-  const done = new Set<NotifyKind>();
+  const done = new Set<ItemKind>();
   for (const it of items) {
     if (COALESCED.has(it.kind)) {
       if (done.has(it.kind)) continue;
@@ -377,7 +394,12 @@ export class DiscordNotifier {
   private status = "";
   private announcedStatus = "";
   private serverTimer: ReturnType<typeof setTimeout> | null = null;
-  private pending: Item[] = [];
+  /** `discord`: the webhook the item was queued for; empty when only sinks take it. */
+  private pending: { item: Item; discord: string }[] = [];
+  private readonly sinks: NotifySink[] = [];
+  /** Defeated bosses of `bossWorld` in the last readable state; null before one. */
+  private defeated: Set<string> | null = null;
+  private bossWorld = "";
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private outbox: string[] = [];
   private sending: Promise<void> | null = null;
@@ -403,7 +425,10 @@ export class DiscordNotifier {
   /** The hub listener. */
   handle(m: LiveMessage): void {
     try {
-      if (m.type === "state") this.seed(m.state, m.online);
+      if (m.type === "state") {
+        this.seed(m.state, m.online);
+        this.bosses(m.state, m.online);
+      }
       else if (m.type === "event") this.event(m.event);
     } catch (e) {
       this.log(`discord: ${redact(e instanceof Error ? e.message : String(e), this.url)}`);
@@ -422,11 +447,19 @@ export class DiscordNotifier {
     this.url = target?.url ?? "";
     this.kinds = new Set(target?.kinds ?? []);
     if (this.url !== before) {
-      this.pending = [];
+      // What waits for a sink still goes there; Discord's share was for the old channel.
+      this.pending = this.pending.filter((p) => this.sinkWants(p.item.kind)).map((p) => ({ item: p.item, discord: "" }));
       this.outbox = [];
-      if (this.flushTimer) clearTimeout(this.flushTimer);
-      this.flushTimer = null;
+      if (this.flushTimer && this.pending.length === 0) {
+        clearTimeout(this.flushTimer);
+        this.flushTimer = null;
+      }
     }
+  }
+
+  /** Another consumer of the news (phone push). */
+  addSink(sink: NotifySink): void {
+    this.sinks.push(sink);
   }
 
   stop(): void {
@@ -480,8 +513,9 @@ export class DiscordNotifier {
       case "player_join": {
         const name = String(d.name ?? "");
         if (!name) return;
+        const first = this.joinedAt.size === 0;
         this.joinedAt.set(playerKey(d), ts);
-        return this.add({ kind: "join", name, key: playerKey(d) });
+        return this.add({ kind: "join", name, key: playerKey(d), first });
       }
       case "player_leave": {
         const name = String(d.name ?? "");
@@ -564,9 +598,32 @@ export class DiscordNotifier {
     }, this.opts.serverHoldMs);
   }
 
+  /**
+   * A boss is news when its key turns defeated between two readable states of
+   * the same world. The first readable state, and the first of another world,
+   * are the baseline.
+   */
+  private bosses(st: AgentState, online: boolean): void {
+    const meta = st.world?.meta;
+    if (!online || !meta || !Array.isArray(meta.bosses)) return;
+    const now = new Set(meta.bosses.filter((b) => b.defeated).map((b) => b.key));
+    const before = this.defeated;
+    const sameWorld = meta.name === this.bossWorld;
+    this.defeated = now;
+    this.bossWorld = meta.name;
+    if (!before || !sameWorld) return;
+    for (const key of now) if (!before.has(key)) this.add({ kind: "boss", key });
+  }
+
+  private sinkWants(kind: ItemKind): boolean {
+    return this.sinks.some((s) => s.wants(kind));
+  }
+
   private add(item: Item): void {
-    if (this.stopped || !this.url || !this.kinds.has(item.kind)) return;
-    this.pending.push(item);
+    if (this.stopped) return;
+    const discord = this.url && this.kinds.has(item.kind as NotifyKind) ? this.url : "";
+    if (!discord && !this.sinkWants(item.kind)) return;
+    this.pending.push({ item, discord });
     if (COALESCED.has(item.kind)) {
       if (!this.flushTimer) this.flushTimer = setTimeout(() => this.flush(), this.opts.coalesceMs);
       return;
@@ -578,8 +635,19 @@ export class DiscordNotifier {
 
   private flush(): void {
     this.flushTimer = null;
-    const items = this.pending;
+    const queued = this.pending;
     this.pending = [];
+    if (queued.length === 0) return;
+    for (const sink of this.sinks) {
+      const mine = queued.map((p) => p.item).filter((it) => sink.wants(it.kind));
+      if (mine.length === 0) continue;
+      try {
+        sink.batch(mine, { joinCode: this.joinCode });
+      } catch (e) {
+        this.log(`notify: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    const items = queued.filter((p) => p.discord && p.discord === this.url).map((p) => p.item);
     if (items.length === 0) return;
     let content = formatBatch(items, this.o.locale).join("\n");
     if (content.length > CONTENT_MAX) content = `${content.slice(0, CONTENT_MAX - 1)}…`;

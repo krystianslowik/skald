@@ -10,6 +10,7 @@ import { cause, log as defaultLog, type Logger } from "./log";
 import type { MapCache, MapView } from "./map";
 import type { NotifyChange, NotifySettings } from "./notify";
 import { checkOrigin, type OriginPolicy } from "./origin";
+import { pushRoutes, type PushService } from "./push";
 import {
   ACCESS_LISTS,
   ACCESS_OPS,
@@ -61,6 +62,8 @@ export interface AppDeps {
   map?: MapCache;
   /** Discord notifications: the environment's or the panel's webhook. Unset: the feature is off. */
   notify?: Pick<NotifySettings, "on" | "fromEnv" | "view" | "update" | "clear" | "test">;
+  /** Phone push notifications; unset: /api/push answers 404. */
+  push?: Pick<PushService, "info" | "subscribe" | "device" | "unsubscribe" | "test">;
   verifyPassword?: (password: string, hash: string) => Promise<boolean>;
   clock?: () => number;
   /** This build's Skald release; "dev" when unset. */
@@ -247,6 +250,9 @@ export function createApp(deps: AppDeps): Hono {
     if (!authed(c)) return c.json({ error: "unauthorized" }, 401);
     await next();
   });
+
+  // Phone push: each signed-in viewer turns it on for their own device.
+  if (deps.push) app.route("/api/push", pushRoutes(deps.push));
 
   // ---- roles ---------------------------------------------------------------
   // With ADMIN_PASSWORD_HASH, changing anything (actions, settings, admin

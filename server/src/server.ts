@@ -7,6 +7,7 @@ import { hashPassword } from "./hash";
 import { Hub } from "./hub";
 import { MapCache } from "./map";
 import { DiscordNotifier, NotifySettings } from "./notify";
+import { PushService, PushStore } from "./push";
 import { metricsFetch, VERSION } from "./buildinfo";
 import { log } from "./log";
 import { cachedMetrics, fetchMetrics } from "./prom";
@@ -78,6 +79,10 @@ const hub = new Hub(agent, store, { timeZone: cfg.timeZone });
 const notifier = new DiscordNotifier({ url: "", kinds: cfg.discordNotify, locale: cfg.locale });
 hub.subscribe((m) => notifier.handle(m));
 const notify = new NotifySettings({ notifier, store, envUrl: cfg.discordWebhookUrl, envKinds: cfg.discordNotify });
+// Phone push takes the same news. VAPID keys are made on the first start and kept in DB_PATH.
+const push = new PushService({ store: new PushStore(cfg.dbPath), contact: cfg.pushContact, allowLocal: cfg.mock });
+await push.init();
+notifier.addSink(push);
 hub.start();
 
 const target = { namespace: cfg.promNamespace, container: cfg.promContainer, podRegex: cfg.promPodRegex };
@@ -105,6 +110,7 @@ const app = createApp({
   publicOrigins: cfg.publicOrigins,
   map: new MapCache((etag) => agent.map(etag), cfg.mapSpoilers),
   notify,
+  push,
   version: VERSION,
   update: updates ? () => updates.get() : undefined,
 });

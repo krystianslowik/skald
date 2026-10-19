@@ -42,6 +42,14 @@ describe("config", () => {
     expect(loadConfig({ ...base, COOKIE_SECURE: "0" }).cookieSecure).toBe(true);
   });
 
+  it("names a push contact: PUSH_CONTACT, else the https public origin, else the project", () => {
+    expect(loadConfig(base).pushContact).toBe("https://github.com/krystianslowik/skald");
+    expect(loadConfig({ ...base, PUBLIC_ORIGIN: "http://lan.example:8080,https://skald.example" }).pushContact).toBe("https://skald.example");
+    expect(loadConfig({ ...base, PUSH_CONTACT: "mailto:jarl@example.com" }).pushContact).toBe("mailto:jarl@example.com");
+    expect(() => loadConfig({ ...base, PUSH_CONTACT: "jarl@example.com" })).toThrow("PUSH_CONTACT");
+    expect(() => loadConfig({ ...base, PUSH_CONTACT: "http://skald.example" })).toThrow("PUSH_CONTACT");
+  });
+
   it("keeps Discord off unless a webhook is set, and checks the kinds", () => {
     const c = loadConfig(base);
     expect(c.discordWebhookUrl).toBe("");
