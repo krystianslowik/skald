@@ -772,14 +772,99 @@ func TestReconnectStillListedIsOnePlayer(t *testing.T) {
 	}
 }
 
+// The second of two same-name players reconnects while the plugin still
+// lists its old peer; the log attached the new peer to the first Ragnar.
+// The new peer goes back to its account's player, no phantom "Ragnar#3".
+func TestSecondPlayerReconnectStillListed(t *testing.T) {
+	h := events.New(100, 100)
+	tr := New(h)
+	tr.SetStatus("running")
+	feed(t, tr, `Got character ZDOID from Ragnar : 100:1`, `Got character ZDOID from Ragnar : 200:1`)
+	tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "xbox", "A"}, {"200", "Ragnar", "steam", "B"}})
+	feed(t, tr, "+1m", `Got character ZDOID from Ragnar : 300:1`)
+	tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "xbox", "A"}, {"200", "Ragnar", "steam", "B"}, {"300", "Ragnar", "steam", "B"}})
+	tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "xbox", "A"}, {"300", "Ragnar", "steam", "B"}})
+	if got, want := byID(tr), map[string]string{"Ragnar": "Ragnar/xbox", "Ragnar#2": "Ragnar/steam"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("players = %v, want %v", got, want)
+	}
+	if want := []string{"+Ragnar=Ragnar", "+Ragnar=Ragnar#2"}; !reflect.DeepEqual(joinsLeaves(h), want) {
+		t.Errorf("sequence = %v, want %v", joinsLeaves(h), want)
+	}
+	if ids, _ := tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "xbox", "A"}, {"300", "Ragnar", "steam", "B"}}); ids["300"] != "Ragnar#2" {
+		t.Errorf("ids = %v", ids)
+	}
+}
+
+// Expiring a reconnect's stale peer leaves the count to the game's count
+// lines: a client still loading stays counted.
+func TestExpiringAStalePeerKeepsTheCount(t *testing.T) {
+	tr := New(events.New(100, 100))
+	tr.SetStatus("running")
+	feed(t, tr,
+		`Got character ZDOID from Ragnar : 100:1`,
+		`Got character ZDOID from Freya : 400:1`,
+		`Player joined server "Midgard" that has join code 482915, now 3 player(s)`,
+		"+1m",
+		`Got character ZDOID from Ragnar : 200:1`,
+	)
+	tr.SetPeers(after(tr), []Peer{{"200", "Ragnar", "xbox", "A"}, {"400", "Freya", "steam", "F"}, {"500", "", "steam", "L"}})
+	if s := tr.Snapshot(); s.PlayersReported != 3 || len(s.Players) != 2 {
+		t.Fatalf("reported = %d, players = %+v", s.PlayersReported, s.Players)
+	}
+}
+
+// A player the plugin read already took off the list: its abandoned lines
+// still lower the lagging connection-lost count, once.
+func TestAbandonAfterExpiryLowersTheCount(t *testing.T) {
+	tr := New(events.New(100, 100))
+	tr.SetStatus("running")
+	feed(t, tr,
+		`Got character ZDOID from Ragnar : 100:1`,
+		`Got character ZDOID from Freya : 400:1`,
+		`Player joined server "Midgard" that has join code 482915, now 2 player(s)`,
+	)
+	tr.SetPeers(after(tr), []Peer{{"400", "Freya", "steam", "F"}})
+	feed(t, tr,
+		// The connection-lost count lags by one.
+		`Player connection lost server "Midgard" that has join code 482915, now 2 player(s)`,
+		`Destroying abandoned non persistent zdo 100:1 owner 100`,
+		`Destroying abandoned non persistent zdo 100:2 owner 100`,
+	)
+	if s := tr.Snapshot(); s.PlayersReported != 1 || len(s.Players) != 1 {
+		t.Fatalf("reported = %d, players = %+v", s.PlayersReported, s.Players)
+	}
+}
+
+// A player whose only live peer the plugin lists under another name is not
+// left without one: a spare same-name peer is a new player, not its.
+func TestPeerUnderAnotherNameIsNotAnOrphan(t *testing.T) {
+	h := events.New(100, 100)
+	tr := New(h)
+	tr.SetStatus("running")
+	feed(t, tr, `Got character ZDOID from Ragnar : 100:1`, `Got character ZDOID from Ragnar : 200:1`)
+	tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "xbox", "A"}, {"200", "Ragnar", "steam", "B"}})
+	feed(t, tr, "+1m",
+		`PlayFab socket with remote ID playfab/1B2C3D4E5F607182 received local Platform ID Steam_76561190000000003`,
+		`Got character ZDOID from Ragnar : 300:1`,
+	)
+	// 300 went to Ragnar#2 (steam). The plugin names 100 differently for once.
+	tr.SetPeers(after(tr), []Peer{{"100", "Ragnar ", "xbox", "A"}, {"200", "Ragnar", "steam", "B"}, {"300", "Ragnar", "playstation", "C"}})
+	if got, want := byID(tr), map[string]string{"Ragnar": "Ragnar/xbox", "Ragnar#2": "Ragnar/steam", "Ragnar#3": "Ragnar/playstation"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("players = %v, want %v", got, want)
+	}
+}
+
 // SetPeers hands back the id of each listed peer the tracker knows.
 func TestSetPeersReturnsIDs(t *testing.T) {
 	tr := New(events.New(100, 100))
 	tr.SetStatus("running")
 	feed(t, tr, `Got character ZDOID from Ragnar : 100:1`, `Got character ZDOID from Ragnar : 200:1`)
-	ids := tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "xbox", "a"}, {"200", "Ragnar", "steam", "b"}, {"300", "Freya", "steam", "c"}})
+	ids, inUse := tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "xbox", "a"}, {"200", "Ragnar", "steam", "b"}, {"300", "Freya", "steam", "c"}})
 	if want := map[string]string{"100": "Ragnar", "200": "Ragnar#2"}; !reflect.DeepEqual(ids, want) {
 		t.Fatalf("ids = %v, want %v", ids, want)
+	}
+	if want := []string{"Ragnar", "Ragnar#2"}; !reflect.DeepEqual(inUse, want) {
+		t.Fatalf("in use = %v, want %v", inUse, want)
 	}
 }
 

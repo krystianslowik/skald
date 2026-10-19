@@ -121,9 +121,10 @@ type Options struct {
 	HTTP *http.Client
 	// OnPlayers hears every player list read: when the read began and each
 	// connected peer. It answers with the player id ("Ragnar#2") of each
-	// peer it knows, by peer id, which tells apart players sharing a name.
+	// peer it knows, by peer id, which tells apart players sharing a name,
+	// and every id in use, which ids made up for the others must avoid.
 	// It must not call back into the client.
-	OnPlayers func(readAt time.Time, peers []Peer) map[string]string
+	OnPlayers func(readAt time.Time, peers []Peer) (byUID map[string]string, inUse []string)
 }
 
 // Client calls the plugin and keeps the private name <-> id tables.
@@ -507,7 +508,9 @@ func (c *Client) Players(ctx context.Context) ([]Player, error) {
 		if id != "" {
 			c.userIDByName[strings.ToLower(p.Name)] = id
 		}
-		peers = append(peers, Peer{UID: uid, Name: p.Name, Platform: platformOf(id), Account: id})
+		// The account is the platform user id only: the socket host name
+		// is another format, so one player could look like two.
+		peers = append(peers, Peer{UID: uid, Name: p.Name, Platform: platformOf(id), Account: p.UserID})
 		out = append(out, Player{
 			Name:         p.Name,
 			Platform:     platformOf(id),
@@ -521,13 +524,19 @@ func (c *Client) Players(ctx context.Context) ([]Player, error) {
 	}
 	c.mu.Unlock()
 	var ids map[string]string
+	var inUse []string
 	if c.opt.OnPlayers != nil {
-		ids = c.opt.OnPlayers(readAt, peers)
+		ids, inUse = c.opt.OnPlayers(readAt, peers)
 	}
 	// The tracker's ids first, then ids unique within the list for peers
 	// it does not list (still loading, or not in the log yet), so those
-	// never take a listed player's id.
+	// never take a listed player's id, also one whose peer is newer than
+	// this read.
 	taken := map[string]bool{}
+	reserved := map[string]bool{}
+	for _, id := range inUse {
+		reserved[id] = true
+	}
 	for i := range out {
 		if id := ids[peers[i].UID]; id != "" && !taken[id] {
 			out[i].ID = id
@@ -539,7 +548,7 @@ func (c *Client) Players(ctx context.Context) ([]Player, error) {
 			continue
 		}
 		id := out[i].Name
-		for n := 2; taken[id]; n++ {
+		for n := 2; taken[id] || reserved[id]; n++ {
 			id = out[i].Name + "#" + strconv.Itoa(n)
 		}
 		out[i].ID = id

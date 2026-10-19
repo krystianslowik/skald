@@ -93,6 +93,9 @@ type Tracker struct {
 	// holds the peer ids a plugin player list taken after that has listed.
 	seen      map[string]time.Time
 	confirmed map[string]struct{}
+	// expired holds peer ids a plugin read took off before their abandoned
+	// lines came; the first of those still lowers the count.
+	expired map[string]struct{}
 	// pending platforms of open connections, oldest first, at most one per
 	// remote id, waiting for a character to claim them.
 	pending []pendingPlatform
@@ -108,6 +111,7 @@ func New(hub *events.Hub) *Tracker {
 		peers:     map[string]map[string]struct{}{},
 		seen:      map[string]time.Time{},
 		confirmed: map[string]struct{}{},
+		expired:   map[string]struct{}{},
 	}
 }
 
@@ -198,6 +202,10 @@ func (t *Tracker) HandleLine(raw string) {
 			// One line per object the peer owned; the first one is the
 			// peer's leave. Its character is one of them, so every peer that
 			// spawned gets one.
+			if _, ok := t.expired[m.UID]; ok {
+				delete(t.expired, m.UID)
+				t.lowerCount()
+			}
 			t.dropPeer(m.UID, true)
 		case logparse.KindWorldBackup:
 			t.hub.Publish("world_backup", map[string]any{"ms": m.Ms})
@@ -276,9 +284,15 @@ func (t *Tracker) dropPeer(uid string, lost bool) {
 		delete(t.peers, id)
 		t.leave(id)
 	}
-	if !lost {
-		return
+	if lost {
+		t.lowerCount()
 	}
+}
+
+// lowerCount takes one disconnected peer off the reported count, which the
+// lagging connection-lost line leaves one too high, keeping it at least the
+// number of names listed. Caller holds mu.
+func (t *Tracker) lowerCount() {
 	if n := max(t.s.PlayersReported-1, len(t.s.Players)); n < t.s.PlayersReported {
 		t.s.PlayersReported = n
 		t.hub.Publish("player_count", map[string]any{"count": n})
@@ -442,8 +456,9 @@ func (t *Tracker) PeersWanted() bool {
 //     a platform.
 //
 // Peers of one account, or without one, are never split apart. It returns
-// the id of every listed peer the tracker knows, by peer id.
-func (t *Tracker) SetPeers(readAt time.Time, list []Peer) map[string]string {
+// the id of every listed peer the tracker knows, by peer id, and the id of
+// every listed player.
+func (t *Tracker) SetPeers(readAt time.Time, list []Peer) (byUID map[string]string, inUse []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	live := make(map[string]Peer, len(list))
@@ -471,9 +486,11 @@ func (t *Tracker) SetPeers(readAt time.Time, list []Peer) map[string]string {
 		}
 	}
 	for _, name := range names {
-		// spare: the live peers of each account a player does not keep.
+		// spare: the live peers of each account a player does not keep;
+		// kept: the account each player keeps.
 		var spare [][]string
 		var orphans []string
+		kept := map[string]string{}
 		for _, p := range t.s.Players {
 			if p.Name != name || len(t.peers[p.ID]) == 0 {
 				continue
@@ -481,10 +498,13 @@ func (t *Tracker) SetPeers(readAt time.Time, list []Peer) map[string]string {
 			var alive []string
 			orphan := true
 			for uid := range t.peers[p.ID] {
-				if lp, ok := live[uid]; ok && judged(uid) && lp.Name == name {
+				lp, ok := live[uid]
+				if !judged(uid) || ok {
+					// Too new to tell, or alive (also under another name).
+					orphan = false
+				}
+				if ok && judged(uid) && lp.Name == name {
 					alive = append(alive, uid)
-				} else if !judged(uid) {
-					orphan = false // too new to tell
 				}
 			}
 			if len(alive) == 0 {
@@ -508,6 +528,9 @@ func (t *Tracker) SetPeers(readAt time.Time, list []Peer) map[string]string {
 				}
 				byAccount[acct] = append(byAccount[acct], uid)
 			}
+			if len(accounts) == 1 {
+				kept[p.ID] = accounts[0]
+			}
 			if len(accounts) <= 1 {
 				continue
 			}
@@ -518,9 +541,25 @@ func (t *Tracker) SetPeers(readAt time.Time, list []Peer) map[string]string {
 					break
 				}
 			}
+			kept[p.ID] = keep
 			for _, acct := range accounts {
 				if acct != keep {
 					spare = append(spare, byAccount[acct])
+				}
+			}
+		}
+		// A spare account another same-name player keeps is that player's
+		// reconnect the log attached to the wrong one.
+		for j := 0; j < len(spare); j++ {
+			acct := live[spare[j][0]].Account
+			for _, p := range t.s.Players {
+				if p.Name == name && kept[p.ID] == acct {
+					for _, uid := range spare[j] {
+						t.movePeer(uid, p.ID)
+					}
+					spare = slices.Delete(spare, j, j+1)
+					j--
+					break
 				}
 			}
 		}
@@ -553,8 +592,11 @@ func (t *Tracker) SetPeers(readAt time.Time, list []Peer) map[string]string {
 			}
 		}
 	}
+	// Not lost: the game's count lines own the count, and a client still
+	// loading is in it.
 	for _, uid := range stale {
-		t.dropPeer(uid, true)
+		t.dropPeer(uid, false)
+		t.expired[uid] = struct{}{}
 	}
 
 	for i, p := range t.s.Players {
@@ -572,13 +614,16 @@ func (t *Tracker) SetPeers(readAt time.Time, list []Peer) map[string]string {
 		t.hub.Publish("player_platform", map[string]any{"name": p.Name, "id": p.ID, "platform": platform})
 	}
 
-	ids := map[string]string{}
+	byUID = map[string]string{}
 	for _, p := range list {
 		if id, ok := t.uids[p.UID]; ok {
-			ids[p.UID] = id
+			byUID[p.UID] = id
 		}
 	}
-	return ids
+	for _, p := range t.s.Players {
+		inUse = append(inUse, p.ID)
+	}
+	return byUID, inUse
 }
 
 // newestPlatform is the known platform of the newest of these live peers,
@@ -634,5 +679,6 @@ func (t *Tracker) setCount(n int) {
 		clear(t.peers)
 		clear(t.seen)
 		clear(t.confirmed)
+		clear(t.expired)
 	}
 }
