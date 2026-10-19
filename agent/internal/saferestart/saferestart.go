@@ -34,9 +34,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path"
@@ -243,6 +245,11 @@ type Options struct {
 	RecoverTimeout time.Duration
 	// Keep is how many pre-restart archives stay; 5 when zero.
 	Keep int
+	// ResumeWait bounds waiting for supervisord when the agent starts; the
+	// agent sidecar starts before the game container. 5 min when zero.
+	ResumeWait time.Duration
+	// StartTries is how often the game's start is tried; 3 when zero.
+	StartTries int
 }
 
 // Runner runs one safe restart at a time and keeps the last one.
@@ -268,36 +275,185 @@ func (r *Runner) marker() string {
 	return filepath.Join(r.opt.ConfigDir, restore.SkaldDir, ".safe-restart-down")
 }
 
-// Resume starts the game (and the updater) again if a run stopped them and
-// the agent died before the start. Called once when the agent starts.
+// markerData is what the marker holds.
+type markerData struct {
+	Run     string    `json:"run"`
+	At      time.Time `json:"at"`
+	Updater bool      `json:"updater"`
+}
+
+// markDown writes (down) or clears the marker, synced to disk. A run that
+// cannot write it does not stop the game.
+func (r *Runner) markDown(down, updater bool) error {
+	r.down, r.downUpdater = down, updater
+	dir := filepath.Dir(r.marker())
+	if !down {
+		err := os.Remove(r.marker())
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		syncDir(dir)
+		return err
+	}
+	id := ""
+	if v := r.View(); v != nil {
+		id = v.ID
+	}
+	body, _ := json.Marshal(markerData{Run: id, At: r.opt.Now().UTC(), Updater: updater})
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return writeSynced(r.marker(), body)
+}
+
+// writeSynced writes p through a synced temporary file and a rename, then
+// syncs the directory, so the file is on disk when it returns.
+func writeSynced(p string, body []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(p), ".safe-restart-*.tmp")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name) // no-op after the rename
+	_, err = tmp.Write(body)
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(name, p)
+	}
+	if err != nil {
+		return err
+	}
+	syncDir(filepath.Dir(p))
+	return nil
+}
+
+func syncDir(dir string) {
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		d.Close()
+	}
+}
+
+// stopped are the supervisord states of a program that is not running and
+// not on its way anywhere.
+func stopped(st string) bool { return st == "STOPPED" || st == "EXITED" || st == "FATAL" }
+
+// Resume runs once when the agent starts. It removes copies a run left half
+// written and, if a run stopped the game and the agent died before the
+// start, starts it again: only when supervisord shows the game stopped (and
+// the updater too, if the run had stopped it). An updater that runs is the
+// image in charge, and a marker older than any run could last is ignored.
+// Either way the run is reported as failed.
 func (r *Runner) Resume() {
+	dir := filepath.Join(r.opt.ConfigDir, restore.SkaldDir)
+	if tmps, _ := filepath.Glob(filepath.Join(dir, "."+Prefix+"-*.tmp")); len(tmps) > 0 {
+		for _, t := range tmps {
+			_ = os.Remove(t)
+		}
+		r.opt.Logger.Info("safe restart: removed half-written copies", "n", len(tmps))
+	}
 	raw, err := os.ReadFile(r.marker())
 	if err != nil {
 		return
 	}
-	updater := strings.TrimSpace(string(raw)) == "updater"
-	r.opt.Logger.Warn("safe restart: the agent stopped mid-run; starting the game again")
-	if err := r.startGame(updater); err != nil {
-		r.opt.Logger.Error("safe restart: could not start the game again", "err", err)
+	var m markerData
+	clear := func() {
+		if err := os.Remove(r.marker()); err == nil {
+			syncDir(dir)
+		}
+	}
+	if json.Unmarshal(raw, &m) != nil || m.At.IsZero() {
+		r.opt.Logger.Warn("safe restart: unreadable marker removed")
+		clear()
 		return
 	}
-	_ = os.Remove(r.marker())
+	if r.opt.Now().Sub(m.At) > 2*r.opt.ActionTimeout+r.opt.RecoverTimeout {
+		r.opt.Logger.Warn("safe restart: stale marker removed", "run", m.Run)
+		clear()
+		return
+	}
+	// The agent may be up before supervisord is.
+	var srv, upd string
+	end := r.opt.Now().Add(r.opt.ResumeWait)
+	for {
+		var ok bool
+		srv, upd, ok = r.states()
+		if ok {
+			break
+		}
+		if !r.opt.Now().Before(end) {
+			r.opt.Logger.Error("safe restart: supervisord did not answer; the game may still be stopped", "run", m.Run)
+			return
+		}
+		time.Sleep(r.opt.Tick)
+	}
+	msg := "the agent restarted during the safe restart"
+	switch {
+	case m.Updater && upd == "RUNNING":
+		msg += "; the image's updater is running and in charge of the game"
+	case !stopped(srv):
+		msg += "; the game is " + strings.ToLower(srv)
+	case m.Updater && !stopped(upd):
+		msg += "; the updater is " + strings.ToLower(upd) + ", so the game was left alone"
+	default:
+		if !r.lockWait(context.Background()) {
+			msg += "; another action held the game, so it was not started"
+			break
+		}
+		err := r.startGame(m.Updater)
+		r.opt.Unlock()
+		if err != nil {
+			r.opt.Logger.Error("safe restart: could not start the game again", "err", err)
+			msg += "; starting the game again failed: " + scrub(err)
+		} else {
+			r.opt.Logger.Warn("safe restart: the agent restarted mid-run; the game was started again", "run", m.Run)
+			msg += "; the game was started again"
+		}
+	}
+	clear()
+	r.interrupted(m, msg)
 }
 
-// markDown writes or clears the marker.
-func (r *Runner) markDown(down, updater bool) {
-	r.down, r.downUpdater = down, updater
-	if !down {
-		_ = os.Remove(r.marker())
-		return
+// interrupted reports a run the agent lost to a restart.
+func (r *Runner) interrupted(m markerData, msg string) {
+	now := r.opt.Now().UTC()
+	v := View{ID: m.Run, Actor: "unknown", State: RunFailed, Step: StepStart, StartedAt: m.At, EndedAt: &now, Error: msg}
+	for _, name := range StepNames {
+		v.Steps = append(v.Steps, Step{Name: name, State: Pending})
 	}
-	body := ""
-	if updater {
-		body = "updater"
+	v.step(StepStart).State, v.step(StepStart).Reason = Failed, "interrupted"
+	r.mu.Lock()
+	if r.cur == nil {
+		c := v.clone()
+		r.cur = &c
 	}
-	if err := os.MkdirAll(filepath.Dir(r.marker()), 0o755); err == nil {
-		_ = os.WriteFile(r.marker(), []byte(body), 0o644)
+	r.mu.Unlock()
+	r.opt.Publish("end", RunFailed, v)
+}
+
+// states asks supervisord for the game's and the updater's states.
+func (r *Runner) states() (string, string, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	infos, err := r.opt.Supervisor.GetAllProcessInfo(ctx)
+	if err != nil {
+		return "", "", false
 	}
+	srv, upd := "UNKNOWN", "UNKNOWN"
+	for _, p := range infos {
+		switch p.Name {
+		case restore.ServerProgram:
+			srv = p.StateName
+		case restore.UpdaterProgram:
+			upd = p.StateName
+		}
+	}
+	return srv, upd, true
 }
 
 // New returns a runner with defaults filled in.
@@ -331,6 +487,12 @@ func New(opt Options) *Runner {
 	}
 	if opt.Keep == 0 {
 		opt.Keep = 5
+	}
+	if opt.ResumeWait == 0 {
+		opt.ResumeWait = 5 * time.Minute
+	}
+	if opt.StartTries == 0 {
+		opt.StartTries = 3
 	}
 	if opt.Crossplay == nil {
 		opt.Crossplay = func() bool { return false }
@@ -440,10 +602,19 @@ func (r *Runner) Cancel(actor string) error {
 }
 
 // set changes one step (and the run's current step) and publishes the run.
+// An unknown step name is a bug; it is logged and ignored.
 func (r *Runner) set(name, st, reason string, err error) {
 	r.mu.Lock()
 	v := r.cur
-	s := v.step(name)
+	var s *Step
+	if v != nil {
+		s = v.step(name)
+	}
+	if s == nil {
+		r.mu.Unlock()
+		r.opt.Logger.Error("safe restart: no such step", "step", name)
+		return
+	}
 	now := r.opt.Now().UTC()
 	s.State, s.Reason, s.At = st, reason, &now
 	s.Error = ""
@@ -482,6 +653,12 @@ func (r *Runner) finish(state string, err error) {
 	r.opt.Publish("end", state, snap)
 }
 
+// Errors that end a run before the game is touched.
+var (
+	errNotRunning = errors.New("the game is not running")
+	errMarker     = errors.New("cannot record the stop on disk")
+)
+
 func (r *Runner) run(ctx context.Context, done chan struct{}) {
 	defer close(done)
 	defer func() {
@@ -490,7 +667,7 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 			// Never leave the game down.
 			if r.down {
 				if err := r.startGame(r.downUpdater); err == nil {
-					r.markDown(false, false)
+					_ = r.markDown(false, false)
 				}
 			}
 			r.finish(RunFailed, fmt.Errorf("internal error"))
@@ -499,27 +676,23 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 	r.opt.Publish("begin", Running, *r.View())
 
 	if err := r.waitEmpty(ctx); err != nil {
-		r.cancelled(StepWait, false)
+		if errors.Is(err, errNotRunning) {
+			r.failEarly(StepWait, "notrunning", err)
+		} else {
+			r.cancelled(StepWait, false)
+		}
 		return
 	}
 	if err := r.countdown(ctx); err != nil {
 		r.cancelled(StepCountdown, true)
 		return
 	}
-	// The point of no return: a cancel that got in before this still counts.
-	r.mu.Lock()
-	r.cancellable = false
-	late := ctx.Err() != nil
-	r.mu.Unlock()
-	if late {
-		r.cancelled(StepCountdown, true)
-		return
-	}
-
-	if !r.lock() {
-		err := errors.New("another action is in progress")
-		r.set(StepSave, Failed, "busy", err)
-		r.finish(RunFailed, err)
+	if ok := r.lockWait(ctx); !ok {
+		if ctx.Err() != nil {
+			r.cancelled(StepCountdown, true)
+		} else {
+			r.failEarly(StepSave, "busy", errors.New("another action is in progress"))
+		}
 		return
 	}
 	locked := true
@@ -534,13 +707,30 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 	// Only a running game is restarted: a stopped one may be the image's
 	// updater at work, which must not be cut off.
 	if st := r.serverState(); st != "RUNNING" {
-		err := fmt.Errorf("the game is %s; try again when it is running", strings.ToLower(st))
-		r.set(StepSave, Failed, "notrunning", err)
-		r.finish(RunFailed, err)
+		r.failEarly(StepSave, "notrunning", fmt.Errorf("the game is %s; try again when it is running", strings.ToLower(st)))
 		return
 	}
 
 	r.save()
+
+	// Last checks before the game is touched; a wait can last a day.
+	if why := r.Writable(); why != "" {
+		r.failEarly(StepStop, "readonly", errors.New(why))
+		return
+	}
+	if err := r.room(); err != nil {
+		r.failEarly(StepStop, "nospace", err)
+		return
+	}
+	// The point of no return: a cancel that got in before this still counts.
+	r.mu.Lock()
+	r.cancellable = false
+	late := ctx.Err() != nil
+	r.mu.Unlock()
+	if late {
+		r.cancelled(r.View().Step, true)
+		return
+	}
 
 	r.opt.Restarting(true)
 	restarting := true
@@ -553,7 +743,16 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 	defer endRestart()
 
 	updater, err := r.stop()
-	if err != nil {
+	switch {
+	case errors.Is(err, errMarker):
+		endRestart()
+		r.failEarly(StepStop, "marker", err)
+		return
+	case errors.Is(err, errNotRunning):
+		endRestart()
+		r.failEarly(StepStop, "notrunning", err)
+		return
+	case err != nil:
 		err = fmt.Errorf("stop: %w", err)
 		r.set(StepStop, Failed, "", err)
 		// The game may still run; make sure it does.
@@ -563,7 +762,7 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 			r.set(StepStart, Failed, "", serr)
 			err = errors.Join(err, serr)
 		} else {
-			r.markDown(false, false)
+			r.clearMarker()
 			r.set(StepStart, OK, "", nil)
 		}
 		endRestart()
@@ -574,6 +773,7 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 
 	// The world is quiet now: back it up and read the copy back.
 	var runErr error
+	verified := false
 	archive, digest, err := r.backup()
 	if err != nil {
 		runErr = fmt.Errorf("backup: %w", err)
@@ -583,11 +783,16 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 		r.update(func(v *View) { v.Archive = filepath.Base(archive); v.ArchiveSHA256 = digest })
 		r.set(StepBackup, OK, "", nil)
 		r.set(StepVerify, Running, "", nil)
-		size, err := Verify(archive, digest, r.opt.World)
+		size, err := Verify(archive, digest, r.opt.World, countChunks(r.opt.ConfigDir, r.opt.World))
 		if err != nil {
 			runErr = fmt.Errorf("verify: %w", err)
+			// Kept for a look, but out of the restore list and the count.
+			if q, qerr := quarantine(archive); qerr == nil {
+				r.update(func(v *View) { v.Archive = filepath.Base(q) })
+			}
 			r.set(StepVerify, Failed, "", err)
 		} else {
+			verified = true
 			r.update(func(v *View) { v.ArchiveBytes = size })
 			r.set(StepVerify, OK, "", nil)
 		}
@@ -603,15 +808,15 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 		r.finish(RunFailed, errors.Join(runErr, err))
 		return
 	}
-	r.markDown(false, false)
+	r.clearMarker()
 	endRestart()
 	unlock()
 	r.set(StepStart, OK, "", nil)
 
-	if err := r.recoverGame(startedAt); err != nil {
+	if err := r.recoverGame(startedAt, r.opt.Now()); err != nil {
 		runErr = errors.Join(runErr, err)
 	}
-	if archive != "" {
+	if verified {
 		r.prune(archive)
 	}
 	if runErr != nil {
@@ -621,17 +826,99 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 	r.finish(RunDone, nil)
 }
 
+// clearMarker removes the marker once the game is started; a failure only
+// leaves a marker Resume handles.
+func (r *Runner) clearMarker() {
+	if err := r.markDown(false, false); err != nil {
+		r.opt.Logger.Warn("safe restart: marker not removed", "err", err)
+	}
+}
+
+// failEarly ends a run that failed before the game was touched; warned
+// players hear that the restart is off.
+func (r *Runner) failEarly(step, reason string, err error) {
+	r.set(step, Failed, reason, err)
+	r.calledOff()
+	r.finish(RunFailed, err)
+}
+
 // cancelled ends a run cancelled at step; warned players hear it.
 func (r *Runner) cancelled(step string, announce bool) {
 	r.set(step, Cancelled, "", nil)
-	if announce && r.View().Warned && r.opt.Bridge != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		if err := r.opt.Bridge.Broadcast(ctx, r.text("cancelled", 0), r.View().Actor); err != nil {
-			r.opt.Logger.Warn("safe restart: cancel broadcast failed", "err", err)
-		}
-		cancel()
+	if announce {
+		r.calledOff()
 	}
 	r.finish(RunCancelled, nil)
+}
+
+// calledOff tells players who were warned that the restart is off.
+func (r *Runner) calledOff() {
+	v := r.View()
+	if !v.Warned || r.opt.Bridge == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := r.opt.Bridge.Broadcast(ctx, r.text("cancelled", 0), v.Actor); err != nil {
+		r.opt.Logger.Warn("safe restart: called-off broadcast failed", "err", err)
+	}
+}
+
+// worldBytes is the size of the world's files on disk.
+func worldBytes(configDir, world string) int64 {
+	var total int64
+	base := filepath.Join(configDir, "worlds_local")
+	for _, item := range []string{world, world + ".db", world + ".fwl"} {
+		_ = filepath.WalkDir(filepath.Join(base, item), func(_ string, d fs.DirEntry, err error) error {
+			if err == nil && d.Type().IsRegular() {
+				if fi, err := d.Info(); err == nil {
+					total += fi.Size()
+				}
+			}
+			return nil
+		})
+	}
+	return total
+}
+
+// room checks that the copy fits: at least the world's size free where the
+// copies go (a zip is smaller than the world, so this leaves a margin).
+func (r *Runner) room() error {
+	dir := filepath.Join(r.opt.ConfigDir, restore.SkaldDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	free, err := freeSpace(dir)
+	if err != nil {
+		return nil // cannot tell; the copy reports a full disk itself
+	}
+	if need := worldBytes(r.opt.ConfigDir, r.opt.World); free < uint64(need) {
+		return fmt.Errorf("only %d MB free for a copy of a %d MB world", free>>20, need>>20)
+	}
+	return nil
+}
+
+// freeSpace is freeBytes; tests replace it.
+var freeSpace = freeBytes
+
+// countChunks is how many chunk files the world has on disk; -1 when unknown.
+func countChunks(configDir, world string) int {
+	m, err := filepath.Glob(filepath.Join(configDir, "worlds_local", world, "*.chunk"))
+	if err != nil {
+		return -1
+	}
+	return len(m)
+}
+
+// quarantine renames an archive that failed its check (and its .sha256) out
+// of the names the restore list and the pruning look at.
+func quarantine(archive string) (string, error) {
+	q := filepath.Join(filepath.Dir(archive), "failed-"+filepath.Base(archive))
+	if err := os.Rename(archive, q); err != nil {
+		return "", err
+	}
+	_ = os.Rename(archive+".sha256", q+".sha256")
+	return q, nil
 }
 
 // absPath is an absolute path in an error; only its last part is kept.
@@ -689,7 +976,11 @@ func (r *Runner) waitEmpty(ctx context.Context) error {
 				return nil
 			}
 		} else if n == 0 {
+			// Nobody on, but the game is on its way up or down.
 			since = time.Time{}
+			if v.Deadline != nil && !now.Before(*v.Deadline) {
+				return fmt.Errorf("%w: it was %s at the deadline", errNotRunning, status)
+			}
 		} else {
 			since = time.Time{}
 			if v.Deadline != nil && !now.Before(*v.Deadline) {
@@ -787,8 +1078,9 @@ func (r *Runner) textFor(mark time.Duration) string {
 	return r.text("sec", secs)
 }
 
-// lock takes the action lock, waiting a while for a short action to end.
-func (r *Runner) lock() bool {
+// lockWait takes the action lock, waiting a while for a short action to
+// end. False when it is still busy or ctx ends first.
+func (r *Runner) lockWait(ctx context.Context) bool {
 	end := r.opt.Now().Add(r.opt.LockWait)
 	for {
 		if r.opt.Lock() {
@@ -797,7 +1089,9 @@ func (r *Runner) lock() bool {
 		if !r.opt.Now().Before(end) {
 			return false
 		}
-		time.Sleep(r.opt.Tick)
+		if sleep(ctx, r.opt.Tick) != nil {
+			return false
+		}
 	}
 }
 
@@ -838,20 +1132,35 @@ func (r *Runner) save() {
 	}
 }
 
-// stop stops the updater (it may start the game on its own) and the game.
-// It reports whether the updater ran, so start can bring it back.
+// stop stops the updater (it may start the game on its own), checks the
+// game still runs, and stops it. It reports whether the updater ran, so the
+// start can bring it back. errMarker and errNotRunning mean the game was not
+// touched (an updater it stopped is started again).
 func (r *Runner) stop() (bool, error) {
 	r.set(StepStop, Running, "", nil)
 	ctx, cancel := context.WithTimeout(context.Background(), r.opt.ActionTimeout)
 	defer cancel()
 	updater := r.processRunning(ctx, restore.UpdaterProgram)
-	// From here the game may be down: an agent that dies now starts it again on its return.
-	r.markDown(true, updater)
+	// From here the game may go down: an agent that dies now starts it again on
+	// its return. Without that record on disk, the game is not touched.
+	if err := r.markDown(true, updater); err != nil {
+		r.down = false
+		return false, fmt.Errorf("%w: %v", errMarker, err)
+	}
 	if updater {
 		// It ran: start it again afterwards even if this stop fails.
 		if err := r.opt.Supervisor.StopProcess(ctx, restore.UpdaterProgram, true); err != nil && !supervisor.IsFault(err, supervisor.FaultNotRunning) {
 			return true, err
 		}
+	}
+	// The updater may have stopped the game for an update just before it was
+	// stopped itself: then this is not the moment.
+	if st := r.serverState(); st != "RUNNING" {
+		if updater {
+			r.startUpdater()
+		}
+		r.clearMarker()
+		return false, fmt.Errorf("%w: it is %s", errNotRunning, strings.ToLower(st))
 	}
 	if err := r.opt.Supervisor.StopProcess(ctx, restore.ServerProgram, true); err != nil && !supervisor.IsFault(err, supervisor.FaultNotRunning) {
 		return updater, err
@@ -888,19 +1197,68 @@ func (r *Runner) processRunning(ctx context.Context, name string) bool {
 	return false
 }
 
-// startGame starts the game, then the updater if it was stopped.
+// startGame brings the game back. It first waits until the game is fully
+// stopped (never starts one still stopping). With the updater, the updater
+// is started and starts the game itself after its update check, as the image
+// does on boot: a game update is then installed before the game comes up,
+// and the join code a run posts is not rotated by an update right after.
+// If the updater has not started the game within RecoverTimeout, the game is
+// started directly. Starts are tried StartTries times with a growing pause.
 func (r *Runner) startGame(updater bool) error {
+	end := r.opt.Now().Add(r.opt.ActionTimeout)
+	for {
+		st := r.serverState()
+		if st == "RUNNING" || st == "STARTING" {
+			if updater {
+				r.startUpdater()
+			}
+			return nil
+		}
+		if stopped(st) {
+			break
+		}
+		if !r.opt.Now().Before(end) {
+			return fmt.Errorf("the game is still %s", strings.ToLower(st))
+		}
+		time.Sleep(r.opt.Tick)
+	}
+	if updater && r.startUpdater() {
+		end := r.opt.Now().Add(r.opt.RecoverTimeout)
+		for r.opt.Now().Before(end) {
+			if st := r.serverState(); st == "RUNNING" || st == "STARTING" {
+				return nil
+			}
+			time.Sleep(r.opt.Tick)
+		}
+		r.opt.Logger.Warn("safe restart: the updater did not start the game; starting it directly")
+	}
+	var err error
+	pause := r.opt.Tick
+	for i := 0; i < r.opt.StartTries; i++ {
+		if i > 0 {
+			time.Sleep(pause)
+			pause *= 2
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), r.opt.ActionTimeout)
+		err = r.opt.Supervisor.StartProcess(ctx, restore.ServerProgram, true)
+		cancel()
+		if err == nil || supervisor.IsFault(err, supervisor.FaultAlreadyStarted) {
+			return nil
+		}
+		r.opt.Logger.Warn("safe restart: start failed", "try", i+1, "err", err)
+	}
+	return err
+}
+
+// startUpdater starts the image's updater; false when that failed.
+func (r *Runner) startUpdater() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), r.opt.ActionTimeout)
 	defer cancel()
-	if err := r.opt.Supervisor.StartProcess(ctx, restore.ServerProgram, true); err != nil && !supervisor.IsFault(err, supervisor.FaultAlreadyStarted) {
-		return err
+	if err := r.opt.Supervisor.StartProcess(ctx, restore.UpdaterProgram, false); err != nil && !supervisor.IsFault(err, supervisor.FaultAlreadyStarted) {
+		r.opt.Logger.Warn("safe restart: updater did not start again", "err", err)
+		return false
 	}
-	if updater {
-		if err := r.opt.Supervisor.StartProcess(ctx, restore.UpdaterProgram, false); err != nil && !supervisor.IsFault(err, supervisor.FaultAlreadyStarted) {
-			r.opt.Logger.Warn("safe restart: updater did not start again", "err", err)
-		}
-	}
-	return nil
+	return true
 }
 
 func (r *Runner) backup() (string, string, error) {
@@ -908,13 +1266,13 @@ func (r *Runner) backup() (string, string, error) {
 	return restore.Archive(r.opt.ConfigDir, r.opt.World, filepath.Join(r.opt.ConfigDir, restore.SkaldDir), Prefix, r.opt.Now())
 }
 
-// recoverGame waits for the world to load after startedAt and, with
-// crossplay, for a join code registered after it.
-func (r *Runner) recoverGame(startedAt time.Time) error {
+// recoverGame waits (RecoverTimeout from now) for the world to load after
+// startedAt and, with crossplay, for a join code registered after it.
+func (r *Runner) recoverGame(startedAt, now time.Time) error {
 	r.set(StepRecover, Running, "", nil)
 	crossplay := r.opt.Crossplay()
 	after := func(t *time.Time) bool { return t != nil && !t.Before(startedAt.Truncate(time.Second)) }
-	end := startedAt.Add(r.opt.RecoverTimeout)
+	end := now.Add(r.opt.RecoverTimeout)
 	for {
 		snap := r.opt.State()
 		loaded := after(snap.WorldLoadedAt)
@@ -968,13 +1326,16 @@ func (r *Runner) prune(keep string) {
 
 // ---- verify -------------------------------------------------------------------
 
-var generation = regexp.MustCompile(`^_main\.(\d+)\.(db2|fwl2|ok)$`)
+var generation = regexp.MustCompile(`^_main\.(\d+)\.(db2|fwl2|chunks|ok)$`)
 
 // Verify reads an archive back: a regular non-empty file whose sha256 is
 // digest (and matches the .sha256 file next to it), whose entries all read
 // to the end (archive/zip checks each CRC there), and which holds a complete
-// world. It returns the archive's size.
-func Verify(archive, digest, world string) (int64, error) {
+// world. A 1.0 world is the newest finished generation's .db2, .fwl2 and
+// .chunks index, all non-empty, and its chunk files: at least one, and when
+// diskChunks is not negative, exactly as many as the world has on disk. It
+// returns the archive's size.
+func Verify(archive, digest, world string, diskChunks int) (int64, error) {
 	fi, err := os.Lstat(archive)
 	if err != nil {
 		return 0, err
@@ -1008,7 +1369,8 @@ func Verify(archive, digest, world string) (int64, error) {
 		return 0, err
 	}
 	defer zr.Close()
-	type pair struct{ db, fwl, ok bool }
+	type pair struct{ db, fwl, chunks, ok bool }
+	chunkFiles := 0
 	gens := map[int]*pair{}
 	var flatDB, flatFWL bool
 	prefix := "worlds_local/" + world + "/"
@@ -1029,7 +1391,12 @@ func Verify(archive, digest, world string) (int64, error) {
 		case zf.Name == "worlds_local/"+world+".fwl":
 			flatFWL = nonEmpty
 		case strings.HasPrefix(zf.Name, prefix):
-			m := generation.FindStringSubmatch(strings.TrimPrefix(zf.Name, prefix))
+			rest := strings.TrimPrefix(zf.Name, prefix)
+			if !strings.Contains(rest, "/") && strings.HasSuffix(rest, ".chunk") {
+				chunkFiles++
+				continue
+			}
+			m := generation.FindStringSubmatch(rest)
 			if m == nil {
 				continue
 			}
@@ -1042,6 +1409,8 @@ func Verify(archive, digest, world string) (int64, error) {
 				gens[g].db = nonEmpty
 			case "fwl2":
 				gens[g].fwl = nonEmpty
+			case "chunks":
+				gens[g].chunks = nonEmpty
 			case "ok":
 				gens[g].ok = true
 			}
@@ -1055,19 +1424,26 @@ func Verify(archive, digest, world string) (int64, error) {
 		if p.ok && g > newestOK {
 			newestOK = g
 		}
-		if p.db && p.fwl {
+		if p.db && p.fwl && p.chunks {
 			anyWhole = true
 		}
 	}
 	switch {
 	case newestOK >= 0:
-		if p := gens[newestOK]; !p.db || !p.fwl {
-			return 0, fmt.Errorf("the newest finished save (%d) lacks its .db2 or .fwl2", newestOK)
+		if p := gens[newestOK]; !p.db || !p.fwl || !p.chunks {
+			return 0, fmt.Errorf("the newest finished save (%d) lacks its .db2, .fwl2 or .chunks", newestOK)
 		}
 	case anyWhole:
-	case flatDB && flatFWL:
+	case len(gens) == 0 && flatDB && flatFWL:
+		return fi.Size(), nil // a pre-1.0 world has no chunk files
 	default:
-		return 0, errors.New("no complete world (.db2 + .fwl2, or .db + .fwl) in the archive")
+		return 0, errors.New("no complete world (.db2 + .fwl2 + .chunks, or .db + .fwl) in the archive")
+	}
+	if chunkFiles == 0 {
+		return 0, errors.New("the archive holds no chunk files")
+	}
+	if diskChunks >= 0 && chunkFiles != diskChunks {
+		return 0, fmt.Errorf("the archive holds %d chunk files, the world has %d", chunkFiles, diskChunks)
 	}
 	return fi.Size(), nil
 }

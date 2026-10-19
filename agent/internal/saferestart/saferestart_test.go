@@ -3,6 +3,7 @@ package saferestart
 import (
 	"archive/zip"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -21,6 +22,8 @@ import (
 // A fictional world; never a real one.
 const world = "Testheim"
 
+// fakeSup is supervisord with the image's programs. Like the image's
+// updater, a started updater starts a stopped game (after its update check).
 type fakeSup struct {
 	mu              sync.Mutex
 	state           map[string]string
@@ -28,9 +31,21 @@ type fakeSup struct {
 	failStop        error
 	failUpdaterStop error
 	failStart       error
-	onStart         func()
+	// failStarts makes the next n starts of the game fail.
+	failStarts int
+	// updaterIdle: a started updater does not start the game.
+	updaterIdle bool
+	// infoErrs makes the next n state reads fail (supervisord not up yet).
+	infoErrs int
+	// stopping keeps the game STOPPING this long after its stop returned.
+	stopping time.Duration
+	// startedWhileStopping records a start sent to a game still stopping.
+	startedWhileStopping bool
+	onStart              func()
 	// whileStopped runs once the game is down (the world is quiet).
 	whileStopped func()
+	// onUpdaterStop runs when the updater is stopped.
+	onUpdaterStop func()
 }
 
 func newFakeSup() *fakeSup {
@@ -40,6 +55,10 @@ func newFakeSup() *fakeSup {
 func (f *fakeSup) GetAllProcessInfo(context.Context) ([]supervisor.ProcessInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.infoErrs > 0 {
+		f.infoErrs--
+		return nil, errors.New("connection refused")
+	}
 	var out []supervisor.ProcessInfo
 	for n, s := range f.state {
 		out = append(out, supervisor.ProcessInfo{Name: n, StateName: s})
@@ -59,10 +78,23 @@ func (f *fakeSup) StopProcess(_ context.Context, name string, _ bool) error {
 		return f.failUpdaterStop
 	}
 	f.state[name] = "STOPPED"
-	hook := f.whileStopped
+	hook, updHook := f.whileStopped, f.onUpdaterStop
+	if name == restore.ServerProgram && f.stopping > 0 {
+		f.state[name] = "STOPPING"
+		d := f.stopping
+		go func() {
+			time.Sleep(d)
+			f.mu.Lock()
+			f.state[restore.ServerProgram] = "STOPPED"
+			f.mu.Unlock()
+		}()
+	}
 	f.mu.Unlock()
 	if name == restore.ServerProgram && hook != nil {
 		hook()
+	}
+	if name == restore.UpdaterProgram && updHook != nil {
+		updHook()
 	}
 	return nil
 }
@@ -70,17 +102,38 @@ func (f *fakeSup) StopProcess(_ context.Context, name string, _ bool) error {
 func (f *fakeSup) StartProcess(_ context.Context, name string, _ bool) error {
 	f.mu.Lock()
 	f.calls = append(f.calls, "start "+name)
-	if name == restore.ServerProgram && f.failStart != nil {
-		f.mu.Unlock()
-		return f.failStart
+	if name == restore.ServerProgram {
+		if f.state[name] == "STOPPING" {
+			f.startedWhileStopping = true
+		}
+		if f.failStart != nil {
+			f.mu.Unlock()
+			return f.failStart
+		}
+		if f.failStarts > 0 {
+			f.failStarts--
+			f.state[name] = "FATAL"
+			f.mu.Unlock()
+			return &supervisor.Fault{Code: 50, String: "SPAWN_ERROR"}
+		}
 	}
 	f.state[name] = "RUNNING"
+	startsGame := name == restore.UpdaterProgram && !f.updaterIdle && f.state[restore.ServerProgram] != "RUNNING"
+	if startsGame {
+		f.state[restore.ServerProgram] = "RUNNING"
+	}
 	hook := f.onStart
 	f.mu.Unlock()
-	if name == restore.ServerProgram && hook != nil {
+	if (name == restore.ServerProgram || startsGame) && hook != nil {
 		hook()
 	}
 	return nil
+}
+
+func (f *fakeSup) set(name, st string) {
+	f.mu.Lock()
+	f.state[name] = st
+	f.mu.Unlock()
 }
 
 func (f *fakeSup) Calls() []string {
@@ -184,7 +237,7 @@ func newHarness(t *testing.T) *harness {
 	if err := os.MkdirAll(w, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for name, body := range map[string]string{"_main.3.db2": "db-three", "_main.3.fwl2": "fwl-three", "_main.3.ok": "", "_main.2.db2": "db-two", "_main.2.fwl2": "fwl-two", "_main.2.ok": "", "chunk_0_0.chunk": "chunk"} {
+	for name, body := range map[string]string{"_main.3.db2": "db-three", "_main.3.fwl2": "fwl-three", "_main.3.ok": "", "_main.2.db2": "db-two", "_main.2.fwl2": "fwl-two", "_main.2.ok": "", "_main.3.chunks": "index-three", "_main.2.chunks": "index-two", "00_00__0_1.chunk": "chunk", "00_01__0_2.chunk": "chunk"} {
 		if err := os.WriteFile(filepath.Join(w, name), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -283,7 +336,8 @@ func TestHappyPathEmptyServer(t *testing.T) {
 		t.Errorf("archive %q %d %q", v.Archive, v.ArchiveBytes, v.ArchiveSHA256)
 	}
 	// The updater was paused around the zip and came back after the game.
-	want := []string{"stop valheim-updater", "stop valheim-server", "start valheim-server", "start valheim-updater"}
+	// The updater, started again, starts the game after its update check.
+	want := []string{"stop valheim-updater", "stop valheim-server", "start valheim-updater"}
 	if got := h.sup.Calls(); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("calls %v, want %v", got, want)
 	}
@@ -317,6 +371,7 @@ func TestBackupIsOfTheStoppedWorld(t *testing.T) {
 		w := filepath.Join(h.dir, "worlds_local", world)
 		_ = os.WriteFile(filepath.Join(w, "_main.4.db2"), []byte("db-four"), 0o644)
 		_ = os.WriteFile(filepath.Join(w, "_main.4.fwl2"), []byte("fwl-four"), 0o644)
+		_ = os.WriteFile(filepath.Join(w, "_main.4.chunks"), []byte("index-four"), 0o644)
 		_ = os.WriteFile(filepath.Join(w, "_main.4.ok"), nil, 0o644)
 	}
 	v := h.run(Request{})
@@ -481,26 +536,323 @@ func TestNeverStopsAGameThatIsNotRunning(t *testing.T) {
 	}
 }
 
+// leaveMarker is what a run leaves when the agent dies with the game down.
+func (h *harness) leaveMarker(age time.Duration, updater bool) {
+	h.t.Helper()
+	body, _ := json.Marshal(markerData{Run: "20261009-200000", At: time.Now().Add(-age).UTC(), Updater: updater})
+	dir := filepath.Join(h.dir, restore.SkaldDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		h.t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".safe-restart-down"), body, 0o644); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// unreadable makes a world file unreadable once the game is down.
+func (h *harness) unreadable() {
+	p := filepath.Join(h.dir, "worlds_local", world, "_main.3.db2")
+	h.sup.whileStopped = func() { _ = os.Chmod(p, 0) }
+	h.t.Cleanup(func() { _ = os.Chmod(p, 0o644) })
+}
+
+func (h *harness) markerLeft() bool {
+	_, err := os.Stat(filepath.Join(h.dir, restore.SkaldDir, ".safe-restart-down"))
+	return err == nil
+}
+
 func TestResumeStartsAGameAnAgentLeftDown(t *testing.T) {
 	h := newHarness(t)
-	h.sup.state[restore.ServerProgram] = "STOPPED"
-	h.sup.state[restore.UpdaterProgram] = "STOPPED"
-	r := New(h.opt)
-	r.markDown(true, true)
-	if _, err := os.Stat(r.marker()); err != nil {
-		t.Fatal(err)
-	}
+	h.sup.set(restore.ServerProgram, "STOPPED")
+	h.sup.set(restore.UpdaterProgram, "STOPPED")
+	// The sidecar is up before the game container's supervisord.
+	h.sup.infoErrs = 3
+	h.leaveMarker(time.Second, true)
+	tmp := filepath.Join(h.dir, restore.SkaldDir, ".pre-restart-123.tmp")
+	_ = os.WriteFile(tmp, []byte("half"), 0o644)
 	New(h.opt).Resume()
-	if got := strings.Join(h.sup.Calls(), ","); got != "start valheim-server,start valheim-updater" {
+	// The updater starts the game after its update check.
+	if got := strings.Join(h.sup.Calls(), ","); got != "start valheim-updater" {
 		t.Errorf("calls %s", got)
 	}
-	if _, err := os.Stat(r.marker()); err == nil {
+	if h.markerLeft() {
 		t.Error("marker left behind")
+	}
+	if _, err := os.Stat(tmp); err == nil {
+		t.Error("half-written copy left behind")
+	}
+	if ev := h.Events(); len(ev) != 1 || ev[0] != "end:failed" {
+		t.Errorf("events %v", ev)
+	}
+	if h.locked {
+		t.Error("lock held")
 	}
 	// Nothing to do without one.
 	New(h.opt).Resume()
-	if len(h.sup.Calls()) != 2 {
+	if len(h.sup.Calls()) != 1 || len(h.Events()) != 1 {
+		t.Errorf("second resume: calls %v events %v", h.sup.Calls(), h.Events())
+	}
+}
+
+func TestResumeLeavesTheImageInCharge(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		srv, upd string
+		updater  bool
+	}{
+		{"updater running", "STOPPED", "RUNNING", true},
+		{"game running", "RUNNING", "STOPPED", true},
+		{"game stopping", "STOPPING", "STOPPED", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.sup.set(restore.ServerProgram, tc.srv)
+			h.sup.set(restore.UpdaterProgram, tc.upd)
+			h.leaveMarker(time.Second, tc.updater)
+			New(h.opt).Resume()
+			if len(h.sup.Calls()) != 0 {
+				t.Errorf("calls %v", h.sup.Calls())
+			}
+			if h.markerLeft() {
+				t.Error("marker left behind")
+			}
+			if ev := h.Events(); len(ev) != 1 || ev[0] != "end:failed" {
+				t.Errorf("events %v", ev)
+			}
+		})
+	}
+}
+
+func TestResumeIgnoresAStaleMarker(t *testing.T) {
+	h := newHarness(t)
+	h.sup.set(restore.ServerProgram, "STOPPED")
+	h.sup.set(restore.UpdaterProgram, "STOPPED")
+	// Older than any run could last (2 x 1 s + 0.5 s here).
+	h.leaveMarker(time.Minute, true)
+	New(h.opt).Resume()
+	if len(h.sup.Calls()) != 0 || len(h.Events()) != 0 || h.markerLeft() {
+		t.Errorf("calls %v events %v marker %v", h.sup.Calls(), h.Events(), h.markerLeft())
+	}
+}
+
+func TestResumeGivesUpWhenSupervisordNeverAnswers(t *testing.T) {
+	h := newHarness(t)
+	h.opt.ResumeWait = 20 * time.Millisecond
+	h.sup.infoErrs = 1 << 20
+	h.leaveMarker(time.Second, false)
+	New(h.opt).Resume()
+	if len(h.sup.Calls()) != 0 {
 		t.Errorf("calls %v", h.sup.Calls())
+	}
+	// Kept for the next start.
+	if !h.markerLeft() {
+		t.Error("marker removed")
+	}
+}
+
+func TestMarkerWriteFailureLeavesTheGameAlone(t *testing.T) {
+	h := newHarness(t)
+	// A directory where the marker goes: it cannot be written.
+	if err := os.MkdirAll(filepath.Join(h.dir, restore.SkaldDir, ".safe-restart-down", "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	v := h.run(Request{})
+	if v.State != RunFailed || v.step(StepStop).Reason != "marker" {
+		t.Fatalf("view %+v", v)
+	}
+	for _, c := range h.sup.Calls() {
+		if strings.HasPrefix(c, "stop ") {
+			t.Errorf("stopped something: %v", h.sup.Calls())
+		}
+	}
+	if h.locked {
+		t.Error("lock held")
+	}
+}
+
+func TestMarkerIsOnDiskWhileTheGameIsDown(t *testing.T) {
+	h := newHarness(t)
+	var seen markerData
+	h.sup.whileStopped = func() {
+		raw, err := os.ReadFile(filepath.Join(h.dir, restore.SkaldDir, ".safe-restart-down"))
+		if err == nil {
+			_ = json.Unmarshal(raw, &seen)
+		}
+	}
+	v := h.run(Request{})
+	if v.State != RunDone || seen.Run != v.ID || !seen.Updater || seen.At.IsZero() {
+		t.Fatalf("marker %+v run %s %s", seen, v.ID, v.State)
+	}
+	if h.markerLeft() {
+		t.Error("marker left after the start")
+	}
+}
+
+func TestWritableIsCheckedAgainBeforeTheStop(t *testing.T) {
+	h := newHarness(t)
+	h.game.set(func(s *state.Snapshot) { s.PlayersReported = 1 })
+	r := New(h.opt)
+	if _, err := r.Start(Request{WhenEmpty: true}, "Freya"); err != nil {
+		t.Fatal(err)
+	}
+	worlds := filepath.Join(h.dir, "worlds_local")
+	if err := os.Chmod(worlds, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(worlds, 0o755)
+	h.game.set(func(s *state.Snapshot) { s.PlayersReported = 0 })
+	r.Wait()
+	v := r.View()
+	if v.State != RunFailed || v.step(StepStop).Reason != "readonly" {
+		t.Fatalf("view %+v", v)
+	}
+	for _, c := range h.sup.Calls() {
+		if strings.HasPrefix(c, "stop ") {
+			t.Errorf("stopped something: %v", h.sup.Calls())
+		}
+	}
+}
+
+func TestNoRoomForTheCopyLeavesTheGameAlone(t *testing.T) {
+	h := newHarness(t)
+	defer func(f func(string) (uint64, error)) { freeSpace = f }(freeSpace)
+	freeSpace = func(string) (uint64, error) { return 10, nil }
+	v := h.run(Request{})
+	if v.State != RunFailed || v.step(StepStop).Reason != "nospace" {
+		t.Fatalf("view %+v", v)
+	}
+	if len(h.sup.Calls()) != 0 {
+		t.Errorf("calls %v", h.sup.Calls())
+	}
+}
+
+func TestUpdaterStoppedTheGameJustBefore(t *testing.T) {
+	h := newHarness(t)
+	// The updater stopped the game for an update right before it was stopped itself.
+	h.sup.onUpdaterStop = func() { h.sup.set(restore.ServerProgram, "STOPPED") }
+	h.sup.updaterIdle = true
+	v := h.run(Request{})
+	if v.State != RunFailed || v.step(StepStop).Reason != "notrunning" {
+		t.Fatalf("view %+v", v)
+	}
+	if got := strings.Join(h.sup.Calls(), ","); got != "stop valheim-updater,start valheim-updater" {
+		t.Errorf("calls %s", got)
+	}
+	if h.markerLeft() {
+		t.Error("marker left")
+	}
+}
+
+func TestStartWaitsForTheStopAndRetries(t *testing.T) {
+	h := newHarness(t)
+	// No updater: the run starts the game itself.
+	h.sup.set(restore.UpdaterProgram, "STOPPED")
+	h.sup.stopping = 30 * time.Millisecond
+	h.sup.failStarts = 2
+	v := h.run(Request{})
+	if v.State != RunDone {
+		t.Fatalf("state %s error %q", v.State, v.Error)
+	}
+	if h.sup.startedWhileStopping {
+		t.Error("started a game still stopping")
+	}
+	n := 0
+	for _, c := range h.sup.Calls() {
+		if c == "start valheim-server" {
+			n++
+		}
+	}
+	if n != 3 {
+		t.Errorf("starts %d (%v)", n, h.sup.Calls())
+	}
+}
+
+func TestUpdaterThatDoesNotStartTheGame(t *testing.T) {
+	h := newHarness(t)
+	h.sup.updaterIdle = true
+	v := h.run(Request{})
+	if v.State != RunDone {
+		t.Fatalf("state %s error %q", v.State, v.Error)
+	}
+	if got := strings.Join(h.sup.Calls(), ","); !strings.HasSuffix(got, "start valheim-updater,start valheim-server") {
+		t.Errorf("calls %s", got)
+	}
+}
+
+func TestDeadlineWithTheGameStuckBetween(t *testing.T) {
+	h := newHarness(t)
+	h.game.set(func(s *state.Snapshot) { s.Status = "starting" })
+	v := h.run(Request{WhenEmpty: true, DeadlineMinutes: 1})
+	if v.State != RunFailed || v.step(StepWait).Reason != "notrunning" {
+		t.Fatalf("view %+v", v)
+	}
+	if len(h.sup.Calls()) != 0 {
+		t.Errorf("calls %v", h.sup.Calls())
+	}
+}
+
+func TestWarnedPlayersHearAnEarlyFailure(t *testing.T) {
+	h := newHarness(t)
+	h.game.set(func(s *state.Snapshot) { s.PlayersReported = 1 })
+	h.locked = true
+	v := h.run(Request{WarnMinutes: 1})
+	if v.State != RunFailed || v.step(StepSave).Reason != "busy" {
+		t.Fatalf("view %+v", v)
+	}
+	said := h.bridge.Said()
+	if len(said) == 0 || said[len(said)-1] != "The server restart is called off." {
+		t.Errorf("broadcasts %v", said)
+	}
+}
+
+func TestCancelWhileWaitingForTheLock(t *testing.T) {
+	h := newHarness(t)
+	h.opt.LockWait = 10 * time.Second
+	h.locked = true
+	r := New(h.opt)
+	if _, err := r.Start(Request{}, "Bjorn"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(30 * time.Millisecond)
+	if err := r.Cancel("Astrid"); err != nil {
+		t.Fatalf("cancel while waiting for the lock: %v", err)
+	}
+	r.Wait()
+	if v := r.View(); v.State != RunCancelled {
+		t.Fatalf("view %+v", v)
+	}
+}
+
+func TestSetWithAnUnknownStepDoesNotHang(t *testing.T) {
+	h := newHarness(t)
+	r := New(h.opt)
+	r.set("nope", OK, "", nil) // no run at all
+	if _, err := r.Start(Request{}, "Bjorn"); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait()
+	r.set("nope", OK, "", nil)
+	if v := r.View(); v.State != RunDone {
+		t.Fatalf("view %+v", v)
+	}
+}
+
+func TestPruneWaitsForAVerifiedCopy(t *testing.T) {
+	h := newHarness(t)
+	h.opt.Keep = 1
+	dir := filepath.Join(h.dir, restore.SkaldDir)
+	_ = os.MkdirAll(dir, 0o755)
+	old := filepath.Join(dir, "pre-restart-20260101-000000.zip")
+	_ = os.WriteFile(old, []byte("x"), 0o644)
+	h.sup.whileStopped = func() {
+		_ = os.Remove(filepath.Join(h.dir, "worlds_local", world, "_main.3.fwl2"))
+	}
+	v := h.run(Request{})
+	if v.State != RunFailed {
+		t.Fatalf("state %s", v.State)
+	}
+	if _, err := os.Stat(old); err != nil {
+		t.Error("a failed run pruned the last good copy")
 	}
 }
 
@@ -512,7 +864,8 @@ func TestStopFailureOfTheUpdaterStillStartsItAgain(t *testing.T) {
 		t.Fatalf("state %s", v.State)
 	}
 	calls := strings.Join(h.sup.Calls(), ",")
-	if !strings.HasSuffix(calls, "start valheim-server,start valheim-updater") {
+	// The game was never stopped; the updater runs again.
+	if !strings.HasSuffix(calls, "stop valheim-updater,start valheim-updater") {
 		t.Errorf("calls %s", calls)
 	}
 	wantStates(t, v, map[string]string{StepStop: Failed, StepStart: OK})
@@ -523,10 +876,11 @@ func TestErrorsCarryNoPaths(t *testing.T) {
 		t.Errorf("scrub = %q", got)
 	}
 	h := newHarness(t)
-	if err := os.WriteFile(filepath.Join(h.dir, restore.SkaldDir), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	h.unreadable()
 	v := h.run(Request{})
+	if v.step(StepBackup).Error == "" {
+		t.Fatal("the backup did not fail")
+	}
 	if strings.Contains(v.Error, h.dir) || strings.Contains(v.step(StepBackup).Error, h.dir) {
 		t.Errorf("errors leak a path: %q / %q", v.Error, v.step(StepBackup).Error)
 	}
@@ -596,12 +950,12 @@ func TestCancelWhileWaitingAndCountingDown(t *testing.T) {
 func TestCancelAfterThePointOfNoReturn(t *testing.T) {
 	h := newHarness(t)
 	block := make(chan struct{})
-	h.bridge.onSave = func() { <-block }
+	h.sup.whileStopped = func() { <-block }
 	r := New(h.opt)
 	if _, err := r.Start(Request{}, "Bjorn"); err != nil {
 		t.Fatal(err)
 	}
-	for r.View().Step != StepSave {
+	for r.View().Step != StepStop {
 		time.Sleep(time.Millisecond)
 	}
 	if err := r.Cancel("Bjorn"); !errors.Is(err, ErrTooLate) {
@@ -675,18 +1029,18 @@ func TestStopFailureStartsTheGameAndFails(t *testing.T) {
 		t.Fatalf("state %s error %q", v.State, v.Error)
 	}
 	wantStates(t, v, map[string]string{StepStop: Failed, StepBackup: Pending})
+	// The game never went down; the updater stopped first runs again.
 	calls := h.sup.Calls()
-	if calls[len(calls)-2] != "start valheim-server" {
+	if calls[len(calls)-1] != "start valheim-updater" {
 		t.Errorf("calls %v", calls)
 	}
+	wantStates(t, v, map[string]string{StepStart: OK})
 }
 
 func TestBackupFailureStillStartsTheGame(t *testing.T) {
 	h := newHarness(t)
-	// A file named like the archive's directory makes the zip impossible.
-	if err := os.WriteFile(filepath.Join(h.dir, restore.SkaldDir), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// A world file the agent cannot read makes the zip impossible.
+	h.unreadable()
 	v := h.run(Request{})
 	if v.State != RunFailed || !strings.Contains(v.Error, "backup") {
 		t.Fatalf("state %s error %q", v.State, v.Error)
@@ -708,9 +1062,17 @@ func TestVerifyFailureKeepsTheGameUpAndTheRunFails(t *testing.T) {
 		t.Fatalf("state %s error %q", v.State, v.Error)
 	}
 	wantStates(t, v, map[string]string{StepBackup: OK, StepVerify: Failed, StepStart: OK, StepRecover: OK})
-	// Kept for inspection.
+	// Kept for inspection, out of the restore list.
+	if !strings.HasPrefix(v.Archive, "failed-pre-restart-") {
+		t.Errorf("archive %q not quarantined", v.Archive)
+	}
 	if _, err := os.Stat(filepath.Join(h.dir, restore.SkaldDir, v.Archive)); err != nil {
 		t.Errorf("archive gone: %v", err)
+	}
+	for _, b := range restore.List(h.dir) {
+		if b.Source == restore.SourceSkald {
+			t.Errorf("a failed copy is listed for restore: %s", b.Name)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(h.dir, restore.SkaldDir, ".safe-restart-down")); err == nil {
 		t.Error("down marker left after the start")
@@ -719,6 +1081,7 @@ func TestVerifyFailureKeepsTheGameUpAndTheRunFails(t *testing.T) {
 
 func TestStartFailure(t *testing.T) {
 	h := newHarness(t)
+	h.sup.updaterIdle = true
 	h.sup.failStart = errors.New("SPAWN_ERROR")
 	v := h.run(Request{})
 	if v.State != RunFailed || !strings.Contains(v.Error, "start") {
@@ -857,23 +1220,23 @@ func writeZip(t *testing.T, entries map[string]string) (string, string) {
 }
 
 func TestVerify(t *testing.T) {
-	gen := map[string]string{world + "/_main.7.db2": "d", world + "/_main.7.fwl2": "f", world + "/_main.7.ok": ""}
+	gen := map[string]string{world + "/_main.7.db2": "d", world + "/_main.7.fwl2": "f", world + "/_main.7.chunks": "i", world + "/_main.7.ok": "", world + "/00_00__0_1.chunk": "c"}
 	p, digest := writeZip(t, gen)
-	if n, err := Verify(p, digest, world); err != nil || n == 0 {
+	if n, err := Verify(p, digest, world, -1); err != nil || n == 0 {
 		t.Fatalf("whole world: %d %v", n, err)
 	}
-	if _, err := Verify(p, strings.Repeat("0", 64), world); err == nil || !strings.Contains(err.Error(), "checksum") {
+	if _, err := Verify(p, strings.Repeat("0", 64), world, -1); err == nil || !strings.Contains(err.Error(), "checksum") {
 		t.Errorf("wrong digest: %v", err)
 	}
 	// The checksum file must agree.
 	_ = os.WriteFile(p+".sha256", []byte(strings.Repeat("1", 64)+"  x\n"), 0o644)
-	if _, err := Verify(p, digest, world); err == nil {
+	if _, err := Verify(p, digest, world, -1); err == nil {
 		t.Error("checksum file mismatch accepted")
 	}
 
 	// Pre-1.0 flat pair.
 	p, digest = writeZip(t, map[string]string{world + ".db": "d", world + ".fwl": "f"})
-	if _, err := Verify(p, digest, world); err != nil {
+	if _, err := Verify(p, digest, world, -1); err != nil {
 		t.Errorf("flat pair: %v", err)
 	}
 	// Half a pair, or an empty half, is not a world.
@@ -882,19 +1245,31 @@ func TestVerify(t *testing.T) {
 		{world + "/_main.7.db2": "d", world + "/_main.7.ok": ""},
 		{world + "/_main.7.db2": "d", world + "/_main.7.fwl2": "", world + "/_main.7.ok": ""},
 		// Generation 8 finished but only 7 is whole.
-		{world + "/_main.7.db2": "d", world + "/_main.7.fwl2": "f", world + "/_main.8.db2": "d", world + "/_main.8.ok": ""},
+		{world + "/_main.7.db2": "d", world + "/_main.7.fwl2": "f", world + "/_main.7.chunks": "i", world + "/_main.8.db2": "d", world + "/_main.8.ok": "", world + "/00_00__0_1.chunk": "c"},
+		// No chunk index, an empty one, or no chunk files.
+		{world + "/_main.7.db2": "d", world + "/_main.7.fwl2": "f", world + "/_main.7.ok": "", world + "/00_00__0_1.chunk": "c"},
+		{world + "/_main.7.db2": "d", world + "/_main.7.fwl2": "f", world + "/_main.7.chunks": "", world + "/_main.7.ok": "", world + "/00_00__0_1.chunk": "c"},
+		{world + "/_main.7.db2": "d", world + "/_main.7.fwl2": "f", world + "/_main.7.chunks": "i", world + "/_main.7.ok": ""},
 		{"Otherheim/_main.1.db2": "d", "Otherheim/_main.1.fwl2": "f"},
 	} {
 		p, digest := writeZip(t, entries)
-		if _, err := Verify(p, digest, world); err == nil {
+		if _, err := Verify(p, digest, world, -1); err == nil {
 			t.Errorf("accepted %v", entries)
 		}
+	}
+	// The chunk files must match the world on disk.
+	p, digest = writeZip(t, gen)
+	if _, err := Verify(p, digest, world, 1); err != nil {
+		t.Errorf("one chunk on disk: %v", err)
+	}
+	if _, err := Verify(p, digest, world, 2); err == nil || !strings.Contains(err.Error(), "chunk files") {
+		t.Errorf("chunk count mismatch: %v", err)
 	}
 	// A truncated archive fails on its sha256 already; one with a broken CRC on the read.
 	p, digest = writeZip(t, gen)
 	raw, _ := os.ReadFile(p)
 	_ = os.WriteFile(p, raw[:len(raw)/2], 0o644)
-	if _, err := Verify(p, digest, world); err == nil {
+	if _, err := Verify(p, digest, world, -1); err == nil {
 		t.Error("truncated archive accepted")
 	}
 }
