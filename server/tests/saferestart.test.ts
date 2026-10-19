@@ -146,6 +146,24 @@ describe("Discord news of a safe restart", () => {
     expect(b.contents.join("\n")).toContain("New join code: **555222**");
   });
 
+  it("tells what changed under a hold the agent never ended", async () => {
+    const { n, contents } = discord();
+    const r = run({ step: "stop" });
+    for (const e of [step("begin", "running", r), step("countdown", "skipped", r), step("stop", "running", r), ev("server_state", { status: "stopped" }), ev("join_code", { code: "555333" })]) n.handle(live(e));
+    // The agent restarted with the game down: no run, no end, a new code meanwhile.
+    n.handle(
+      state((s) => {
+        s.safeRestart = null;
+        s.server.status = "stopped";
+        s.server.joinCode = "555333";
+      }),
+    );
+    await settle(n);
+    const all = contents.join("\n");
+    expect(all).toContain("Server stopped");
+    expect(all).toContain("New join code: **555333**");
+  });
+
   it("files the news under the Discord kinds: a failure is a failure, the rest is server news", async () => {
     const f = discord(["failure"]);
     for (const e of fullRun("failed", { error: "start: SPAWN_ERROR" })) f.n.handle(live(e));

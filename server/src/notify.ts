@@ -665,9 +665,21 @@ export class DiscordNotifier {
     if (!this.restartRun) return;
     const r = st.safeRestart;
     if (r && r.state === "running" && r.id === this.restartRun) return;
+    const held = this.restartHold;
     this.restartRun = null;
     this.restartHold = false;
     this.restartWarned = false;
+    if (!held) return;
+    // What changed under the hold is news now: the server's state (held for
+    // serverHoldMs like any other) and a new join code.
+    const status = st.server.status;
+    this.status = "";
+    this.serverState(status);
+    const code = st.server.joinCode ?? "";
+    if (code && code !== this.restartCode) {
+      this.joinCode = code;
+      this.add({ kind: "join_code", code });
+    }
   }
 
   /**
