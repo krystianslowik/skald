@@ -141,8 +141,12 @@ export type Recovery = "reloading" | "down" | "held" | "spent" | "stale";
 export async function recoverChunk(urls: readonly (string | undefined)[]): Promise<Recovery> {
   if (navigator.onLine === false) return "down";
   const named = [...new Set(urls.filter((u): u is string => !!u))];
-  if (!named.length) return reloadOnce() ? "reloading" : "stale";
-  const probes = await Promise.all(named.map(probeChunk));
+  // No chunk named (WebKit does not say, and the build may not list it): ask
+  // for the page's own scripts instead. The entry imports every lazy chunk by
+  // its hashed name, so an entry still on the server means this build is current.
+  const probed = named.length ? named : pageAssets();
+  if (!probed.length) return reloadOnce() ? "reloading" : "stale";
+  const probes = await Promise.all(probed.map(probeChunk));
   if (probes.includes("down")) return "down";
   if (probes.includes("gone")) return reloadOnce() ? "reloading" : "stale";
   // WebKit reuses a failed module script, the entry's and each one it imports,
@@ -151,20 +155,29 @@ export async function recoverChunk(urls: readonly (string | undefined)[]): Promi
   // scripts it asks for again (Vite preloads every chunk it imports, the entry
   // included), so those are fetched too. A reload before all of them answered
   // would leave a blank page: keep the note and try again later instead.
-  const all = [...new Set([...named, ...named.flatMap(chunkDeps), ...pageAssets()])];
-  const warm = await Promise.all(
-    all.map((u) =>
+  const warm = await warmAll([...probed, ...named.flatMap(chunkDeps), ...pageAssets()]);
+  if (warm === "down") return "down";
+  // One of the page's own scripts is gone from the server: a deploy changed it, though not the lazy chunk.
+  if (warm === "gone") return reloadOnce() ? "reloading" : "stale";
+  if (reloadOnce()) return "reloading";
+  return reloadBlock() === "spent" ? "spent" : "held";
+}
+
+/**
+ * Fetches each URL with an ordinary request (the kind WebKit needs before it
+ * stops reusing a failed module script): "down" if any got no answer, else
+ * "gone" if any answered with an error, else "ok".
+ */
+async function warmAll(urls: readonly string[]): Promise<"ok" | "gone" | "down"> {
+  const res = await Promise.all(
+    [...new Set(urls)].map((u) =>
       fetch(u, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) }).then(
-        (res) => (res.ok ? "ok" : "gone"),
+        (r) => (r.ok ? "ok" : "gone"),
         () => "down",
       ),
     ),
   );
-  if (warm.includes("down")) return "down";
-  // One of the page's own scripts is gone from the server: a deploy changed it, though not the lazy chunk.
-  if (warm.includes("gone")) return reloadOnce() ? "reloading" : "stale";
-  if (reloadOnce()) return "reloading";
-  return reloadBlock() === "spent" ? "spent" : "held";
+  return res.includes("down") ? "down" : res.includes("gone") ? "gone" : "ok";
 }
 
 /** This tab's recent chunk reloads (sessionStorage); throws without sessionStorage. A time ahead of the clock (it was set back) is dropped. */

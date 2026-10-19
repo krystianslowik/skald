@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- When the server is unreachable while a part of the page fails to load, Safari now keeps the "no connection" note and waits for the server instead of reloading into a blank page, also when it could not tell which part failed.
+
 ## [2026.10.18] - 2026-10-19
 
 ### Added
