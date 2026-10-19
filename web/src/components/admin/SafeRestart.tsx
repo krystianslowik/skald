@@ -150,7 +150,6 @@ function Ended({ run }: { run: SafeRestartRun }) {
           <p role="status" className="mt-1 font-bold text-flame">
             {t("admin.safe.done")}
           </p>
-          {run.warning && <p className="mt-1 text-sm font-bold text-flame">{t("admin.safe.killed")}</p>}
           {run.joinCode && (
             <p className="mt-2">
               <span className="block text-xs text-ash">{t("admin.safe.code")}</span>
@@ -164,6 +163,7 @@ function Ended({ run }: { run: SafeRestartRun }) {
           {t("admin.safe.failed", { error: run.error ?? "" })}
         </p>
       )}
+      {run.warning && <p className="mt-1 text-sm font-bold text-flame">{t("admin.safe.killed")}</p>}
       {run.state === "cancelled" && <p className="mt-1 text-sm text-bone">{t("admin.safe.cancelledBy", { who: actorName(i18n, run.cancelledBy) })}</p>}
       {run.archive && (
         <p className="mt-2 break-all text-xs text-ash">

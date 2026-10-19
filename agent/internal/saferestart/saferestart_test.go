@@ -733,6 +733,42 @@ func TestStopThatHadToKillIsAWarning(t *testing.T) {
 	}
 }
 
+func TestResumeTreatsAnUnspawnedBootstrapAsBusy(t *testing.T) {
+	h := newHarness(t)
+	// supervisord answers before it has spawned the bootstrap, and the image is
+	// still busy when the wait runs out: the image is left to start the game.
+	h.sup.set(restore.ServerProgram, "STOPPED")
+	h.sup.set(restore.UpdaterProgram, "STOPPED")
+	h.sup.set(BootstrapProgram, "STOPPED")
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		h.sup.set(BootstrapProgram, "RUNNING")
+	}()
+	h.leaveMarker(time.Second, true)
+	New(h.opt).Resume()
+	if len(h.sup.Calls()) != 0 {
+		t.Errorf("acted while the image was setting up: %v", h.sup.Calls())
+	}
+	if h.markerLeft() {
+		t.Error("marker left")
+	}
+	if ev := h.Events(); len(ev) != 1 || ev[0] != "end:failed" {
+		t.Errorf("events %v", ev)
+	}
+}
+
+func TestResumeReportsAnUnreachableSupervisordOnce(t *testing.T) {
+	h := newHarness(t)
+	h.opt.ResumeWait = 20 * time.Millisecond
+	h.sup.infoErrs = 1 << 20
+	h.leaveMarker(time.Second, false)
+	New(h.opt).Resume()
+	New(h.opt).Resume()
+	if ev := h.Events(); len(ev) != 1 {
+		t.Errorf("events %v", ev)
+	}
+}
+
 func TestResumeIgnoresAStaleMarker(t *testing.T) {
 	h := newHarness(t)
 	h.sup.set(restore.ServerProgram, "STOPPED")
@@ -1009,15 +1045,18 @@ func TestStartWaitsForTheStopAndRetries(t *testing.T) {
 
 func TestUpdaterThatDoesNotStartTheGame(t *testing.T) {
 	h := newHarness(t)
+	// Still running after RecoverTimeout: busy with an install of its own.
 	h.sup.updaterIdle = true
 	v := h.run(Request{})
-	if v.State != RunDone {
+	if v.State != RunFailed || !strings.Contains(v.Error, "updater is still busy") {
 		t.Fatalf("state %s error %q", v.State, v.Error)
 	}
-	// The updater is stopped (it may be installing something of its own),
-	// the game started, and the updater started again.
-	if got := strings.Join(h.sup.Calls(), ","); !strings.HasSuffix(got, "start valheim-updater,stop valheim-updater,start valheim-server,start valheim-updater") {
+	// Its install is not cut off, and the game is not started beside it.
+	if got := strings.Join(h.sup.Calls(), ","); !strings.HasSuffix(got, "stop valheim-server,start valheim-updater") {
 		t.Errorf("calls %s", got)
+	}
+	if h.locked {
+		t.Error("lock held")
 	}
 }
 

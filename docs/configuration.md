@@ -971,9 +971,11 @@ Then the agent:
    check, as the image does on boot: an update is installed before the server
    comes up, so the join code posted next is not replaced by an update right
    after. Without the updater (or if it ends, or has not started the server
-   within 20 minutes) the agent stops the updater (it may be busy with an
-   install of its own), starts the server, waiting first until it has fully
-   stopped and trying up to three times, and starts the updater again;
+   within 20 minutes) and it has ended, the agent starts the server, waiting
+   first until it has fully stopped and trying up to three times. An updater
+   still running after 20 minutes is busy with an install (a large update, a
+   mod merge): the agent neither cuts it off nor starts the server beside it,
+   the run ends failed, and the updater starts the server when it is done;
 6. waits up to 20 minutes for the world to load and, with crossplay, for a
    new join code, and posts it to Discord and phones.
 
@@ -996,7 +998,8 @@ wait for it (its restart applies them); backups and update checks still run.
 The run lives in the agent, so it carries on when skald-web restarts. A
 restart of the agent itself ends it. If the agent comes back to its note
 (written less than half an hour before), it waits for supervisord, for the
-image's `valheim-bootstrap` to finish and for the game to settle, and starts the game again only if supervisord shows the
+image's `valheim-bootstrap` to finish (if it is still running after five
+minutes, the image is left to start the game) and for the game to settle, and starts the game again only if supervisord shows the
 game, and the updater it had paused, stopped; if the updater runs, the image
 is in charge and the agent leaves it alone. If the game still runs but the
 updater the run paused is stopped, it starts the updater again. An older

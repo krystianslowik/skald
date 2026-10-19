@@ -287,6 +287,8 @@ type markerData struct {
 	Run     string    `json:"run"`
 	At      time.Time `json:"at"`
 	Updater bool      `json:"updater"`
+	// Reported: an agent that could not reach supervisord already told the owner.
+	Reported bool `json:"reported,omitempty"`
 }
 
 // markDown writes (down) or clears the marker, synced to disk. A run that
@@ -396,7 +398,9 @@ func (r *Runner) Resume() {
 	if r.opt.Now().Sub(m.At) > 2*r.opt.ActionTimeout+r.opt.RecoverTimeout {
 		r.opt.Logger.Warn("safe restart: stale marker removed", "run", m.Run)
 		clear(m.Run)
-		r.interrupted(m, "the agent was gone too long after stopping the game for a safe restart; check that the game runs")
+		if !m.Reported {
+			r.interrupted(m, "the agent was gone too long after stopping the game for a safe restart; check that the game runs")
+		}
 		return
 	}
 	// The agent may be up before supervisord is, and the game may still be
@@ -405,20 +409,28 @@ func (r *Runner) Resume() {
 	// nothing is decided before it is done.
 	var srv, upd string
 	end := r.opt.Now().Add(r.opt.ResumeWait)
-	answered := false
+	answered, booting := false, false
 	for {
 		ps, ok := r.procStates()
-		srv, upd = ps[restore.ServerProgram], ps[restore.UpdaterProgram]
+		srv, upd = procState(ps, restore.ServerProgram), procState(ps, restore.UpdaterProgram)
 		answered = answered || ok
-		boot := ps[BootstrapProgram]
-		if ok && settled(srv) && settled(upd) && boot != "RUNNING" && boot != "STARTING" {
+		boot, has := ps[BootstrapProgram]
+		// Done: exited or failed, or not there at all. STOPPED is not yet spawned.
+		booting = ok && has && boot != "EXITED" && boot != "FATAL"
+		if ok && !booting && settled(srv) && settled(upd) {
 			break
 		}
 		if !r.opt.Now().Before(end) {
 			if !answered {
 				r.opt.Logger.Error("safe restart: supervisord did not answer; the game may still be stopped", "run", m.Run)
-				// Kept for the next start; the owner hears about it now.
-				r.interrupted(m, "the agent restarted during the safe restart and could not reach supervisord; check that the game runs")
+				// Kept for the next start; the owner hears about it once.
+				if !m.Reported {
+					m.Reported = true
+					if body, err := json.Marshal(m); err == nil {
+						_ = writeSynced(r.marker(), body)
+					}
+					r.interrupted(m, "the agent restarted during the safe restart and could not reach supervisord; check that the game runs")
+				}
 				return
 			}
 			break
@@ -427,6 +439,10 @@ func (r *Runner) Resume() {
 	}
 	msg := "the agent restarted during the safe restart"
 	switch {
+	case booting:
+		// The image is still setting up; it starts the updater, which starts the game.
+		msg += "; the image was still starting up and was left to start the game"
+		clear(m.Run)
 	case upd == "RUNNING":
 		// Whatever the run had done, a running updater is the image in charge.
 		msg += "; the image's updater is running and in charge of the game"
@@ -437,6 +453,8 @@ func (r *Runner) Resume() {
 		if r.lockWait(context.Background()) {
 			if r.startUpdater() {
 				msg += " and the updater was started again"
+			} else {
+				msg += ", but the updater could not be started again: start valheim-updater by hand"
 			}
 			clear(m.Run)
 			r.opt.Unlock()
@@ -469,6 +487,14 @@ func (r *Runner) Resume() {
 		}
 	}
 	r.interrupted(m, msg)
+}
+
+// procState is one program's state from procStates, "UNKNOWN" when it is missing.
+func procState(ps map[string]string, name string) string {
+	if st, ok := ps[name]; ok {
+		return st
+	}
+	return "UNKNOWN"
 }
 
 // settled: a supervisord state that is not on its way somewhere.
@@ -515,13 +541,7 @@ func (r *Runner) states() (string, string, bool) {
 	if !ok {
 		return "", "", false
 	}
-	get := func(name string) string {
-		if st, ok := ps[name]; ok {
-			return st
-		}
-		return "UNKNOWN"
-	}
-	return get(restore.ServerProgram), get(restore.UpdaterProgram), true
+	return procState(ps, restore.ServerProgram), procState(ps, restore.UpdaterProgram), true
 }
 
 // New returns a runner with defaults filled in.
@@ -839,15 +859,7 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 		r.finish(RunFailed, err)
 		return
 	}
-	if r.opt.ShutdownTimedOut != nil && r.opt.ShutdownTimedOut(stopAt) {
-		// The game did not stop on its own in time: its last save may be cut.
-		r.update(func(v *View) {
-			v.Warning = "the game did not shut down in time and was signalled harder; check the world"
-		})
-		r.set(StepStop, Warn, "killed", nil)
-	} else {
-		r.set(StepStop, OK, "", nil)
-	}
+	r.set(StepStop, OK, "", nil)
 
 	// The world is quiet now: back it up and read the copy back.
 	r.touchMarker()
@@ -877,6 +889,15 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 			r.update(func(v *View) { v.ArchiveBytes = size })
 			r.set(StepVerify, OK, "", nil)
 		}
+	}
+
+	// Looked at after the backup, so the image's log line has arrived.
+	if r.opt.ShutdownTimedOut != nil && r.opt.ShutdownTimedOut(stopAt) {
+		// The game did not stop on its own in time: its last save may be cut.
+		r.update(func(v *View) {
+			v.Warning = "the game did not shut down in time and was signalled harder; check the world"
+		})
+		r.set(StepStop, Warn, "killed", nil)
 	}
 
 	// Started either way: nothing has touched the world.
@@ -1263,18 +1284,11 @@ func (r *Runner) stop() (bool, error) {
 
 // serverState is the game's supervisord state, or "UNKNOWN".
 func (r *Runner) serverState() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	infos, err := r.opt.Supervisor.GetAllProcessInfo(ctx)
-	if err != nil {
+	srv, _, ok := r.states()
+	if !ok {
 		return "UNKNOWN"
 	}
-	for _, p := range infos {
-		if p.Name == restore.ServerProgram {
-			return p.StateName
-		}
-	}
-	return "UNKNOWN"
+	return srv
 }
 
 // startGame brings the game back. It first waits until the game is fully
@@ -1320,22 +1334,16 @@ func (r *Runner) startGame(updater bool) error {
 			}
 			time.Sleep(r.opt.Tick)
 		}
-		// The updater may be busy with an install of its own (a scheduled
-		// update, a mod merge): it is stopped, with its process group, before
-		// the game starts, and started again after.
-		r.opt.Logger.Warn("safe restart: the updater did not start the game; starting it directly")
-		ctx, cancel := context.WithTimeout(context.Background(), r.opt.ActionTimeout)
-		err := r.opt.Supervisor.StopProcess(ctx, restore.UpdaterProgram, true)
-		cancel()
-		if err != nil && !supervisor.IsFault(err, supervisor.FaultNotRunning) {
-			r.opt.Logger.Warn("safe restart: updater did not stop", "err", err)
+		// An updater still running is busy with an install (a large update, a
+		// mod merge). The game is neither started beside it nor is the install
+		// cut off: the updater starts the game when it is done.
+		if _, upd, _ := r.states(); !stopped(upd) {
+			return errors.New("the updater is still busy (installing?); it starts the game when it is done")
 		}
-		if err := r.startDirect(); err != nil {
-			r.startUpdater()
-			return err
-		}
-		r.startUpdater()
-		return nil
+		// It ended without starting the game: start it directly. supervisord
+		// restarts an updater that exited; starting it here would run its
+		// update check against the game just started.
+		r.opt.Logger.Warn("safe restart: the updater ended without starting the game; starting it directly")
 	}
 	return r.startDirect()
 }

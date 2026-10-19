@@ -28,7 +28,7 @@ export type Item =
    */
   | { kind: "restart"; phase: "warning"; minutes: number }
   | { kind: "restart"; phase: "done"; code: string; killed?: boolean }
-  | { kind: "restart"; phase: "failed"; error: string; archive: string }
+  | { kind: "restart"; phase: "failed"; error: string; archive: string; killed?: boolean }
   | { kind: "restart"; phase: "cancelled" }
   /** A boss whose key turned defeated since the last state; not a Discord kind, only sinks take it. */
   | { kind: "boss"; key: string };
@@ -346,8 +346,10 @@ function restartLine(it: Extract<Item, { kind: "restart" }>, locale: Locale): st
       const line = it.code ? fill(s["restart.done"], { code: escapeMd(it.code) }) : s["restart.doneNoCode"];
       return it.killed ? `${line}\n${s["restart.killed"]}` : line;
     }
-    case "failed":
-      return it.archive ? fill(s["restart.failed"], { error: escapeMd(it.error), archive: escapeMd(it.archive) }) : fill(s["restart.failedNoArchive"], { error: escapeMd(it.error) });
+    case "failed": {
+      const line = it.archive ? fill(s["restart.failed"], { error: escapeMd(it.error), archive: escapeMd(it.archive) }) : fill(s["restart.failedNoArchive"], { error: escapeMd(it.error) });
+      return it.killed ? `${line}\n${s["restart.killed"]}` : line;
+    }
     case "cancelled":
       return s["restart.cancelled"];
   }
@@ -716,6 +718,12 @@ export class DiscordNotifier {
       }
       return;
     }
+    // The end of another run (one an agent restart interrupted, reported
+    // late) is its own news and leaves the run in progress alone.
+    if (this.restartRun && this.restartRun !== run.id) {
+      if (result === "failed") this.add({ kind: "restart", phase: "failed", error: run.error ?? "", archive: run.archive ?? "" });
+      return;
+    }
     this.restartRun = null;
     const warned = this.restartWarned;
     const held = this.restartHold;
@@ -732,7 +740,7 @@ export class DiscordNotifier {
       return this.add({ kind: "restart", phase: "done", code: run.joinCode ?? "", ...(run.warning ? { killed: true } : {}) });
     }
     if (result === "failed") {
-      this.add({ kind: "restart", phase: "failed", error: run.error ?? "", archive: run.archive ?? "" });
+      this.add({ kind: "restart", phase: "failed", error: run.error ?? "", archive: run.archive ?? "", ...(run.warning ? { killed: true } : {}) });
       // The game may be up with a new code all the same.
       const code = run.joinCode || this.joinCode;
       if (run.joinCode) this.joinCode = run.joinCode;

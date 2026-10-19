@@ -117,7 +117,12 @@ func TestShutdownTimedOutReadsTheLog(t *testing.T) {
 	if h.s.shutdownTimedOut(before) {
 		t.Fatal("found a timeout in a clean shutdown")
 	}
-	h.hub.Publish("log", map[string]any{"line": "Timeout while waiting for server to shut down - sending SIGTERM to PGID 42"})
+	// Not from the game's script (a chat line quoting it): ignored.
+	h.hub.Publish("log", map[string]any{"line": "Ragnar: Timeout while waiting for server to shut down"})
+	if h.s.shutdownTimedOut(before) {
+		t.Fatal("a line from elsewhere counted")
+	}
+	h.hub.Publish("log", map[string]any{"line": "Oct  9 22:27:55 supervisord: valheim-server WARN - Timeout while waiting for server to shut down - sending SIGTERM to PGID 42"})
 	if !h.s.shutdownTimedOut(before) {
 		t.Fatal("missed the timeout line")
 	}

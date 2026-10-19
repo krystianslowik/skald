@@ -107,6 +107,26 @@ describe("Discord news of a safe restart", () => {
     expect(contents.join("\n")).toContain("New join code: **771203**\nThe game did not shut down in time and had to be stopped harder: check the world.");
   });
 
+  it("says it on a failed run too", async () => {
+    const { n, contents } = discord();
+    for (const e of fullRun("failed", { error: "backup: disk full", warning: "the game did not shut down in time" })) n.handle(live(e));
+    await settle(n);
+    expect(contents.join("\n")).toContain("The safe restart failed (backup: disk full).\nThe game did not shut down in time and had to be stopped harder: check the world.");
+  });
+
+  it("keeps holding for the run in progress when an older run's end comes in late", async () => {
+    const { n, contents } = discord();
+    const r = run({ id: "20261009-190000" });
+    for (const e of [step("begin", "running", r), step("countdown", "skipped", r), step("stop", "running", r)]) n.handle(live(e));
+    // An agent that restarted earlier reports an older run as interrupted.
+    n.handle(live(step("end", "failed", run({ id: "20261009-120000", state: "failed", error: "the agent restarted during the safe restart" }))));
+    n.handle(live(ev("server_state", { status: "stopped" })));
+    await settle(n);
+    const all = contents.join("\n");
+    expect(all).toContain("The safe restart failed (the agent restarted during the safe restart).");
+    expect(all).not.toContain("Server stopped");
+  });
+
   it("calls off only what it announced", async () => {
     const a = discord();
     const r = run();

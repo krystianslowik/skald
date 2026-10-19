@@ -50,7 +50,8 @@ const shutdownLine = "Timeout while waiting for server to shut down"
 // shutdownTimedOut looks for that line in the log since a time.
 func (s *Server) shutdownTimedOut(since time.Time) bool {
 	for _, l := range s.opt.Hub.Logs(2000) {
-		if !l.TS.Before(since) && strings.Contains(l.Line, shutdownLine) {
+		// The image logs it as "... valheim-server WARN - Timeout while ...".
+		if !l.TS.Before(since) && strings.Contains(l.Line, "valheim-server") && strings.Contains(l.Line, shutdownLine) {
 			return true
 		}
 	}
