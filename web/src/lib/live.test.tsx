@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyAgentState } from "../types";
-import { getLivePositions, useLivePositions } from "./live";
+import { getLivePositions, PLATE_TOP, stackPlates, useLivePositions, type PlateBox } from "./live";
 import { useValheim } from "./useValheim";
 
 /** Records what the page sends over /live. */
@@ -128,5 +128,60 @@ describe("live positions subscription", () => {
     expect(next.sent).toEqual([SUB, UNSUB]);
     expect(sock.sent).toEqual([SUB]);
     page.unmount();
+  });
+});
+
+describe("name plates of players standing together", () => {
+  let n = 0;
+  const plate = (x: number, y: number, w = 80, h = 18, id = `p${n++}`): PlateBox => ({ id, x, y, w, h });
+  /** The plates' screen rectangles after stacking. */
+  const rects = (boxes: PlateBox[], prev?: string[]) => {
+    const { shift } = stackPlates(boxes, prev);
+    return boxes.map((b, i) => ({ l: b.x - b.w / 2, r: b.x + b.w / 2, t: b.y + PLATE_TOP + shift[i]!, b: b.y + PLATE_TOP + shift[i]! + b.h }));
+  };
+  const overlap = (a: { l: number; r: number; t: number; b: number }, b: typeof a) => a.l < b.r && a.r > b.l && a.t < b.b && a.b > b.t;
+  const noOverlaps = (r: ReturnType<typeof rects>) => {
+    for (let i = 0; i < r.length; i++) for (let j = i + 1; j < r.length; j++) expect(overlap(r[i]!, r[j]!)).toBe(false);
+  };
+
+  it("leaves a lone player's plate, and players far apart, where they are", () => {
+    expect(stackPlates([plate(100, 100)]).shift).toEqual([0]);
+    expect(stackPlates([plate(100, 100), plate(400, 100), plate(100, 300)]).shift).toEqual([0, 0, 0]);
+  });
+
+  it("stacks the plates of players on the same spot, none covering another", () => {
+    const boxes = [plate(200, 200), plate(200, 200, 60), plate(201, 199, 100), plate(199, 202)];
+    noOverlaps(rects(boxes));
+    // A column right under the dots, not scattered over the map.
+    expect(Math.max(...stackPlates(boxes).shift)).toBeLessThan(4 * 22);
+  });
+
+  it("keeps the dots' order: the player higher up gets the upper plate", () => {
+    const [lower, upper] = rects([plate(300, 314), plate(305, 300)]);
+    expect(upper!.b).toBeLessThanOrEqual(lower!.t);
+  });
+
+  it("does not swap two plates back and forth while their players walk side by side", () => {
+    const ragnar = (y: number) => plate(300, y, 80, 18, "Ragnar");
+    const freya = (y: number) => plate(302, y, 80, 18, "Freya");
+    let { order } = stackPlates([ragnar(300), freya(301)]);
+    expect(order).toEqual(["Ragnar", "Freya"]);
+    // A pixel either way on the next frames: the stack stays put.
+    for (const [a, b] of [[302, 300], [300, 301], [303, 299]] as const) {
+      order = stackPlates([ragnar(a), freya(b)], order).order;
+      expect(order).toEqual(["Ragnar", "Freya"]);
+    }
+    // Freya clearly above now: her plate goes up.
+    expect(stackPlates([ragnar(320), freya(300)], order).order).toEqual(["Freya", "Ragnar"]);
+  });
+
+  it("does not cover another player's dot with a plate", () => {
+    // Bjorn stands just below Freya, where her plate would go.
+    const [freya] = rects([plate(100, 100), plate(100, 125)]);
+    expect(freya!.t).toBeGreaterThanOrEqual(125 + 9);
+  });
+
+  it("copes with a full server in one spot", () => {
+    noOverlaps(rects(Array.from({ length: 64 }, (_, i) => plate(500 + (i % 3), 500 + (i % 5)))));
   });
 });

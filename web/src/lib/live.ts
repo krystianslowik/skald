@@ -111,3 +111,65 @@ export class Glide {
     return this.tracks.get(name) ?? null;
   }
 }
+
+/** A player's marker on screen: the dot's centre, and the size of its name plate. */
+export interface PlateBox {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Where a name plate sits under its dot (px from the dot's centre to the plate's top). */
+export const PLATE_TOP = 12;
+/** The dot's footprint (px), which another player's plate must not cover. */
+const DOT = 18;
+/** Space kept between a plate and whatever it was moved clear of (px). */
+const PLATE_GAP = 2;
+/** Two plates trade places in the stack only once their dots are this far apart vertically (px), so walking side by side does not flicker. */
+const SWAP_PX = 6;
+
+/**
+ * Moves name plates apart so players standing together can all be read: each
+ * plate starts under its own dot and, while it would cover a plate already
+ * placed or another player's dot, goes down past it. Plates are placed from
+ * the topmost dot down, so the stack keeps the dots' order; `prev` (the order
+ * returned last time) keeps two dots at nearly the same height from trading
+ * places on every frame. Returns how far down each plate moved (px, 0 when it
+ * was clear) and the order to pass next time.
+ */
+export function stackPlates(boxes: readonly PlateBox[], prev: readonly string[] = []): { shift: number[]; order: string[] } {
+  const shift = boxes.map(() => 0);
+  const rank = new Map(prev.map((id, i) => [id, i]));
+  // Last time's order first (newcomers after it, by height), then swap neighbours whose dots are clearly the other way round.
+  const order = boxes.map((_, i) => i).sort((a, b) => (rank.get(boxes[a]!.id) ?? Infinity) - (rank.get(boxes[b]!.id) ?? Infinity) || boxes[a]!.y - boxes[b]!.y || boxes[a]!.x - boxes[b]!.x);
+  for (let swapped = true; swapped; ) {
+    swapped = false;
+    for (let k = 0; k + 1 < order.length; k++) {
+      if (boxes[order[k]!]!.y - boxes[order[k + 1]!]!.y > SWAP_PX) {
+        [order[k], order[k + 1]] = [order[k + 1]!, order[k]!];
+        swapped = true;
+      }
+    }
+  }
+  type Rect = { l: number; r: number; t: number; b: number };
+  const taken: Rect[] = [];
+  const dots: (Rect & { i: number })[] = boxes.map((b, i) => ({ i, l: b.x - DOT / 2, r: b.x + DOT / 2, t: b.y - DOT / 2, b: b.y + DOT / 2 }));
+  for (const i of order) {
+    const b = boxes[i]!;
+    const l = b.x - b.w / 2;
+    const r = b.x + b.w / 2;
+    let t = b.y + PLATE_TOP;
+    for (;;) {
+      const hit =
+        taken.find((o) => l < o.r + PLATE_GAP && r > o.l - PLATE_GAP && t < o.b + PLATE_GAP && t + b.h > o.t - PLATE_GAP) ??
+        dots.find((o) => o.i !== i && l < o.r && r > o.l && t < o.b + PLATE_GAP && t + b.h > o.t);
+      if (!hit) break;
+      t = hit.b + PLATE_GAP;
+    }
+    taken.push({ l, r, t, b: t + b.h });
+    shift[i] = t - b.y - PLATE_TOP;
+  }
+  return { shift, order: order.map((i) => boxes[i]!.id) };
+}
