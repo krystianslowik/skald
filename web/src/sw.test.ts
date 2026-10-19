@@ -52,12 +52,38 @@ function boot(network: (url: string) => Response | Promise<Response>, source = S
     },
   };
   const handlers: Record<string, Handler> = {};
+  /** What the worker showed, opened and focused. */
+  const shown: { title: string; options: NotificationOptions & { renotify?: boolean } }[] = [];
+  const opened: string[] = [];
+  const windows: { url: string; focused: boolean; navigated: string | null; focus(): Promise<unknown>; navigate(u: string): Promise<unknown> }[] = [];
   const self = {
     location: { origin: ORIGIN },
     navigator: env.quota ? { storage: { estimate: async () => ({ quota: env.quota }) } } : undefined,
     addEventListener: (type: string, fn: Handler) => void (handlers[type] = fn),
     skipWaiting: async () => undefined,
-    clients: { claim: async () => undefined },
+    clients: {
+      claim: async () => undefined,
+      matchAll: async () => windows,
+      openWindow: async (url: string) => void opened.push(url),
+    },
+    registration: { showNotification: async (title: string, options: NotificationOptions) => void shown.push({ title, options }) },
+  };
+  const openWindowAt = (url: string) => {
+    const w = {
+      url,
+      focused: false,
+      navigated: null as string | null,
+      focus: async () => ((w.focused = true), w),
+      navigate: async (u: string) => ((w.navigated = u), w),
+    };
+    windows.push(w);
+    return w;
+  };
+  /** Fires an event with extra fields and waits for what the worker extended it with. */
+  const dispatch = async (type: string, fields: Record<string, unknown>) => {
+    let wait: Promise<unknown> = Promise.resolve();
+    handlers[type]!({ ...fields, waitUntil: (p) => void (wait = p) } as Parameters<Handler>[0]);
+    await wait;
   };
   const fetch = async (r: Request | string) => {
     if (typeof r === "string") return network(r);
@@ -87,7 +113,7 @@ function boot(network: (url: string) => Response | Promise<Response>, source = S
     handlers.fetch!({ request: new Request(ORIGIN + path, init), waitUntil: () => undefined, respondWith: () => void (answered = true) });
     return answered;
   };
-  return { stores, run, get, answers };
+  return { stores, run, get, answers, dispatch, shown, opened, openWindowAt };
 }
 
 const html = () => new Response("<!doctype html><title>Skald</title>", { headers: { "Content-Type": "text/html; charset=utf-8" } });
@@ -296,5 +322,43 @@ describe("stampServiceWorker", () => {
     expect(a).not.toBe(b);
     expect(buildId(["x", "y"])).toBe(buildId(["y", "x"]));
     expect(() => stampServiceWorker("const VERSION = 'v1';", [])).toThrow();
+  });
+});
+
+describe("service worker push", () => {
+  const push = (payload: unknown) => ({ data: { json: () => (typeof payload === "string" ? JSON.parse(payload) : payload), text: () => String(payload) } });
+
+  it("shows every push, tagged per kind, and keeps where a tap goes", async () => {
+    const sw = boot(() => html());
+    await sw.dispatch("push", push({ title: "At the fire", body: "Ragnar arrives at the fire", tag: "join", url: "/#saga" }));
+    expect(sw.shown).toEqual([
+      { title: "At the fire", options: { body: "Ragnar arrives at the fire", tag: "skald-join", renotify: true, icon: "/icon-192.png", badge: "/icon-192.png", data: { url: "/#saga" } } },
+    ]);
+  });
+
+  it("still shows something for a push it cannot read, and never sends a tap off the panel", async () => {
+    const sw = boot(() => html());
+    await sw.dispatch("push", { data: { json: () => JSON.parse("not json"), text: () => "plain words" } });
+    await sw.dispatch("push", push({ title: "", body: 5, url: "//evil.example/x" }));
+    await sw.dispatch("push", push({ url: "https://evil.example/" }));
+    expect(sw.shown.map((n) => [n.title, n.options.body, n.options.tag, (n.options.data as { url: string }).url])).toEqual([
+      ["Skald", "plain words", undefined, "/"],
+      ["Skald", "", undefined, "/"],
+      ["Skald", "", undefined, "/"],
+    ]);
+  });
+
+  it("on a tap, focuses an open panel and moves it to the news, else opens one", async () => {
+    const sw = boot(() => html());
+    let closed = 0;
+    const tap = (url: string) => ({ notification: { data: { url }, close: () => void closed++ } });
+    await sw.dispatch("notificationclick", tap("/#saga"));
+    expect(sw.opened).toEqual([`${ORIGIN}/#saga`]);
+    const win = sw.openWindowAt(`${ORIGIN}/`);
+    await sw.dispatch("notificationclick", tap("/#settings"));
+    expect(win.focused).toBe(true);
+    expect(win.navigated).toBe(`${ORIGIN}/#settings`);
+    expect(sw.opened).toHaveLength(1);
+    expect(closed).toBe(2);
   });
 });

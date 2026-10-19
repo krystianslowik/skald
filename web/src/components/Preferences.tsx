@@ -7,8 +7,9 @@ import { preloadSettingsSheet, SettingsGlyph } from "./SettingsGlyph";
 import { SkaldVersion } from "./SkaldVersion";
 import { useEmbers } from "../lib/embers";
 import { useMapPerf } from "../lib/mapperf";
+import { NotifyRow } from "./Notifications";
 
-function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+export function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <div className="flex min-h-14 items-center justify-between gap-4 border-b border-iron/25 py-2 last:border-0">
       <span className="text-bone">
@@ -20,7 +21,7 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
   );
 }
 
-function Switch({ on, toggle, label, title }: { on: boolean; toggle: () => void; label: string; title: string }) {
+export function Switch({ on, toggle, label, title, disabled = false }: { on: boolean; toggle: () => void; label: string; title: string; disabled?: boolean }) {
   return (
     <button
       type="button"
@@ -29,7 +30,8 @@ function Switch({ on, toggle, label, title }: { on: boolean; toggle: () => void;
       aria-label={label}
       title={title}
       onClick={toggle}
-      className={`press relative h-8 w-14 shrink-0 rounded-full border transition-colors coarse:h-11 coarse:w-18 ${on ? "border-select-hi/70 bg-select/50" : "border-iron/60 bg-black/40"}`}
+      disabled={disabled}
+      className={`press relative h-8 w-14 disabled:opacity-50 shrink-0 rounded-full border transition-colors coarse:h-11 coarse:w-18 ${on ? "border-select-hi/70 bg-select/50" : "border-iron/60 bg-black/40"}`}
     >
       <span className={`absolute top-1/2 h-6 w-6 -translate-y-1/2 rounded-full bg-bone shadow-sm transition-[left] coarse:h-8 coarse:w-8 ${on ? "left-[calc(100%-1.75rem)] coarse:left-[calc(100%-2.25rem)]" : "left-1"}`} />
     </button>
@@ -97,6 +99,7 @@ export const Preferences = memo(function Preferences({
       <Row label={t("mapPerf.label")} hint={t("mapPerf.hint")}>
         <MapPerfSwitch />
       </Row>
+      <NotifyRow />
       <button type="button" onClick={() => void logout()} aria-busy={busy} className="plaque press mt-3 min-h-12 w-full font-bold">
         {t("header.logout")}
       </button>
