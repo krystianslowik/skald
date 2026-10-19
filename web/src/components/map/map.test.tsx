@@ -138,6 +138,46 @@ describe("WorldClock", () => {
 });
 
 describe("MapView", () => {
+  it("while picking a route start, a tap or a long press on the map sets the start and adds no pin", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(snap)));
+    HTMLElement.prototype.setPointerCapture = () => {};
+    inLocale(<MapView saveKey="a" onClose={vi.fn()} />);
+    const canvas = await screen.findByRole("img", { name: /World map. Drag to move/ });
+    fireEvent.click(screen.getAllByRole("button", { name: "Portal network" })[0]!);
+    const sheet = await screen.findByRole("dialog", { name: "Portal network" });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Tap the map" }));
+    expect(screen.getByText("Tap the map where the route starts")).toBeInTheDocument();
+    const press = (type: string, ms = 0) => {
+      const e = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(e, { pointerId: 1, pointerType: "touch", button: 0, clientX: 40, clientY: 40 });
+      Object.defineProperty(e, "timeStamp", { value: ms });
+      act(() => {
+        canvas.dispatchEvent(e);
+      });
+    };
+    press("pointerdown");
+    press("pointerup", 50);
+    // The tap went to the route (onTapWorld while picking): the start is a point now, nothing else opened.
+    await waitFor(() => expect(screen.queryByText("Tap the map where the route starts")).not.toBeInTheDocument());
+    expect(within(sheet).getByRole("option", { name: /^Point at / })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "New pin" })).not.toBeInTheDocument();
+    // Picking again, a long press sets the start too, and opens neither the pin sheet nor the spot menu.
+    fireEvent.click(within(sheet).getByRole("button", { name: "Tap the map" }));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      press("pointerdown", 1000);
+      act(() => {
+        vi.advanceTimersByTime(700);
+      });
+      press("pointerup", 1700);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(screen.queryByText("Tap the map where the route starts")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "New pin" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
   it("loads the map and closes on Escape", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(snap)));
     const onClose = vi.fn();

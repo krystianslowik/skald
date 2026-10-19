@@ -77,7 +77,9 @@ const DOUBLE_TAP_PX = 30;
 /** Two fingers down and up within this time, barely moving, are a two-finger tap. */
 const TWO_TAP_MS = 300;
 /** A finger held this long without moving is a long press. */
-const LONG_PRESS_MS = 520;
+const LONG_PRESS_MS = 600;
+/** A long press survives this much wander (a resting thumb is never quite still). */
+const PRESS_SLOP = 10;
 /** Chunks of floor plans and nature arriving within this time are drawn together. */
 const ARRIVAL_MS = 60;
 /** Floor plans and nature for a still view are asked for at most this often (a wheel zoom is a run of still views). */
@@ -161,10 +163,17 @@ export const MapCanvas = forwardRef<
     onTapWorld?: (p: { x: number; z: number }) => void;
     /** A tap on an ore deposit (instead of `onSelect`); null when a tap lands anywhere else. */
     onOre?: (ore: NatureItem | null) => void;
+    /**
+     * Marks drawn over the canvas by the page (the web pins): what a tap, a
+     * long press or a right click at this canvas point opens, or null. They
+     * take no pointer events themselves, so a pan, a pinch or a wheel that
+     * starts on one still moves the map.
+     */
+    pickOverlay?: (x: number, y: number, touch: boolean) => (() => void) | null;
     interactive?: boolean;
     className?: string;
   }
->(function MapCanvas({ map, mask, markers, layers, selected, highlighted, relief = null, tiles = null, storey = null, onStoreys, onSelect, onGroup, onAnchor, onPointerWorld, onFrame, onLongPress, onTapWorld, onOre, remember = false, insets = NO_INSETS, interactive = true, className = "relative" }, ref) {
+>(function MapCanvas({ map, mask, markers, layers, selected, highlighted, relief = null, tiles = null, storey = null, onStoreys, onSelect, onGroup, onAnchor, onPointerWorld, onFrame, onLongPress, onTapWorld, onOre, pickOverlay, remember = false, insets = NO_INSETS, interactive = true, className = "relative" }, ref) {
   const { t } = useI18n();
   const reduced = useReducedMotion() ?? false;
   const coarse = useMedia(COARSE);
@@ -173,6 +182,9 @@ export const MapCanvas = forwardRef<
   /** The WebGL terrain under the marks (maprender.ts decides whether to use it). */
   const glCanvas = useRef<HTMLCanvasElement>(null);
   const renderer = useRef<MapRenderer | null>(null);
+  // Read at the moment of a tap: a new function does not rebind the pointer handlers.
+  const overlay = useRef(pickOverlay);
+  overlay.current = pickOverlay;
   const view = useRef<View>({ cx: 0, cz: 0, scale: 0.02, w: 1, h: 1 });
   const fitted = useRef(false);
   const hovered = useRef<string | null>(null);
@@ -603,6 +615,8 @@ export const MapCanvas = forwardRef<
     // A finger resting on one spot: after LONG_PRESS_MS it is a long press, and its release is not a tap.
     let press: ReturnType<typeof setTimeout> | null = null;
     let pressed = false;
+    // What the last press was made with: a touch long press is answered by the timer, never again by the contextmenu that follows it.
+    let pressType = "mouse";
     // Where a spring back to the limits that this touch stopped was heading; a tap that does not move picks it up again.
     let caught: View | null = null;
     // The map answered this touch (often by opening a sheet over itself): its touchend cancels the
@@ -658,6 +672,7 @@ export const MapCanvas = forwardRef<
     };
 
     const down = (e: PointerEvent) => {
+      if (pts.size === 0) pressType = e.pointerType;
       if (e.button !== 0 && e.pointerType === "mouse") return;
       el.setPointerCapture(e.pointerId);
       // A touch stops the map where it is, even on its way back from past a limit: it springs back again when the finger lifts.
@@ -680,10 +695,13 @@ export const MapCanvas = forwardRef<
         if (onLongPress) {
           press = setTimeout(() => {
             press = null;
-            if (moved || pts.size !== 1) return;
+            if (pts.size !== 1) return;
             pressed = true;
             navigator.vibrate?.(12);
-            onLongPress(toWorld(p));
+            // On a page mark, the press opens that mark.
+            const own = overlay.current?.(p.x, p.y, e.pointerType !== "mouse");
+            if (own) own();
+            else onLongPress(toWorld(p));
           }, LONG_PRESS_MS);
         }
       } else {
@@ -705,7 +723,7 @@ export const MapCanvas = forwardRef<
         onPointerWorld?.(((w) => ({ x: Math.round(w[0]), z: Math.round(w[1]) }))(screenToWorld(view.current, p.x, p.y)));
         const hit = renderer.current ? pickItem(renderer.current.visible, p.x, p.y) : null;
         const id = hit?.m.id ?? null;
-        el.style.cursor = id || (onOre && renderer.current?.oreAt(p.x, p.y, 4)) ? "pointer" : "grab";
+        el.style.cursor = id || (onOre && renderer.current?.oreAt(p.x, p.y, 4)) || overlay.current?.(p.x, p.y, false) ? "pointer" : "grab";
         if (id !== hovered.current) {
           hovered.current = id;
           schedule();
@@ -738,8 +756,9 @@ export const MapCanvas = forwardRef<
         pinch = now;
         return;
       }
-      if (!moved && downAt && Math.hypot(p.x - downAt.x, p.y - downAt.y) < SLOP) return;
-      cancelPress();
+      const far = downAt ? Math.hypot(p.x - downAt.x, p.y - downAt.y) : Infinity;
+      if (!moved && far < SLOP) return;
+      if (far > PRESS_SLOP) cancelPress();
       if (!moved) {
         moved = true;
         el.style.cursor = "grabbing";
@@ -828,6 +847,14 @@ export const MapCanvas = forwardRef<
         // A tap that stopped a spring back lets it carry on.
         springBack(p.x, p.y);
         const touch = e.pointerType !== "mouse";
+        // The page's own marks sit over the canvas: they come first.
+        const own = overlay.current?.(p.x, p.y, touch);
+        if (own) {
+          lastTap = null;
+          onOre?.(null);
+          own();
+          return;
+        }
         const hit = renderer.current ? pickItem(renderer.current.visible, p.x, p.y, touch ? 28 : 16) : null;
         if (hit) {
           lastTap = null;
@@ -887,7 +914,12 @@ export const MapCanvas = forwardRef<
     const context = (e: MouseEvent) => {
       if (!onLongPress) return;
       e.preventDefault();
-      onLongPress(toWorld(local(e as PointerEvent)));
+      // A finger's long press (Android follows it with a contextmenu) was answered by the timer already.
+      if (pressed || pressType !== "mouse") return;
+      const p = local(e as PointerEvent);
+      const own = overlay.current?.(p.x, p.y, false);
+      if (own) own();
+      else onLongPress(toWorld(p));
     };
     el.addEventListener("contextmenu", context);
     el.addEventListener("touchstart", touchStart, { passive: true });

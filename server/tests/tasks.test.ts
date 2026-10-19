@@ -281,7 +281,7 @@ describe("tasks over /live and in the saga", () => {
     const hub = new Hub({} as AgentSource, new HistoryStore(":memory:"));
     const store = new TaskStore(":memory:");
     store.create({ title: "Forge" });
-    const live = liveSocket(hub, store);
+    const live = liveSocket(hub, { tasks: store });
     const a = new FakeSocket(liveSocketData(new URL("http://x/live?topics=")));
     const b = new FakeSocket(liveSocketData(new URL("http://x/live?topics=")));
     live.open(a);
@@ -349,7 +349,7 @@ describe("tasks over /live and in the saga", () => {
   it("serialises a change once, whatever the number of sockets", () => {
     const hub = new Hub({} as AgentSource, new HistoryStore(":memory:"));
     const store = new TaskStore(":memory:");
-    const live = liveSocket(hub, store);
+    const live = liveSocket(hub, { tasks: store });
     const socks = [0, 1, 2].map(() => new FakeSocket(liveSocketData(new URL("http://x/live?topics="))));
     for (const s of socks) live.open(s);
     const spy = spyOn(JSON, "stringify");

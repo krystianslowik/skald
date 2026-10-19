@@ -218,3 +218,84 @@ describe("MapCanvas floor plans and nature (#160)", () => {
     again.view.unmount();
   });
 });
+
+describe("MapCanvas page marks and long presses", () => {
+  function mountWith(props: { onLongPress?: (p: { x: number; z: number }) => void; pickOverlay?: (x: number, y: number, touch: boolean) => (() => void) | null; onSelect?: () => void }) {
+    const ref = createRef<MapCanvasHandle>();
+    const view = render(
+      <I18nProvider locale="en">
+        <MapCanvas ref={ref} map={map} mask={null} markers={[]} layers={DEFAULT_LAYERS} selected={null} onSelect={props.onSelect ?? (() => {})} onLongPress={props.onLongPress} pickOverlay={props.pickOverlay} />
+      </I18nProvider>,
+    );
+    const el = view.getByRole("img");
+    let t = 0;
+    const fire = (type: string, x: number, y: number, o: { id?: number; pointerType?: string; button?: number } = {}) => {
+      const e = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(e, { pointerId: o.id ?? 1, pointerType: o.pointerType ?? "touch", button: o.button ?? 0, clientX: x, clientY: y });
+      Object.defineProperty(e, "timeStamp", { value: t });
+      act(() => {
+        el.dispatchEvent(e);
+      });
+      return e;
+    };
+    const wait = (ms: number) => {
+      t += ms;
+      act(() => {
+        vi.advanceTimersByTime(ms);
+      });
+    };
+    return { ref, fire, wait };
+  }
+
+  it("gives a tap on a page mark to the mark, and a drag from it to the map", () => {
+    const open = vi.fn();
+    const onSelect = vi.fn();
+    const m = mountWith({ onSelect, pickOverlay: (x, y) => (Math.hypot(x - 200, y - 300) < 20 ? open : null) });
+    m.fire("pointerdown", 200, 300);
+    m.fire("pointerup", 200, 300);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(onSelect).not.toHaveBeenCalled();
+    // A drag that starts on the mark pans the map and opens nothing.
+    m.wait(400);
+    const before = m.ref.current!.project(0, 0);
+    m.fire("pointerdown", 200, 300);
+    m.fire("pointermove", 260, 340);
+    m.fire("pointerup", 260, 340);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(m.ref.current!.project(0, 0)).not.toEqual(before);
+  });
+
+  it("answers a finger's long press once, even with a little wander and the contextmenu after it", () => {
+    const onLongPress = vi.fn();
+    const m = mountWith({ onLongPress });
+    m.fire("pointerdown", 100, 100);
+    m.fire("pointermove", 106, 104);
+    m.wait(500);
+    expect(onLongPress).not.toHaveBeenCalled();
+    m.wait(150);
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    const menu = m.fire("contextmenu", 106, 104);
+    expect((menu as Event).defaultPrevented).toBe(true);
+    m.fire("pointerup", 106, 104);
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    // Wandering too far is a pan, not a press.
+    m.fire("pointerdown", 100, 100);
+    m.fire("pointermove", 130, 100);
+    m.wait(700);
+    m.fire("pointerup", 130, 100);
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes a right click as a long press, or as opening the page mark under it", () => {
+    const onLongPress = vi.fn();
+    const open = vi.fn();
+    const m = mountWith({ onLongPress, pickOverlay: (x, y) => (Math.hypot(x - 200, y - 300) < 20 ? open : null) });
+    m.fire("pointerdown", 50, 50, { pointerType: "mouse", button: 2 });
+    expect(m.fire("contextmenu", 50, 50).defaultPrevented).toBe(true);
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    m.fire("pointerdown", 200, 300, { pointerType: "mouse", button: 2 });
+    expect(m.fire("contextmenu", 200, 300).defaultPrevented).toBe(true);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+  });
+});

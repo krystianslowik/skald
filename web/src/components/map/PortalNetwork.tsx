@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
-import { useI18n } from "../../i18n";
+import type { WebPin } from "@server/pintypes";
+import { useI18n, type TextKey } from "../../i18n";
 import { getLivePositions, subscribeLivePositions, useLivePositions } from "../../lib/live";
 import type { Marker } from "../../lib/mapgeo";
 import { findRoute, nearestPlace, noWarnings, partners, portalGroups, portalWarnings, type Place, type Route, type Spot } from "../../lib/portalnet";
@@ -12,7 +13,7 @@ import { MapIcon } from "./MapIcon";
 
 type I18n = ReturnType<typeof useI18n>;
 
-/** A route's end: a mark on the map ("base:0", "loc:3", "pin:2"), a player online ("player:<id>") or the tapped point ("spot"). */
+/** A route's end: a mark on the map ("base:0", "loc:3", "pin:2"), a shared pin ("webpin:<id>"), a player online ("player:<id>") or the tapped point ("spot"). */
 interface End {
   key: string;
   label: string;
@@ -28,7 +29,7 @@ interface Ends {
   pins: End[];
 }
 
-function endsOf(markers: readonly Marker[], t: I18n["t"], lookup: I18n["lookup"]): Ends {
+function endsOf(markers: readonly Marker[], t: I18n["t"], lookup: I18n["lookup"], webPins: readonly WebPin[] = []): Ends {
   const out: Ends = { bases: [], bosses: [], places: [], pins: [] };
   // An unnamed base goes by the closest named pin or place, else by where it is.
   const named = placesOf(markers.filter((m) => m.data.type !== "base"), t, lookup);
@@ -45,9 +46,13 @@ function endsOf(markers: readonly Marker[], t: I18n["t"], lookup: I18n["lookup"]
     else if (d.type === "location" && (d.kind === "trader" || d.kind === "start") && d.placed && d.explored) out.places.push(end);
     else if (d.type === "pin") out.pins.push(d.name ? end : { ...end, label: `${end.label} ${t("map.coords", { x: m.x, z: m.z })}` });
   }
+  // Shared pins from the panel, by their note (or their mark when it has none).
+  for (const p of webPins) out.pins.push({ key: `webpin:${p.id}`, label: p.note || `${t(`pins.icon.${p.icon}` as TextKey)} ${t("map.coords", { x: Math.round(p.x), z: Math.round(p.z) })}`, x: p.x, z: p.z });
   for (const list of [out.bosses, out.places, out.pins]) list.sort((a, b) => a.label.localeCompare(b.label));
   return out;
 }
+
+const NO_PINS: readonly WebPin[] = [];
 
 /** Players online as route starts (the picker reads them only while the sheet is open). */
 export function playerEnds(players: readonly LivePlayer[]): End[] {
@@ -101,9 +106,10 @@ function usePlayerAt(key: string | null): string {
 }
 
 /** The route finder's state; it lives with the map so the route stays drawn when the sheet closes. */
-export function usePortalNet(map: ApiMap, markers: readonly Marker[]): PortalNet {
+/** `webPins`: the shared pins of this world, offered as ends with the save's pins. */
+export function usePortalNet(map: ApiMap, markers: readonly Marker[], webPins: readonly WebPin[] = NO_PINS): PortalNet {
   const { t, lookup, number } = useI18n();
-  const ends = useMemo(() => endsOf(markers, t, lookup), [markers, t, lookup]);
+  const ends = useMemo(() => endsOf(markers, t, lookup, webPins), [markers, t, lookup, webPins]);
   const [from, setFromState] = useState<End | null>(() => ends.bases[0] ?? null);
   const [to, setToState] = useState<End | null>(null);
   const [spot, setSpot] = useState<Spot | null>(null);

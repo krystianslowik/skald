@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useState, type ReactNode } from "react";
 import { useEveryLocale, useI18n, type TextKey } from "../../i18n";
 import { LAYERS, markerItems, markerStores, searchMarkers, type IconId, type LayerId, type Marker } from "../../lib/mapgeo";
 import { fold, matchingItems } from "../../lib/storage";
@@ -117,6 +117,7 @@ export function MapLayers({
   relief = "none",
   onToggle,
   onPick,
+  extra,
 }: {
   map: ApiMap;
   markers: readonly Marker[];
@@ -127,6 +128,8 @@ export function MapLayers({
   onToggle: (l: LayerId) => void;
   /** `level`: the chest of a stack that holds what was searched for. */
   onPick: (m: Marker, level?: number) => void;
+  /** A section of its own under the search (the web pins). */
+  extra?: ReactNode;
 }) {
   const { t, tn, lookup, number } = useI18n();
   const { on: perf } = useMapPerf();
@@ -197,6 +200,8 @@ export function MapLayers({
           </ul>
         )}
       </div>
+
+      {extra}
 
       <div>
         <h3 className="label-caps">{t("map.layers")}</h3>

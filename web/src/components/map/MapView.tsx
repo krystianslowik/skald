@@ -9,13 +9,18 @@ import { useTerrain } from "../../lib/useTerrain";
 import { useTerrainTiles } from "../../lib/terraintiles";
 import { useWorldMap } from "../../lib/useWorldMap";
 import type { MapPoint } from "../../types";
+import { filterPins, storedPinFilter, storePinFilter, usePinName, usePins, type PinFilter } from "../../lib/webpins";
+import type { WebPin } from "@server/pintypes";
 import { Sheet, SheetClose } from "../Sheet";
-import { useAdmin } from "../admin/AdminContext";
+import { useAdmin, viewOnly } from "../admin/AdminContext";
 import { LiveLayer, type LiveLayerHandle } from "./LiveLayer";
 import { MapCanvas, type MapCanvasHandle } from "./MapCanvas";
 import { DetailsBody, DetailsHead, MapDetails, markerTitle } from "./MapDetails";
 import { MapLayers } from "./MapLayers";
 import { OrePopover } from "./OrePopover";
+import { PinLayer, type PinLayerHandle } from "./PinLayer";
+import { PinPanel } from "./PinPanel";
+import { PinSheet, type PinSheetMode } from "./PinSheet";
 import { PortalSheet, RouteChip, usePortalNet } from "./PortalNetwork";
 import { PortalRouteLayer, type PortalRouteLayerHandle } from "./PortalRouteLayer";
 import { StoreySwitcher } from "./StoreySwitcher";
@@ -173,7 +178,27 @@ function SaveMap({
   const phone = useMedia(PHONE);
   const canvas = useRef<MapCanvasHandle>(null);
   const live = useRef<LiveLayerHandle>(null);
+  const pinLayer = useRef<PinLayerHandle>(null);
   const admin = useAdmin();
+  // Web pins: placed on the panel, kept by the server, changed live by everyone.
+  const { pins, load: pinsLoad } = usePins();
+  const me = usePinName();
+  const [pinFilter, setPinFilterState] = useState(storedPinFilter);
+  const setPinFilter = useCallback((f: PinFilter) => {
+    storePinFilter(f);
+    setPinFilterState(f);
+  }, []);
+  const [pinSheet, setPinSheet] = useState<PinSheetMode | null>(null);
+  // A long press where an admin could also act: which of the two is asked here.
+  const [spot, setSpot] = useState<{ x: number; z: number } | null>(null);
+  const spotBox = useRef<HTMLDivElement>(null);
+  const openPin = pinSheet?.kind === "view" ? pinSheet.id : null;
+  const shownPins = useMemo(() => {
+    const list = filterPins(pins, pinFilter, me);
+    // The pin whose sheet is open stays on the map even when the filter leaves it out.
+    const open = openPin && !list.some((p) => p.id === openPin) ? pins.find((p) => p.id === openPin) : undefined;
+    return open ? [...list, open] : list;
+  }, [pins, pinFilter, me, openPin]);
   const [layers, setLayers] = useState(storedLayers);
   const [sel, setSel] = useState<Selection | null>(null);
   // A tapped ore deposit, and the box that follows it over the map.
@@ -228,7 +253,9 @@ function SaveMap({
     [settleStorey],
   );
   // The portal network: its sheet, the route it draws and the portals a row rings.
-  const net = usePortalNet(map, markers);
+  // Web pins of this world are route ends too (archived ones are not).
+  const livePins = useMemo(() => pins.filter((p) => !p.archived), [pins]);
+  const net = usePortalNet(map, markers, livePins);
   const routeLayer = useRef<PortalRouteLayerHandle>(null);
   const [portalsOpen, setPortalsOpen] = useState(false);
   const [ring, setRing] = useState<readonly string[]>([]);
@@ -331,6 +358,7 @@ function SaveMap({
 
   const onSelect = useCallback(
     (m: Marker | null) => {
+      setSpot(null);
       // Picking a route's start: a tapped mark is the start.
       if (m && net.picking) return net.onTap(m);
       if (m) return choose({ m });
@@ -449,17 +477,94 @@ function SaveMap({
     if (!layers.resources) setOre(null);
   }, [layers.resources]);
 
-  // Live players follow the view; admin long presses open what can happen at the spot.
+  // The long-press menu sits at its spot like the ore box.
+  const spotAt = useRef(spot);
+  spotAt.current = spot;
+  const placeSpot = useCallback(() => {
+    const el = spotBox.current;
+    const p = spotAt.current;
+    if (!el || !p || !canvas.current) return;
+    const [px, py] = canvas.current.project(p.x, p.z);
+    const W = el.parentElement?.clientWidth ?? 0;
+    const H = el.parentElement?.clientHeight ?? 0;
+    const x = Math.max(8, Math.min(W - el.offsetWidth - 8, px - el.offsetWidth / 2));
+    let y = py - el.offsetHeight - 14;
+    if (y < 8) y = py + 14;
+    y = Math.max(8, Math.min(H - el.offsetHeight - 8, y));
+    el.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+    el.style.visibility = px < 0 || py < 0 || px > W || py > H ? "hidden" : "visible";
+  }, []);
+  useEffect(() => {
+    placeSpot();
+    if (!spot) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setSpot(null);
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [spot, placeSpot]);
+
+  // Live players and web pins follow the view.
   const onFrame = useCallback(() => {
     live.current?.place();
     routeLayer.current?.place();
+    pinLayer.current?.place();
     placeOre();
-  }, [placeOre]);
+    placeSpot();
+  }, [placeOre, placeSpot]);
   const pick = admin?.pick ?? null;
-  const onLongPress = useMemo(() => {
-    if (!admin?.present) return undefined;
-    return (p: { x: number; z: number }) => (admin.pick ? admin.completePick(p) : admin.open({ kind: "point", x: p.x, z: p.z }));
-  }, [admin]);
+  const addPinAt = useCallback((p: { x: number; z: number }) => {
+    setSpot(null);
+    setSel(null);
+    setOre(null);
+    setPinSheet({ kind: "add", x: p.x, z: p.z });
+  }, []);
+  // A long press (right click on a desktop) adds a web pin; where an admin could act, it asks which.
+  const onLongPress = useCallback(
+    (p: { x: number; z: number }) => {
+      if (admin?.pick) return admin.completePick(p);
+      // Picking a route's start: the press sets it, as a tap would; no pin, no menu.
+      if (net.picking) return net.onTap(p);
+      if (admin?.present && !viewOnly(admin)) return setSpot(p);
+      addPinAt(p);
+    },
+    [admin, addPinAt, net.picking, net.onTap],
+  );
+  // A pin just added is new and the viewer's own: a filter that would hide it opens up.
+  const keepInView = useCallback(
+    (pin: WebPin) => {
+      if (filterPins([pin], pinFilter, me).length === 0) setPinFilter({ ...pinFilter, show: true, status: "open" });
+    },
+    [pinFilter, me, setPinFilter],
+  );
+  const showPin = useCallback((pin: WebPin) => {
+    setSpot(null);
+    setSel(null);
+    setOre(null);
+    setPinSheet({ kind: "view", id: pin.id });
+  }, []);
+  // The canvas picks the pins (they take no pointer events), so a gesture that starts on one still moves the map.
+  const pickOverlay = useCallback(
+    (x: number, y: number, touch: boolean) => {
+      const pin = pinLayer.current?.pick(x, y, touch);
+      if (!pin) return null;
+      // Picking a route's start: a tapped pin is the start.
+      return net.picking ? () => net.onTap({ x: pin.x, z: pin.z, id: `webpin:${pin.id}` }) : () => showPin(pin);
+    },
+    [showPin, net.picking, net.onTap],
+  );
+  // A pin pressed from the keyboard: the same as a tap on it.
+  const openFromLayer = useCallback((pin: WebPin) => (net.picking ? net.onTap({ x: pin.x, z: pin.z, id: `webpin:${pin.id}` }) : showPin(pin)), [net.picking, net.onTap, showPin]);
+  const pickPin = useCallback(
+    (pin: WebPin) => {
+      setPanelOpen(false);
+      showPin(pin);
+      canvas.current?.flyTo(pin.x, pin.z, 0.35, FOCUS_MAX_SCALE);
+    },
+    [showPin],
+  );
   const onTapWorld = useMemo(() => (pick && admin ? (p: { x: number; z: number }) => admin.completePick(p) : net.picking ? net.onTap : undefined), [pick, admin, net.picking, net.onTap]);
   useEffect(() => {
     if (!pick) return;
@@ -474,7 +579,18 @@ function SaveMap({
   const openPlayer = useMemo(() => (admin?.present ? (name: string) => admin.open({ kind: "player", name }) : undefined), [admin]);
 
   const reliefState = tiles ? (tiles.stale ? "stale" : "ready") : terrain.status === "ready" ? (terrain.doc.stale ? "stale" : "ready") : "none";
-  const panel = <MapLayers map={map} markers={markers} layers={layers} counts={counts} relief={reliefState} onToggle={toggle} onPick={pickResult} />;
+  const panel = (
+    <MapLayers
+      map={map}
+      markers={markers}
+      layers={layers}
+      counts={counts}
+      relief={reliefState}
+      onToggle={toggle}
+      onPick={pickResult}
+      extra={<PinPanel pins={pins} load={pinsLoad} filter={pinFilter} me={me} onFilter={setPinFilter} onPick={pickPin} />}
+    />
+  );
   const bottom = "bottom-[max(0.75rem,env(safe-area-inset-bottom))]";
 
   return (
@@ -497,6 +613,7 @@ function SaveMap({
         onPointerWorld={coarse ? undefined : onPointerWorld}
         onFrame={onFrame}
         onLongPress={onLongPress}
+        pickOverlay={pickOverlay}
         onTapWorld={onTapWorld}
         onOre={setOre}
         remember
@@ -504,7 +621,27 @@ function SaveMap({
         className="absolute inset-0"
       />
       <PortalRouteLayer ref={routeLayer} canvas={canvas} route={net.route} />
+      <PinLayer ref={pinLayer} canvas={canvas} pins={shownPins} selected={openPin} onOpen={openFromLayer} />
       <LiveLayer ref={live} canvas={canvas} onOpen={openPlayer} />
+      {spot && (
+        <div ref={spotBox} role="menu" aria-label={t("pins.spot")} className="material absolute left-0 top-0 z-20 flex flex-col gap-1 rounded-[3px] p-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.55)]" style={{ visibility: "hidden" }}>
+          <button type="button" role="menuitem" onClick={() => addPinAt(spot)} className="plaque press min-h-10 px-3 text-left text-sm font-bold text-flame coarse:min-h-11">
+            {t("pins.spot.add")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setSpot(null);
+              admin?.open({ kind: "point", x: spot.x, z: spot.z });
+            }}
+            className="plaque press min-h-10 px-3 text-left text-sm font-bold coarse:min-h-11"
+          >
+            {t("pins.spot.admin")}
+          </button>
+        </div>
+      )}
+      {pinSheet && <PinSheet key={pinSheet.kind === "view" ? pinSheet.id : `add:${pinSheet.x}:${pinSheet.z}`} mode={pinSheet} pins={pins} onClose={() => setPinSheet(null)} onAdded={keepInView} />}
       {ore && (
         <div ref={oreBox} className="pointer-events-none absolute left-0 top-0 z-20 max-w-[min(18rem,calc(100%-1rem))]" style={{ visibility: "hidden" }}>
           <OrePopover ore={ore} onClose={() => setOre(null)} />

@@ -1,6 +1,7 @@
 // Shared wire types. Kept free of Bun/Node imports: the web package compiles
 // this file through its `@server/*` path alias.
 
+import type { PinMessage } from "./pintypes";
 import type { Task } from "./taskmodel";
 
 export type ServerStatus = "starting" | "running" | "stopping" | "stopped" | "unknown";
@@ -551,7 +552,9 @@ export type LiveMessage =
   /** One shared task added or changed. */
   | { type: "task"; task: Task }
   /** One shared task deleted. */
-  | { type: "task_gone"; id: number };
+  | { type: "task_gone"; id: number }
+  /** Web map pins (pins.ts): the world's list on open, then one per change. */
+  | PinMessage;
 
 /** A top-level part of the agent's state; `now` is not one (it moves on every read). */
 export type StateSlice = Exclude<keyof AgentState, "now">;

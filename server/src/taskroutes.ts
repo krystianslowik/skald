@@ -1,5 +1,6 @@
 import type { Context, Hono } from "hono";
 import { RateLimiter } from "./auth";
+import { jsonBody as readJson, writeLimit } from "./routehelp";
 import { GUARDED_FIELDS, parseTaskInput, type Task, type TaskExpect } from "./taskmodel";
 import type { TaskChange, TaskStore } from "./tasks";
 
@@ -16,23 +17,7 @@ export interface TaskRoutesDeps {
   clientKey?: (c: Context) => string;
 }
 
-/** A JSON object body, or the 4xx to answer. JSON only: a cross-site form cannot send it without a preflight. */
-async function jsonBody(c: Context): Promise<unknown | Response> {
-  if (!/^application\/json\b/i.test(c.req.header("Content-Type") ?? "")) return c.json({ ok: false, error: "bad request body" }, 415);
-  if (Number(c.req.header("Content-Length") ?? 0) > MAX_BODY) return c.json({ ok: false, error: "body too large" }, 413);
-  let raw = "";
-  try {
-    raw = await c.req.text();
-  } catch {
-    return c.json({ ok: false, error: "bad request body" }, 400);
-  }
-  if (raw.length > MAX_BODY) return c.json({ ok: false, error: "body too large" }, 413);
-  try {
-    return JSON.parse(raw) as unknown;
-  } catch {
-    return c.json({ ok: false, error: "bad request body" }, 400);
-  }
-}
+const jsonBody = (c: Context) => readJson(c, MAX_BODY);
 
 const taskId = (c: Context): number | null => {
   const raw = c.req.param("id") ?? "";
@@ -52,10 +37,7 @@ export function mountTasks(app: Hono, deps: TaskRoutesDeps): void {
     return c.json({ ok: true, task }, status);
   };
   /** A write's 429, or null when the client may write. */
-  const limited = (c: Context) => {
-    const wait = limiter.hit(`tasks:${deps.clientKey?.(c) ?? "all"}`);
-    return wait > 0 ? c.json({ ok: false, error: "rate_limited", retryAfter: wait }, 429, { "Retry-After": String(wait) }) : null;
-  };
+  const limited = writeLimit(limiter, "tasks", deps.clientKey);
   const changed = (c: Context, res: TaskChange, created = false) => {
     if (!res.ok) {
       if (res.error === "stale") return c.json({ ok: false, error: "stale", task: res.task }, 409);
