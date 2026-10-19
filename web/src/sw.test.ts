@@ -362,6 +362,18 @@ describe("service worker push", () => {
     expect((calls[1]!.body as { subscription: { keys: { p256dh: string } } }).subscription.keys.p256dh).toBe("new");
   });
 
+  it("keeps the old endpoint when saving the renewed one fails", async () => {
+    const calls: string[] = [];
+    const sw = boot((url, init = {}) => {
+      calls.push(init.method ?? "GET");
+      if (init.method === "PUT") return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
+      return Response.json({ ok: true, prefs: { kinds: ["raid"] } });
+    });
+    const sub = (endpoint: string) => ({ endpoint, options: {}, toJSON: () => ({ endpoint, keys: { p256dh: "p", auth: "a" } }) });
+    await sw.dispatch("pushsubscriptionchange", { oldSubscription: sub("https://fcm.googleapis.com/fcm/send/old"), newSubscription: sub("https://fcm.googleapis.com/fcm/send/new") });
+    expect(calls).toEqual(["POST", "PUT"]);
+  });
+
   it("on a tap, focuses an open panel and moves it to the news, else opens one", async () => {
     const sw = boot(() => html());
     let closed = 0;

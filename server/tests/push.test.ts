@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it } from "bun:test";
 import type { AgentSource } from "../src/agent";
 import { createApp } from "../src/app";
@@ -182,6 +183,33 @@ async function subscribe(push: PushService, n: number, p: Partial<PushPrefs> = {
 }
 
 describe("PushService", () => {
+  it("adds the session column to a device table made before it", async () => {
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE push_devices (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, prefs TEXT NOT NULL, created INTEGER NOT NULL, fails INTEGER NOT NULL DEFAULT 0)");
+    const store = new PushStore(db);
+    stores.push(store);
+    const push = new PushService({ store, contact: "mailto:jarl@example.com", log: silentLog });
+    await push.init();
+    const ua = await newBrowserKeys();
+    expect((await push.subscribe({ endpoint: `${FCM}1`, keys: ua.keys }, prefs(), "s1")).ok).toBe(true);
+    push.forgetSession("s1");
+    expect(store.count()).toBe(0);
+  });
+
+  it("moves a device to the session that saves it last, within that session's cap", async () => {
+    const store = new PushStore(":memory:");
+    stores.push(store);
+    const push = new PushService({ store, contact: "mailto:jarl@example.com", log: silentLog, maxPerSession: 1 });
+    await push.init();
+    const a = await newBrowserKeys();
+    const b = await newBrowserKeys();
+    expect((await push.subscribe({ endpoint: `${FCM}1`, keys: a.keys }, prefs(), "A")).ok).toBe(true);
+    expect((await push.subscribe({ endpoint: `${FCM}2`, keys: b.keys }, prefs(), "B")).ok).toBe(true);
+    expect(await push.subscribe({ endpoint: `${FCM}1`, keys: a.keys }, prefs(), "B")).toMatchObject({ ok: false, error: "session_full" });
+    push.forgetSession("A");
+    expect(store.all().map((d) => d.endpoint)).toEqual([`${FCM}2`]);
+  });
+
   it("makes VAPID keys once and keeps them", async () => {
     const store = new PushStore(":memory:");
     stores.push(store);
@@ -463,6 +491,14 @@ describe("/api/push", () => {
     expect((await call("POST", "/api/push/test", { endpoint: `${FCM}0` }, { "CF-Connecting-IP": "203.0.113.7" })).status).toBe(429);
     // Another address is not held by it.
     expect((await put(call, 9, { "CF-Connecting-IP": "203.0.113.8" })).status).toBe(200);
+  });
+
+  it("does not count a known device changing its choice toward the limit", async () => {
+    const { call } = await app({ pushLimiter: new RateLimiter(2, 60_000, 60_000) });
+    const keys = (await newBrowserKeys()).keys;
+    const save = () => call("PUT", "/api/push", { subscription: { endpoint: `${FCM}1`, keys }, prefs: prefs() }, { "CF-Connecting-IP": "203.0.113.7" });
+    for (let i = 0; i < 6; i++) expect((await save()).status).toBe(200);
+    expect((await put(call, 2, { "CF-Connecting-IP": "203.0.113.7" })).status).toBe(200);
   });
 
   it("lets one session hold only a few devices, and signing out forgets them", async () => {

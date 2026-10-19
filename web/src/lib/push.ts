@@ -128,33 +128,37 @@ export async function enablePush(prefs: PushPrefs): Promise<EnableResult> {
     if (!infoRes.ok) return "failed";
     const key = keyBytes(((await infoRes.json()) as PushInfo).publicKey);
     let sub = await reg.pushManager.getSubscription();
+    const fresh = !sub || !sameKey(sub.options.applicationServerKey, key);
     // Made for another key (the panel's database was replaced): push services would refuse it.
     if (sub && !sameKey(sub.options.applicationServerKey, key)) {
       await sub.unsubscribe();
       sub = null;
     }
     sub ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
-    const json = sub.toJSON();
-    const res = await send("/api/push", "PUT", { subscription: { endpoint: json.endpoint, keys: json.keys }, prefs });
-    remember(res.ok);
-    if (res.ok) return "ok";
-    // The server keeps no device for it: the browser's subscription would only wait for a 410.
-    await sub.unsubscribe().catch(() => false);
-    return res.status === 409 ? "full" : "failed";
+    const status = await putPrefs(prefs, sub);
+    if (status === 200) return "ok";
+    if (status !== 409) return "failed";
+    // Refused for good: a subscription made just now would only wait for a 410.
+    if (fresh) await sub.unsubscribe().catch(() => false);
+    return "full";
   } catch (e) {
     if (e instanceof Unauthorized) throw e;
     return "failed";
   }
 }
 
+/** PUT /api/push for a subscription; the answer's status. */
+async function putPrefs(prefs: PushPrefs, sub: PushSubscription): Promise<number> {
+  const json = sub.toJSON();
+  const res = await send("/api/push", "PUT", { subscription: { endpoint: json.endpoint, keys: json.keys }, prefs });
+  remember(res.ok);
+  return res.status;
+}
+
 /** Saves this device's choice; false when the server did not take it. */
 export async function savePrefs(prefs: PushPrefs, sub?: PushSubscription | null): Promise<boolean> {
   const s = sub ?? (await subscription());
-  if (!s) return false;
-  const json = s.toJSON();
-  const res = await send("/api/push", "PUT", { subscription: { endpoint: json.endpoint, keys: json.keys }, prefs });
-  remember(res.ok);
-  return res.ok;
+  return s ? (await putPrefs(prefs, s)) === 200 : false;
 }
 
 /** Turns push off for this device, on the server and in the browser. */

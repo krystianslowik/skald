@@ -151,6 +151,17 @@ describe("NotifySheet", () => {
     expect(b.sub()).toBeNull();
   });
 
+  it("keeps the browser's subscription when the server is only busy", async () => {
+    const b = browser();
+    const fetchImpl = globalThis.fetch;
+    vi.stubGlobal("fetch", async (path: string, init: RequestInit = {}) => (path === "/api/push" && init.method === "PUT" ? Response.json({ ok: false }, { status: 429 }) : fetchImpl(path, init)));
+    sheet();
+    const device = await screen.findByRole("switch", { name: "Notifications on this device" });
+    await act(async () => fireEvent.click(device));
+    await screen.findByText("That did not work. Try again in a moment.");
+    expect(b.sub()).not.toBeNull();
+  });
+
   it("explains a refused permission and stays off", async () => {
     const b = browser({ permission: "denied" });
     sheet();

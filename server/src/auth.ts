@@ -62,7 +62,12 @@ export function verifyAdminSession(secret: string, token: string | undefined, se
 
 /** A short, stable, non-reversible name for a session in the audit log. */
 export function sessionHash(session: string): string {
-  return createHmac("sha256", "skald-actor").update(session).digest("hex").slice(0, 6);
+  return sessionDigest(session, "skald-actor", 6);
+}
+
+/** A session token's keyed, non-reversible digest for one purpose, `length` hex characters. */
+export function sessionDigest(session: string, purpose: string, length: number): string {
+  return createHmac("sha256", purpose).update(session).digest("hex").slice(0, length);
 }
 
 /** Reads one cookie out of a Cookie header (used for the WebSocket upgrade). */

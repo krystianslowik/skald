@@ -5,7 +5,7 @@ import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import type { RateLimiter } from "./auth";
+import { sessionDigest, type RateLimiter } from "./auth";
 import { cause, log as defaultLog, type Logger } from "./log";
 import { fill, gameVersion, RAIDS, type Item, type ItemKind, type NotifySink } from "./notify";
 import { PUSH_DEFAULT_KINDS, PUSH_KINDS, QUIET_TIME, type PushInfo, type PushKind, type PushPayload, type PushPrefs, type PushSubscriptionInput } from "./pushtypes";
@@ -313,6 +313,15 @@ export class PushStore {
         session  TEXT NOT NULL DEFAULT ''
       );
     `);
+    // A table from before the session column (an earlier build of this feature).
+    const cols = this.db.query("PRAGMA table_info(push_devices)").all() as { name: string }[];
+    if (!cols.some((c) => c.name === "session")) this.db.exec("ALTER TABLE push_devices ADD COLUMN session TEXT NOT NULL DEFAULT ''");
+  }
+
+  /** The session a device was saved by; null when unknown. */
+  sessionOf(endpoint: string): string | null {
+    const r = this.db.query("SELECT session FROM push_devices WHERE endpoint = ?").get(endpoint) as { session: string } | null;
+    return r?.session ?? null;
   }
 
   getMeta(key: string): string | null {
@@ -373,10 +382,6 @@ export class PushStore {
     return this.db.query("DELETE FROM push_devices WHERE endpoint = ?").run(endpoint).changes > 0;
   }
 
-  clear(): void {
-    this.db.exec("DELETE FROM push_devices");
-  }
-
   close(): void {
     this.db.close();
   }
@@ -400,8 +405,8 @@ export interface PushServiceOptions {
   /** VAPID `sub`: who push services can reach about this panel (mailto: or https:). */
   contact: string;
   /**
-   * Changes when the panel password does: every device is forgotten then, as
-   * a new password is meant to shut out who had the old one.
+   * Changes with the panel password and the session secret (pushResetKey):
+   * every device is forgotten then, as either is meant to shut someone out.
    */
   resetKey?: string;
   fetchImpl?: typeof fetch;
@@ -470,9 +475,7 @@ export class PushService implements NotifySink {
     if (this.opt.resetKey !== undefined) {
       const was = store.getMeta(META_RESET);
       if (was !== null && was !== this.opt.resetKey) {
-        store.clear();
-        this.memory.clear();
-        this.testedAt.clear();
+        for (const d of store.all()) this.forget(d.endpoint);
         this.logger.info("push: the panel password or session secret changed, every device has to turn notifications on again", { route: "push" });
       }
       store.setMeta(META_RESET, this.opt.resetKey);
@@ -513,10 +516,10 @@ export class PushService implements NotifySink {
       return { ok: false, error: "bad_keys", message: "the subscription's keys are not usable" };
     }
     const store = this.opt.store;
-    if (!store.get(endpoint)) {
-      if (session && store.countSession(session) >= this.o.maxPerSession) return { ok: false, error: "session_full", message: `at most ${this.o.maxPerSession} devices per sign-in` };
-      if (store.count() >= this.o.maxDevices) return { ok: false, error: "full", message: `at most ${this.o.maxDevices} devices` };
-    }
+    const owner = store.sessionOf(endpoint);
+    // A device joining this session (new, or saved by another sign-in) counts toward its cap.
+    if (session && owner !== session && store.countSession(session) >= this.o.maxPerSession) return { ok: false, error: "session_full", message: `at most ${this.o.maxPerSession} devices per sign-in` };
+    if (owner === null && store.count() >= this.o.maxDevices) return { ok: false, error: "full", message: `at most ${this.o.maxDevices} devices` };
     store.put({ endpoint, p256dh: keys.p256dh, auth: keys.auth, prefs }, this.clock(), session);
     this.refresh();
     return { ok: true, prefs };
@@ -647,13 +650,8 @@ async function body(c: Context): Promise<Record<string, unknown> | null> {
   }
 }
 
-/**
- * /api/push, mounted behind the panel session (any signed-in viewer manages
- * their own device; nothing here changes the server). The origin check on
- * /api/* covers every method that changes something.
- */
 export interface PushRouteOptions {
-  /** Subscribing and tests per client address. */
+  /** New devices and tests per client address (a known device saving its choice is not counted). */
   limiter: RateLimiter;
   /** The client address the limiter keys on (TRUSTED_IP_HEADER aware). */
   clientKey: (c: Context) => string;
@@ -661,6 +659,11 @@ export interface PushRouteOptions {
   session: (c: Context) => string;
 }
 
+/**
+ * /api/push, mounted behind the panel session (any signed-in viewer manages
+ * their own device; nothing here changes the server). The origin check on
+ * /api/* covers every method that changes something.
+ */
 export function pushRoutes(push: Pick<PushService, "info" | "subscribe" | "device" | "unsubscribe" | "test">, o: PushRouteOptions): Hono {
   const r = new Hono();
   // Subscriptions are a few hundred bytes; nothing here needs more.
@@ -675,10 +678,13 @@ export function pushRoutes(push: Pick<PushService, "info" | "subscribe" | "devic
     return c.json(push.info());
   });
   r.put("/", async (c) => {
-    const denied = limited(c);
-    if (denied) return denied;
     const b = await body(c);
     if (!b) return c.json({ ok: false, error: "bad_request" }, 400);
+    const known = push.device((b.subscription as { endpoint?: unknown } | undefined)?.endpoint) !== null;
+    if (!known) {
+      const denied = limited(c);
+      if (denied) return denied;
+    }
     const prefs = parsePrefs(b.prefs);
     if (typeof prefs === "string") return c.json({ ok: false, error: "bad_prefs", message: prefs }, 400);
     const res = await push.subscribe(b.subscription as PushSubscriptionInput, prefs, o.session(c));
@@ -723,5 +729,5 @@ export function pushResetKey(passwordHash: string, sessionSecret: string): strin
 
 /** A session token's stable, non-reversible tag for the device table. */
 export function pushSessionTag(token: string | undefined): string {
-  return token ? createHash("sha256").update(`skald-push-session|${token}`).digest("hex").slice(0, 32) : "";
+  return token ? sessionDigest(token, "skald-push-session", 32) : "";
 }
