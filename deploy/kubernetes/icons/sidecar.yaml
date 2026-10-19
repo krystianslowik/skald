@@ -25,7 +25,7 @@ spec:
         # few stat() calls). The extraction itself takes ~20 s of one core and
         # ~550 MiB at its peak, once per game build.
         - name: icons
-          image: ghcr.io/krystianslowik/skald-icons:2026.10.23
+          image: ghcr.io/krystianslowik/skald-icons:2026.10.24
           imagePullPolicy: IfNotPresent
           args: ["--game", "/opt/valheim", "--out", "/icons", "--every", "600", "--nice", "19"]
           resources:
