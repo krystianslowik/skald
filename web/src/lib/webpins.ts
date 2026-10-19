@@ -59,6 +59,7 @@ export function setPins(list: readonly WebPin[]): void {
   const prev = byId;
   byId = new Map();
   for (const p of list) {
+    if (!known(p)) continue;
     const have = prev.get(p.id);
     if (have && have.version > p.version) byId.set(p.id, have);
     else take(p);
@@ -155,7 +156,10 @@ export function updatePin(pin: WebPin, by: string, change: { state?: PinState; n
     body.icon = change.icon;
     expect.icon = pin.icon;
   }
-  if (change.archived !== undefined && change.archived !== pin.archived) body.archived = change.archived;
+  if (change.archived !== undefined && change.archived !== pin.archived) {
+    body.archived = change.archived;
+    expect.archived = pin.archived;
+  }
   if (Object.keys(body).length === 1) return Promise.resolve<PinCall>({ ok: true, pin });
   return send("PATCH", `/api/pins/${encodeURIComponent(pin.id)}`, { ...body, expect });
 }

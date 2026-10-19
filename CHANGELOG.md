@@ -16,7 +16,7 @@ above them.
 
 ### Changed
 
-- A long press on the map now takes 0.6 s and allows a little finger movement, and Android's menu after a long press no longer fires it a second time.
+- A long press on the map (a finger or a pen) now takes 0.6 s and allows a little movement, and Android's menu after a long press no longer fires it a second time. With a mouse, the map's actions are on the right click; holding the left button no longer counts as a long press.
 
 ## [2026.10.26] - 2026-10-19
 

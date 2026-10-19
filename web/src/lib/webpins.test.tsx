@@ -114,6 +114,9 @@ describe("pins store", () => {
     // A new list (another world) replaces the pins, but keeps a copy newer than it.
     act(() => setPins([pin({ id: "a", version: 1 }), pin({ id: "z" })]));
     expect(h.result.current.pins.map((p) => [p.id, p.version])).toEqual([["a", 3], ["z", 1]]);
+    // A broken entry in a list is skipped, not fatal.
+    act(() => setPins([null as never, { id: 5 } as never, pin({ id: "ok" })]));
+    expect(h.result.current.pins.map((p) => p.id)).toEqual(["ok"]);
     act(() => setPins([]));
     expect(h.result.current.pins).toEqual([]);
     h.unmount();
@@ -126,7 +129,7 @@ describe("pins store", () => {
     expect(calls.at(-1)).toMatchObject({ url: "/api/pins/p1", init: { method: "PATCH" } });
     expect(body()).toEqual({ by: "Freya", state: "claimed", expect: { state: "new", claimedBy: null } });
     await updatePin(seen, "Freya", { note: "Two rooms", icon: "cave", archived: true });
-    expect(body()).toEqual({ by: "Freya", note: "Two rooms", icon: "cave", archived: true, expect: { note: "Crypt", icon: "dungeon" } });
+    expect(body()).toEqual({ by: "Freya", note: "Two rooms", icon: "cave", archived: true, expect: { note: "Crypt", icon: "dungeon", archived: false } });
     // Nothing to change: no request at all.
     const n = calls.length;
     expect(await updatePin(seen, "Freya", { state: "new" })).toEqual({ ok: true, pin: seen });

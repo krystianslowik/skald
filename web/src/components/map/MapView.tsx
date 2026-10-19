@@ -254,7 +254,9 @@ function SaveMap({
   );
   // The portal network: its sheet, the route it draws and the portals a row rings.
   // Web pins of this world are route ends too (archived ones are not).
-  const livePins = useMemo(() => pins.filter((p) => !p.archived), [pins]);
+  // Keyed on what a route end uses, so a claim or a state change does not rebuild the route finder's lists.
+  const pinEndsKey = pins.filter((p) => !p.archived).map((p) => `${p.id}|${p.x}|${p.z}|${p.icon}|${p.note}`).join("\n");
+  const livePins = useMemo(() => pins.filter((p) => !p.archived), [pinEndsKey]);
   const net = usePortalNet(map, markers, livePins);
   const routeLayer = useRef<PortalRouteLayerHandle>(null);
   const [portalsOpen, setPortalsOpen] = useState(false);
@@ -548,12 +550,14 @@ function SaveMap({
   // The canvas picks the pins (they take no pointer events), so a gesture that starts on one still moves the map.
   const pickOverlay = useCallback(
     (x: number, y: number, touch: boolean) => {
+      // An admin picking a point picks it there, pin or not.
+      if (admin?.pick) return null;
       const pin = pinLayer.current?.pick(x, y, touch);
       if (!pin) return null;
       // Picking a route's start: a tapped pin is the start.
       return net.picking ? () => net.onTap({ x: pin.x, z: pin.z, id: `webpin:${pin.id}` }) : () => showPin(pin);
     },
-    [showPin, net.picking, net.onTap],
+    [showPin, net.picking, net.onTap, admin?.pick],
   );
   // A pin pressed from the keyboard: the same as a tap on it.
   const openFromLayer = useCallback((pin: WebPin) => (net.picking ? net.onTap({ x: pin.x, z: pin.z, id: `webpin:${pin.id}` }) : showPin(pin)), [net.picking, net.onTap, showPin]);

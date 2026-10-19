@@ -325,8 +325,46 @@ describe("MapCanvas long press by mouse and pen", () => {
     });
     fire("pointerup", 107, 100, "mouse");
     expect(onLongPress).not.toHaveBeenCalled();
+    // Nor a left button held still: a mouse right clicks.
+    fire("pointerdown", 100, 100, "mouse");
+    act(() => {
+      vi.advanceTimersByTime(800);
+    });
+    fire("pointerup", 100, 100, "mouse");
+    expect(onLongPress).not.toHaveBeenCalled();
     fire("pointerdown", 60, 60, "pen", 2);
     expect(fire("contextmenu", 60, 60, "pen").defaultPrevented).toBe(true);
     expect(onLongPress).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("MapCanvas long press across re-renders", () => {
+  it("keeps a held press when the parent passes a new long-press callback", () => {
+    const calls: string[] = [];
+    const onSelect = () => {};
+    const ui = (n: number) => (
+      <I18nProvider locale="en">
+        <MapCanvas map={map} mask={null} markers={[]} layers={DEFAULT_LAYERS} selected={null} onSelect={onSelect} onLongPress={() => calls.push(`cb${n}`)} onTapWorld={() => calls.push(`tap${n}`)} />
+      </I18nProvider>
+    );
+    const view = render(ui(1));
+    const el = view.getByRole("img");
+    const fire = (type: string) => {
+      const e = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(e, { pointerId: 1, pointerType: "touch", button: 0, clientX: 80, clientY: 80 });
+      act(() => {
+        el.dispatchEvent(e);
+      });
+    };
+    fire("pointerdown");
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    view.rerender(ui(2));
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    fire("pointerup");
+    expect(calls).toEqual(["cb2"]);
   });
 });

@@ -185,6 +185,13 @@ export const MapCanvas = forwardRef<
   // Read at the moment of a tap: a new function does not rebind the pointer handlers.
   const overlay = useRef(pickOverlay);
   overlay.current = pickOverlay;
+  // The same for the long press and the tap on empty map: a parent's new callback (on every admin
+  // or pin update) must not rebind the handlers, which would drop a press that is being held.
+  const longPress = useRef(onLongPress);
+  longPress.current = onLongPress;
+  const pressable = !!onLongPress;
+  const tapWorld = useRef(onTapWorld);
+  tapWorld.current = onTapWorld;
   const view = useRef<View>({ cx: 0, cz: 0, scale: 0.02, w: 1, h: 1 });
   const fitted = useRef(false);
   const hovered = useRef<string | null>(null);
@@ -694,7 +701,8 @@ export const MapCanvas = forwardRef<
         two = null;
         pressed = false;
         cancelPress();
-        if (onLongPress) {
+        // A long hold is a finger's or a pen's way; a mouse right clicks (a held left button is the start of a pan).
+        if (pressable && e.pointerType !== "mouse") {
           press = setTimeout(() => {
             press = null;
             if (pts.size !== 1) return;
@@ -705,7 +713,7 @@ export const MapCanvas = forwardRef<
             // On a page mark, the press opens that mark.
             const own = overlay.current?.(at.x, at.y, e.pointerType !== "mouse");
             if (own) own();
-            else onLongPress(toWorld(at));
+            else longPress.current?.(toWorld(at));
           }, LONG_PRESS_MS);
         }
       } else {
@@ -761,8 +769,10 @@ export const MapCanvas = forwardRef<
         return;
       }
       const far = downAt ? Math.hypot(p.x - downAt.x, p.y - downAt.y) : Infinity;
-      if (!moved && far < SLOP) return;
-      if (far > (pressType === "touch" ? PRESS_SLOP : SLOP)) cancelPress();
+      // While a finger may still be a long press, it pans only once it wanders past what a press allows.
+      const slop = press && pressType === "touch" ? PRESS_SLOP : SLOP;
+      if (!moved && far < slop) return;
+      cancelPress();
       if (!moved) {
         moved = true;
         el.style.cursor = "grabbing";
@@ -884,7 +894,7 @@ export const MapCanvas = forwardRef<
         }
         lastTap = { ...p, t: e.timeStamp };
         onSelect(null);
-        onTapWorld?.(toWorld(p));
+        tapWorld.current?.(toWorld(p));
         return;
       }
       const [vx, vy] = samples.velocity(e.timeStamp);
@@ -917,14 +927,14 @@ export const MapCanvas = forwardRef<
       setView(zoomAt(view.current, p.x, p.y, Math.exp(-e.deltaY * unit * k)));
     };
     const context = (e: MouseEvent) => {
-      if (!onLongPress) return;
+      if (!longPress.current) return;
       e.preventDefault();
       // A finger's long press (Android follows it with a contextmenu) was answered by the timer already.
       if (pressed || (pressType === "touch" && (pts.size > 0 || e.timeStamp - touchUpAt < 1000))) return;
       const p = local(e as PointerEvent);
       const own = overlay.current?.(p.x, p.y, false);
       if (own) own();
-      else onLongPress(toWorld(p));
+      else longPress.current?.(toWorld(p));
     };
     el.addEventListener("contextmenu", context);
     el.addEventListener("touchstart", touchStart, { passive: true });
@@ -953,7 +963,7 @@ export const MapCanvas = forwardRef<
         if (t) glideTo(t, true);
       }
     };
-  }, [interactive, onPointerWorld, onSelect, onLongPress, onTapWorld, onOre, openCluster, glideTo, reduced, schedule, setView]);
+  }, [interactive, onPointerWorld, onSelect, pressable, onOre, openCluster, glideTo, reduced, schedule, setView]);
 
   const onKey = (e: ReactKeyboardEvent) => {
     const v = view.current;

@@ -80,7 +80,7 @@ const tasks = new TaskStore(store.connection);
 const pins = new PinStore(store.connection);
 // The world comes with the agent's state (its save's seed), so pins follow a new or imported world at once.
 hub.subscribe((m) => {
-  if (m.type === "state") pins.followWorld(m.state.world.meta, cfg.sessionSecret);
+  if (m.type === "state") pins.followWorld(m.state.world.meta);
 });
 // Subscribed before start: the first state it sees is its baseline, and
 // nothing that happened before boot is sent.

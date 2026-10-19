@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import type { Context, Hono } from "hono";
 import { RateLimiter } from "./auth";
+import { randomBytes } from "node:crypto";
 import { worldId } from "./catchup";
 import { DONE_STATES, PIN_ICONS, PIN_MAX, PIN_NAME_MAX, PIN_NOTE_MAX, PIN_STATES, sameName, tidyText, type PinExpect, type PinIcon, type PinState, type WebPin } from "./pintypes";
 import { jsonBody, writeLimit } from "./routehelp";
@@ -8,14 +9,14 @@ import type { WorldMeta } from "./types";
 
 /** Pins stand inside the world disc's square, like the floor-plan boxes. */
 const WORLD_EDGE = 10_500;
-/** Pins kept in all worlds together: a cap on the file, far above what one world holds. */
-const PIN_MAX_ALL = 10 * PIN_MAX;
 /** A pin with a full note is a few hundred bytes. */
 const MAX_BODY = 4 * 1024;
 
 /** The table's layout version, kept in the shared `meta` table for a later migration to read. */
 const SCHEMA_VERSION = 1;
 const SCHEMA_KEY = "pins.schema";
+/** The key world ids are made with: made once and kept, so pins stay with their world whatever else changes. */
+const WORLD_KEY = "pins.worldkey";
 
 interface Row {
   id: string;
@@ -138,6 +139,7 @@ export class PinStore {
   private listeners = new Set<(ev: PinEvent) => void>();
   /** The world being played (catchup.ts worldId of its seed); "" until the agent has read a save. */
   private current = "";
+  private readonly worldKey: string;
 
   /** `db`: the history store's connection; a path opens its own (tests). */
   constructor(
@@ -169,6 +171,8 @@ export class PinStore {
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
     this.db.query("INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)").run(SCHEMA_KEY, String(SCHEMA_VERSION));
+    this.db.query("INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)").run(WORLD_KEY, randomBytes(32).toString("base64url"));
+    this.worldKey = (this.db.query("SELECT value FROM meta WHERE key = ?").get(WORLD_KEY) as { value: string }).value;
   }
 
   schemaVersion(): number {
@@ -176,12 +180,13 @@ export class PinStore {
   }
 
   /**
-   * The world from the agent's state: its id is keyed like the catch-up's
-   * (`secret`), so the stored value does not give the seed away. A state
-   * without a world (agent away) keeps the one known.
+   * The world from the agent's state. Its id is keyed like the catch-up's,
+   * so the stored value does not give the seed away, but with the store's
+   * own key, kept in the database: a new SESSION_SECRET does not lose the
+   * pins. A state without a world (agent away) keeps the one known.
    */
-  followWorld(meta: Pick<WorldMeta, "seedName" | "seed"> | null | undefined, secret: string): void {
-    if (meta) this.setWorld(worldId(secret, meta.seedName, meta.seed));
+  followWorld(meta: Pick<WorldMeta, "seedName" | "seed"> | null | undefined): void {
+    if (meta) this.setWorld(worldId(this.worldKey, meta.seedName, meta.seed));
   }
 
   /** The world now played. A different one sends every page its pins (or none). */
@@ -211,9 +216,6 @@ export class PinStore {
     return (this.db.query("SELECT COUNT(*) AS n FROM web_pins WHERE world = ?").get(this.current) as { n: number }).n;
   }
 
-  private countAll(): number {
-    return (this.db.query("SELECT COUNT(*) AS n FROM web_pins").get() as { n: number }).n;
-  }
 
   subscribe(fn: (ev: PinEvent) => void): () => void {
     this.listeners.add(fn);
@@ -247,7 +249,6 @@ export class PinStore {
     // At the limit the oldest archived pin makes room, in the same transaction as the new one.
     const write = this.db.transaction((): { evicted: Row | null } | "full" => {
       let evicted: Row | null = null;
-      if (this.countAll() >= PIN_MAX_ALL) return "full";
       if (this.count() >= this.max) {
         evicted = this.db.query(`SELECT ${COLUMNS} FROM web_pins WHERE world = ? AND archived = 1 ORDER BY updated, id LIMIT 1`).get(this.current) as Row | null;
         if (!evicted) return "full";
@@ -312,6 +313,7 @@ export class PinStore {
     }
     if (change.archived !== undefined) {
       if (typeof change.archived !== "boolean") return bad("archived must be true or false");
+      if (change.archived !== cur.archived && expect.archived !== undefined && expect.archived !== cur.archived) return stale(cur.archived ? "the pin was archived" : "the pin was restored");
       next.archived = change.archived;
     }
     if (next.state === cur.state && next.note === cur.note && next.icon === cur.icon && next.archived === cur.archived) return { ok: true, pin: cur };
@@ -362,6 +364,10 @@ function parseExpect(v: unknown): PinExpect | string {
   if (o.icon !== undefined) {
     if (!isIcon(o.icon)) return "expect.icon is not a mark";
     out.icon = o.icon;
+  }
+  if (o.archived !== undefined) {
+    if (typeof o.archived !== "boolean") return "expect.archived must be true or false";
+    out.archived = o.archived;
   }
   return out;
 }

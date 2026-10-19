@@ -2759,7 +2759,7 @@ export const pl: Dict = {
   "pins.filter.completed": "Zakończone",
   "pins.empty": "Brak pinezek.",
   "pins.archived": plural({ one: "Archiwum ({n})", few: "Archiwum ({n})", many: "Archiwum ({n})", other: "Archiwum ({n})" }),
-  "pins.goneBody": "Ktoś usunął tę pinezkę.",
+  "pins.goneBody": "Tej pinezki już tu nie ma: ktoś ją usunął albo serwer przeszedł na inny świat.",
   "pins.spot": "W tym miejscu",
   "pins.spot.add": "Dodaj tu pinezkę",
   "pins.spot.admin": "Akcje admina tutaj",

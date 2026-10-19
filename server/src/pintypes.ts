@@ -83,6 +83,7 @@ export interface PinExpect {
   claimedBy?: string | null;
   note?: string;
   icon?: PinIcon;
+  archived?: boolean;
 }
 
 /** GET /api/pins: the current world's pins. */

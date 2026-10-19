@@ -121,6 +121,11 @@ describe("PinStore", () => {
     s.update(pin.id, { by: "Freya", icon: "cave", expect: { icon: "dungeon" } });
     expect(s.update(pin.id, { by: "Bjorn", icon: "boss", expect: { icon: "dungeon" } })).toMatchObject({ ok: false, error: "stale" });
     expect(s.update(pin.id, { by: "Bjorn", icon: "boss", expect: { icon: "cave" } })).toMatchObject({ ok: true, pin: { icon: "boss" } });
+    // Archiving a pin someone restored meanwhile (or the other way round) is stale too.
+    s.update(pin.id, { by: "Freya", archived: true, expect: { archived: false } });
+    expect(s.update(pin.id, { by: "Bjorn", archived: true, expect: { archived: false } })).toMatchObject({ ok: true, pin: { archived: true } });
+    expect(s.update(pin.id, { by: "Bjorn", archived: false, expect: { archived: false } })).toMatchObject({ ok: false, error: "stale" });
+    expect(s.update(pin.id, { by: "Bjorn", archived: false, expect: { archived: "no" } })).toMatchObject({ ok: false, error: "bad_request" });
   });
 
   it("knows every allowed move", () => {
@@ -213,34 +218,47 @@ describe("PinStore", () => {
 });
 
 describe("pins follow the world on the map", () => {
-  it("takes the world from the agent's state, keyed, and keeps it while the state has none", () => {
-    const pins = new PinStore(":memory:");
+  it("takes the world from the agent's state, keyed with its own kept key, and keeps it while the state has none", () => {
+    const history = new HistoryStore(":memory:");
+    const pins = new PinStore(history.connection);
     const sent: PinEvent[] = [];
     pins.subscribe((e) => sent.push(e));
     expect(pins.world).toBe("");
     // No world yet: nothing can be pinned into nowhere.
     expect(pins.create({ x: 0, z: 0, by: "Ragnar" })).toMatchObject({ ok: false, error: "no_world" });
-    pins.followWorld({ seedName: "TestSeed", seed: 42 }, "k");
-    expect(pins.world).toBe(worldId("k", "TestSeed", 42));
+    pins.followWorld({ seedName: "TestSeed", seed: 42 });
+    const id = pins.world;
+    expect(id).not.toBe("");
+    // Not the seed, nor anything made from it without the key.
+    expect(id).not.toContain("TestSeed");
+    expect(id).not.toBe(worldId("", "TestSeed", 42));
     expect(sent).toEqual([{ kind: "list" }]);
-    pins.followWorld(null, "k");
-    pins.followWorld({ seedName: "TestSeed", seed: 42 }, "k");
-    expect(pins.world).toBe(worldId("k", "TestSeed", 42));
+    pins.followWorld(null);
+    pins.followWorld({ seedName: "TestSeed", seed: 42 });
+    expect(pins.world).toBe(id);
     expect(sent).toHaveLength(1);
-    pins.followWorld({ seedName: "Other", seed: 7 }, "k");
+    pins.followWorld({ seedName: "Other", seed: 7 });
     expect(sent).toHaveLength(2);
+    // The key is kept with the pins: a restart (with any SESSION_SECRET) finds the same world.
+    const again = new PinStore(history.connection);
+    again.followWorld({ seedName: "TestSeed", seed: 42 });
+    expect(again.world).toBe(id);
+    // Another database has its own key.
+    const other = new PinStore(":memory:");
+    other.followWorld({ seedName: "TestSeed", seed: 42 });
+    expect(other.world).not.toBe(id);
   });
 
   it("follows the hub's states on a live server", () => {
     const hub = new Hub({} as AgentSource, new HistoryStore(":memory:"));
     const pins = new PinStore(":memory:");
     hub.subscribe((m) => {
-      if (m.type === "state") pins.followWorld(m.state.world.meta, "k");
+      if (m.type === "state") pins.followWorld(m.state.world.meta);
     });
     const state = emptyAgentState();
     state.world.meta = { name: "w", seedName: "TestSeed", seed: 42, worldGenVersion: 2, netTime: 0, day: 0, savedAt: new Date(T0).toISOString() } as never;
     (hub as unknown as { emit(m: unknown): void }).emit({ type: "state", state, online: true });
-    expect(pins.world).toBe(worldId("k", "TestSeed", 42));
+    expect(pins.world).not.toBe("");
   });
 });
 

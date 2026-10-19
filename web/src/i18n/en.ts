@@ -2770,7 +2770,7 @@ export const en = {
   "pins.filter.completed": "Completed",
   "pins.empty": "No pins here.",
   "pins.archived": plural({ one: "Archived ({n})", other: "Archived ({n})" }),
-  "pins.goneBody": "Someone deleted this pin.",
+  "pins.goneBody": "This pin is no longer here: someone deleted it, or the server moved on to another world.",
   "pins.spot": "At this spot",
   "pins.spot.add": "Add a pin here",
   "pins.spot.admin": "Admin actions here",
