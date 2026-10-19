@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { capRecent } from "@server/history";
 import type { AgentEvent, ApiState, LiveWireMessage, LogLine } from "../types";
 import { getLogs, getState, Unauthorized } from "./api";
-import { applyEvent } from "./apply";
+import { applyEvent, playerKey } from "./apply";
 import { getLivePositions, setLivePositions, setPositionsSink, watchingPositions } from "./live";
 
 const MAX_LOGS = 1500;
@@ -209,13 +209,14 @@ export function useValheim(onUnauthorized: () => void): Valheim {
       // Markers leave with their players, and all of them with the server.
       if (ev.type === "player_leave" || (ev.type === "server_state" && ev.data.status !== "running")) {
         const live = getLivePositions();
-        const players = ev.type === "player_leave" ? live.players.filter((p) => p.name !== ev.data.name) : [];
+        // By id: another player sharing the name keeps their marker.
+        const players = ev.type === "player_leave" ? live.players.filter((p) => (p.id ?? p.name) !== playerKey(ev.data)) : [];
         if (players.length !== live.players.length) setLivePositions({ t: live.t, players });
       }
       setState((s) => {
         if (!s) return s;
         const next = applyEvent(s, ev);
-        if (!stored || ev.type === "player_count") return next;
+        if (!stored || ev.type === "player_count" || ev.type === "player_platform") return next;
         return { ...next, history: { ...next.history, events: addEvent(next.history.events, ev) } };
       });
     };

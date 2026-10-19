@@ -6,7 +6,10 @@ import (
 	"math"
 )
 
-var errShort = errors.New("worldmap: truncated data")
+var (
+	errShort  = errors.New("worldmap: truncated data")
+	errVarint = errors.New("worldmap: bad varint")
+)
 
 // buf is a bounds-checked little-endian reader over a byte slice. The first
 // failed read sets err; every later read returns zero values, so callers can
@@ -101,7 +104,7 @@ func (r *buf) uvarint() int {
 			return int(n)
 		}
 	}
-	r.err = errors.New("worldmap: bad varint")
+	r.err = errVarint
 	return 0
 }
 

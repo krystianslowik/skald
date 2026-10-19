@@ -2107,6 +2107,7 @@ export const pl: Dict = {
   "compat.why.flags": "przedmiot ma nieznane znaczniki ({v})",
   "compat.why.trailing": "po ostatnim przedmiocie zostały nieznane bajty ({v})",
   "compat.why.truncated": "zapis jest ucięty",
+  "compat.why.varint": "nazwa w zapisie ma długość, której Skald nie umie odczytać",
   "compat.save.chunks_unreadable": "Nie udało się odczytać {n} fragmentów świata.",
   "compat.save.locations_unreadable": "Nie udało się odczytać wygenerowanych lokacji.",
   "compat.save.meta_unreadable": "Nie udało się odczytać pliku świata (.fwl).",

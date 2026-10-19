@@ -1,11 +1,13 @@
+import { playerKey } from "./apply";
 import { NOTIFY_KINDS, type AgentEvent, type AgentState, type CompatResult, type LiveMessage, type Locale, type NotifyChange, type NotifyConfig, type NotifyKind } from "./types";
 
 export { NOTIFY_KINDS, type NotifyChange, type NotifyKind };
 
 /** One line waiting to go out; joins, leaves and deaths of a batch share a line. */
 type Item =
-  | { kind: "join"; name: string }
-  | { kind: "leave"; name: string; ms: number | null }
+  // key tells apart players sharing a name ("Ragnar#2"); the name otherwise.
+  | { kind: "join"; name: string; key?: string }
+  | { kind: "leave"; name: string; key?: string; ms: number | null }
   | { kind: "death"; name: string }
   | { kind: "raid"; raid: string }
   | { kind: "server"; status: "stopped" | "starting" | "running" }
@@ -64,6 +66,12 @@ const STRINGS = {
     "compat.reason.world_loaded_missing": "no world loaded line",
     "compat.reason.join_code_missing": "no join code",
     "compat.reason.map_behind": "the map is not built from the newest save",
+    "compat.why.inventory_version": "the game saves inventories in a new format (version {v}) that Skald does not know yet",
+    "compat.why.inventory_items": "a container lists {v} items, more than fit",
+    "compat.why.inventory_flags": "an item has unknown flags ({v})",
+    "compat.why.inventory_trailing": "{v} unknown bytes follow the last item",
+    "compat.why.truncated": "the save is cut short",
+    "compat.why.bad_varint": "a name in the save has a length Skald cannot read",
     adminFailed: "{actor}: {command} failed ({error})",
     settingsFailed: "Applying the new settings failed ({error})",
     actionFailed: "{action} failed ({error})",
@@ -107,6 +115,12 @@ const STRINGS = {
     "compat.reason.world_loaded_missing": "brak wpisu o wczytaniu świata",
     "compat.reason.join_code_missing": "brak kodu dołączenia",
     "compat.reason.map_behind": "mapa nie jest zbudowana z najnowszego zapisu",
+    "compat.why.inventory_version": "gra zapisuje ekwipunek w nowym formacie (wersja {v}), którego Skald jeszcze nie zna",
+    "compat.why.inventory_items": "skrzynia podaje {v} przedmiotów, więcej niż się mieści",
+    "compat.why.inventory_flags": "przedmiot ma nieznane znaczniki ({v})",
+    "compat.why.inventory_trailing": "po ostatnim przedmiocie zostały nieznane bajty ({v})",
+    "compat.why.truncated": "zapis jest ucięty",
+    "compat.why.bad_varint": "nazwa w zapisie ma długość, której Skald nie umie odczytać",
     adminFailed: "{actor}: {command} nie powiodło się ({error})",
     settingsFailed: "Nie udało się zastosować nowych ustawień ({error})",
     actionFailed: "{action} nie powiodło się ({error})",
@@ -220,12 +234,14 @@ export function formatBatch(items: readonly Item[], locale: Locale): string[] {
     if (COALESCED.has(it.kind)) {
       if (done.has(it.kind)) continue;
       done.add(it.kind);
-      // One label per name: a leave carries the visit, repeated deaths a count.
+      // One label per player (its id; deaths carry only the name): a leave
+      // carries the visit, repeated deaths a count.
       const labels = new Map<string, string>();
       const deaths = new Map<string, number>();
       for (const x of items) {
         if (x.kind !== it.kind) continue;
         const name = (x as { name: string }).name;
+        const who = x.kind === "join" || x.kind === "leave" ? (x.key ?? name) : name;
         let label = escapeMd(name);
         if (x.kind === "leave" && x.ms !== null) label += ` (${duration(x.ms, locale)})`;
         if (x.kind === "death") {
@@ -233,7 +249,7 @@ export function formatBatch(items: readonly Item[], locale: Locale): string[] {
           deaths.set(name, n);
           if (n > 1) label += ` (${n}×)`;
         }
-        labels.set(name, label);
+        labels.set(who, label);
       }
       const names = [...labels.values()];
       lines.push(fill(s[(names.length > 1 ? `${it.kind}Many` : it.kind) as Key], { names: list(names) }));
@@ -278,12 +294,23 @@ function compatLines(r: CompatResult, followUp: boolean, locale: Locale): string
     const d = c.detail ?? {};
     const reason = c.reason ?? "";
     const n = String((reason === "chunks_unreadable" ? d.chunksUnreadable : d.containersUnreadable) ?? "");
-    const text = s[`compat.reason.${reason}`] ? fill(s[`compat.reason.${reason}`]!, { n, why: escapeMd(String(d.containerReason ?? "")) }) : escapeMd(reason);
+    const text = s[`compat.reason.${reason}`] ? fill(s[`compat.reason.${reason}`]!, { n, why: containerWhy(d, s) }) : escapeMd(reason);
     lines.push(`- ${s[`compat.check.${c.name}`] ?? escapeMd(c.name)}: ${text}`);
   }
   if (r.awaitingSave) lines.push(s["compat.awaitingSave"]!);
   if (r.status !== "ok") lines.push(s["compat.panel"]!);
   return lines;
+}
+
+/**
+ * Why containers did not read, from the agent's reason code (and its value);
+ * the agent's own text, escaped, for a code without words here.
+ */
+function containerWhy(d: Record<string, unknown>, s: Record<string, string>): string {
+  const text = typeof d.containerReasonCode === "string" ? s[`compat.why.${d.containerReasonCode}`] : undefined;
+  if (!text) return escapeMd(String(d.containerReason ?? ""));
+  const v = Number(d.containerReasonValue) || 0;
+  return fill(text, { v: d.containerReasonCode === "inventory_flags" ? `0x${v.toString(16)}` : String(v) });
 }
 
 /** Discord's 429 wait: the body's `retry_after`, else the header, both in seconds. */
@@ -453,15 +480,15 @@ export class DiscordNotifier {
       case "player_join": {
         const name = String(d.name ?? "");
         if (!name) return;
-        this.joinedAt.set(name, ts);
-        return this.add({ kind: "join", name });
+        this.joinedAt.set(playerKey(d), ts);
+        return this.add({ kind: "join", name, key: playerKey(d) });
       }
       case "player_leave": {
         const name = String(d.name ?? "");
         if (!name) return;
-        const at = this.joinedAt.get(name);
-        this.joinedAt.delete(name);
-        return this.add({ kind: "leave", name, ms: at === undefined ? null : Math.max(0, ts - at) });
+        const at = this.joinedAt.get(playerKey(d));
+        this.joinedAt.delete(playerKey(d));
+        return this.add({ kind: "leave", name, key: playerKey(d), ms: at === undefined ? null : Math.max(0, ts - at) });
       }
       case "player_count":
         if (Number(d.count) === 0) this.joinedAt.clear();

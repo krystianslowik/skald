@@ -277,8 +277,8 @@ export class MockAgent implements AgentSource {
       },
       // Two warriors already at the fire when the dev server starts.
       players: [
-        { name: "Ragnar", since: new Date(now - 72 * MIN).toISOString(), platform: "xbox" },
-        { name: "Freya", since: new Date(now - 38 * MIN).toISOString(), platform: "steam" },
+        { id: "Ragnar", name: "Ragnar", since: new Date(now - 72 * MIN).toISOString(), platform: "xbox" },
+        { id: "Freya", name: "Freya", since: new Date(now - 38 * MIN).toISOString(), platform: "steam" },
       ],
       world: {
         sizeBytes: 48_213_771,
@@ -685,7 +685,7 @@ export class MockAgent implements AgentSource {
   private livePlayers() {
     return this.state.players.map((p) => {
       const at = this.posOf(p.name);
-      return { name: p.name, platform: p.platform ?? "unknown", x: Math.round(at.x * 10) / 10, z: Math.round(at.z * 10) / 10, health: Math.round(at.health), maxHealth: at.maxHealth };
+      return { id: p.id ?? p.name, name: p.name, platform: p.platform ?? "unknown", x: Math.round(at.x * 10) / 10, z: Math.round(at.z * 10) / 10, health: Math.round(at.health), maxHealth: at.maxHealth };
     });
   }
 
@@ -1187,7 +1187,7 @@ export class MockAgent implements AgentSource {
     const platform = platformOf(name);
     const uid = 100_000_000 + Math.floor(Math.random() * 900_000_000);
     this.uids.set(name, uid);
-    this.state.players.push({ name, since: new Date(this.clock()).toISOString(), platform });
+    this.state.players.push({ id: name, name, since: new Date(this.clock()).toISOString(), platform });
     // The 1.0 crossplay sequence, as the agent serves it (ids redacted).
     this.log("PlayFab listen socket child connected to remote player ***");
     this.count("joined");
@@ -1195,7 +1195,7 @@ export class MockAgent implements AgentSource {
     this.log("Got handshake from client playfab/***");
     this.log("Server: New peer connected,sending global keys");
     this.log(`Got character ZDOID from ${name} : ${uid}:1`);
-    this.emit("player_join", { name, platform });
+    this.emit("player_join", { name, id: name, platform });
   }
 
   private leave(name: string): void {
@@ -1205,7 +1205,7 @@ export class MockAgent implements AgentSource {
     this.state.players = this.state.players.filter((p) => p.name !== name);
     this.log("RPC_Disconnect");
     for (const k of [1, 2, 3]) this.log(`Destroying abandoned non persistent zdo ${uid}:${k} owner ${uid}`);
-    this.emit("player_leave", { name });
+    this.emit("player_leave", { name, id: name });
     this.count("lost");
   }
 
@@ -1385,8 +1385,8 @@ export class MockAgent implements AgentSource {
     spans.push({ name: "Bjorn", from: at(5, 23, 10), to: at(4, 4, 25), deaths: 1 });
     const raw: { at: number; type: AgentEventType; data: Record<string, unknown> }[] = [];
     for (const s of spans) {
-      raw.push({ at: s.from, type: "player_join", data: { name: s.name, platform: platformOf(s.name) } });
-      raw.push({ at: s.to, type: "player_leave", data: { name: s.name } });
+      raw.push({ at: s.from, type: "player_join", data: { name: s.name, id: s.name, platform: platformOf(s.name) } });
+      raw.push({ at: s.to, type: "player_leave", data: { name: s.name, id: s.name } });
       for (let i = 0; i < s.deaths; i++) raw.push({ at: s.from + rand() * (s.to - s.from), type: "death", data: { name: s.name } });
     }
     const raids = ["army_eikthyr", "foresttrolls", "army_theelder", "wolves"];
@@ -1415,19 +1415,19 @@ export class MockAgent implements AgentSource {
         online.delete(name);
       }
       if (r.type === "server_state" && r.data.status !== "running") {
-        for (const n of [...online]) this.emit("player_leave", { name: n }, r.at - 1);
+        for (const n of [...online]) this.emit("player_leave", { name: n, id: n }, r.at - 1);
         online.clear();
       }
       if (r.type === "death" && !online.has(name)) continue;
       this.emit(r.type, r.data, r.at);
       if (r.type === "player_join" || r.type === "player_leave") this.emit("player_count", { count: online.size }, r.at);
     }
-    for (const n of online) this.emit("player_leave", { name: n }, now - 3 * HOUR);
+    for (const n of online) this.emit("player_leave", { name: n, id: n }, now - 3 * HOUR);
     this.emit("player_count", { count: 0 }, now - 3 * HOUR);
     // Tonight's session, matching the players in the initial state.
     for (const [i, p] of this.state.players.entries()) {
       const at = Date.parse(p.since);
-      this.emit("player_join", { name: p.name, platform: p.platform ?? "unknown" }, at);
+      this.emit("player_join", { name: p.name, id: p.name, platform: p.platform ?? "unknown" }, at);
       this.emit("player_count", { count: i + 1 }, at);
     }
   }

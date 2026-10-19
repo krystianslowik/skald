@@ -1,4 +1,13 @@
-import type { AgentEvent, AgentState, CompatResult, Platform } from "./types";
+import { isPlatform, type AgentEvent, type AgentState, type CompatResult } from "./types";
+
+/**
+ * Which online player a join, leave or platform event is about: its id, or
+ * its name from agents that send no id. Two players whose characters share
+ * a name have different ids.
+ */
+export function playerKey(d: Record<string, unknown>): string {
+  return typeof d.id === "string" && d.id ? d.id : typeof d.name === "string" ? d.name : "";
+}
 
 /**
  * Applies one live agent event to the last known state. Used by the hub (so
@@ -11,12 +20,23 @@ export function applyEvent<S extends AgentState>(s: S, ev: AgentEvent): S {
       return { ...s, server: { ...s.server, joinCode: String(d.code ?? ""), joinCodeAt: ev.ts } };
     case "player_join": {
       const name = String(d.name ?? "");
-      if (!name || s.players.some((p) => p.name === name)) return s;
-      const platform = typeof d.platform === "string" ? (d.platform as Platform) : undefined;
-      return { ...s, players: [...s.players, platform ? { name, since: ev.ts, platform } : { name, since: ev.ts }] };
+      const key = playerKey(d);
+      if (!name || s.players.some((p) => (p.id ?? p.name) === key)) return s;
+      const platform = isPlatform(d.platform) ? d.platform : undefined;
+      const id = typeof d.id === "string" && d.id ? { id: d.id } : {};
+      return { ...s, players: [...s.players, platform ? { ...id, name, since: ev.ts, platform } : { ...id, name, since: ev.ts }] };
     }
-    case "player_leave":
-      return { ...s, players: s.players.filter((p) => p.name !== d.name) };
+    case "player_leave": {
+      const key = playerKey(d);
+      return { ...s, players: s.players.filter((p) => (p.id ?? p.name) !== key) };
+    }
+    case "player_platform": {
+      // The admin plugin corrected the platform the log guessed.
+      const key = playerKey(d);
+      const platform = d.platform;
+      if (!isPlatform(platform) || !s.players.some((p) => (p.id ?? p.name) === key)) return s;
+      return { ...s, players: s.players.map((p) => ((p.id ?? p.name) === key ? { ...p, platform } : p)) };
+    }
     case "player_count": {
       const count = Number(d.count);
       return { ...s, players: count === 0 ? [] : s.players, server: { ...s.server, playersReported: count } };

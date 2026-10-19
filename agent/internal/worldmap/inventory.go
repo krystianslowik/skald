@@ -83,6 +83,56 @@ type rawItem struct {
 
 var errInventory = errors.New("worldmap: unreadable inventory")
 
+// InvReason is why an inventory did not decode, for the compatibility check:
+// a fixed code the web panel and the notifications translate, and its one
+// value (0 when the code has none).
+type InvReason struct {
+	Code  string
+	Value int64
+}
+
+// The reason codes. They are part of the agent's API: the web and the
+// server translate them, so a rename breaks both.
+const (
+	ReasonVersion   = "inventory_version"  // Value: the inventory version
+	ReasonItems     = "inventory_items"    // Value: the item count
+	ReasonFlags     = "inventory_flags"    // Value: the item's flag byte
+	ReasonTrailing  = "inventory_trailing" // Value: the bytes left over
+	ReasonTruncated = "truncated"
+	ReasonBadVarint = "bad_varint"
+	ReasonOther     = "other" // a new shape; the text says what
+)
+
+// ReasonCodes is every code, for tests on both sides.
+var ReasonCodes = []string{ReasonVersion, ReasonItems, ReasonFlags, ReasonTrailing, ReasonTruncated, ReasonBadVarint, ReasonOther}
+
+// inventoryError is an errInventory with its reason code and value.
+type inventoryError struct {
+	reason InvReason
+	text   string
+}
+
+func (e *inventoryError) Error() string { return errInventory.Error() + ": " + e.text }
+func (e *inventoryError) Unwrap() error { return errInventory }
+
+func invError(code string, value int64, format string, a ...any) error {
+	return &inventoryError{InvReason{code, value}, fmt.Sprintf(format, a...)}
+}
+
+// reasonOf is the code of an inventory's decode error.
+func reasonOf(err error) InvReason {
+	var ie *inventoryError
+	switch {
+	case errors.As(err, &ie):
+		return ie.reason
+	case errors.Is(err, errShort):
+		return InvReason{Code: ReasonTruncated}
+	case errors.Is(err, errVarint):
+		return InvReason{Code: ReasonBadVarint}
+	}
+	return InvReason{Code: ReasonOther}
+}
+
 // parseInventory decodes an "items" blob and counts the items it skipped for
 // having no prefab. A blob that does not match the layout above exactly
 // (unknown version or flag bits, trailing bytes) is an error; nothing is
@@ -90,14 +140,14 @@ var errInventory = errors.New("worldmap: unreadable inventory")
 func parseInventory(blob []byte) (items []rawItem, skipped int, err error) {
 	r := &buf{b: blob}
 	if v := r.i32(); r.err == nil && v != inventoryVersion && v != inventoryVersionOld {
-		return nil, 0, fmt.Errorf("%w: version %d", errInventory, v)
+		return nil, 0, invError(ReasonVersion, int64(v), "version %d", v)
 	}
 	n := int(r.u16())
 	if r.err != nil {
 		return nil, 0, r.err
 	}
 	if n > maxItems {
-		return nil, 0, fmt.Errorf("%w: %d items", errInventory, n)
+		return nil, 0, invError(ReasonItems, int64(n), "%d items", n)
 	}
 	items = make([]rawItem, 0, n)
 	for i := 0; i < n; i++ {
@@ -109,7 +159,7 @@ func parseInventory(blob []byte) (items []rawItem, skipped int, err error) {
 			return nil, 0, r.err
 		}
 		if flags&^itemKnown != 0 {
-			return nil, 0, fmt.Errorf("%w: item flags %#02x", errInventory, flags)
+			return nil, 0, invError(ReasonFlags, int64(flags), "item flags %#02x", flags)
 		}
 		it := rawItem{stack: 1, quality: 1, durability: float32(dur) / 100, x: int(x), y: int(y)}
 		if flags&itemQuality != 0 {
@@ -142,7 +192,7 @@ func parseInventory(blob []byte) (items []rawItem, skipped int, err error) {
 		items = append(items, it)
 	}
 	if r.p != len(blob) {
-		return nil, 0, fmt.Errorf("%w: %d trailing bytes", errInventory, len(blob)-r.p)
+		return nil, 0, invError(ReasonTrailing, int64(len(blob)-r.p), "%d trailing bytes", len(blob)-r.p)
 	}
 	return items, skipped, nil
 }

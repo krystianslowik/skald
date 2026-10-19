@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -590,7 +591,7 @@ func TestPositions(t *testing.T) {
 		t.Fatalf("got %+v", ev)
 	}
 	b, _ := json.Marshal(ev.Data["players"])
-	if string(b) != `[{"name":"Freya","platform":"steam","x":-5,"z":5,"health":null,"maxHealth":null},{"name":"Ragnar","platform":"xbox","x":10,"z":-20.1,"health":25,"maxHealth":50}]` {
+	if string(b) != `[{"id":"Freya","name":"Freya","platform":"steam","x":-5,"z":5,"health":null,"maxHealth":null},{"id":"Ragnar","name":"Ragnar","platform":"xbox","x":10,"z":-20.1,"health":25,"maxHealth":50}]` {
 		t.Fatalf("players %s", b)
 	}
 	// Unchanged samples are skipped: the next event is the clearing one.
@@ -606,5 +607,100 @@ func TestPositions(t *testing.T) {
 	case ev := <-ch:
 		t.Fatalf("unexpected %+v", ev)
 	case <-time.After(80 * time.Millisecond):
+	}
+}
+
+// Every player list read reports each peer with its name and platform (#19),
+// and SyncPlayers reads it without a map open, only while wanted.
+func TestPlayersReportPeerPlatforms(t *testing.T) {
+	f := &fakePlugin{build: "l-1.0.17"}
+	srv := httptest.NewServer(f)
+	t.Cleanup(srv.Close)
+	got := make(chan []Peer, 64)
+	before := time.Now()
+	var readAt time.Time
+	c := New(Options{URL: srv.URL, Token: testToken, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		OnPlayers: func(at time.Time, p []Peer) PlayerIDs { readAt = at; got <- p; return PlayerIDs{} }})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var wanted atomic.Bool
+	wanted.Store(true)
+	done := make(chan struct{})
+	go func() { c.SyncPlayers(ctx, 10*time.Millisecond, wanted.Load); close(done) }()
+	select {
+	case p := <-got:
+		want := []Peer{{"1234567890123456789", "Ragnar", "xbox", "Xbox_2533274800000001"}, {"42", "Freya", "steam", ""}}
+		if fmt.Sprint(p) != fmt.Sprint(want) {
+			t.Fatalf("peers = %v, want %v", p, want)
+		}
+		if readAt.Before(before) || readAt.After(time.Now()) {
+			t.Fatalf("readAt = %v, not the start of the read", readAt)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SyncPlayers never read the player list")
+	}
+	// Settled: no more reads.
+	wanted.Store(false)
+	time.Sleep(30 * time.Millisecond)
+	for len(got) > 0 {
+		<-got
+	}
+	time.Sleep(60 * time.Millisecond)
+	if n := len(got); n != 0 {
+		t.Fatalf("%d reads while not wanted", n)
+	}
+	cancel()
+	<-done
+}
+
+// Players sharing a name get the tracker's ids, and ids unique within the
+// list for peers the tracker does not know (#23).
+func TestPlayersSharingANameGetIDs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"ok":true,"data":{"time":1,"players":[
+			{"uid":9,"name":"Ragnar","platformId":"Xbox_2533274800000003","hasCharacter":false},
+			{"uid":7,"name":"Ragnar","platformId":"Steam_76561190000000002","hasCharacter":true},
+			{"uid":8,"name":"Ragnar","platformId":"Xbox_2533274800000001","hasCharacter":true}]}}`)
+	}))
+	t.Cleanup(srv.Close)
+	// Peer 9 is listed before the tracker's "Ragnar" (8) would be, and the
+	// tracker knows only 8 and 7. It also lists "Ragnar#3" for a peer newer
+	// than this read.
+	c := New(Options{URL: srv.URL, Token: testToken, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		OnPlayers: func(time.Time, []Peer) PlayerIDs {
+			return PlayerIDs{ByUID: map[string]string{"7": "Ragnar#2", "8": "Ragnar"}, InUse: []string{"Ragnar", "Ragnar#2", "Ragnar#3"}}
+		}})
+	players, err := c.Players(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, p := range players {
+		got = append(got, p.ID+"/"+p.Platform)
+	}
+	if want := []string{"Ragnar/xbox", "Ragnar#2/steam", "Ragnar#4/xbox"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("players = %v, want %v", got, want)
+	}
+}
+
+// A reconnect's old peer the tracker hides is no entry; a peer it names no
+// one for gets an id of its own.
+func TestPeersOfOnePlayerAreOneEntry(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"ok":true,"data":{"time":1,"players":[
+			{"uid":200,"name":"Ragnar","platformId":"Xbox_2533274800000001","hasCharacter":false},
+			{"uid":300,"name":"Ragnar","platformId":"Xbox_2533274800000001","hasCharacter":true,"position":{"x":5,"y":0,"z":6}}]}}`)
+	}))
+	t.Cleanup(srv.Close)
+	c := New(Options{URL: srv.URL, Token: testToken, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		OnPlayers: func(time.Time, []Peer) PlayerIDs {
+			return PlayerIDs{ByUID: map[string]string{"300": "Ragnar"}, Hidden: map[string]bool{"200": true}, InUse: []string{"Ragnar"}}
+		}})
+	players, err := c.Players(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(players) != 1 || players[0].ID != "Ragnar" || !players[0].HasCharacter || players[0].X != 5 {
+		t.Fatalf("players = %+v", players)
 	}
 }

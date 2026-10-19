@@ -157,13 +157,15 @@ func TestTriggers(t *testing.T) {
 		s.LastSaveAt = at(time.Now().UTC())
 		h.Generation, h.Latest = 4, 4
 		h.ContainersUnreadable, h.ContainerReason = 41, "unreadable inventory: version 111"
+		h.ContainerWhy = worldmap.InvReason{Code: worldmap.ReasonVersion, Value: 111}
 	})
 	c.Tick(ctx)
 	sv := c.View().Result
 	if sv.Trigger != TriggerSave || sv.PreviousBuild != "l-1.0.17" || !sv.Updated || sv.AwaitingSave || sv.Status != StatusFail || sv.Generation != 4 {
 		t.Fatalf("after the first save = %+v", sv)
 	}
-	if ch := sv.Check(CheckSave); ch.Reason != "containers_unreadable" || ch.Detail["containersUnreadable"] != 41 || ch.Detail["containerReason"] != "unreadable inventory: version 111" {
+	if ch := sv.Check(CheckSave); ch.Reason != "containers_unreadable" || ch.Detail["containersUnreadable"] != 41 || ch.Detail["containerReason"] != "unreadable inventory: version 111" ||
+		ch.Detail["containerReasonCode"] != "inventory_version" || ch.Detail["containerReasonValue"] != int64(111) {
 		t.Errorf("save = %+v", ch)
 	}
 	c.Tick(ctx)

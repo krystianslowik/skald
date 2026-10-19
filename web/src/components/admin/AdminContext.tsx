@@ -108,7 +108,7 @@ export interface Admin {
   cancelPick(): void;
   toast(ok: boolean, text: string): void;
   /** Players at the fire, for the target pickers. */
-  players: { name: string; platform?: Platform }[];
+  players: { id?: string; name: string; platform?: Platform }[];
   mainBase: { x: number; z: number } | null;
   /** The world's name, which a restore asks to have typed. */
   world: string;

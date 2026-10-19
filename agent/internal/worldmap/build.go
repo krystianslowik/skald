@@ -337,7 +337,8 @@ func (b *Builder) build(gen int) (*Snapshot, *Pieces, *Nature, error) {
 		chunks = append(chunks, e.data)
 	}
 	found := assemble(snap, chunks, b.lastDB2, b.opt.ShowNames)
-	h.ContainersUnreadable, h.ContainerReason = snap.Stats.ContainersUnreadable, containerReason(chunks)
+	h.ContainersUnreadable = snap.Stats.ContainersUnreadable
+	h.ContainerReason, h.ContainerWhy = containerReason(chunks)
 	h.BuiltAt = b.opt.Now().UTC()
 	// Published by Refresh with the snapshot, never for a build that failed to encode.
 	b.next = h

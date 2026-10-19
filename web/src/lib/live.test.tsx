@@ -81,6 +81,20 @@ describe("live positions subscription", () => {
     page.unmount();
   });
 
+  it("takes only the leaving player's marker when another shares the name (#23)", () => {
+    const { page, sock } = connect();
+    const map = renderHook(() => useLivePositions());
+    const two = { type: "positions", t: 1, players: [
+      { id: "Ragnar", name: "Ragnar", platform: "xbox", x: 1, z: 0, health: 1, maxHealth: 1 },
+      { id: "Ragnar#2", name: "Ragnar", platform: "steam", x: 2, z: 0, health: 1, maxHealth: 1 },
+    ] };
+    act(() => sock.push(two));
+    act(() => sock.push({ type: "event", event: { seq: 1, ts: "2026-10-09T20:00:00Z", type: "player_leave", data: { name: "Ragnar", id: "Ragnar#2" } } }));
+    expect(map.result.current.players.map((p) => p.id)).toEqual(["Ragnar"]);
+    map.unmount();
+    page.unmount();
+  });
+
   it("ignores a sample still on its way after the last watcher left", () => {
     const { page, sock } = connect();
     const map = renderHook(() => useLivePositions());

@@ -36,7 +36,7 @@ export function PointSheet({ x, z, onClose }: { x: number; z: number; onClose: (
           ) : (
             <div className="flex flex-wrap gap-2">
               {admin.players.map((p) => (
-                <Chip key={p.name} on={false} disabled={off} onClick={() => void admin.run("teleport", { player: p.name, to: at }, { done: t("admin.player.teleported", { name: p.name, where: here }) })}>
+                <Chip key={p.id ?? p.name} on={false} disabled={off} onClick={() => void admin.run("teleport", { player: p.name, to: at }, { done: t("admin.player.teleported", { name: p.name, where: here }) })}>
                   <PlatformGlyph platform={p.platform} />
                   {p.name}
                 </Chip>

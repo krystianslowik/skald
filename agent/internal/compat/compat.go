@@ -465,7 +465,11 @@ func saveCheck(on bool, h worldmap.Health, pendingSave, behind bool) Check {
 		"metaRead":             !h.MetaUnreadable,
 	}
 	if h.ContainerReason != "" {
+		// The code (and its value) is what the panel and the notifications
+		// translate; the text stays for a code they do not know yet.
 		ch.Detail["containerReason"] = h.ContainerReason
+		ch.Detail["containerReasonCode"] = h.ContainerWhy.Code
+		ch.Detail["containerReasonValue"] = h.ContainerWhy.Value
 	}
 	switch {
 	case !h.Built() && h.Failure == worldmap.FailNoSave:

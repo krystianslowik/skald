@@ -91,24 +91,26 @@ export class Glide {
     let moving = false;
     const seen = new Set<string>();
     for (const p of players) {
-      seen.add(p.name);
-      let tr = this.tracks.get(p.name);
+      const key = p.id ?? p.name;
+      seen.add(key);
+      let tr = this.tracks.get(key);
       if (!tr || reduced || Math.hypot(p.x - tr.x, p.z - tr.z) > SNAP_M) {
-        this.tracks.set(p.name, { x: p.x, z: p.z, vx: 0, vz: 0 });
+        this.tracks.set(key, { x: p.x, z: p.z, vx: 0, vz: 0 });
         continue;
       }
       const sx = springStep(tr.x, tr.vx, p.x, dt, 1.6);
       const sz = springStep(tr.z, tr.vz, p.z, dt, 1.6);
       tr = { x: sx.x, z: sz.x, vx: sx.v, vz: sz.v };
-      this.tracks.set(p.name, tr);
+      this.tracks.set(key, tr);
       if (Math.abs(tr.x - p.x) > 0.05 || Math.abs(tr.z - p.z) > 0.05) moving = true;
     }
     for (const name of [...this.tracks.keys()]) if (!seen.has(name)) this.tracks.delete(name);
     return moving;
   }
 
-  at(name: string): { x: number; z: number } | null {
-    return this.tracks.get(name) ?? null;
+  /** Where a marker is now, by the player's id (its name from older agents). */
+  at(key: string): { x: number; z: number } | null {
+    return this.tracks.get(key) ?? null;
   }
 }
 

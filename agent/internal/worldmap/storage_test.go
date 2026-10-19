@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -394,4 +395,38 @@ func TestRealWorldStorage(t *testing.T) {
 	ck.report(t)
 
 	t.Logf("storage: %v, %d item kinds; graves %d with %d stacks; json %d bytes", kinds, len(totals), len(s.Tombstones), graveItems, len(raw))
+}
+
+// Every refusal has a fixed reason code (and its value) that the web panel
+// and the notifications translate (#152). Renaming a code breaks them.
+func TestInventoryReasonCodes(t *testing.T) {
+	good := encodeInventory([]invItem{{name: "Wood", flags: 0x49, stack: 3}})
+	many := append([]byte{}, good...)
+	binary.LittleEndian.PutUint16(many[4:], 2000)
+	varint := []byte{110, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, itemCrafter, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 0xff}
+	cases := []struct {
+		name string
+		blob []byte
+		want InvReason
+	}{
+		{"new version", append([]byte{111, 0, 0, 0}, good[4:]...), InvReason{ReasonVersion, 111}},
+		{"too many items", many, InvReason{ReasonItems, 2000}},
+		{"unknown flag", encodeInventory([]invItem{{name: "Wood", flags: 0x49 | 0x80, stack: 3}}), InvReason{ReasonFlags, 0xc9}},
+		{"trailing", append(append([]byte{}, good...), 0, 0), InvReason{ReasonTrailing, 2}},
+		{"truncated", good[:len(good)-2], InvReason{Code: ReasonTruncated}},
+		{"bad varint", varint, InvReason{Code: ReasonBadVarint}},
+	}
+	for _, c := range cases {
+		_, _, err := parseInventory(c.blob)
+		if got := reasonOf(err); got != c.want {
+			t.Errorf("%s: reason = %+v (%v), want %+v", c.name, got, err, c.want)
+		}
+	}
+	if got := reasonOf(errors.New("something new")); got != (InvReason{Code: ReasonOther}) {
+		t.Errorf("other = %+v", got)
+	}
+	want := []string{"inventory_version", "inventory_items", "inventory_flags", "inventory_trailing", "truncated", "bad_varint", "other"}
+	if !reflect.DeepEqual(ReasonCodes, want) {
+		t.Errorf("ReasonCodes = %v, want %v", ReasonCodes, want)
+	}
 }

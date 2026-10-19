@@ -34,6 +34,8 @@ type accessList struct {
 }
 
 type accessOnline struct {
+	// ID is the player's id as /state lists it ("Ragnar#2").
+	ID       string `json:"id"`
 	Name     string `json:"name"`
 	Platform string `json:"platform"`
 	Admin    bool   `json:"admin"`
@@ -132,6 +134,7 @@ func (s *Server) accessGet(w http.ResponseWriter, r *http.Request) {
 	for _, p := range s.opt.Tracker.Snapshot().Players {
 		id := d.ids[strings.ToLower(p.Name)]
 		resp.Online = append(resp.Online, accessOnline{
+			ID:       p.ID,
 			Name:     p.Name,
 			Platform: p.Platform,
 			Admin:    onList(resp.Admins.Entries, p.Name, id),
