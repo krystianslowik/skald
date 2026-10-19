@@ -32,6 +32,22 @@ export interface Task {
   doneAt: string | null;
 }
 
+/** Fields an edit may only change from the value it saw: two players claiming a task, moving it on, or changing its list at once. */
+export const GUARDED_FIELDS = ["status", "owner", "materials"] as const;
+export type GuardedField = (typeof GUARDED_FIELDS)[number];
+/** The values an edit started from, for the guarded fields it changes. */
+export type TaskExpect = Partial<Pick<Task, GuardedField>>;
+
+/** Same value, by content (a material list as much as a name). */
+export const sameValue = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+/** The guarded fields an edit changes, as they were before it. */
+export function expectOf(before: Task, diff: TaskInput): TaskExpect {
+  const out: TaskExpect = {};
+  for (const f of GUARDED_FIELDS) if (diff[f] !== undefined) (out as Record<string, unknown>)[f] = before[f];
+  return out;
+}
+
 /** The fields a create or an edit may carry; an edit carries only what changes. */
 export interface TaskInput {
   title?: string;

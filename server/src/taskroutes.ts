@@ -1,7 +1,7 @@
 import type { Context, Hono } from "hono";
 import { RateLimiter } from "./auth";
-import { parseTaskInput, type Task } from "./taskmodel";
-import { GUARDED_FIELDS, type TaskChange, type TaskExpect, type TaskStore } from "./tasks";
+import { GUARDED_FIELDS, parseTaskInput, type Task, type TaskExpect } from "./taskmodel";
+import type { TaskChange, TaskStore } from "./tasks";
 
 /** A task with a full material list and note is about 2 KB; anything far past that is not one. */
 const MAX_BODY = 16 * 1024;

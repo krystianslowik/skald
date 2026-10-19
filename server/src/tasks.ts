@@ -1,11 +1,5 @@
 import { Database } from "bun:sqlite";
-import { TASK_LIMITS, type Task, type TaskInput } from "./taskmodel";
-
-/** Fields an edit may only change from the value it saw: two players claiming a task, moving it on, or changing its list at once. */
-export const GUARDED_FIELDS = ["status", "owner", "materials"] as const;
-export type GuardedField = (typeof GUARDED_FIELDS)[number];
-/** The values an edit started from, for the guarded fields it changes. */
-export type TaskExpect = Partial<Pick<Task, GuardedField>>;
+import { GUARDED_FIELDS, sameValue as same, TASK_LIMITS, type Task, type TaskExpect, type TaskInput } from "./taskmodel";
 
 export type TaskChange =
   | {
@@ -25,8 +19,6 @@ export type TaskEvent = { kind: "put"; task: Task } | { kind: "gone"; id: number
 const SCHEMA_VERSION = 1;
 const SCHEMA_KEY = "tasks.schema";
 
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-
 /**
  * The group's shared tasks, in the panel database, on the history store's
  * connection (one writer for the file, like the push store). Each change goes
@@ -34,6 +26,8 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
  */
 export class TaskStore {
   private db: Database;
+  /** Opened here (a path): closed here. A connection passed in stays the history store's. */
+  private readonly own: boolean;
   private listeners = new Set<(ev: TaskEvent) => void>();
   private cache: Task[] | null = null;
   /** Tasks the saga already has a line for; kept in the row as `logged`, never sent. */
@@ -41,9 +35,12 @@ export class TaskStore {
 
   /** `db`: the history store's connection; a path opens its own (tests). */
   constructor(db: Database | string, private readonly clock: () => number = Date.now) {
+    this.own = typeof db === "string";
     this.db = typeof db === "string" ? new Database(db, { create: true }) : db;
-    if (typeof db === "string") this.db.exec("PRAGMA journal_mode = WAL");
-    this.db.exec("PRAGMA secure_delete = ON");
+    if (this.own) {
+      this.db.exec("PRAGMA journal_mode = WAL");
+      this.db.exec("PRAGMA secure_delete = ON");
+    }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS tasks (
         id   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -112,7 +109,8 @@ export class TaskStore {
     const prev = this.get(id);
     if (!prev) return { ok: false, error: "not_found" };
     for (const f of GUARDED_FIELDS) {
-      if (input[f] !== undefined && expect[f] !== undefined && !same(prev[f], expect[f])) return { ok: false, error: "stale", task: prev };
+      // A change to what it already is (two players making the same move) is no clash.
+      if (input[f] !== undefined && expect[f] !== undefined && !same(prev[f], expect[f]) && !same(prev[f], input[f])) return { ok: false, error: "stale", task: prev };
     }
     const now = new Date(this.clock()).toISOString();
     const next: Task = { ...prev, ...input, id, updatedAt: now, rev: prev.rev + 1 };
@@ -164,6 +162,6 @@ export class TaskStore {
   }
 
   close(): void {
-    this.db.close();
+    if (this.own) this.db.close();
   }
 }

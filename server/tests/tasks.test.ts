@@ -361,6 +361,14 @@ describe("tasks over /live and in the saga", () => {
       spy.mockRestore();
     }
     for (const s of socks) expect(s.tasks()).toEqual(["list:", "put:Forge"]);
+    // Sockets opening between changes share one serialised list.
+    const spy2 = spyOn(JSON, "stringify");
+    try {
+      for (let i = 0; i < 3; i++) live.open(new FakeSocket(liveSocketData(new URL("http://x/live?topics="))));
+      expect(spy2.mock.calls.filter(([v]) => (v as { type?: string })?.type === "tasks")).toHaveLength(1);
+    } finally {
+      spy2.mockRestore();
+    }
   });
 });
 
@@ -377,6 +385,8 @@ describe("conflicts and limits", () => {
     // Two players claiming the same task: the second is told.
     expect(store.update(1, { owner: "Astrid" }, { owner: "" }).ok).toBe(true);
     expect(store.update(1, { owner: "Bjorn" }, { owner: "" })).toMatchObject({ ok: false, error: "stale", task: { owner: "Astrid" } });
+    // Both making the same move is no clash either.
+    expect(store.update(1, { owner: "Astrid" }, { owner: "" }).ok).toBe(true);
     // Someone else's note edit is no conflict for a status change.
     expect(store.update(1, { note: "by the river" }).ok).toBe(true);
     expect(store.update(1, { status: "done" }, { status: "doing" }).ok).toBe(true);
@@ -417,6 +427,9 @@ describe("conflicts and limits", () => {
     store.create({ title: "Forge" });
     expect((history.connection.query("SELECT COUNT(*) AS n FROM tasks").get() as { n: number }).n).toBe(1);
     expect(history.getMeta("tasks.schema")).toBe("1");
+    // The connection stays the history store's.
+    store.close();
+    expect(history.count()).toBe(0);
   });
 
   const app = (over: Partial<Parameters<typeof mountTasks>[1]> = {}) => {

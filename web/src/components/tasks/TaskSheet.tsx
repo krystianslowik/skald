@@ -1,6 +1,6 @@
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { expandRecipe, RECIPE_KINDS, RECIPES, type Recipe } from "@server/recipes";
-import { parseTaskInput, shortfall, TASK_LIMITS, TASK_STATUSES, type TaskInputError } from "@server/taskmodel";
+import { GUARDED_FIELDS, parseTaskInput, sameValue, shortfall, TASK_LIMITS, TASK_STATUSES, type TaskInputError } from "@server/taskmodel";
 import { useI18n } from "../../i18n";
 import { BOSSES } from "../../lib/world";
 import { itemLabel } from "../../lib/storage";
@@ -138,7 +138,7 @@ export default function TaskSheet({
       const now = r.task;
       for (const f of ["title", "owner", "status", "note", "target", "materials"] as const) {
         const mine = f in diff;
-        const clash = mine && (f === "status" || f === "owner" || f === "materials") && JSON.stringify(now[f]) !== JSON.stringify(opened[f]);
+        const clash = mine && (GUARDED_FIELDS as readonly string[]).includes(f) && !sameValue(now[f], opened[f]);
         if (!mine || clash) take(now, f);
       }
       setOpened(now);
@@ -237,7 +237,8 @@ export default function TaskSheet({
         </div>
       }
     >
-      <div className="space-y-5 pb-4 text-sm">
+      {/* Held still while a save is out, so a stale answer cannot overwrite what is typed meanwhile. */}
+      <fieldset disabled={busy} className="min-w-0 space-y-5 pb-4 text-sm">
         <Field label={t("tasks.field.title")} htmlFor={`${ids}-title`} error={fieldError("title")}>
           <input
             id={`${ids}-title`}
@@ -384,7 +385,7 @@ export default function TaskSheet({
         <Field label={t("tasks.field.note")} htmlFor={`${ids}-note`} error={fieldError("note")}>
           <textarea id={`${ids}-note`} value={note} maxLength={TASK_LIMITS.note} rows={3} onChange={(e) => setNote(e.target.value)} placeholder={t("tasks.field.noteHint")} className="field w-full resize-y" />
         </Field>
-      </div>
+      </fieldset>
     </Sheet>
   );
 }

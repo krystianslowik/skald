@@ -213,6 +213,12 @@ describe("task edits", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Too many changes at once. Wait 42 s and try again.");
   });
 
+  it("ignore a single-task change before the first whole list", () => {
+    const board = renderHook(() => useTasks());
+    act(() => putTask(task(4)));
+    expect(board.result.current).toBeNull();
+  });
+
   it("take single-task changes from the socket, and a task listed again lives again", async () => {
     stubFetch([]);
     setTasks([task(1, { title: "Forge" })]);

@@ -88,7 +88,10 @@ export function liveSocket(hub: Hub, tasks?: TaskFeed) {
   // A socket gets the whole list when it opens, then one task per change,
   // serialised once and sent as the same frame to every socket.
   const taskSockets = new Set<LiveSocket>();
+  // The whole list as one frame for opening sockets, made again only after a change.
+  let listFrame: string | null = null;
   tasks?.subscribe((ev) => {
+    listFrame = null;
     const frame = JSON.stringify((ev.kind === "put" ? { type: "task", task: ev.task } : { type: "task_gone", id: ev.id }) satisfies LiveMessage);
     for (const ws of taskSockets) ws.send(frame, true);
   });
@@ -111,7 +114,8 @@ export function liveSocket(hub: Hub, tasks?: TaskFeed) {
       send({ type: "state", state: hub.getState(), online: hub.online });
       ws.data.unsubscribe = hub.subscribe(send, { history: ws.data.history });
       if (tasks) {
-        send({ type: "tasks", tasks: tasks.list() });
+        listFrame ??= JSON.stringify({ type: "tasks", tasks: tasks.list() } satisfies LiveMessage);
+        ws.send(listFrame, true);
         taskSockets.add(ws);
         ws.data.untasks = () => taskSockets.delete(ws);
       }

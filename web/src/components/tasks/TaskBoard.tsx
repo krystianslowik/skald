@@ -48,7 +48,8 @@ const TaskCard = memo(function TaskCard({ task, stock, onOpen, onUnauthorized }:
   const i18n = useI18n();
   const { t } = i18n;
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState<string | null>(null);
+  // Why the last tap failed, as a kind: the words follow the language, and a limit's wait is shown as given.
+  const [failed, setFailed] = useState<null | { kind: "stale" | "failed" } | { kind: "limited"; wait: number }>(null);
   const needs = useMemo(() => (stock ? stillMissing(shortfall(task.materials, stock)) : null), [task.materials, stock]);
   const where = targetLabel(i18n, task);
   const done = task.status === "done";
@@ -59,7 +60,7 @@ const TaskCard = memo(function TaskCard({ task, stock, onOpen, onUnauthorized }:
     const r = await updateTask(task.id, { status: nextStatus(task.status) }, { status: task.status });
     setBusy(false);
     if (!r.ok && r.error === "unauthorized") onUnauthorized?.();
-    setFailed(r.ok || r.error === "unauthorized" ? null : r.error === "stale" ? t("tasks.error.staleCard") : r.error === "rate_limited" ? t("tasks.error.rateLimited", { n: r.retryAfter }) : t("tasks.saveFailed"));
+    setFailed(r.ok || r.error === "unauthorized" ? null : r.error === "stale" ? { kind: "stale" } : r.error === "rate_limited" ? { kind: "limited", wait: r.retryAfter } : { kind: "failed" });
   };
   const meta = [task.owner, where].filter(Boolean).join(" · ");
   return (
@@ -83,7 +84,7 @@ const TaskCard = memo(function TaskCard({ task, stock, onOpen, onUnauthorized }:
         {!done && task.materials.length > 0 && (needs === null ? null : needs.length > 0 ? <MissingLine needs={needs} /> : <span className="mt-1.5 block text-xs font-bold text-select-hi">{t("tasks.allInStores")}</span>)}
         {failed && (
           <span role="alert" className="mt-1 block text-xs text-blood">
-            {failed}
+            {failed.kind === "stale" ? t("tasks.error.staleCard") : failed.kind === "limited" ? t("tasks.error.rateLimited", { n: failed.wait }) : t("tasks.saveFailed")}
           </span>
         )}
       </button>

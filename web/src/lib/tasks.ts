@@ -4,10 +4,11 @@
 // the list reads it once from /api/tasks.
 
 import { useEffect, useSyncExternalStore } from "react";
-import type { Task, TaskInput, TaskInputError } from "@server/taskmodel";
+import type { Task, TaskExpect, TaskInput, TaskInputError } from "@server/taskmodel";
 import { Unauthorized } from "./api";
 
-export type { Task, TaskInput, TaskStatus, TaskTarget, TaskMaterial } from "@server/taskmodel";
+export type { Task, TaskExpect, TaskInput, TaskStatus, TaskTarget, TaskMaterial } from "@server/taskmodel";
+export { expectOf } from "@server/taskmodel";
 
 let current: Task[] | null = null;
 /** Bumped by every list from the socket: a read that started before one is older than it. */
@@ -34,6 +35,8 @@ export function setTasks(next: Task[]): void {
 
 /** One task added or changed, from /live. An older copy than the one shown is ignored. */
 export function putTask(task: Task): void {
+  // Before the first whole list there is nothing to change: that list (or the read) brings it.
+  if (current === null) return;
   generation += 1;
   deleted.delete(task.id);
   const list = current ?? [];
@@ -44,6 +47,7 @@ export function putTask(task: Task): void {
 
 /** One task deleted, from /live. */
 export function dropTask(id: number): void {
+  if (current === null) return;
   generation += 1;
   deleted.add(id);
   if (current?.some((t) => t.id === id)) publish(current.filter((t) => t.id !== id));
@@ -139,8 +143,6 @@ export async function createTask(input: TaskInput): Promise<TaskResult> {
   return r;
 }
 
-/** What an edit saw of the guarded fields it changes; a mismatch on the server makes it `stale`. */
-export type TaskExpect = Partial<Pick<Task, "status" | "owner" | "materials">>;
 
 /**
  * `expect`: the values the edit started from, for the status, owner and
@@ -154,14 +156,6 @@ export async function updateTask(id: number, input: TaskInput, expect?: TaskExpe
   return r;
 }
 
-/** The guarded fields an edit changes, as they were before it. */
-export function expectOf(before: Task, diff: TaskInput): TaskExpect {
-  const out: TaskExpect = {};
-  if (diff.status !== undefined) out.status = before.status;
-  if (diff.owner !== undefined) out.owner = before.owner;
-  if (diff.materials !== undefined) out.materials = before.materials;
-  return out;
-}
 
 export async function deleteTask(id: number): Promise<TaskResult> {
   const r = await send("DELETE", `/api/tasks/${id}`);
