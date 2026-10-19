@@ -1,7 +1,7 @@
 import type { Context, Hono } from "hono";
 import { RateLimiter } from "./auth";
 import { parseTaskInput, type Task } from "./taskmodel";
-import type { TaskChange, TaskStore } from "./tasks";
+import { GUARDED_FIELDS, type TaskChange, type TaskExpect, type TaskStore } from "./tasks";
 
 /** A task with a full material list and note is about 2 KB; anything far past that is not one. */
 const MAX_BODY = 16 * 1024;
@@ -15,12 +15,6 @@ export interface TaskRoutesDeps {
   /** Who a write counts against (the client address); one shared bucket without it. */
   clientKey?: (c: Context) => string;
 }
-
-/** The database stayed locked past the connection's short wait. */
-const isBusy = (e: unknown) => {
-  const x = e as { code?: unknown; message?: unknown } | null;
-  return x?.code === "SQLITE_BUSY" || (typeof x?.message === "string" && /database is locked|SQLITE_BUSY/.test(x.message));
-};
 
 /** A JSON object body, or the 4xx to answer. JSON only: a cross-site form cannot send it without a preflight. */
 async function jsonBody(c: Context): Promise<unknown | Response> {
@@ -62,15 +56,6 @@ export function mountTasks(app: Hono, deps: TaskRoutesDeps): void {
     const wait = limiter.hit(`tasks:${deps.clientKey?.(c) ?? "all"}`);
     return wait > 0 ? c.json({ ok: false, error: "rate_limited", retryAfter: wait }, 429, { "Retry-After": String(wait) }) : null;
   };
-  /** Runs a store write; a database still locked after its short wait is a 503 to retry, not a 500. */
-  const write = <T>(c: Context, fn: () => T): T | Response => {
-    try {
-      return fn();
-    } catch (e) {
-      if (isBusy(e)) return c.json({ ok: false, error: "busy" }, 503, { "Retry-After": "1" });
-      throw e;
-    }
-  };
   const changed = (c: Context, res: TaskChange, created = false) => {
     if (!res.ok) {
       if (res.error === "stale") return c.json({ ok: false, error: "stale", task: res.task }, 409);
@@ -92,8 +77,7 @@ export function mountTasks(app: Hono, deps: TaskRoutesDeps): void {
     if (!input.ok) return c.json({ ok: false, error: "invalid", field: input.error }, 400);
     const stop = limited(c);
     if (stop) return stop;
-    const res = write(c, () => deps.store.create(input.value));
-    return res instanceof Response ? res : changed(c, res, true);
+    return changed(c, deps.store.create(input.value), true);
   });
 
   app.patch("/api/tasks/:id", async (c) => {
@@ -103,12 +87,18 @@ export function mountTasks(app: Hono, deps: TaskRoutesDeps): void {
     if (body instanceof Response) return body;
     const input = parseTaskInput(body, true);
     if (!input.ok) return c.json({ ok: false, error: "invalid", field: input.error }, 400);
-    const rev = (body as { rev?: unknown }).rev;
-    if (rev !== undefined && !(typeof rev === "number" && Number.isInteger(rev) && rev >= 0)) return c.json({ ok: false, error: "invalid", field: "body" }, 400);
+    // `expect`: what the page saw of the guarded fields it changes; a mismatch is a 409 with the current task.
+    const rawExpect = (body as { expect?: unknown }).expect;
+    let expect: TaskExpect = {};
+    if (rawExpect !== undefined) {
+      const picked = typeof rawExpect === "object" && rawExpect !== null ? Object.fromEntries(GUARDED_FIELDS.flatMap((f) => (f in rawExpect ? [[f, (rawExpect as Record<string, unknown>)[f]]] : []))) : null;
+      const parsed = picked ? parseTaskInput(picked, true) : null;
+      if (!parsed?.ok) return c.json({ ok: false, error: "invalid", field: "body" }, 400);
+      expect = parsed.value as TaskExpect;
+    }
     const stop = limited(c);
     if (stop) return stop;
-    const res = write(c, () => deps.store.update(id, input.value, rev as number | undefined));
-    return res instanceof Response ? res : changed(c, res);
+    return changed(c, deps.store.update(id, input.value, expect));
   });
 
   app.delete("/api/tasks/:id", (c) => {
@@ -116,9 +106,7 @@ export function mountTasks(app: Hono, deps: TaskRoutesDeps): void {
     if (id === null) return c.json({ ok: false, error: "not_found" }, 404);
     const stop = limited(c);
     if (stop) return stop;
-    const gone = write(c, () => deps.store.remove(id));
-    if (gone instanceof Response) return gone;
-    if (!gone) return c.json({ ok: false, error: "not_found" }, 404);
+    if (!deps.store.remove(id)) return c.json({ ok: false, error: "not_found" }, 404);
     c.header("Cache-Control", "no-store");
     return c.json({ ok: true });
   });

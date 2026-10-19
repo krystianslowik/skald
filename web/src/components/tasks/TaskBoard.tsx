@@ -48,7 +48,7 @@ const TaskCard = memo(function TaskCard({ task, stock, onOpen, onUnauthorized }:
   const i18n = useI18n();
   const { t } = i18n;
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState<null | "stale" | "failed">(null);
+  const [failed, setFailed] = useState<string | null>(null);
   const needs = useMemo(() => (stock ? stillMissing(shortfall(task.materials, stock)) : null), [task.materials, stock]);
   const where = targetLabel(i18n, task);
   const done = task.status === "done";
@@ -56,10 +56,10 @@ const TaskCard = memo(function TaskCard({ task, stock, onOpen, onUnauthorized }:
     if (busy) return;
     navigator.vibrate?.(6);
     setBusy(true);
-    const r = await updateTask(task.id, { status: nextStatus(task.status) }, task.rev);
+    const r = await updateTask(task.id, { status: nextStatus(task.status) }, { status: task.status });
     setBusy(false);
     if (!r.ok && r.error === "unauthorized") onUnauthorized?.();
-    setFailed(r.ok || r.error === "unauthorized" ? null : r.error === "stale" ? "stale" : "failed");
+    setFailed(r.ok || r.error === "unauthorized" ? null : r.error === "stale" ? t("tasks.error.staleCard") : r.error === "rate_limited" ? t("tasks.error.rateLimited", { n: r.retryAfter }) : t("tasks.saveFailed"));
   };
   const meta = [task.owner, where].filter(Boolean).join(" · ");
   return (
@@ -83,7 +83,7 @@ const TaskCard = memo(function TaskCard({ task, stock, onOpen, onUnauthorized }:
         {!done && task.materials.length > 0 && (needs === null ? null : needs.length > 0 ? <MissingLine needs={needs} /> : <span className="mt-1.5 block text-xs font-bold text-select-hi">{t("tasks.allInStores")}</span>)}
         {failed && (
           <span role="alert" className="mt-1 block text-xs text-blood">
-            {failed === "stale" ? t("tasks.error.staleCard") : t("tasks.saveFailed")}
+            {failed}
           </span>
         )}
       </button>

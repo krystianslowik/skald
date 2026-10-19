@@ -1,5 +1,6 @@
 import type { Hub } from "./hub";
 import type { Task } from "./taskmodel";
+import type { TaskEvent } from "./tasks";
 import type { AgentState, LiveMessage, LiveWireMessage } from "./types";
 
 /**
@@ -76,21 +77,20 @@ export function wire(m: LiveMessage): LiveWireMessage {
 /** The shared tasks, as the socket needs them: the list now and every change. */
 export interface TaskFeed {
   list(): Task[];
-  subscribe(fn: (tasks: Task[]) => void): () => void;
+  subscribe(fn: (ev: TaskEvent) => void): () => void;
 }
 
 /**
  * `tasks`: every socket gets the whole task list when it opens (a page back
- * from a dropped link is whole again) and after every change.
+ * from a dropped link is whole again), then each change as one task.
  */
 export function liveSocket(hub: Hub, tasks?: TaskFeed) {
-  // The task list is serialised once per change and the same frame goes to every socket.
+  // A socket gets the whole list when it opens, then one task per change,
+  // serialised once and sent as the same frame to every socket.
   const taskSockets = new Set<LiveSocket>();
-  let taskFrame: string | null = null;
-  const frameOf = (list: Task[]) => JSON.stringify({ type: "tasks", tasks: list } satisfies LiveMessage);
-  tasks?.subscribe((list) => {
-    taskFrame = frameOf(list);
-    for (const ws of taskSockets) ws.send(taskFrame, true);
+  tasks?.subscribe((ev) => {
+    const frame = JSON.stringify((ev.kind === "put" ? { type: "task", task: ev.task } : { type: "task_gone", id: ev.id }) satisfies LiveMessage);
+    for (const ws of taskSockets) ws.send(frame, true);
   });
   const watch = (ws: LiveSocket, on: boolean) => {
     if (on && !ws.data.unwatch && ws.data.send) ws.data.unwatch = hub.watchPositions(ws.data.send);
@@ -111,8 +111,7 @@ export function liveSocket(hub: Hub, tasks?: TaskFeed) {
       send({ type: "state", state: hub.getState(), online: hub.online });
       ws.data.unsubscribe = hub.subscribe(send, { history: ws.data.history });
       if (tasks) {
-        taskFrame ??= frameOf(tasks.list());
-        ws.send(taskFrame, true);
+        send({ type: "tasks", tasks: tasks.list() });
         taskSockets.add(ws);
         ws.data.untasks = () => taskSockets.delete(ws);
       }

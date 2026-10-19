@@ -316,8 +316,8 @@ export class Hub {
 
   /** The epoch of events the panel makes itself, apart from every agent's. */
   static readonly LOCAL_EPOCH = "skald-web";
-  /** Task lines kept in the history: enough for the saga, never enough to crowd out the game's own events. */
-  static readonly TASK_LINES = 50;
+  /** Task lines kept in the history: the latest few, so they take at most a tenth of the saga's 200 lines. */
+  static readonly TASK_LINES = 20;
   /** The last seq given to such an event; null until read from the store. */
   private localSeq: number | null = null;
 

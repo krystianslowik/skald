@@ -117,7 +117,7 @@ describe("TaskStore", () => {
     let t = Date.parse("2026-10-19T10:00:00Z");
     const store = new TaskStore(":memory:", () => t);
     const seen: Task[][] = [];
-    store.subscribe((list) => seen.push(list));
+    store.subscribe(() => seen.push(store.list()));
 
     const made = store.create({ title: "Forge", owner: "Ragnar" });
     expect(made.ok && made.task).toMatchObject({ id: 1, title: "Forge", owner: "Ragnar", status: "todo", note: "", target: null, materials: [], doneAt: null });
@@ -273,11 +273,11 @@ describe("tasks over /live and in the saga", () => {
       this.sent.push(JSON.parse(s) as LiveWireMessage);
     }
     tasks() {
-      return this.sent.flatMap((m) => (m.type === "tasks" ? [m.tasks.map((t) => t.title)] : []));
+      return this.sent.flatMap((m) => (m.type === "tasks" ? [`list:${m.tasks.map((t) => t.title).join(",")}`] : m.type === "task" ? [`put:${m.task.title}`] : m.type === "task_gone" ? [`gone:${m.id}`] : []));
     }
   }
 
-  it("sends the list when a socket opens and after every change, to every socket", () => {
+  it("sends the list when a socket opens, then each change as one task, to every socket", () => {
     const hub = new Hub({} as AgentSource, new HistoryStore(":memory:"));
     const store = new TaskStore(":memory:");
     store.create({ title: "Forge" });
@@ -289,8 +289,8 @@ describe("tasks over /live and in the saga", () => {
     store.create({ title: "Smelter" });
     live.close(b);
     store.remove(1);
-    expect(a.tasks()).toEqual([["Forge"], ["Forge", "Smelter"], ["Smelter"]]);
-    expect(b.tasks()).toEqual([["Forge"], ["Forge", "Smelter"]]);
+    expect(a.tasks()).toEqual(["list:Forge", "put:Smelter", "gone:1"]);
+    expect(b.tasks()).toEqual(["list:Forge", "put:Smelter"]);
   });
 
   it("stores a finished task as a saga event apart from the agent's sequence", () => {
@@ -346,7 +346,7 @@ describe("tasks over /live and in the saga", () => {
     expect(events.find((e) => e.type === "task")!.data.title).toBe(`t${Hub.TASK_LINES + 4}`);
   });
 
-  it("serialises the list once per change, whatever the number of sockets", () => {
+  it("serialises a change once, whatever the number of sockets", () => {
     const hub = new Hub({} as AgentSource, new HistoryStore(":memory:"));
     const store = new TaskStore(":memory:");
     const live = liveSocket(hub, store);
@@ -355,28 +355,50 @@ describe("tasks over /live and in the saga", () => {
     const spy = spyOn(JSON, "stringify");
     try {
       store.create({ title: "Forge" });
-      const lists = spy.mock.calls.filter(([v]) => (v as { type?: string })?.type === "tasks");
-      expect(lists).toHaveLength(1);
+      const frames = spy.mock.calls.filter(([v]) => (v as { type?: string })?.type === "task");
+      expect(frames).toHaveLength(1);
     } finally {
       spy.mockRestore();
     }
-    for (const s of socks) expect(s.tasks().at(-1)).toEqual(["Forge"]);
+    for (const s of socks) expect(s.tasks()).toEqual(["list:", "put:Forge"]);
   });
 });
 
 describe("conflicts and limits", () => {
-  it("counts revisions and refuses a stale status or material change, not a stale note", () => {
+  it("refuses a status, owner or material change made on a value that moved on, and nothing else", () => {
     const store = new TaskStore(":memory:");
     store.create({ title: "Forge", materials: [{ item: "Copper", qty: 6 }] });
     expect(store.get(1)!.rev).toBe(0);
-    expect(store.update(1, { status: "doing" }, 0).ok).toBe(true);
+    expect(store.update(1, { status: "doing" }, { status: "todo" }).ok).toBe(true);
     expect(store.get(1)!.rev).toBe(1);
-    // A page that still holds rev 0:
-    const stale = store.update(1, { status: "done" }, 0);
-    expect(stale).toMatchObject({ ok: false, error: "stale", task: { rev: 1, status: "doing" } });
-    expect(store.update(1, { materials: [] }, 0)).toMatchObject({ ok: false, error: "stale" });
-    expect(store.update(1, { note: "by the river" }, 0).ok).toBe(true);
-    expect(store.update(1, { status: "done" }, 2).ok).toBe(true);
+    // A page that still saw "todo":
+    expect(store.update(1, { status: "done" }, { status: "todo" })).toMatchObject({ ok: false, error: "stale", task: { rev: 1, status: "doing" } });
+    expect(store.update(1, { materials: [] }, { materials: [{ item: "Copper", qty: 5 }] })).toMatchObject({ ok: false, error: "stale" });
+    // Two players claiming the same task: the second is told.
+    expect(store.update(1, { owner: "Astrid" }, { owner: "" }).ok).toBe(true);
+    expect(store.update(1, { owner: "Bjorn" }, { owner: "" })).toMatchObject({ ok: false, error: "stale", task: { owner: "Astrid" } });
+    // Someone else's note edit is no conflict for a status change.
+    expect(store.update(1, { note: "by the river" }).ok).toBe(true);
+    expect(store.update(1, { status: "done" }, { status: "doing" }).ok).toBe(true);
+  });
+
+  it("does not lose a saga line when the write fails", () => {
+    const store = new TaskStore(":memory:");
+    store.create({ title: "Forge" });
+    const db = (store as unknown as { db: { query: (sql: string) => unknown } }).db;
+    const real = db.query.bind(db);
+    let fail = true;
+    const spy = spyOn(db, "query").mockImplementation((sql: string) => {
+      if (fail && sql.startsWith("UPDATE")) {
+        fail = false;
+        throw Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+      }
+      return real(sql);
+    });
+    expect(() => store.update(1, { status: "done" })).toThrow();
+    const retry = store.update(1, { status: "done" });
+    expect(retry.ok && retry.completed).toBe(true);
+    spy.mockRestore();
   });
 
   it("gives no saga line for a task created already done", () => {
@@ -388,9 +410,13 @@ describe("conflicts and limits", () => {
     expect(again.ok && again.completed).toBe(false);
   });
 
-  it("keeps a schema version for the table", () => {
-    const store = new TaskStore(":memory:");
+  it("keeps a schema version for the table, and shares the history store's connection", () => {
+    const history = new HistoryStore(":memory:");
+    const store = new TaskStore(history.connection);
     expect(store.schemaVersion()).toBe(1);
+    store.create({ title: "Forge" });
+    expect((history.connection.query("SELECT COUNT(*) AS n FROM tasks").get() as { n: number }).n).toBe(1);
+    expect(history.getMeta("tasks.schema")).toBe("1");
   });
 
   const app = (over: Partial<Parameters<typeof mountTasks>[1]> = {}) => {
@@ -405,11 +431,12 @@ describe("conflicts and limits", () => {
   it("answers 409 with the current task when an edit is stale", async () => {
     const { send } = app();
     await send("POST", "/api/tasks", { title: "Forge" });
-    await send("PATCH", "/api/tasks/1", { status: "doing", rev: 0 });
-    const res = await send("PATCH", "/api/tasks/1", { status: "done", rev: 0 });
+    await send("PATCH", "/api/tasks/1", { status: "doing", expect: { status: "todo" } });
+    const res = await send("PATCH", "/api/tasks/1", { status: "done", expect: { status: "todo" } });
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ ok: false, error: "stale", task: { status: "doing", rev: 1 } });
-    expect((await send("PATCH", "/api/tasks/1", { status: "done", rev: "x" })).status).toBe(400);
+    expect((await send("PATCH", "/api/tasks/1", { status: "done", expect: { status: "later" } })).status).toBe(400);
+    expect((await send("PATCH", "/api/tasks/1", { status: "done", expect: "x" })).status).toBe(400);
   });
 
   it("limits writes per client", async () => {
@@ -420,16 +447,6 @@ describe("conflicts and limits", () => {
     expect(res.headers.get("Retry-After")).toBe("60");
     // Reading is never limited.
     expect((await send("GET", "/api/tasks")).status).toBe(200);
-  });
-
-  it("answers 503 when the database is busy", async () => {
-    const { store, send } = app();
-    spyOn(store, "create").mockImplementation(() => {
-      throw Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
-    });
-    const res = await send("POST", "/api/tasks", { title: "Forge" });
-    expect(res.status).toBe(503);
-    expect(res.headers.get("Retry-After")).toBe("1");
   });
 });
 

@@ -484,8 +484,12 @@ export type LiveMessage =
    */
   | { type: "state"; state: AgentState; online: boolean; changed?: StateSlice[] }
   | { type: "positions"; t: number; players: LivePlayer[] }
-  /** Every shared task, after any change to one of them. */
-  | { type: "tasks"; tasks: Task[] };
+  /** Every shared task: sent when a socket opens. */
+  | { type: "tasks"; tasks: Task[] }
+  /** One shared task added or changed. */
+  | { type: "task"; task: Task }
+  /** One shared task deleted. */
+  | { type: "task_gone"; id: number };
 
 /** A top-level part of the agent's state; `now` is not one (it moves on every read). */
 export type StateSlice = Exclude<keyof AgentState, "now">;

@@ -797,7 +797,8 @@ start. The NetworkPolicy needs no change: the plugin is loopback only.
   when something in the state changed, as a `{"type":"state","partial":true}`
   message with just the top-level parts that did (the first state on a socket
   is always whole). The shared tasks go out whole as `{"type":"tasks"}` when
-  a socket opens and after every change to one of them. Frames are compressed (permessage-deflate) for every
+  a socket opens, then one at a time as `{"type":"task"}` (added or changed)
+  and `{"type":"task_gone","id":...}`. Frames are compressed (permessage-deflate) for every
   browser that asks, which all current ones do; a reverse proxy passes this
   on without extra settings.
 
@@ -816,7 +817,7 @@ behind your access layer, or set an admin password:
   group, so anyone signed in adds, edits, finishes and deletes them
   (`/api/tasks`, at most 30 changes a minute from one address), and the
   first time a task is finished it adds a "Task done" line to the saga (the
-  newest 50 such lines are kept).
+  newest 20 such lines are kept).
 - Admin commands, restarts, backups, updates and saving or applying server
   settings answer 403 until the browser unlocks an admin session with the
   admin password (`POST /api/admin/unlock`, rate-limited like the login: 5

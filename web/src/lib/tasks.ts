@@ -22,12 +22,31 @@ function publish(next: Task[]): void {
 /** Tasks the socket has reported gone: no late answer to this page's own write brings one back. */
 const deleted = new Set<number>();
 
-/** The whole list, as the server sent it over /live. */
+/** The whole list, as the server sent it over /live when the socket opened. */
 export function setTasks(next: Task[]): void {
   generation += 1;
   const ids = new Set(next.map((t) => t.id));
   for (const t of current ?? []) if (!ids.has(t.id)) deleted.add(t.id);
+  // Listed again (a frame from before a create, then a newer one): it lives.
+  for (const id of ids) deleted.delete(id);
   publish(next);
+}
+
+/** One task added or changed, from /live. An older copy than the one shown is ignored. */
+export function putTask(task: Task): void {
+  generation += 1;
+  deleted.delete(task.id);
+  const list = current ?? [];
+  const have = list.find((t) => t.id === task.id);
+  if (have && have.rev > task.rev) return;
+  publish(have ? list.map((t) => (t.id === task.id ? task : t)) : [...list, task]);
+}
+
+/** One task deleted, from /live. */
+export function dropTask(id: number): void {
+  generation += 1;
+  deleted.add(id);
+  if (current?.some((t) => t.id === id)) publish(current.filter((t) => t.id !== id));
 }
 
 const subscribe = (f: () => void) => {
@@ -82,7 +101,9 @@ export type TaskResult =
   | { ok: true; task?: Task }
   /** `stale`: someone changed the task first; `task` is the server's copy now. */
   | { ok: false; error: "stale"; task: Task }
-  | { ok: false; error: "unauthorized" | "invalid" | "too_many" | "not_found" | "busy" | "failed"; field?: TaskInputError };
+  /** Too many changes from this address: wait `retryAfter` seconds. */
+  | { ok: false; error: "rate_limited"; retryAfter: number }
+  | { ok: false; error: "unauthorized" | "invalid" | "too_many" | "not_found" | "failed"; field?: TaskInputError };
 
 async function send(method: string, path: string, body?: unknown): Promise<TaskResult> {
   let res: Response;
@@ -97,7 +118,7 @@ async function send(method: string, path: string, body?: unknown): Promise<TaskR
     return { ok: false, error: "failed" };
   }
   if (res.status === 401) return { ok: false, error: "unauthorized" };
-  let data: { task?: Task; error?: string; field?: TaskInputError } = {};
+  let data: { task?: Task; error?: string; field?: TaskInputError; retryAfter?: number } = {};
   try {
     data = (await res.json()) as typeof data;
   } catch {
@@ -107,7 +128,7 @@ async function send(method: string, path: string, body?: unknown): Promise<TaskR
   if (res.status === 400 && data.error === "invalid") return { ok: false, error: "invalid", field: data.field };
   if (res.status === 409 && data.error === "stale" && data.task) return { ok: false, error: "stale", task: data.task };
   if (res.status === 409) return { ok: false, error: "too_many" };
-  if (res.status === 429 || res.status === 503) return { ok: false, error: "busy" };
+  if (res.status === 429) return { ok: false, error: "rate_limited", retryAfter: Number(res.headers.get("Retry-After")) || data.retryAfter || 60 };
   if (res.status === 404) return { ok: false, error: "not_found" };
   return { ok: false, error: "failed" };
 }
@@ -118,16 +139,28 @@ export async function createTask(input: TaskInput): Promise<TaskResult> {
   return r;
 }
 
+/** What an edit saw of the guarded fields it changes; a mismatch on the server makes it `stale`. */
+export type TaskExpect = Partial<Pick<Task, "status" | "owner" | "materials">>;
+
 /**
- * `rev`: the revision the edit started from. A status or material change
- * someone else overtook comes back `stale`, and the list takes the server's
- * copy at once.
+ * `expect`: the values the edit started from, for the status, owner and
+ * materials it changes. If someone changed one of those first, the answer is
+ * `stale` and the list takes the server's copy at once.
  */
-export async function updateTask(id: number, input: TaskInput, rev?: number): Promise<TaskResult> {
-  const r = await send("PATCH", `/api/tasks/${id}`, rev === undefined ? input : { ...input, rev });
+export async function updateTask(id: number, input: TaskInput, expect?: TaskExpect): Promise<TaskResult> {
+  const r = await send("PATCH", `/api/tasks/${id}`, expect && Object.keys(expect).length > 0 ? { ...input, expect } : input);
   if (r.ok && r.task) upsert(r.task, false);
   else if (!r.ok && r.error === "stale") upsert(r.task, false);
   return r;
+}
+
+/** The guarded fields an edit changes, as they were before it. */
+export function expectOf(before: Task, diff: TaskInput): TaskExpect {
+  const out: TaskExpect = {};
+  if (diff.status !== undefined) out.status = before.status;
+  if (diff.owner !== undefined) out.owner = before.owner;
+  if (diff.materials !== undefined) out.materials = before.materials;
+  return out;
 }
 
 export async function deleteTask(id: number): Promise<TaskResult> {

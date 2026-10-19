@@ -209,6 +209,9 @@ describe("shared tasks over the socket", () => {
     const forge = { id: 1, title: "Forge", owner: "Astrid", status: "todo", note: "", target: null, materials: [], createdAt: "2026-10-19T10:00:00Z", updatedAt: "2026-10-19T10:00:00Z", doneAt: null };
     act(() => sock.push({ type: "tasks", tasks: [forge] }));
     expect(board.result.current?.map((t) => t.title)).toEqual(["Forge"]);
+    act(() => sock.push({ type: "task", task: { ...forge, id: 2, title: "Smelter", rev: 0 } }));
+    act(() => sock.push({ type: "task_gone", id: 1 }));
+    expect(board.result.current?.map((t) => t.title)).toEqual(["Smelter"]);
     act(() => sock.push({ type: "tasks", tasks: [] }));
     expect(board.result.current).toEqual([]);
     board.unmount();

@@ -4,7 +4,7 @@ import type { AgentEvent, ApiState, LiveWireMessage, LogLine } from "../types";
 import { getLogs, getState, Unauthorized } from "./api";
 import { applyEvent, playerKey } from "./apply";
 import { getLivePositions, setLivePositions, setPositionsSink, watchingPositions } from "./live";
-import { setTasks } from "./tasks";
+import { dropTask, putTask, setTasks } from "./tasks";
 
 const MAX_LOGS = 1500;
 /** Hidden at least this long, the page reads state and the log tail again on return. */
@@ -268,6 +268,10 @@ export function useValheim(onUnauthorized: () => void): Valheim {
           if (watchingPositions()) setLivePositions({ t: msg.t, players: msg.players });
         } else if (msg.type === "tasks") {
           setTasks(msg.tasks);
+        } else if (msg.type === "task") {
+          putTask(msg.task);
+        } else if (msg.type === "task_gone") {
+          dropTask(msg.id);
         } else if (msg.type === "state") {
           // Newer than a /api/state read still on its way, which must not undo
           // it: the hub does not send these slices again.

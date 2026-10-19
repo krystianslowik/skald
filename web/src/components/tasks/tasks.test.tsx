@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../i18n";
-import { createTask, resetTasks, setTasks, updateTask, useTasks, type Task } from "../../lib/tasks";
+import { createTask, dropTask, putTask, resetTasks, setTasks, updateTask, useTasks, type Task } from "../../lib/tasks";
 import { renderHook } from "@testing-library/react";
 import type { AgentEvent } from "../../types";
 import { Saga } from "../Saga";
@@ -51,7 +51,7 @@ function stubFetch(containers: ReturnType<typeof chest>[] | null, status = 200) 
       if (url === "/api/tasks" && method === "GET") return Response.json({ tasks: [] });
       if (url === "/api/tasks" && method === "POST") return Response.json({ ok: true, task: task(nextId++, { ...(body as Partial<Task>), updatedAt: "2026-10-19T11:00:00.000Z" }) }, { status: 201 });
       const m = /^\/api\/tasks\/(\d+)$/.exec(url);
-      if (m && method === "PATCH") return Response.json({ ok: true, task: task(Number(m[1]), { ...(body as Partial<Task>), updatedAt: "2026-10-19T11:00:00.000Z" }) });
+      if (m && method === "PATCH") return Response.json({ ok: true, task: task(Number(m[1]), { ...(body as Partial<Task>), updatedAt: "2026-10-19T11:00:00.000Z", rev: 99 }) });
       if (m && method === "DELETE") return Response.json({ ok: true });
       return new Response("{}", { status: 500 });
     }),
@@ -84,7 +84,7 @@ describe("task board", () => {
     inLocale(<TaskBoard saveKey="a" players={[]} />);
     expect(screen.queryByText("Old one")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Start Task 1" }));
-    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")).toEqual({ method: "PATCH", url: "/api/tasks/1", body: { status: "doing", rev: 0 } }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")).toEqual({ method: "PATCH", url: "/api/tasks/1", body: { status: "doing", expect: { status: "todo" } } }));
     expect(await screen.findByRole("button", { name: "Mark Task 1 done" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Done (1)" }));
     expect(screen.getByText("Old one")).toBeInTheDocument();
@@ -149,7 +149,7 @@ describe("task edits", () => {
     const sheet = await screen.findByRole("dialog");
     fireEvent.change(within(sheet).getByLabelText("Note"), { target: { value: "by the river, north bank" } });
     fireEvent.click(within(sheet).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")).toEqual({ method: "PATCH", url: "/api/tasks/5", body: { note: "by the river, north bank", rev: 0 } }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")).toEqual({ method: "PATCH", url: "/api/tasks/5", body: { note: "by the river, north bank" } }));
   });
 
   it("are measured against the task as it was opened, not the copy the socket brings meanwhile", async () => {
@@ -162,16 +162,21 @@ describe("task edits", () => {
     act(() => setTasks([task(6, { title: "Smelter", status: "done", materials: [{ item: "Stone", qty: 60 }], rev: 1 })]));
     fireEvent.change(within(sheet).getByLabelText("Note"), { target: { value: "behind the longhouse" } });
     fireEvent.click(within(sheet).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ note: "behind the longhouse", rev: 0 }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ note: "behind the longhouse" }));
   });
 
-  it("show the newer copy and say so when the server calls a status change stale", async () => {
-    const newer = task(8, { title: "Karve", status: "done", rev: 3, materials: [{ item: "Resin", qty: 20 }] });
+  it("on a stale answer move onto the newer copy, keeping only this page's own changes that did not clash", async () => {
+    // Bjorn renamed it and finished it, with a new list, before this save landed.
+    const newer = task(8, { title: "Karve 2", status: "done", rev: 3, materials: [{ item: "Resin", qty: 20 }] });
+    const bodies: unknown[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         if (url === "/api/storage") return Response.json({ generation: 1, savedAt: "", showNames: false, containers: [] });
-        if (init?.method === "PATCH") return Response.json({ ok: false, error: "stale", task: newer }, { status: 409 });
+        if (init?.method === "PATCH") {
+          bodies.push(JSON.parse(String(init.body)));
+          return bodies.length === 1 ? Response.json({ ok: false, error: "stale", task: newer }, { status: 409 }) : Response.json({ ok: true, task: { ...newer, rev: 4 } });
+        }
         return Response.json({ tasks: [] });
       }),
     );
@@ -180,10 +185,50 @@ describe("task edits", () => {
     fireEvent.click(screen.getByText("Karve"));
     const sheet = await screen.findByRole("dialog");
     fireEvent.click(within(sheet).getByRole("button", { name: /Doing/ }));
+    fireEvent.change(within(sheet).getByLabelText("Note"), { target: { value: "keel first" } });
     fireEvent.click(within(sheet).getByRole("button", { name: "Save" }));
     expect(await within(sheet).findByText(/Someone changed this task first/)).toBeInTheDocument();
+    expect(bodies[0]).toEqual({ status: "doing", note: "keel first", expect: { status: "todo" } });
+    // Their status, list and name; my note.
     expect(within(sheet).getByRole("button", { name: /^Done/ })).toHaveAttribute("aria-pressed", "true");
     expect(within(sheet).getByText("Resin")).toBeInTheDocument();
+    expect(within(sheet).getByLabelText("What")).toHaveValue("Karve 2");
+    expect(within(sheet).getByLabelText("Note")).toHaveValue("keel first");
+    // Saving again sends only the note: the rename is not undone.
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(bodies[1]).toEqual({ note: "keel first" }));
+  });
+
+  it("tell how long to wait when the server limits changes", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (init?.method === "PATCH") return Response.json({ ok: false, error: "rate_limited", retryAfter: 42 }, { status: 429, headers: { "Retry-After": "42" } });
+        return Response.json({ tasks: [], containers: [] });
+      }),
+    );
+    setTasks([task(1)]);
+    inLocale(<TaskBoard saveKey="a" players={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start Task 1" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Too many changes at once. Wait 42 s and try again.");
+  });
+
+  it("take single-task changes from the socket, and a task listed again lives again", async () => {
+    stubFetch([]);
+    setTasks([task(1, { title: "Forge" })]);
+    const board = renderHook(() => useTasks());
+    act(() => putTask(task(2, { title: "Smelter" })));
+    act(() => putTask(task(1, { title: "Forge", status: "doing", rev: 1 })));
+    // An older copy arriving late is ignored.
+    act(() => putTask(task(1, { title: "Forge", status: "todo", rev: 0 })));
+    expect(board.result.current?.map((t) => `${t.title}:${t.status}`)).toEqual(["Forge:doing", "Smelter:todo"]);
+    act(() => dropTask(2));
+    expect(board.result.current?.map((t) => t.id)).toEqual([1]);
+    // A list from before a create, then a newer one with it: our own edits to it land again.
+    act(() => setTasks([]));
+    act(() => setTasks([task(1, { title: "Forge", rev: 1 })]));
+    await act(() => updateTask(1, { note: "x" }));
+    expect(board.result.current?.[0]?.updatedAt).toBe("2026-10-19T11:00:00.000Z");
   });
 
   it("keep the sheet and what was typed when the task is deleted elsewhere, and save it anew", async () => {

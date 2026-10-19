@@ -74,7 +74,7 @@ if (cfg.mock) {
 
 const store = new HistoryStore(cfg.dbPath);
 const hub = new Hub(agent, store, { timeZone: cfg.timeZone });
-const tasks = new TaskStore(cfg.dbPath);
+const tasks = new TaskStore(store.connection);
 // Subscribed before start: the first state it sees is its baseline, and
 // nothing that happened before boot is sent.
 // Always there, so a webhook saved in the admin sheet later starts from the same

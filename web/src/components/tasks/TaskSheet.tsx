@@ -4,7 +4,7 @@ import { parseTaskInput, shortfall, TASK_LIMITS, TASK_STATUSES, type TaskInputEr
 import { useI18n } from "../../i18n";
 import { BOSSES } from "../../lib/world";
 import { itemLabel } from "../../lib/storage";
-import { changedFields, createTask, deleteTask, updateTask, type Task, type TaskInput, type TaskMaterial, type TaskResult, type TaskTarget } from "../../lib/tasks";
+import { changedFields, createTask, deleteTask, expectOf, updateTask, type Task, type TaskInput, type TaskMaterial, type TaskResult, type TaskTarget } from "../../lib/tasks";
 import { ItemSearch } from "../admin/ItemPicker";
 import { Btn, Chip, Stepper, useArmed } from "../admin/parts";
 import { Sheet, SheetClose } from "../Sheet";
@@ -97,7 +97,23 @@ export default function TaskSheet({
           ? t("tasks.error.gone")
           : r.error === "stale"
             ? t("tasks.error.stale")
-            : t("tasks.saveFailed");
+            : r.error === "rate_limited"
+              ? t("tasks.error.rateLimited", { n: r.retryAfter })
+              : t("tasks.saveFailed");
+
+  /** Puts a task's own value of each field into the form. */
+  const take = (from: Task, f: keyof TaskInput) => {
+    if (f === "title") setTitle(from.title);
+    else if (f === "owner") setOwner(from.owner);
+    else if (f === "status") setStatus(from.status);
+    else if (f === "note") setNote(from.note);
+    else if (f === "materials") setMaterials(from.materials);
+    else if (f === "target") {
+      setTargetKind(from.target?.kind ?? "none");
+      if (from.target?.kind === "boss") setBoss(from.target.key);
+      if (from.target?.kind === "base") setBase(from.target.name);
+    }
+  };
 
   const save = async () => {
     if (busy) return;
@@ -110,17 +126,24 @@ export default function TaskSheet({
     const diff = editing ? changedFields(opened, checked.value as Required<TaskInput>) : checked.value;
     if (editing && Object.keys(diff).length === 0) return onClose();
     setBusy(true);
-    const r = editing ? await updateTask(opened.id, diff, opened.rev) : await createTask(diff);
+    const r = editing ? await updateTask(opened.id, diff, expectOf(opened, diff)) : await createTask(diff);
     setBusy(false);
     if (r.ok) onClose();
     else if (r.error === "unauthorized") onUnauthorized?.();
-    else if (r.error === "stale") {
-      // Someone moved the task on or changed its list first: theirs is shown, the text typed here stays.
-      setOpened(r.task);
-      setStatus(r.task.status);
-      setMaterials(r.task.materials);
+    else if (r.error === "stale" && editing) {
+      // The form moves onto the newer copy: what was changed here stays, unless
+      // someone changed the same status, owner or list first (theirs is shown);
+      // everything not touched here takes their value, so a second save sends
+      // only this page's own changes.
+      const now = r.task;
+      for (const f of ["title", "owner", "status", "note", "target", "materials"] as const) {
+        const mine = f in diff;
+        const clash = mine && (f === "status" || f === "owner" || f === "materials") && JSON.stringify(now[f]) !== JSON.stringify(opened[f]);
+        if (!mine || clash) take(now, f);
+      }
+      setOpened(now);
       setError({ text: failText(r) });
-    } else setError({ field: r.field, text: failText(r) });
+    } else setError({ field: "field" in r ? r.field : undefined, text: failText(r) });
   };
 
   const remove = async () => {
@@ -182,7 +205,7 @@ export default function TaskSheet({
           <div className="min-w-0 flex-1">
             <p className="label-caps">{t("tasks.kicker")}</p>
             <h2 id={`${ids}-h`} className="plank-title truncate text-2xl">
-              {opened ? t("tasks.edit") : t("tasks.new")}
+              {editing ? t("tasks.edit") : t("tasks.new")}
             </h2>
           </div>
           <SheetClose label={t("tasks.close")} escLabel={t("key.esc")} onClose={close} />
