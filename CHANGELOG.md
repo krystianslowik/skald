@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.20] - 2026-10-19
+
 ### Fixed
 
 - With the admin plugin installed, two players whose characters have the same name now show as two players: at the fire, on the map, in the admin sheet, in the saga and in Discord and Telegram messages. A player who reconnects stays one player and is no longer announced as leaving and joining. Before, same-name players showed as one, and when one of them left, the other could drop off the list while still playing. Without the plugin, same-name players still show as one entry, which now stays listed until both have left, and a reconnect is never mistaken for a new player.
