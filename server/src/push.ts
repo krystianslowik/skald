@@ -128,7 +128,6 @@ const STRINGS = {
     "failure.restart": "The safe restart failed",
     "restart.title": "Server restart",
     "restart.warning": "In {n} min, for a backup. Find a safe spot.",
-    "restart.now": "Going down now for a backup. Back in a few minutes.",
     "restart.cancelled": "The restart is called off",
     "action.backup": "Backup",
     "action.restart": "Server restart",
@@ -162,7 +161,6 @@ const STRINGS = {
     "failure.restart": "Bezpieczny restart nie powiódł się",
     "restart.title": "Restart serwera",
     "restart.warning": "Za {n} min, na kopię świata. Znajdźcie bezpieczne miejsce.",
-    "restart.now": "Teraz, na kopię świata. Wracamy za kilka minut.",
     "restart.cancelled": "Restart odwołany",
     "action.backup": "Kopia świata",
     "action.restart": "Restart serwera",
@@ -235,6 +233,8 @@ export function notificationsFor(items: readonly Item[], prefs: PushPrefs, ctx: 
     if (!k || !on.has(k)) return false;
     if (it.kind === "server") return it.status === "running";
     if (it.kind === "failure") return it.what !== "admin";
+    // Going down now on an empty server: the server-up that follows is news enough for a phone.
+    if (it.kind === "restart" && it.phase === "warning") return it.minutes > 0;
     return true;
   });
   const out: PushPayload[] = [];
@@ -262,7 +262,7 @@ export function notificationsFor(items: readonly Item[], prefs: PushPrefs, ctx: 
   // A safe restart's heads-up or cancel; its end reads as the server being up.
   const restart = [...mine].reverse().find((it): it is Extract<Item, { kind: "restart" }> => it.kind === "restart" && it.phase !== "failed");
   const back = restart?.phase === "done" ? restart : undefined;
-  if (restart?.phase === "warning") out.push({ title: s["restart.title"], body: restart.minutes > 0 ? fill(s["restart.warning"], { n: String(restart.minutes) }) : s["restart.now"], tag: "server", url: "/" });
+  if (restart?.phase === "warning") out.push({ title: s["restart.title"], body: fill(s["restart.warning"], { n: String(restart.minutes) }), tag: "server", url: "/" });
   if (restart?.phase === "cancelled") out.push({ title: s["restart.title"], body: s["restart.cancelled"], tag: "server", url: "/" });
   const up = mine.some((it) => it.kind === "server") || !!back;
   const code = back?.code || ([...mine].reverse().find((it): it is Extract<Item, { kind: "join_code" }> => it.kind === "join_code")?.code ?? "");

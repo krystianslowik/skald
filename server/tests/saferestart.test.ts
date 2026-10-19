@@ -148,7 +148,9 @@ describe("phone push of a safe restart", () => {
 
   it("tells the heads-up, the server back with its code, and a failure", () => {
     expect(one({ kind: "restart", phase: "warning", minutes: 5 })).toEqual([{ title: "Server restart", body: "In 5 min, for a backup. Find a safe spot.", tag: "server", url: "/" }]);
-    expect(one({ kind: "restart", phase: "warning", minutes: 0 }, { locale: "pl" })[0]!.body).toBe("Teraz, na kopię świata. Wracamy za kilka minut.");
+    expect(one({ kind: "restart", phase: "warning", minutes: 5 }, { locale: "pl" })[0]!.body).toBe("Za 5 min, na kopię świata. Znajdźcie bezpieczne miejsce.");
+    // Going down now (nobody on): the server-up a minute later is enough for a phone.
+    expect(one({ kind: "restart", phase: "warning", minutes: 0 })).toEqual([]);
     expect(one({ kind: "restart", phase: "done", code: "771203" })).toEqual([{ title: "The server is up", body: "Join code: 771203", tag: "server", url: "/" }]);
     expect(one({ kind: "restart", phase: "failed", error: "x", archive: "" })).toEqual([{ title: "Something failed", body: "The safe restart failed", tag: "failure", url: "/#settings" }]);
     expect(one({ kind: "restart", phase: "cancelled" })[0]!.body).toBe("The restart is called off");
