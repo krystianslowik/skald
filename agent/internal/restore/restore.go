@@ -176,6 +176,9 @@ func SafeName(name string) (string, error) {
 }
 
 // worldItems are the names a world occupies in worlds_local.
+// WorldItems are the names a world occupies in worlds_local.
+func WorldItems(world string) []string { return worldItems(world) }
+
 func worldItems(world string) []string {
 	return []string{world, world + ".db", world + ".fwl"}
 }
@@ -474,6 +477,9 @@ func verify(p, digest string, files int, size int64) error {
 	}
 	return nil
 }
+
+// SyncDir fsyncs a directory, so renames and removals in it are on disk.
+func SyncDir(dir string) { syncDir(dir) }
 
 func syncDir(dir string) {
 	if d, err := os.Open(dir); err == nil {

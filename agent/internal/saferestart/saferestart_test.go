@@ -35,6 +35,8 @@ type fakeSup struct {
 	failStarts int
 	// updaterIdle: a started updater does not start the game.
 	updaterIdle bool
+	// updaterExits: a started updater ends at once (EXITED).
+	updaterExits bool
 	// infoErrs makes the next n state reads fail (supervisord not up yet).
 	infoErrs int
 	// stopping keeps the game STOPPING this long after its stop returned.
@@ -46,6 +48,8 @@ type fakeSup struct {
 	whileStopped func()
 	// onUpdaterStop runs when the updater is stopped.
 	onUpdaterStop func()
+	// onInfo runs once, at the next state read.
+	onInfo func()
 }
 
 func newFakeSup() *fakeSup {
@@ -54,6 +58,12 @@ func newFakeSup() *fakeSup {
 
 func (f *fakeSup) GetAllProcessInfo(context.Context) ([]supervisor.ProcessInfo, error) {
 	f.mu.Lock()
+	if hook := f.onInfo; hook != nil {
+		f.onInfo = nil
+		f.mu.Unlock()
+		hook()
+		f.mu.Lock()
+	}
 	defer f.mu.Unlock()
 	if f.infoErrs > 0 {
 		f.infoErrs--
@@ -118,6 +128,9 @@ func (f *fakeSup) StartProcess(_ context.Context, name string, _ bool) error {
 		}
 	}
 	f.state[name] = "RUNNING"
+	if name == restore.UpdaterProgram && f.updaterExits {
+		f.state[name] = "EXITED"
+	}
 	startsGame := name == restore.UpdaterProgram && !f.updaterIdle && f.state[restore.ServerProgram] != "RUNNING"
 	if startsGame {
 		f.state[restore.ServerProgram] = "RUNNING"
@@ -284,6 +297,7 @@ func newHarness(t *testing.T) *harness {
 		SaveTimeout:    200 * time.Millisecond,
 		ActionTimeout:  time.Second,
 		RecoverTimeout: 500 * time.Millisecond,
+		ResumeWait:     200 * time.Millisecond,
 	}
 	return h
 }
@@ -623,6 +637,50 @@ func TestResumeLeavesTheImageInCharge(t *testing.T) {
 	}
 }
 
+func TestResumeWaitsForAGameStillStopping(t *testing.T) {
+	h := newHarness(t)
+	h.sup.set(restore.ServerProgram, "STOPPING")
+	h.sup.set(restore.UpdaterProgram, "STOPPED")
+	h.leaveMarker(time.Second, true)
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		h.sup.set(restore.ServerProgram, "STOPPED")
+	}()
+	New(h.opt).Resume()
+	if got := strings.Join(h.sup.Calls(), ","); got != "start valheim-updater" {
+		t.Errorf("calls %s", got)
+	}
+}
+
+func TestResumeLeavesARunningUpdaterAloneWhateverTheMarkerSays(t *testing.T) {
+	h := newHarness(t)
+	// The pod restarted: the image's updater runs its boot update, the game is down.
+	h.sup.set(restore.ServerProgram, "STOPPED")
+	h.sup.set(restore.UpdaterProgram, "RUNNING")
+	h.leaveMarker(time.Second, false)
+	New(h.opt).Resume()
+	if len(h.sup.Calls()) != 0 {
+		t.Errorf("calls %v", h.sup.Calls())
+	}
+}
+
+func TestResumeKeepsAnotherRunsMarker(t *testing.T) {
+	h := newHarness(t)
+	h.sup.set(restore.ServerProgram, "RUNNING")
+	h.sup.set(restore.UpdaterProgram, "STOPPED")
+	h.leaveMarker(time.Second, false)
+	// A new run writes its marker while the old one is being handled.
+	body, _ := json.Marshal(markerData{Run: "20261009-210000", At: time.Now().UTC()})
+	h.sup.onInfo = func() {
+		_ = os.WriteFile(filepath.Join(h.dir, restore.SkaldDir, ".safe-restart-down"), body, 0o644)
+	}
+	New(h.opt).Resume()
+	raw, err := os.ReadFile(filepath.Join(h.dir, restore.SkaldDir, ".safe-restart-down"))
+	if err != nil || !strings.Contains(string(raw), "20261009-210000") {
+		t.Errorf("the newer run's marker is gone: %v %s", err, raw)
+	}
+}
+
 func TestResumeIgnoresAStaleMarker(t *testing.T) {
 	h := newHarness(t)
 	h.sup.set(restore.ServerProgram, "STOPPED")
@@ -723,6 +781,129 @@ func TestNoRoomForTheCopyLeavesTheGameAlone(t *testing.T) {
 	}
 	if len(h.sup.Calls()) != 0 {
 		t.Errorf("calls %v", h.sup.Calls())
+	}
+}
+
+func TestUpdaterStoppedTheGameDuringTheSave(t *testing.T) {
+	h := newHarness(t)
+	// The updater finds an update while the run waits for the save line.
+	h.bridge.onSave = func() {
+		h.sup.set(restore.ServerProgram, "STOPPED")
+		now := time.Now()
+		h.game.set(func(s *state.Snapshot) { s.LastSaveAt = &now })
+	}
+	v := h.run(Request{})
+	if v.State != RunFailed || v.step(StepStop).Reason != "notrunning" {
+		t.Fatalf("view %+v", v)
+	}
+	// Its update is not cut off: nothing was stopped.
+	if len(h.sup.Calls()) != 0 {
+		t.Errorf("calls %v", h.sup.Calls())
+	}
+}
+
+func TestPlayersToldItGoesDownNowHearItDoesNot(t *testing.T) {
+	h := newHarness(t)
+	h.game.set(func(s *state.Snapshot) { s.PlayersReported = 1 })
+	defer func(f func(string) (uint64, error)) { freeSpace = f }(freeSpace)
+	freeSpace = func(string) (uint64, error) { return 10, nil }
+	v := h.run(Request{})
+	if v.State != RunFailed || v.step(StepStop).Reason != "nospace" {
+		t.Fatalf("view %+v", v)
+	}
+	said := h.bridge.Said()
+	if len(said) != 2 || said[0] != "The server restarts now. Back in a few minutes." || said[1] != "The server restart is called off." {
+		t.Errorf("broadcasts %q", said)
+	}
+}
+
+func TestUpdaterThatExitsIsNotWaitedFor(t *testing.T) {
+	h := newHarness(t)
+	h.opt.RecoverTimeout = 5 * time.Second
+	h.sup.updaterIdle = true
+	h.sup.updaterExits = true
+	start := time.Now()
+	v := h.run(Request{})
+	if v.State != RunDone {
+		t.Fatalf("state %s error %q", v.State, v.Error)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Errorf("waited %v for an updater that had ended", d)
+	}
+}
+
+func TestCancelDuringTheSaveKeepsItsResult(t *testing.T) {
+	h := newHarness(t)
+	var r *Runner
+	h.bridge.onSave = func() {
+		_ = r.Cancel("Astrid")
+		now := time.Now()
+		h.game.set(func(s *state.Snapshot) { s.LastSaveAt = &now })
+	}
+	r = New(h.opt)
+	if _, err := r.Start(Request{}, "Bjorn"); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait()
+	v := r.View()
+	if v.State != RunCancelled {
+		t.Fatalf("view %+v", v)
+	}
+	wantStates(t, v, map[string]string{StepSave: OK, StepStop: Cancelled})
+	if len(h.sup.Calls()) != 0 {
+		t.Errorf("calls %v", h.sup.Calls())
+	}
+}
+
+func TestMarkerIsRefreshedWhileTheGameIsDown(t *testing.T) {
+	h := newHarness(t)
+	read := func() markerData {
+		var m markerData
+		raw, _ := os.ReadFile(filepath.Join(h.dir, restore.SkaldDir, ".safe-restart-down"))
+		_ = json.Unmarshal(raw, &m)
+		return m
+	}
+	var atStop, atStart time.Time
+	h.sup.whileStopped = func() {
+		atStop = read().At
+		time.Sleep(20 * time.Millisecond)
+	}
+	h.sup.onStart = func() {
+		atStart = read().At
+		h.game.boots("123456")()
+	}
+	v := h.run(Request{})
+	if v.State != RunDone {
+		t.Fatalf("view %+v", v)
+	}
+	if atStop.IsZero() || !atStart.After(atStop) {
+		t.Errorf("marker at stop %v, at start %v", atStop, atStart)
+	}
+}
+
+func TestFailedCopiesArePrunedToo(t *testing.T) {
+	h := newHarness(t)
+	dir := filepath.Join(h.dir, restore.SkaldDir)
+	_ = os.MkdirAll(dir, 0o755)
+	for _, n := range []string{"failed-pre-restart-20260101-000000.zip", "failed-pre-restart-20260102-000000.zip", "failed-pre-restart-20260103-000000.zip"} {
+		_ = os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o644)
+	}
+	h.sup.whileStopped = func() {
+		_ = os.Remove(filepath.Join(h.dir, "worlds_local", world, "_main.3.fwl2"))
+	}
+	v := h.run(Request{})
+	left, _ := filepath.Glob(filepath.Join(dir, "failed-*.zip"))
+	if len(left) != FailedKeep {
+		t.Errorf("left %v", left)
+	}
+	found := false
+	for _, p := range left {
+		if filepath.Base(p) == v.Archive {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("this run's failed copy %s was pruned: %v", v.Archive, left)
 	}
 }
 

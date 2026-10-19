@@ -306,6 +306,15 @@ func (r *Runner) markDown(down, updater bool) error {
 	return writeSynced(r.marker(), body)
 }
 
+// touchMarker refreshes the marker's time while the game is down.
+func (r *Runner) touchMarker() {
+	if r.down {
+		if err := r.markDown(true, r.downUpdater); err != nil {
+			r.opt.Logger.Warn("safe restart: marker not refreshed", "err", err)
+		}
+	}
+}
+
 // writeSynced writes p through a synced temporary file and a rename, then
 // syncs the directory, so the file is on disk when it returns.
 func writeSynced(p string, body []byte) error {
@@ -332,12 +341,7 @@ func writeSynced(p string, body []byte) error {
 	return nil
 }
 
-func syncDir(dir string) {
-	if d, err := os.Open(dir); err == nil {
-		_ = d.Sync()
-		d.Close()
-	}
-}
+func syncDir(dir string) { restore.SyncDir(dir) }
 
 // stopped are the supervisord states of a program that is not running and
 // not on its way anywhere.
@@ -362,50 +366,73 @@ func (r *Runner) Resume() {
 		return
 	}
 	var m markerData
-	clear := func() {
-		if err := os.Remove(r.marker()); err == nil {
+	// clear removes the marker only while it is still this run's.
+	clear := func(run string) {
+		raw, err := os.ReadFile(r.marker())
+		var now markerData
+		if err != nil || (json.Unmarshal(raw, &now) == nil && now.Run != run) {
+			return
+		}
+		if os.Remove(r.marker()) == nil {
 			syncDir(dir)
 		}
 	}
 	if json.Unmarshal(raw, &m) != nil || m.At.IsZero() {
 		r.opt.Logger.Warn("safe restart: unreadable marker removed")
-		clear()
+		if os.Remove(r.marker()) == nil {
+			syncDir(dir)
+		}
 		return
 	}
+	// The run refreshes the marker at every step while the game is down, so
+	// its age is how long the agent has been gone.
 	if r.opt.Now().Sub(m.At) > 2*r.opt.ActionTimeout+r.opt.RecoverTimeout {
 		r.opt.Logger.Warn("safe restart: stale marker removed", "run", m.Run)
-		clear()
+		clear(m.Run)
 		return
 	}
-	// The agent may be up before supervisord is.
+	// The agent may be up before supervisord is, and the game may still be
+	// on its way down: wait for both to answer and settle.
 	var srv, upd string
 	end := r.opt.Now().Add(r.opt.ResumeWait)
+	answered := false
 	for {
 		var ok bool
 		srv, upd, ok = r.states()
-		if ok {
+		answered = answered || ok
+		if ok && settled(srv) && settled(upd) {
 			break
 		}
 		if !r.opt.Now().Before(end) {
-			r.opt.Logger.Error("safe restart: supervisord did not answer; the game may still be stopped", "run", m.Run)
-			return
+			if !answered {
+				r.opt.Logger.Error("safe restart: supervisord did not answer; the game may still be stopped", "run", m.Run)
+				return
+			}
+			break
 		}
 		time.Sleep(r.opt.Tick)
 	}
 	msg := "the agent restarted during the safe restart"
 	switch {
-	case m.Updater && upd == "RUNNING":
+	case upd == "RUNNING":
+		// Whatever the run had done, a running updater is the image in charge.
 		msg += "; the image's updater is running and in charge of the game"
+		clear(m.Run)
 	case !stopped(srv):
 		msg += "; the game is " + strings.ToLower(srv)
+		clear(m.Run)
 	case m.Updater && !stopped(upd):
 		msg += "; the updater is " + strings.ToLower(upd) + ", so the game was left alone"
+		clear(m.Run)
 	default:
 		if !r.lockWait(context.Background()) {
 			msg += "; another action held the game, so it was not started"
+			clear(m.Run)
 			break
 		}
 		err := r.startGame(m.Updater)
+		// Cleared before the lock is let go: a new run may write its own marker then.
+		clear(m.Run)
 		r.opt.Unlock()
 		if err != nil {
 			r.opt.Logger.Error("safe restart: could not start the game again", "err", err)
@@ -415,9 +442,11 @@ func (r *Runner) Resume() {
 			msg += "; the game was started again"
 		}
 	}
-	clear()
 	r.interrupted(m, msg)
 }
+
+// settled: a supervisord state that is not on its way somewhere.
+func settled(st string) bool { return st != "STOPPING" && st != "STARTING" && st != "BACKOFF" }
 
 // interrupted reports a run the agent lost to a restart.
 func (r *Runner) interrupted(m markerData, msg string) {
@@ -728,7 +757,8 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 	late := ctx.Err() != nil
 	r.mu.Unlock()
 	if late {
-		r.cancelled(r.View().Step, true)
+		// The steps so far keep their results; the stop is what was called off.
+		r.cancelled(StepStop, true)
 		return
 	}
 
@@ -772,6 +802,7 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 	r.set(StepStop, OK, "", nil)
 
 	// The world is quiet now: back it up and read the copy back.
+	r.touchMarker()
 	var runErr error
 	verified := false
 	archive, digest, err := r.backup()
@@ -783,6 +814,7 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 		r.update(func(v *View) { v.Archive = filepath.Base(archive); v.ArchiveSHA256 = digest })
 		r.set(StepBackup, OK, "", nil)
 		r.set(StepVerify, Running, "", nil)
+		r.touchMarker()
 		size, err := Verify(archive, digest, r.opt.World, countChunks(r.opt.ConfigDir, r.opt.World))
 		if err != nil {
 			runErr = fmt.Errorf("verify: %w", err)
@@ -790,6 +822,7 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 			if q, qerr := quarantine(archive); qerr == nil {
 				r.update(func(v *View) { v.Archive = filepath.Base(q) })
 			}
+			r.pruneFailed()
 			r.set(StepVerify, Failed, "", err)
 		} else {
 			verified = true
@@ -799,6 +832,7 @@ func (r *Runner) run(ctx context.Context, done chan struct{}) {
 	}
 
 	// Started either way: nothing has touched the world.
+	r.touchMarker()
 	r.set(StepStart, Running, "", nil)
 	startedAt := r.opt.Now()
 	if err := r.startGame(updater); err != nil {
@@ -868,7 +902,7 @@ func (r *Runner) calledOff() {
 func worldBytes(configDir, world string) int64 {
 	var total int64
 	base := filepath.Join(configDir, "worlds_local")
-	for _, item := range []string{world, world + ".db", world + ".fwl"} {
+	for _, item := range restore.WorldItems(world) {
 		_ = filepath.WalkDir(filepath.Join(base, item), func(_ string, d fs.DirEntry, err error) error {
 			if err == nil && d.Type().IsRegular() {
 				if fi, err := d.Info(); err == nil {
@@ -1113,6 +1147,9 @@ func (r *Runner) save() {
 	if n, _ := r.players(); n > 0 {
 		if err := r.opt.Bridge.Broadcast(ctx, r.text("now", 0), v.Actor); err != nil {
 			r.opt.Logger.Warn("safe restart: last warning failed", "err", err)
+		} else {
+			// Told it goes down now: they hear it if it does not.
+			r.update(func(v *View) { v.Warned = true })
 		}
 	}
 	asked := r.opt.Now()
@@ -1140,7 +1177,16 @@ func (r *Runner) stop() (bool, error) {
 	r.set(StepStop, Running, "", nil)
 	ctx, cancel := context.WithTimeout(context.Background(), r.opt.ActionTimeout)
 	defer cancel()
-	updater := r.processRunning(ctx, restore.UpdaterProgram)
+	// The updater may have stopped the game for an update during the save:
+	// then neither is touched.
+	srv, upd, ok := r.states()
+	if !ok {
+		return false, fmt.Errorf("%w: supervisord did not answer", errNotRunning)
+	}
+	if srv != "RUNNING" {
+		return false, fmt.Errorf("%w: it is %s", errNotRunning, strings.ToLower(srv))
+	}
+	updater := upd == "RUNNING"
 	// From here the game may go down: an agent that dies now starts it again on
 	// its return. Without that record on disk, the game is not touched.
 	if err := r.markDown(true, updater); err != nil {
@@ -1153,8 +1199,7 @@ func (r *Runner) stop() (bool, error) {
 			return true, err
 		}
 	}
-	// The updater may have stopped the game for an update just before it was
-	// stopped itself: then this is not the moment.
+	// Or just before the updater was stopped itself.
 	if st := r.serverState(); st != "RUNNING" {
 		if updater {
 			r.startUpdater()
@@ -1184,19 +1229,6 @@ func (r *Runner) serverState() string {
 	return "UNKNOWN"
 }
 
-func (r *Runner) processRunning(ctx context.Context, name string) bool {
-	infos, err := r.opt.Supervisor.GetAllProcessInfo(ctx)
-	if err != nil {
-		return false
-	}
-	for _, p := range infos {
-		if p.Name == name {
-			return p.StateName == "RUNNING"
-		}
-	}
-	return false
-}
-
 // startGame brings the game back. It first waits until the game is fully
 // stopped (never starts one still stopping). With the updater, the updater
 // is started and starts the game itself after its update check, as the image
@@ -1224,9 +1256,19 @@ func (r *Runner) startGame(updater bool) error {
 	}
 	if updater && r.startUpdater() {
 		end := r.opt.Now().Add(r.opt.RecoverTimeout)
+		next := r.opt.Now().Add(time.Minute)
 		for r.opt.Now().Before(end) {
-			if st := r.serverState(); st == "RUNNING" || st == "STARTING" {
+			srv, upd, _ := r.states()
+			if srv == "RUNNING" || srv == "STARTING" {
 				return nil
+			}
+			// An updater that ended will not start the game.
+			if stopped(upd) {
+				break
+			}
+			if r.opt.Now().After(next) {
+				r.touchMarker()
+				next = r.opt.Now().Add(time.Minute)
 			}
 			time.Sleep(r.opt.Tick)
 		}
@@ -1321,6 +1363,37 @@ func (r *Runner) prune(keep string) {
 			continue
 		}
 		_ = os.Remove(p + ".sha256")
+	}
+}
+
+// failedName matches the copies that failed their check.
+var failedName = regexp.MustCompile(`^failed-pre-restart-\d{8}-\d{6}\.zip$`)
+
+// FailedKeep is how many copies that failed their check stay for a look.
+const FailedKeep = 2
+
+// pruneFailed keeps the newest FailedKeep failed copies.
+func (r *Runner) pruneFailed() {
+	dir := filepath.Join(r.opt.ConfigDir, restore.SkaldDir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	var names []string
+	for _, e := range entries {
+		if failedName.MatchString(e.Name()) && e.Type().IsRegular() {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(names)))
+	for i, name := range names {
+		if i < FailedKeep {
+			continue
+		}
+		p := filepath.Join(dir, name)
+		if os.Remove(p) == nil {
+			_ = os.Remove(p + ".sha256")
+		}
 	}
 }
 

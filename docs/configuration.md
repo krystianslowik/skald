@@ -956,9 +956,11 @@ Then the agent:
 1. asks the game to save (admin plugin only) and waits for the save line;
 2. checks once more that it can write the config volume and that the free
    space there is at least the world's size, writes a note that it is about
-   to stop the game (`skald-backups/.safe-restart-down`, synced to disk),
-   pauses the image's updater, checks the game still runs, and stops it
-   through supervisord, which waits for the shutdown save;
+   to stop the game (`skald-backups/.safe-restart-down`, synced to disk and
+   refreshed while the game is down), checks the game still runs (else the
+   updater may be installing an update and nothing is touched), pauses the
+   image's updater, checks once more, and stops the game through
+   supervisord, which waits for the shutdown save;
 3. zips the stopped world into `skald-backups/pre-restart-<time>.zip`, with
    its sha256 in a `.sha256` file next to it;
 4. checks the copy: the size, the sha256 of the file read back, every entry
@@ -968,9 +970,9 @@ Then the agent:
 5. starts the updater again, which starts the server itself after its update
    check, as the image does on boot: an update is installed before the server
    comes up, so the join code posted next is not replaced by an update right
-   after. Without the updater (or if it has not started the server within 20
-   minutes) the agent starts the server, waiting first until it has fully
-   stopped and trying up to three times;
+   after. Without the updater (or if it ends, or has not started the server
+   within 20 minutes) the agent starts the server, waiting first until it has
+   fully stopped and trying up to three times;
 6. waits up to 20 minutes for the world to load and, with crossplay, for a
    new join code, and posts it to Discord and phones.
 
@@ -983,8 +985,8 @@ goes to the end. Players who were warned hear when a restart is off. A
 failed backup or check never leaves the server down: the world was not
 touched, so the server is started again and the run ends failed, with a
 Discord and phone alert. A copy that fails its check is renamed to
-`failed-pre-restart-<time>.zip`: kept for a look, but not in the restore list
-and not counted. Only the newest five checked `pre-restart-*.zip` are kept,
+`failed-pre-restart-<time>.zip`: kept for a look (the newest two), but not in
+the restore list and not counted. Only the newest five checked `pre-restart-*.zip` are kept,
 and only a run with a checked copy removes older ones; `pre-restore-*.zip`
 are never deleted. While a safe restart runs, a plain restart, a restore and
 applying settings now are refused, and settings waiting for an empty server
@@ -992,10 +994,10 @@ wait for it (its restart applies them); backups and update checks still run.
 
 The run lives in the agent, so it carries on when skald-web restarts. A
 restart of the agent itself ends it. If the agent comes back to its note
-(within the time a run can take), it waits for supervisord and starts the
-game again only if supervisord shows the game, and the updater it had
-paused, stopped; if the updater runs, the image is in charge and the agent
-leaves it alone. Either way the run is reported as failed, on Discord and
+(written less than half an hour before), it waits for supervisord and for
+the game to settle, and starts the game again only if supervisord shows the
+game, and the updater it had paused, stopped; if the updater runs, the image
+is in charge and the agent leaves it alone. Either way the run is reported as failed, on Discord and
 phones too. Half-written copies are removed when the agent starts.
 
 The game's shutdown is the image's: supervisord's `valheim-server` program
