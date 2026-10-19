@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Fixed
+
+- Chests holding an item crafted in a style variant (a painted shield, for example) now show their contents. Before, the compatibility check reported such a chest as unreadable with an "item flags" reason and the map hid everything in it.
+
 ## [2026.10.20] - 2026-10-19
 
 ### Fixed
