@@ -120,14 +120,10 @@ type Options struct {
 	// HTTP overrides the client (tests).
 	HTTP *http.Client
 	// OnPlayers hears every player list read: when the read began and each
-	// connected peer, by its peer id, with its character's name and its
-	// platform (unknown when the game reports none). It must not call back
-	// into the client.
-	OnPlayers func(readAt time.Time, peers []Peer)
-	// PlayerID names the listed player a peer id belongs to ("Ragnar#2"),
-	// "" when none, to tell apart players sharing a name. It is asked
-	// after OnPlayers and must not call back into the client.
-	PlayerID func(uid string) string
+	// connected peer. It answers with the player id ("Ragnar#2") of each
+	// peer it knows, by peer id, which tells apart players sharing a name.
+	// It must not call back into the client.
+	OnPlayers func(readAt time.Time, peers []Peer) map[string]string
 }
 
 // Client calls the plugin and keeps the private name <-> id tables.
@@ -511,7 +507,7 @@ func (c *Client) Players(ctx context.Context) ([]Player, error) {
 		if id != "" {
 			c.userIDByName[strings.ToLower(p.Name)] = id
 		}
-		peers = append(peers, Peer{UID: uid, Name: p.Name, Platform: platformOf(id)})
+		peers = append(peers, Peer{UID: uid, Name: p.Name, Platform: platformOf(id), Account: id})
 		out = append(out, Player{
 			Name:         p.Name,
 			Platform:     platformOf(id),
@@ -524,25 +520,30 @@ func (c *Client) Players(ctx context.Context) ([]Player, error) {
 		})
 	}
 	c.mu.Unlock()
+	var ids map[string]string
 	if c.opt.OnPlayers != nil {
-		c.opt.OnPlayers(readAt, peers)
+		ids = c.opt.OnPlayers(readAt, peers)
 	}
-	// Ids unique within the list, also for peers the tracker has not
-	// listed yet (still loading, or not in the log yet).
+	// The tracker's ids first, then ids unique within the list for peers
+	// it does not list (still loading, or not in the log yet), so those
+	// never take a listed player's id.
 	taken := map[string]bool{}
 	for i := range out {
-		id := ""
-		if c.opt.PlayerID != nil {
-			id = c.opt.PlayerID(peers[i].UID)
+		if id := ids[peers[i].UID]; id != "" && !taken[id] {
+			out[i].ID = id
+			taken[id] = true
 		}
-		if id == "" || taken[id] {
-			id = out[i].Name
-			for n := 2; taken[id]; n++ {
-				id = out[i].Name + "#" + strconv.Itoa(n)
-			}
+	}
+	for i := range out {
+		if out[i].ID != "" {
+			continue
 		}
-		taken[id] = true
+		id := out[i].Name
+		for n := 2; taken[id]; n++ {
+			id = out[i].Name + "#" + strconv.Itoa(n)
+		}
 		out[i].ID = id
+		taken[id] = true
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Name != out[j].Name {
@@ -554,9 +555,10 @@ func (c *Client) Players(ctx context.Context) ([]Player, error) {
 }
 
 // Peer is one connected peer as OnPlayers hears it. UID is the game's peer
-// id; it stays inside the agent.
+// id and Account its platform user id ("" when unknown); both stay inside
+// the agent.
 type Peer struct {
-	UID, Name, Platform string
+	UID, Name, Platform, Account string
 }
 
 // SyncPlayers reads the player list every `every` while wanted() says a

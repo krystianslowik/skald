@@ -73,14 +73,13 @@ func main() {
 		Logger:       logger,
 		// The plugin knows whose each peer is and its platform; the log
 		// only guesses both.
-		OnPlayers: func(readAt time.Time, peers []bridge.Peer) {
+		OnPlayers: func(readAt time.Time, peers []bridge.Peer) map[string]string {
 			list := make([]state.Peer, len(peers))
 			for i, p := range peers {
-				list[i] = state.Peer{UID: p.UID, Name: p.Name, Platform: p.Platform}
+				list[i] = state.Peer{UID: p.UID, Name: p.Name, Platform: p.Platform, Account: p.Account}
 			}
-			tracker.SetPeers(readAt, list)
+			return tracker.SetPeers(readAt, list)
 		},
-		PlayerID: tracker.IDOf,
 	})
 	if br == nil {
 		logger.Info("bridge disabled", "reason", "BRIDGE_TOKEN not set")

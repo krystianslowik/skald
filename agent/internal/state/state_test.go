@@ -522,7 +522,7 @@ func TestSameNameTwoPlayers(t *testing.T) {
 	if !tr.PeersWanted() {
 		t.Fatal("two peers under one player: the plugin list is wanted")
 	}
-	tr.SetPeers(after(tr), []Peer{{"111111111", "Ragnar", "xbox"}, {"333333333", "Ragnar", "steam"}})
+	tr.SetPeers(after(tr), []Peer{{"111111111", "Ragnar", "xbox", "acct-111111111"}, {"333333333", "Ragnar", "steam", "acct-333333333"}})
 	if got, want := byID(tr), map[string]string{"Ragnar": "Ragnar/xbox", "Ragnar#2": "Ragnar/steam"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("with the plugin: players = %v, want %v", got, want)
 	}
@@ -573,7 +573,7 @@ func TestReconnectWhileAnotherLoadsIsNoNewPlayer(t *testing.T) {
 		t.Fatalf("players = %v, want %v", got, want)
 	}
 	// The plugin no longer lists the old peer: it expires without a leave.
-	tr.SetPeers(after(tr), []Peer{{"200", "Ragnar", "steam"}, {"300", "Freya", "xbox"}})
+	tr.SetPeers(after(tr), []Peer{{"200", "Ragnar", "steam", "acct-200"}, {"300", "Freya", "xbox", "acct-300"}})
 	if got, want := byID(tr), map[string]string{"Ragnar": "Ragnar/steam"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("after the plugin read: players = %v, want %v", got, want)
 	}
@@ -597,13 +597,13 @@ func TestSameNameSecondPlayerReconnects(t *testing.T) {
 		`Got character ZDOID from Ragnar : 100:1`,
 		`Got character ZDOID from Ragnar : 200:1`,
 	)
-	tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "xbox"}, {"200", "Ragnar", "steam"}})
+	tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "xbox", "acct-100"}, {"200", "Ragnar", "steam", "acct-200"}})
 	feed(t, tr,
 		`Player joined server "Midgard" that has join code 482915, now 2 player(s)`,
 		"+1m",
 		`Got character ZDOID from Ragnar : 300:1`,
 	)
-	tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "xbox"}, {"300", "Ragnar", "steam"}})
+	tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "xbox", "acct-100"}, {"300", "Ragnar", "steam", "acct-200"}})
 	feed(t, tr,
 		`Destroying abandoned non persistent zdo 200:1 owner 200`,
 		`Player connection lost server "Midgard" that has join code 482915, now 2 player(s)`,
@@ -669,7 +669,7 @@ func TestBridgePlatformWins(t *testing.T) {
 		t.Fatal("an unconfirmed peer: the plugin list is wanted")
 	}
 	// The plugin lists the loading client too, without a character.
-	tr.SetPeers(after(tr), []Peer{{"111111111", "Ragnar", "xbox"}, {"555", "Freya", "steam"}})
+	tr.SetPeers(after(tr), []Peer{{"111111111", "Ragnar", "xbox", "acct-111111111"}, {"555", "Freya", "steam", "acct-555"}})
 	if got, want := byID(tr), map[string]string{"Ragnar": "Ragnar/xbox"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("players = %v, want %v", got, want)
 	}
@@ -686,12 +686,12 @@ func TestBridgePlatformWins(t *testing.T) {
 		t.Fatalf("player_platform events = %v, want %v", fixed, want)
 	}
 	// Repeating the same report changes nothing and publishes nothing.
-	tr.SetPeers(after(tr), []Peer{{"111111111", "Ragnar", "xbox"}, {"555", "Freya", "steam"}})
+	tr.SetPeers(after(tr), []Peer{{"111111111", "Ragnar", "xbox", "acct-111111111"}, {"555", "Freya", "steam", "acct-555"}})
 	if n := types(drain(h))["player_platform"]; n != 1 {
 		t.Fatalf("player_platform events after a repeated report = %d, want 1", n)
 	}
 	// Unknown never overwrites a known platform.
-	tr.SetPeers(after(tr), []Peer{{"111111111", "Ragnar", "unknown"}})
+	tr.SetPeers(after(tr), []Peer{{"111111111", "Ragnar", "unknown", "acct-111111111"}})
 	if got := byID(tr); got["Ragnar"] != "Ragnar/xbox" {
 		t.Fatalf("after an unknown report: %v", got)
 	}
@@ -701,7 +701,7 @@ func TestBridgePlatformWins(t *testing.T) {
 	if !tr.PeersWanted() {
 		t.Fatal("a new peer: the plugin list is wanted")
 	}
-	tr.SetPeers(after(tr), []Peer{{"111111111", "Ragnar", "xbox"}, {"555", "Freya", "steam"}})
+	tr.SetPeers(after(tr), []Peer{{"111111111", "Ragnar", "xbox", "acct-111111111"}, {"555", "Freya", "steam", "acct-555"}})
 	if got, want := byID(tr), map[string]string{"Ragnar": "Ragnar/xbox", "Freya": "Freya/steam"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("after Freya spawned: players = %v, want %v", got, want)
 	}
@@ -718,7 +718,7 @@ func TestBridgePlatformDisagreementSplits(t *testing.T) {
 		`Got character ZDOID from Ragnar : 100:1`,
 		`Got character ZDOID from Ragnar : 200:1`,
 	)
-	tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "steam"}, {"200", "Ragnar", "playstation"}})
+	tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "steam", "acct-100"}, {"200", "Ragnar", "playstation", "acct-200"}})
 	if got, want := byID(tr), map[string]string{"Ragnar": "Ragnar/steam", "Ragnar#2": "Ragnar/playstation"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("players = %v, want %v", got, want)
 	}
@@ -733,12 +733,53 @@ func TestPeerNewerThanTheReadIsKept(t *testing.T) {
 	feed(t, tr, `Got character ZDOID from Ragnar : 100:1`)
 	readAt := after(tr)
 	feed(t, tr, "+2s", `Got character ZDOID from Freya : 200:1`)
-	tr.SetPeers(readAt, []Peer{{"100", "Ragnar", "xbox"}})
+	tr.SetPeers(readAt, []Peer{{"100", "Ragnar", "xbox", "acct-100"}})
 	if got, want := byID(tr), map[string]string{"Ragnar": "Ragnar/xbox", "Freya": "Freya/unknown"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("players = %v, want %v", got, want)
 	}
 	if !tr.PeersWanted() {
 		t.Fatal("Freya's peer is not confirmed yet")
+	}
+}
+
+// A reconnect while the server still holds the old peer: the plugin lists
+// both under one account. That is one player, not two, and its platform
+// comes from the new peer.
+func TestReconnectStillListedIsOnePlayer(t *testing.T) {
+	h := events.New(100, 100)
+	tr := New(h)
+	tr.SetStatus("running")
+	feed(t, tr,
+		`Got character ZDOID from Ragnar : 100:1`,
+		"+1m",
+		`Got character ZDOID from Ragnar : 200:1`,
+	)
+	tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "xbox", "acct-1"}, {"200", "Ragnar", "xbox", "acct-1"}})
+	if got, want := byID(tr), map[string]string{"Ragnar": "Ragnar/xbox"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("players = %v, want %v", got, want)
+	}
+	// The old peer times out; the plugin lists only the new one.
+	tr.SetPeers(after(tr), []Peer{{"200", "Ragnar", "xbox", "acct-1"}})
+	feed(t, tr, `Destroying abandoned non persistent zdo 100:1 owner 100`)
+	if got, want := byID(tr), map[string]string{"Ragnar": "Ragnar/xbox"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("after the old peer went: players = %v, want %v", got, want)
+	}
+	if want := []string{"+Ragnar=Ragnar"}; !reflect.DeepEqual(joinsLeaves(h), want) {
+		t.Errorf("sequence = %v, want %v", joinsLeaves(h), want)
+	}
+	if tr.PeersWanted() {
+		t.Fatal("settled: no plugin read wanted")
+	}
+}
+
+// SetPeers hands back the id of each listed peer the tracker knows.
+func TestSetPeersReturnsIDs(t *testing.T) {
+	tr := New(events.New(100, 100))
+	tr.SetStatus("running")
+	feed(t, tr, `Got character ZDOID from Ragnar : 100:1`, `Got character ZDOID from Ragnar : 200:1`)
+	ids := tr.SetPeers(after(tr), []Peer{{"100", "Ragnar", "xbox", "a"}, {"200", "Ragnar", "steam", "b"}, {"300", "Freya", "steam", "c"}})
+	if want := map[string]string{"100": "Ragnar", "200": "Ragnar#2"}; !reflect.DeepEqual(ids, want) {
+		t.Fatalf("ids = %v, want %v", ids, want)
 	}
 }
 
