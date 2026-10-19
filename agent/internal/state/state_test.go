@@ -361,7 +361,11 @@ func TestNetStatsZeroConnectionsResetsCount(t *testing.T) {
 // that starts with "+" advances the clock by that duration instead.
 func feed(t *testing.T, tr *Tracker, lines ...string) {
 	t.Helper()
+	// The clock goes on from an earlier feed of this tracker.
 	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	if prev := tr.now(); !prev.Before(now) && prev.Before(now.Add(24*time.Hour)) {
+		now = prev
+	}
 	tr.now = func() time.Time { return now }
 	for _, l := range lines {
 		if strings.HasPrefix(l, "+") {
@@ -957,7 +961,8 @@ func TestSetPeersNamesOnePeerPerPlayer(t *testing.T) {
 	readAt := after(tr)
 	feed(t, tr, "+2s", `Got character ZDOID from Ragnar : 200:1`)
 	got := tr.SetPeers(readAt, []Peer{{"100", "Ragnar", "xbox", "A"}, {"200", "Ragnar", "steam", "B"}, {"400", "Freya", "steam", ""}, {"500", "Freya", "steam", ""}})
-	if want := map[string]string{"100": "Ragnar", "400": "Freya"}; !reflect.DeepEqual(got.ByUID, want) {
+	// Freya's two peers have no account: the newer carries the id.
+	if want := map[string]string{"100": "Ragnar", "500": "Freya"}; !reflect.DeepEqual(got.ByUID, want) {
 		t.Fatalf("ids = %v, want %v", got.ByUID, want)
 	}
 	if len(got.Hidden) != 0 {
@@ -995,6 +1000,30 @@ func TestExpiredPeerAfterACountLine(t *testing.T) {
 	feed(t, tr, "+11m", `Destroying abandoned non persistent zdo 600:1 owner 600`)
 	if s := tr.Snapshot(); s.PlayersReported != 2 {
 		t.Fatalf("after the wait: reported = %d, want 2", s.PlayersReported)
+	}
+}
+
+// Without accounts, a reconnect's newer peer carries the player's id; a
+// read older than one already taken changes nothing and re-lists no peer
+// that read expired.
+func TestNewestPeerAndOutOfOrderReads(t *testing.T) {
+	h := events.New(100, 100)
+	tr := New(h)
+	tr.SetStatus("running")
+	feed(t, tr, `Got character ZDOID from Ragnar : 100:1`, "+1m", `Got character ZDOID from Ragnar : 200:1`)
+	old := after(tr)
+	got := tr.SetPeers(old, []Peer{{"100", "Ragnar", "xbox", ""}, {"200", "Ragnar", "xbox", ""}})
+	if want := map[string]string{"200": "Ragnar"}; !reflect.DeepEqual(got.ByUID, want) {
+		t.Fatalf("ids = %v, want %v", got.ByUID, want)
+	}
+	newer := old.Add(time.Second)
+	tr.SetPeers(newer, []Peer{{"200", "Ragnar", "xbox", ""}})
+	got = tr.SetPeers(old, []Peer{{"100", "Ragnar", "xbox", ""}, {"200", "Ragnar", "xbox", ""}})
+	if !got.Hidden["100"] || got.ByUID["200"] != "Ragnar" {
+		t.Fatalf("late read: ids = %v, hidden = %v", got.ByUID, got.Hidden)
+	}
+	if want := []string{"+Ragnar=Ragnar"}; !reflect.DeepEqual(joinsLeaves(h), want) {
+		t.Errorf("sequence = %v, want %v", joinsLeaves(h), want)
 	}
 }
 

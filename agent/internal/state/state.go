@@ -103,6 +103,8 @@ type Tracker struct {
 	// accounts is the account a plugin read last reported for each peer.
 	expired  map[string]time.Time
 	accounts map[string]string
+	// lastRead is when the newest plugin read applied began.
+	lastRead time.Time
 	// pending platforms of open connections, oldest first, at most one per
 	// remote id, waiting for a character to claim them.
 	pending []pendingPlatform
@@ -213,10 +215,11 @@ func (t *Tracker) HandleLine(raw string) {
 			// One line per object the peer owned; the first one is the
 			// peer's leave. Its character is one of them, so every peer that
 			// spawned gets one.
-			t.pruneExpired()
-			if _, ok := t.expired[m.UID]; ok {
+			if at, ok := t.expired[m.UID]; ok {
 				delete(t.expired, m.UID)
-				t.lowerCount()
+				if t.now().Sub(at) <= expiredTTL {
+					t.lowerCount()
+				}
 			}
 			t.dropPeer(m.UID, true)
 		case logparse.KindWorldBackup:
@@ -472,7 +475,9 @@ type PeerIDs struct {
 // SetPeers takes the admin plugin's player list, read at readAt, as the
 // authority on which peer id is whose and on what platform; the log only
 // guesses both. Only peer ids the log reported before readAt are judged: a
-// newer one may have connected after the read. A player is known by the
+// newer one may have connected after the read, and a read older than one
+// already taken (reads can finish out of order) only names peers. A player
+// is known by the
 // account (platform user id) last reported for its oldest peer that had
 // one. Per name it
 //   - hands live peers of an account to the player known by it (a
@@ -494,6 +499,10 @@ type PeerIDs struct {
 func (t *Tracker) SetPeers(readAt time.Time, list []Peer) PeerIDs {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if readAt.Before(t.lastRead) {
+		return t.peerIDs(list)
+	}
+	t.lastRead = readAt
 	live := make(map[string]Peer, len(list))
 	for _, p := range list {
 		live[p.UID] = p
@@ -657,6 +666,15 @@ func (t *Tracker) SetPeers(readAt time.Time, list []Peer) PeerIDs {
 		t.hub.Publish("player_platform", map[string]any{"name": p.Name, "id": p.ID, "platform": platform})
 	}
 
+	return t.peerIDs(list)
+}
+
+// peerIDs names one listed peer per player (see PeerIDs). Caller holds mu.
+func (t *Tracker) peerIDs(list []Peer) PeerIDs {
+	live := make(map[string]bool, len(list))
+	for _, p := range list {
+		live[p.UID] = true
+	}
 	out := PeerIDs{ByUID: map[string]string{}, Hidden: map[string]bool{}}
 	for _, p := range t.s.Players {
 		if len(t.peers[p.ID]) == 0 {
@@ -668,7 +686,7 @@ func (t *Tracker) SetPeers(readAt time.Time, list []Peer) PeerIDs {
 		var listed, mine []string
 		own := t.ownAccount(p.ID)
 		for uid := range t.peers[p.ID] {
-			if _, ok := live[uid]; ok {
+			if live[uid] {
 				listed = append(listed, uid)
 				if own != "" && t.accounts[uid] == own {
 					mine = append(mine, uid)
@@ -684,10 +702,22 @@ func (t *Tracker) SetPeers(readAt time.Time, list []Peer) PeerIDs {
 				out.Hidden[uid] = true
 			}
 		case len(listed) > 0:
-			out.ByUID[listed[0]] = p.ID
+			// No account to tell by: the newest, a reconnect's live peer.
+			out.ByUID[listed[len(listed)-1]] = p.ID
 		}
 	}
+	t.hideExpired(list, &out)
 	return out
+}
+
+// hideExpired leaves out listed peers a newer read already expired. Caller
+// holds mu.
+func (t *Tracker) hideExpired(list []Peer, out *PeerIDs) {
+	for _, p := range list {
+		if _, ok := t.expired[p.UID]; ok {
+			out.Hidden[p.UID] = true
+		}
+	}
 }
 
 // pruneExpired forgets expired peers whose abandoned lines are overdue.
