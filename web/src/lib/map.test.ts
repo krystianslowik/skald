@@ -283,7 +283,7 @@ describe("markers and layers", () => {
   it("builds one mark per thing, with counts per layer", () => {
     const c = layerCounts(markers, off);
     expect(c.bases).toBe(snap.bases.length);
-    expect(c.portals).toBe(7);
+    expect(c.portals).toBe(9);
     expect(c.graves).toBe(3);
     expect(c.beds).toBe(4);
     expect(c.vehicles).toBe(3);

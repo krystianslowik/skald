@@ -16,6 +16,8 @@ import { MapCanvas, type MapCanvasHandle } from "./MapCanvas";
 import { DetailsBody, DetailsHead, MapDetails, markerTitle } from "./MapDetails";
 import { MapLayers } from "./MapLayers";
 import { OrePopover } from "./OrePopover";
+import { PortalSheet, RouteChip, usePortalNet } from "./PortalNetwork";
+import { PortalRouteLayer, type PortalRouteLayerHandle } from "./PortalRouteLayer";
 import { StoreySwitcher } from "./StoreySwitcher";
 
 const LAYERS_KEY = "skald.map.layers";
@@ -225,7 +227,16 @@ function SaveMap({
     },
     [settleStorey],
   );
-  const highlighted = useMemo(() => (focusMarks ? new Set([...focusMarks.values()].map((m) => m.id)) : undefined), [focusMarks]);
+  // The portal network: its sheet, the route it draws and the portals a row rings.
+  const net = usePortalNet(map, markers);
+  const routeLayer = useRef<PortalRouteLayerHandle>(null);
+  const [portalsOpen, setPortalsOpen] = useState(false);
+  const [ring, setRing] = useState<readonly string[]>([]);
+  const highlighted = useMemo(() => {
+    const ids = new Set<string>(ring);
+    if (focusMarks) for (const m of focusMarks.values()) ids.add(m.id);
+    return ids.size > 0 ? ids : undefined;
+  }, [focusMarks, ring]);
 
   // Keep the selection when a new save arrives, by id.
   useEffect(() => {
@@ -320,14 +331,16 @@ function SaveMap({
 
   const onSelect = useCallback(
     (m: Marker | null) => {
+      // Picking a route's start: a tapped mark is the start.
+      if (m && net.picking) return net.onTap(m);
       if (m) return choose({ m });
       // A tap on empty map lets the sheet slide away the way a swipe would.
       if (phone && closeSheet.current) closeSheet.current();
       else setSel(null);
     },
-    [phone, choose],
+    [phone, choose, net.picking, net.onTap],
   );
-  const onGroup = useCallback((group: readonly Marker[]) => choose({ m: group[0]!, group }), [choose]);
+  const onGroup = useCallback((group: readonly Marker[]) => (net.picking ? net.onTap(group[0]!) : choose({ m: group[0]!, group })), [choose, net.picking, net.onTap]);
   const pickFromGroup = useCallback((m: Marker) => choose({ m }), [choose]);
 
   // The other end of a portal: select it there, so its details follow.
@@ -439,6 +452,7 @@ function SaveMap({
   // Live players follow the view; admin long presses open what can happen at the spot.
   const onFrame = useCallback(() => {
     live.current?.place();
+    routeLayer.current?.place();
     placeOre();
   }, [placeOre]);
   const pick = admin?.pick ?? null;
@@ -446,7 +460,7 @@ function SaveMap({
     if (!admin?.present) return undefined;
     return (p: { x: number; z: number }) => (admin.pick ? admin.completePick(p) : admin.open({ kind: "point", x: p.x, z: p.z }));
   }, [admin]);
-  const onTapWorld = useMemo(() => (pick && admin ? (p: { x: number; z: number }) => admin.completePick(p) : undefined), [pick, admin]);
+  const onTapWorld = useMemo(() => (pick && admin ? (p: { x: number; z: number }) => admin.completePick(p) : net.picking ? net.onTap : undefined), [pick, admin, net.picking, net.onTap]);
   useEffect(() => {
     if (!pick) return;
     const onKey = (e: KeyboardEvent) => {
@@ -489,6 +503,7 @@ function SaveMap({
         insets={insets}
         className="absolute inset-0"
       />
+      <PortalRouteLayer ref={routeLayer} canvas={canvas} route={net.route} />
       <LiveLayer ref={live} canvas={canvas} onOpen={openPlayer} />
       {ore && (
         <div ref={oreBox} className="pointer-events-none absolute left-0 top-0 z-20 max-w-[min(18rem,calc(100%-1rem))]" style={{ visibility: "hidden" }}>
@@ -545,6 +560,7 @@ function SaveMap({
         {/* A finger pinches and double taps; +/- are for mice and trackpads. */}
         {!coarse && <ZoomButton label={t("map.zoomIn")} onClick={() => canvas.current?.zoomBy(1.8)} d="M8 3v10M3 8h10" />}
         {!coarse && <ZoomButton label={t("map.zoomOut")} onClick={() => canvas.current?.zoomBy(1 / 1.8)} d="M3 8h10" />}
+        <ZoomButton label={t("portals.open")} onClick={() => setPortalsOpen(true)} d="M5 14V6.5a3 3 0 0 1 6 0V14M3 14h10M7 9.5h2" />
         {home && <ZoomButton label={t("map.mainBase")} onClick={() => canvas.current?.flyTo(home.x, home.z, 0.9)} d="M2.5 8L8 3.5 13.5 8M4 7v6.5h8V7M6.5 13.5v-3h3v3" />}
         <ZoomButton label={t("map.fit")} onClick={() => canvas.current?.fit()} d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" />
       </div>
@@ -561,6 +577,7 @@ function SaveMap({
             </button>
           </div>
         )}
+        {!portalsOpen && <RouteChip net={net} onOpen={() => setPortalsOpen(true)} />}
         {stale && (
           <p role="status" className="material rounded-[2px] px-3 py-1.5 text-xs text-flame">
             {t("map.stale")}
@@ -581,6 +598,10 @@ function SaveMap({
         )}
       </div>
 
+      {portalsOpen && <PortalSheet map={map} markers={markers} net={net} canvas={canvas} onRing={setRing} onClose={() => {
+            setPortalsOpen(false);
+            net.setPicking(false);
+          }} />}
       {phone ? (
         sel && (
           <Sheet

@@ -106,7 +106,7 @@ describe("MapLayers", () => {
     const { toggles } = setup();
     const portals = screen.getByRole("button", { name: "Portals: shown" });
     expect(portals).toHaveAttribute("aria-pressed", "true");
-    expect(within(portals).getByText("7")).toBeInTheDocument();
+    expect(within(portals).getByText("9")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Beds: hidden" })).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(portals);
     expect(toggles).toEqual(["portals"]);

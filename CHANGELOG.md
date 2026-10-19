@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Added
+
+- Portal network on the map (the portal button by the zoom buttons): every portal grouped by its tag, with where it stands, and warnings for portals that lead nowhere, tags used on more than two portals (only one pair of them connects) and portals without a tag. A route finder takes you from a base, a player online or a point you tap on the map to another base, a boss altar someone has found, a trader or a pin, through portals where they save time, and lists each walking leg and portal hop. The route is drawn on the map and stays there after the sheet is closed, until cleared. Tap any row to centre the map on it. When the server hides names, portals are listed as connected pairs and only missing partners are reported.
+
 ## [2026.10.24] - 2026-10-19
 
 ### Added

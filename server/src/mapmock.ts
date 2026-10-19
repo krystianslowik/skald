@@ -311,6 +311,9 @@ export function mockMap(opts: { generation?: number; netTime?: number; savedAt?:
     portals.push({ id: b, kind: "portal_wood", x: bx, z: bz, tag: name(tag), pairedWith: a });
   }
   portals.push({ id: "-640,-120", kind: "portal_wood", x: -640, z: -120, tag: name("unfinished") });
+  // A third portal on a pair's tag (only one pair connects) and one nobody named.
+  portals.push({ id: "-2340,-1930", kind: "portal_wood", x: -2340, z: -1930, tag: name("outpost") });
+  portals.push({ id: "1600,1690", kind: "portal_stone", x: 1600, z: 1690, tag: "" });
 
   return {
     meta: {
