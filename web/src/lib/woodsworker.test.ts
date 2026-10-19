@@ -21,7 +21,7 @@ function fakePort() {
   return { port, sent, answer };
 }
 
-const req: WoodsDraw = { t: { z: 9, x: 200, y: 300 }, R: 10_500, k: 2, at: 4, woods: true, heat: false, layers: { nature: true, pickables: false } };
+const req: WoodsDraw = { t: { z: 9, x: 200, y: 300 }, R: 10_500, k: 2, at: 4, canopy: 0.2, woods: true, heat: false, layers: { nature: true, pickables: false } };
 
 describe("WoodsWorker", () => {
   it("is never ready without workers: the map draws its woods itself", async () => {

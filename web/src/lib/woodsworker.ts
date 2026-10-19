@@ -15,6 +15,7 @@ export interface WoodsDraw {
   R: number;
   k: number;
   at: number;
+  canopy: number;
   woods: boolean;
   heat: boolean;
   layers: { nature: boolean; pickables: boolean };

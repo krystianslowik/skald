@@ -34,8 +34,9 @@ import { GLMap, TILE_EDGE, type GLStats } from "./mapgl";
 import { fogField, seaMask, type FogField, type SeaMask } from "./fogfield";
 import { CLOUD_TILE, COAST, PAPER, PAPER_DARK, PAPER_TILE, textures as paperTextures, VOID, type Textures } from "./paper";
 import { natureTint, wobble, type NatureItem } from "./nature";
-import { NATURE_BANDS, NatureLayer, natureAlpha } from "./naturerender";
+import { NATURE_BANDS, NATURE_BANDS_PLAIN, NatureLayer, natureAlpha } from "./naturerender";
 import { padBox, StampGrid, tierZoom } from "./gltiles";
+import { detailAt } from "./terraindetail";
 import { drawHeat, drawUnderFog } from "./woodsraster";
 import { WoodsWorker } from "./woodsworker";
 import type { ChunkKey, Piece } from "./pieces";
@@ -291,6 +292,8 @@ export interface FrameState {
   moving?: boolean;
   /** The frame's requestAnimationFrame time stamp. */
   t0?: number;
+  /** Performance mode: plain terrain, woods without lit crowns. */
+  lite?: boolean;
 }
 
 /** 0 at or below `a`, 1 at or above `b`, smooth between. */
@@ -836,7 +839,7 @@ export class MapRenderer {
     const v = f.view;
     this.activeBase = this.storeys(v, f.layers)?.base ?? null;
     this.setRasters(f);
-    const busy = this.gl!.draw({ view: v, fog: f.layers.fog && p.fog !== null, spoilers: this.spoilers, now: performance.now(), ahead: f.ahead, moving: f.moving, t0: f.t0 });
+    const busy = this.gl!.draw({ view: v, fog: f.layers.fog && p.fog !== null, spoilers: this.spoilers, now: performance.now(), ahead: f.ahead, moving: f.moving, t0: f.t0, lite: f.lite, contours: f.layers.contours });
     const inputs = [v.cx, v.cz, v.scale, v.w, v.h, this.dpr, f.layers, f.markers, f.selected, f.hovered, f.highlighted, f.cluster, f.labels?.max, f.labels?.px, f.storey?.base, f.storey?.level, this.nature.version, this.planVersion, this.icons, p];
     if (this.splits.size === 0 && inputs.length === this.overlay.length && inputs.every((x, i) => x === this.overlay[i])) return busy;
     this.overlay = inputs;
@@ -864,7 +867,9 @@ export class MapRenderer {
     const L = f.layers;
     const heat = L.terrain && p.terrain.length > 0;
     const woods = (L.nature || L.resources) && !this.nature.empty && natureAlpha(f.view.scale) > 0;
-    const at = tierZoom(f.view.scale, NATURE_BANDS);
+    const at = tierZoom(f.view.scale, f.lite ? NATURE_BANDS_PLAIN : NATURE_BANDS);
+    // Close up the woods are a canopy (lit crowns at the real trees), coming in with the terrain's detail; not in performance mode.
+    const canopy = f.lite ? 0 : detailAt(at);
     const layers = { nature: L.nature, pickables: L.resources };
     const remote = this.woods?.ready ? this.woods : null;
     if (heat) remote?.setHeat(p.terrain, this.heatVersion);
@@ -872,10 +877,10 @@ export class MapRenderer {
       0,
       heat || woods
         ? {
-            kind: `${heat ? 1 : 0}${woods && L.nature ? 1 : 0}${woods && L.resources ? 1 : 0}`,
+            kind: `${heat ? 1 : 0}${woods && L.nature ? 1 : 0}${woods && L.resources ? 1 : 0}${f.lite ? "lite" : ""}`,
             gen: (box) => `${heat ? this.heatVersion : ""}:${woods ? `${at}:${this.nature.genFor(box)}` : ""}`,
-            draw: (g, box, scale) => drawUnderFog(g, box, scale, { heat: heat ? p.terrain : null, nature: woods ? this.nature : null, layers, at }),
-            remote: remote && ((t, R, k) => remote.draw({ t, R, k, at, woods, heat, layers })),
+            draw: (g, box, scale) => drawUnderFog(g, box, scale, { heat: heat ? p.terrain : null, nature: woods ? this.nature : null, layers, at, canopy }),
+            remote: remote && ((t, R, k) => remote.draw({ t, R, k, at, canopy, woods, heat, layers })),
           }
         : null,
     );

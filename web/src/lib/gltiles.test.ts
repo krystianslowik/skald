@@ -180,7 +180,7 @@ describe("tile data", () => {
     const px = packTile(t, paletteOf(null).meanForest);
     expect(px).toHaveLength(TILE_EDGE * TILE_EDGE * 4);
     for (const i of [0, 777, TILE_EDGE * TILE_EDGE - 1]) {
-      expect(px[4 * i]).toBe(t.biomes[i]);
+      expect(px[4 * i]! & 15).toBe(t.biomes[i]);
       expect((px[4 * i + 2]! << 8) | px[4 * i + 3]!).toBe(t.heights[i]);
       expect(px[4 * i + 1]).toBe(t.forest ? t.forest[i] : expect.any(Number));
     }
@@ -188,6 +188,24 @@ describe("tile data", () => {
     const bare = packTile({ ...t, forest: null }, paletteOf(null).meanForest);
     const i = t.biomes.findIndex((b) => b === 4);
     if (i >= 0) expect(bare[4 * i + 1]).toBe(Math.round(paletteOf(null).meanForest[4]! * 255));
+  });
+
+  it("packs each sample's biome leak (the share of its 3 x 3 that is another biome, in fifteenths) above the biome", () => {
+    const n = 6;
+    // Meadows (1) on the west half, Black Forest (4) on the east; one unknown biome (20) in a corner.
+    const biomes = new Uint8Array(n * n).map((_, i) => (i % n < 3 ? 1 : 4));
+    biomes[n * n - 1] = 20;
+    const t = { n, x0: 0, z0: 0, step: 1, biomes, heights: new Uint16Array(n * n).fill(27_000), forest: null };
+    const px = packTile(t, paletteOf(null).meanForest);
+    const r = (x: number, y: number) => px[4 * (y * n + x)]!;
+    // Inside a biome: no leak.
+    expect(r(0, 2)).toBe(1);
+    // On the border: a quarter of the weights (one column of 1 2 1) is the other biome.
+    expect(r(2, 2)).toBe(1 | (Math.round((4 / 16) * 15) << 4));
+    expect(r(3, 2) & 15).toBe(4);
+    expect(r(3, 2) >> 4).toBe(Math.round((4 / 16) * 15));
+    // A biome past 15 is None, as the palette would draw it.
+    expect(r(n - 1, n - 1) & 15).toBe(0);
   });
 
   afterEach(() => vi.unstubAllGlobals());

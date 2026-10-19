@@ -15,7 +15,7 @@ export type WoodsRequest =
   | { type: "probe" }
   | { type: "nature"; add: [string, PackedNature][]; drop: string[] }
   | { type: "heat"; spots: HeatSpot[] }
-  | { type: "draw"; id: number; t: TileRef; R: number; k: number; at: number; woods: boolean; heat: boolean; layers: { nature: boolean; pickables: boolean } };
+  | { type: "draw"; id: number; t: TileRef; R: number; k: number; at: number; canopy: number; woods: boolean; heat: boolean; layers: { nature: boolean; pickables: boolean } };
 
 export type WoodsReply = { type: "probe"; ok: boolean } | { type: "px"; id: number; px: Uint8ClampedArray<ArrayBuffer> | null };
 
@@ -59,7 +59,7 @@ self.onmessage = (e: MessageEvent<WoodsRequest>) => {
         canvas ??= new OffscreenCanvas(CHUNK, CHUNK);
         const g = canvas.getContext("2d", { willReadFrequently: true });
         if (g)
-          px = rasterChunk(g, m.t, m.R, m.k, (c, box, scale) => drawUnderFog(c, box, scale, { heat: m.heat ? spots : null, nature: m.woods ? nature : null, layers: m.layers, at: m.at }));
+          px = rasterChunk(g, m.t, m.R, m.k, (c, box, scale) => drawUnderFog(c, box, scale, { heat: m.heat ? spots : null, nature: m.woods ? nature : null, layers: m.layers, at: m.at, canopy: m.canopy }));
       } catch {
         px = null;
       }

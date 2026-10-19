@@ -19,8 +19,8 @@ import { closeColour, Fades, FADE_MS, flatColour, GPU_PIN_LEVEL, heldLevel, load
 import type { FogField, SeaMask } from "./fogfield";
 import { COAST, PAPER, PAPER_DARK, PAPER_INK, VOID, type Textures } from "./paper";
 import type { TileFeed } from "./terraindata";
-import { FOREST_DARKEN, paletteOf, RELIEF, SWAMP, WATER_DEEP, WATER_SHALLOW } from "./terrainpaint";
-import { detailAt, NOISE_SIZE, noiseTexture } from "./terraindetail";
+import { BIOMES, FOREST_DARKEN, paletteOf, RELIEF, SWAMP, WATER_DEEP, WATER_SHALLOW } from "./terrainpaint";
+import { CONTOUR_10M, CONTOUR_2M, detailAt, GRAIN, MICRO_RELIEF, NOISE_SIZE, noiseTexture, ROCK } from "./terraindetail";
 import { levelFor, loadLimit, pinnedTiles, planView, tileKey, tilesIn, type TileRef, type TilesDoc } from "./terraintiles";
 import { CHUNK, chunkFrame, rasterChunk } from "./woodsraster";
 import type { View } from "./mapgeo";
@@ -42,6 +42,7 @@ export const TILE_EDGE = 260;
 const rgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number];
 const vec3 = (c: readonly number[]) => `vec3(${c.map((x) => x.toFixed(5)).join(", ")})`;
 const f = (x: number) => x.toFixed(5);
+const [MEADOWS, MOUNTAIN, BLACK_FOREST, PLAINS, ASHLANDS, DEEP_NORTH, MISTLANDS] = (["Meadows", "Mountain", "BlackForest", "Plains", "AshLands", "DeepNorth", "Mistlands"] as const).map((b) => BIOMES.indexOf(b));
 
 const HEADER = `#version 300 es
 precision highp float;
@@ -108,7 +109,8 @@ const lightVec = (key: number) => {
  * faint water lines offshore and a lighter shallow band. The per-pixel
  * arrays stay at 16 entries: more spills registers on phone GPUs.
  */
-export const TILE_FS = `${HEADER}
+const tileFs = (full: boolean) => `${HEADER}
+#define FULL ${full ? 1 : 0}
 ${COMMON}
 uniform highp usampler2DArray uTiles;
 uniform highp sampler2D uNoise;
@@ -118,6 +120,7 @@ uniform float uWater;
 uniform float uPxPerM;
 uniform float uDpr;
 uniform float uDetail;
+uniform float uContours;
 in vec2 vWorld;
 in vec2 vSample;
 flat in vec3 vMisc;
@@ -148,8 +151,9 @@ vec3 biomeRgb(uint b) {
   int i = int(b) < uPalN ? int(b) : 0;
   return uPal[i] * vec3(0.94, 1.0, 0.9);
 }
-// World-anchored noise, one texture repeat every period metres.
-float nz(vec2 w, float period) { return texture(uNoise, w / period).r; }
+// World-anchored noise, one texture repeat every period metres (see noiseTexture for the channels).
+vec4 nz4(vec2 w, float period) { return texture(uNoise, w / period); }
+float nz(vec2 w, float period) { return nz4(w, period).r; }
 
 void main() {
   vec2 s = vSample;
@@ -173,7 +177,7 @@ void main() {
       bio[k] = t.r;
       fo[k] = float(t.g) / 255.0;
       hgt[k] = float(t.b * 256u + t.a) / 50.0 - 500.0;
-      same = same && t.r == bio[0];
+      same = same && ((t.r ^ bio[0]) & 15u) == 0u;
     }
   }
   // Height and its gradient (metres per metre, x east, y north) from the cubic B-spline.
@@ -191,6 +195,7 @@ void main() {
     ht += dwz[k >> 2] * wx[k & 3] * v;
   }
   vec2 grad = vec2(hs, -ht) / stepM;
+  float slope = length(grad);
   // Biome and forest weights round a position nudged by world-anchored noise: up to 0.22 m, so the
   // same place moves the same way on every level, which on the finest data (0.64 m) is 0.35 samples
   // and on coarser levels next to nothing. Unclamped, so the nudge is continuous across sample lines:
@@ -205,29 +210,62 @@ void main() {
     W[k] = kz[k >> 2] * kx[k & 3];
     forest += W[k] * fo[k];
   }
-  uint best = bio[0];
-  uint second = bio[0];
+  uint best = bio[0] & 15u;
+  uint second = best;
   float kb = 1.0;
   if (!same) {
     // Each biome's weight under the spline (up to four biomes round a pixel;
     // a fifth is too faint to matter); the heaviest wins, ties to the lower index.
+    // Close up a sample keeps only its own share of its biome's vote and leaks
+    // the rest (packTile's leak, R's high bits) to the other biomes here: a
+    // border then follows a wider, smoother kernel, without beads.
     uint bb[4];
     float bwt[4];
+#if FULL
+    float lkw[4];
+    float raw[4];
+#endif
     int nb = 0;
     for (int k = 0; k < 16; k++) {
+      uint bk = bio[k] & 15u;
+#if FULL
+      float lk = W[k] * float(bio[k] >> 4u) * ${f(1 / 15)} * det;
+      float own = W[k] - lk;
+#else
+      float own = W[k];
+#endif
       bool hit = false;
       for (int m = 0; m < 4; m++) {
-        if (m < nb && bb[m] == bio[k]) {
-          bwt[m] += W[k];
+        if (m < nb && bb[m] == bk) {
+          bwt[m] += own;
+#if FULL
+          lkw[m] += lk;
+          raw[m] += W[k];
+#endif
           hit = true;
         }
       }
       if (!hit && nb < 4) {
-        bb[nb] = bio[k];
-        bwt[nb] = W[k];
+        bb[nb] = bk;
+        bwt[nb] = own;
+#if FULL
+        lkw[nb] = lk;
+        raw[nb] = W[k];
+#endif
         nb++;
       }
     }
+#if FULL
+    // Each biome's leak goes to the others in proportion to their own weight here, so a biome
+    // entering the 4 x 4 (at weight 0) takes nothing at once: the vote stays continuous.
+    if (det > 0.0) {
+      for (int j = 0; j < 4; j++) {
+        if (j >= nb) break;
+        float rest = max(1.0 - raw[j], 1e-6);
+        for (int m = 0; m < 4; m++) if (m < nb && m != j) bwt[m] += lkw[j] * raw[m] / rest;
+      }
+    }
+#endif
     float bw = -1.0;
     float sw = -1.0;
     for (int m = 0; m < 4; m++) {
@@ -248,23 +286,83 @@ void main() {
     }
     if (sw > 0.0) kb = 0.5 + 0.5 * smoothstep(0.0, 1.6 * spp, bw - sw);
   }
+#if FULL
+  // Close up, micro relief: world-anchored noise on the height's gradient, rougher on rock, snow and steep ground.
+  float rough = (best == ${MOUNTAIN}u || best == ${DEEP_NORTH}u) ? 0.55 : best == ${ASHLANDS}u ? 0.45 : best == ${SWAMP}u ? 0.12 : 0.2;
+  rough = mix(rough, 0.6, smoothstep(0.55, 1.0, slope));
+  if (det > 0.0) {
+    float e = 0.15;
+    float n0 = nz(wp, 6.3);
+    float m0 = nz(wp, 2.1);
+    vec2 bump = (vec2(nz(wp + vec2(e, 0.0), 6.3) - n0, nz(wp + vec2(0.0, e), 6.3) - n0) + 0.35 * vec2(nz(wp + vec2(e, 0.0), 2.1) - m0, nz(wp + vec2(0.0, e), 2.1) - m0)) / e;
+    grad += bump * rough * ${f(MICRO_RELIEF)} * det;
+  }
+#endif
   // The relief at this pixel.
   vec3 n = normalize(vec3(-grad * ${f(RELIEF)}, 1.0));
   float lit = dot(n, mix(${lightVec(1)}, ${lightVec(0.6)}, det));
   float shade = clamp(1.0 + (lit - 1.0) * 0.85, mix(0.58, 0.52, det), mix(1.22, 1.25, det));
   vec3 c = mix(biomeRgb(second), biomeRgb(best), kb);
-  // Finer ground detail (grain, rock, contours) goes here, faded in by det.
+#if FULL
+  // Close up, each biome's grain (world-anchored tone variation) and bare rock on steep slopes.
+  if (det > 0.0) {
+    // Every lookup before the biome branches: implicit derivatives need uniform control flow.
+    float g1 = nz(wp, 23.0) - 0.5;
+    float g2 = nz4(wp, 3.7).g - 0.5;
+    float g3 = nz4(wp, 1.1).g - 0.5;
+    float comb = nz4(vec2(wp.x / 9.0, wp.y / 1.4), 1.0).g - 0.5;
+    float pud = smoothstep(0.58, 0.64, nz(wp, 11.0));
+    float spark = smoothstep(0.9, 0.97, nz4(wp, 0.9).g) * (1.0 - smoothstep(0.2, 0.6, slope));
+    float crack = 1.0 - smoothstep(0.02, 0.07, nz4(wp, 7.0).a);
+    float strata = 0.5 + 0.5 * sin(h * 2.2 + (nz(wp, 13.0) - 0.5) * 9.0);
+    float grain = 0.0;
+    if (best == ${MEADOWS}u) grain = 0.16 * g1 + 0.10 * g2 + 0.06 * g3;
+    else if (best == ${BLACK_FOREST}u) grain = 0.14 * g1 + 0.12 * g2 + 0.08 * g3;
+    // Plains: wind-combed grass.
+    else if (best == ${PLAINS}u) grain = 0.10 * g1 + 0.14 * comb + 0.05 * g3;
+    else if (best == ${SWAMP}u) {
+      // Mud and puddles.
+      grain = 0.12 * g2 - 0.10 * pud;
+      c = mix(c, ${vec3(WATER_SHALLOW.map((x) => x / 255))} * 0.85, 0.35 * pud * det);
+    } else if (best == ${MOUNTAIN}u || best == ${DEEP_NORTH}u) {
+      // Snow: soft drifts, sparkle on the flat, cool shadows.
+      grain = 0.05 * g1 + 0.03 * g2;
+      c += vec3(0.06, 0.06, 0.07) * spark * det;
+      c = mix(c, c * vec3(0.90, 0.93, 1.0), (1.0 - smoothstep(0.7, 1.0, shade)) * 0.6 * det);
+    } else if (best == ${ASHLANDS}u) {
+      // Cracked crust along the noise's cell walls.
+      grain = 0.10 * g2;
+      c = mix(c, vec3(0.20, 0.08, 0.06), 0.55 * crack * det);
+    } else if (best == ${MISTLANDS}u) grain = 0.12 * g1 + 0.08 * g2;
+    c *= 1.0 + grain * ${f(GRAIN)} * det;
+    // Rock: ground steeper than about 45 degrees shows bare stone whatever the biome, with faint strata along the height.
+    float rock = smoothstep(0.95, 1.6, slope);
+    vec3 stone = (best == ${MOUNTAIN}u || best == ${DEEP_NORTH}u) ? vec3(0.58, 0.57, 0.56) : vec3(0.52, 0.48, 0.42);
+    stone *= 0.94 + 0.10 * strata * det + 0.1 * g2 * det;
+    c = mix(c, stone, rock * ${f(ROCK)} * det);
+  }
+#endif
   c *= shade;
   c *= 1.0 - ${f(FOREST_DARKEN)} * forest;
   // Water on the same smooth height, so the coast is one curve.
   float depth = uWater - h;
   float fwd = max(fwidth(depth), 1e-4);
+#if FULL
+  // Wet ground just above the water line.
+  c *= 1.0 - 0.12 * (1.0 - smoothstep(0.0, 0.5, -depth)) * step(depth, 0.0) * det;
+#endif
+#if FULL
+  float ripple = det > 0.0 ? nz(vec2(wp.x / 17.0, wp.y / 5.0), 1.0) - 0.5 : 0.0;
+#endif
   if (depth > 0.0) {
     float a = best == ${SWAMP}u ? max(0.55 * smoothstep(0.0, 3.0, depth), smoothstep(3.0, 8.0, depth)) : smoothstep(0.0, max(0.8 * (1.0 - det), 1.5 * fwd), depth);
     vec3 shallow = ${vec3(WATER_SHALLOW.map((x) => x / 255))};
     // A lighter band in the first metres, close up.
     shallow = mix(shallow * vec3(1.12, 1.12, 1.06), shallow, smoothstep(0.0, 2.5, depth) * det + (1.0 - det));
     vec3 water = mix(shallow, ${vec3(WATER_DEEP.map((x) => x / 255))}, smoothstep(2.0, 70.0, depth));
+#if FULL
+    water *= 1.0 + 0.05 * ripple * det;
+#endif
     c += (water - c) * a;
   }
   // Close up, an ink line on the water line and two faint water lines offshore, each about a CSS px
@@ -277,8 +375,29 @@ void main() {
   float ink = (1.0 - smoothstep(0.15, 0.5, fwd)) * det * (best == ${SWAMP}u ? 0.0 : 1.0);
   c = mix(c, ${vec3(rgb(COAST))}, coast * 0.7 * ink);
   c = mix(c, c * 1.18 + 0.03, (l1 * 0.45 + l2 * 0.25) * ink);
+#if FULL
+  // Contours on land, every 2 m faint and every 10 m stronger, about a CSS px wide; each fades out before it crowds.
+  if (depth < 0.0 && uContours > 0.0 && det > 0.0) {
+    float f2 = h / 2.0;
+    float f10 = h / 10.0;
+    // fwidth(h / k) is fwd / k: no derivatives inside a branch.
+    float w2 = fwd / 2.0;
+    float w10 = fwd / 10.0;
+    // Line widths and the crowding fade in CSS px (w * uDpr: metres of height per CSS px, over the interval);
+    // on near-flat ground (lines thousands of px apart) none, so a plateau at a line's height is not inked over.
+    float sloped = smoothstep(0.0003, 0.001, fwd);
+    float c2 = (1.0 - smoothstep(0.5, 1.3, abs(fract(f2 + 0.5) - 0.5) / w2 / uDpr)) * (1.0 - smoothstep(0.08, 0.25, w2 * uDpr)) * sloped;
+    float c10 = (1.0 - smoothstep(0.6, 1.5, abs(fract(f10 + 0.5) - 0.5) / w10 / uDpr)) * (1.0 - smoothstep(0.1, 0.3, w10 * uDpr)) * sloped;
+    c = mix(c, ${vec3(PAPER_INK.map((x) => (x / 255) * 0.7))}, (${f(CONTOUR_2M)} * c2 + ${f(CONTOUR_10M)} * c10) * det * uContours);
+  }
+#endif
   outColor = vec4(clamp(c, 0.0, 1.0) * cov, cov);
 }`;
+
+/** The terrain shader with close-zoom detail (grain, rock, contours). */
+export const TILE_FS = tileFs(true);
+/** Performance mode's: the plain shader, none of that detail. */
+export const TILE_FS_LITE = tileFs(false);
 
 const SHEET_VS = `${HEADER}
 void main() {
@@ -367,6 +486,10 @@ void main() { outColor = texture(uChunks, vec3(vSample, vMisc.x)) * vMisc.y; }`;
 
 export interface GLFrame {
   view: View;
+  /** Performance mode: the plain terrain shader, no close-zoom detail. */
+  lite?: boolean;
+  /** Contour lines on land, close up. */
+  contours?: boolean;
   /** The fog of war layer is on. */
   fog: boolean;
   /** Spoilers on: terrain is not cut to the generated zones. */
@@ -428,6 +551,8 @@ export interface RasterSource {
 
 type Programs = {
   tile: WebGLProgram;
+  /** Performance mode's tile program, compiled the first time it is wanted. */
+  lite: WebGLProgram | null;
   sheet: WebGLProgram;
   raster: WebGLProgram;
   u: Record<string, WebGLUniformLocation | null>;
@@ -469,6 +594,8 @@ function compile(gl: WebGL2RenderingContext, vs: string, fs: string): WebGLProgr
   }
   return p;
 }
+
+const TILE_UNIFORMS = ["uTiles", "uNoise", "uPal", "uPalN", "uWater", "uPxPerM", "uDpr", "uDetail", "uContours", "uRadius", "uSeaOn", "uSea", "uSeaTex"];
 
 const deviceMemory = () => (globalThis.navigator as { deviceMemory?: number } | undefined)?.deviceMemory ?? 8;
 
@@ -552,6 +679,8 @@ export class GLMap {
 
   /** Why the GPU path was given up for good (a failed self-test or watchdog), or null. */
   private broken: string | null = null;
+  /** Performance mode's shader did not build here: the full one stands in. */
+  private liteBroken = false;
   private readonly watchdog = new Watchdog();
 
   private constructor(
@@ -652,7 +781,9 @@ export class GLMap {
       gl.uniform1f(u["t.uWater"]!, 30);
       gl.uniform1f(u["t.uPxPerM"]!, 1);
       gl.uniform1f(u["t.uDpr"]!, 1);
-      gl.uniform1f(u["t.uDetail"]!, 1);
+      // At no detail: the close-zoom grain would move the flat colour this reads back.
+      gl.uniform1f(u["t.uDetail"]!, 0);
+      gl.uniform1f(u["t.uContours"]!, 1);
       gl.uniform1i(u["t.uNoise"]!, 5);
       gl.activeTexture(gl.TEXTURE5);
       gl.bindTexture(gl.TEXTURE_2D, r.noise);
@@ -665,6 +796,11 @@ export class GLMap {
       const tile = one(LAYERS - 1, [40, 40, 220, 220], 0.64);
       const want = [...flatColour(pal[1]!).map(Math.round), 255];
       if (!closeColour(tile, want)) return `tile shader read back rgba(${tile.join(", ")}), want rgba(${want.join(", ")})`;
+      // At full detail too: the meadow's grain moves its colour by up to about a sixth, no more.
+      gl.uniform1f(u["t.uDetail"]!, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      const near = one(LAYERS - 1, [40, 40, 220, 220], 0.64);
+      if (!closeColour(near, want, 48)) return `tile shader at full detail read back rgba(${near.join(", ")}), want about rgba(${want.join(", ")})`;
       // Chunks: a known colour, uploaded from pixels as chunks are, from the last layer.
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, chunks);
       gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -738,7 +874,7 @@ export class GLMap {
     const raster = compile(gl, TILE_VS, RASTER_FS);
     const u: Programs["u"] = {};
     const names: [WebGLProgram, string, string[]][] = [
-      [tile, "t.", ["uTiles", "uNoise", "uPal", "uPalN", "uWater", "uPxPerM", "uDpr", "uDetail", "uRadius", "uSeaOn", "uSea", "uSeaTex"]],
+      [tile, "t.", TILE_UNIFORMS],
       [sheet, "s.", ["uMode", "uView", "uHalf", "uPaperOct", "uPaperOff", "uCloudOct", "uCloudOff", "uPaperAlpha", "uFog", "uFogBox", "uRim", "uPaper", "uClouds", "uFogTex", "uRadius", "uSeaOn", "uSea", "uSeaTex"]],
       [raster, "r.", ["uChunks"]],
     ];
@@ -769,7 +905,7 @@ export class GLMap {
     this.maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
     this.maxLayers = gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS) as number;
     this.res = {
-      p: { tile, sheet, raster, u },
+      p: { tile, lite: null, sheet, raster, u },
       vao,
       empty,
       inst,
@@ -783,7 +919,7 @@ export class GLMap {
     };
     // The terrain's world-anchored noise (built once per page, uploaded with every context).
     gl.bindTexture(gl.TEXTURE_2D, this.res.noise);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, NOISE_SIZE, NOISE_SIZE, 0, gl.RED, gl.UNSIGNED_BYTE, noiseTexture());
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, NOISE_SIZE, NOISE_SIZE, 0, gl.RGBA, gl.UNSIGNED_BYTE, noiseTexture());
     gl.generateMipmap(gl.TEXTURE_2D);
     // What was handed over before (or before the context was lost) goes up again.
     if (this.paperTex) this.setPaper(this.paperTex);
@@ -1029,6 +1165,21 @@ export class GLMap {
     return this.aheadKeys;
   }
 
+  /** Performance mode's tile program, compiled when first wanted; null if it does not build (the full one, which passed the self-test, is used instead). */
+  private liteProgram(): WebGLProgram | null {
+    const r = this.res!;
+    if (r.p.lite || this.liteBroken) return r.p.lite;
+    try {
+      r.p.lite = compile(this.gl, TILE_VS, TILE_FS_LITE);
+    } catch (err) {
+      this.liteBroken = true;
+      console.warn(`map: performance mode's shader did not build, drawing the full one: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+    for (const n of TILE_UNIFORMS) r.p.u["l." + n] = this.gl.getUniformLocation(r.p.lite, n);
+    return r.p.lite;
+  }
+
   private drawTiles(fr: GLFrame, pxPerM: number, bindSea: (pre: string) => void): boolean {
     const r = this.res!;
     const gl = this.gl;
@@ -1107,17 +1258,21 @@ export class GLMap {
     this.stats = { level: z, wanted: plan.slots.length, quads: sel.quads.length, own: sel.own, ancestor: sel.ancestor, descendant: sel.descendant, blank: sel.blank, fading: sel.fading, uploads: this.budget.used, pending, pool: pool.size, capacity: pool.capacity, chunks, chunksPending, chunksInflight, rastered, redrawn, rasterMs, remote };
     if (sel.quads.length) {
       this.fillInstances(sel.quads, v, R, doc.tileSize, doc.apron - 0.5, (t) => pool.layer(tileKey(t)) ?? 0);
-      gl.useProgram(r.p.tile);
+      const lite = fr.lite ? this.liteProgram() : null;
+      const pre = lite ? "l." : "t.";
+      const prog = lite ?? r.p.tile;
+      gl.useProgram(prog);
       const { u } = r.p;
-      bindSea("t.");
-      gl.uniform1i(u["t.uTiles"]!, 0);
-      gl.uniform3fv(u["t.uPal"]!, this.pal);
-      gl.uniform1i(u["t.uPalN"]!, this.palN);
-      gl.uniform1f(u["t.uWater"]!, doc.waterLevel);
-      gl.uniform1f(u["t.uPxPerM"]!, pxPerM);
-      gl.uniform1f(u["t.uDpr"]!, k);
-      gl.uniform1f(u["t.uDetail"]!, detailAt(v.scale));
-      gl.uniform1i(u["t.uNoise"]!, 5);
+      bindSea(pre);
+      gl.uniform1i(u[pre + "uTiles"]!, 0);
+      gl.uniform3fv(u[pre + "uPal"]!, this.pal);
+      gl.uniform1i(u[pre + "uPalN"]!, this.palN);
+      gl.uniform1f(u[pre + "uWater"]!, doc.waterLevel);
+      gl.uniform1f(u[pre + "uPxPerM"]!, pxPerM);
+      gl.uniform1f(u[pre + "uDpr"]!, k);
+      gl.uniform1f(u[pre + "uDetail"]!, detailAt(v.scale));
+      gl.uniform1f(u[pre + "uContours"]!, fr.contours === false ? 0 : 1);
+      gl.uniform1i(u[pre + "uNoise"]!, 5);
       gl.activeTexture(gl.TEXTURE5);
       gl.bindTexture(gl.TEXTURE_2D, r.noise);
       gl.activeTexture(gl.TEXTURE0);
@@ -1358,7 +1513,7 @@ export class GLMap {
       gl.deleteBuffer(r.inst);
       gl.deleteVertexArray(r.vao);
       gl.deleteVertexArray(r.empty);
-      for (const p of [r.p.tile, r.p.sheet, r.p.raster]) gl.deleteProgram(p);
+      for (const p of [r.p.tile, r.p.lite, r.p.sheet, r.p.raster]) if (p) gl.deleteProgram(p);
     }
     this.res = null;
   }
