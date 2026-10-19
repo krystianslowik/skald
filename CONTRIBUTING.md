@@ -21,7 +21,10 @@ cd ../server && bun install && bun run dev   # mock server, password "ognisko"
 players walking around the map, and a fake bridge (`MOCK_BRIDGE=off`,
 `untested` or `disabled` shows the other panel states), and a compatibility
 check after a game update (`MOCK_COMPAT=warn`, `fail`, `pending` or `none`;
-`ok` by default). No game files are needed. For UI work, `cd web && npm run dev` runs Vite against it.
+`ok` by default). A safe restart from the admin sheet runs on a fast clock (a
+minute is 2 seconds) and goes through unless `MOCK_RESTART` names the step that
+fails: `fail-save`, `fail-backup`, `fail-verify`, `fail-start` or
+`fail-recover`. No game files are needed. For UI work, `cd web && npm run dev` runs Vite against it.
 
 | Directory | What it is |
 |---|---|

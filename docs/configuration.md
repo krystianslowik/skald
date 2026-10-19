@@ -904,7 +904,8 @@ Settings that work with Skald:
 ### Restoring a backup
 
 The list shows the image's backups (`/config/backups/worlds-*.zip`) and
-Skald's own safety copies (`/config/skald-backups/pre-restore-*.zip`). A
+Skald's own copies (`/config/skald-backups/pre-restore-*.zip` from restores,
+`pre-restart-*.zip` from safe restarts). A
 restore needs the world name typed, a long press, and an empty server. Then
 the agent:
 
@@ -933,3 +934,46 @@ of the list. By hand, with the server stopped: move
 `worlds_local/<WORLD>` aside and unzip the safety copy in `/config`
 (`unzip pre-restore-<time>.zip 'worlds_local/<WORLD>/*'`). Safety copies are
 never pruned; delete old ones yourself.
+
+### Safe restart
+
+The admin sheet's **Safe restart** restarts the server the way you would by
+hand, as one run that every admin sees step by step and that lands in the
+Saga. It needs the admin password (when one is set) and a long press. You
+choose:
+
+- **Wait until nobody plays**: the run waits until the server has been empty
+  for a minute. With a deadline (30 minutes to 4 hours), it goes ahead anyway
+  at the deadline, with the countdown below, so the players on are warned.
+- **Countdown with players on**: 1, 5 or 10 minutes of warnings, or none.
+  With the admin plugin the warnings show in the middle of every screen (at
+  the start, then 10, 5, 2 and 1 minutes and 30 and 10 seconds before), in
+  the language of `SKALD_LOCALE`. Discord and phones get one heads-up at the
+  start. The countdown ends early when the last player leaves.
+
+Then the agent:
+
+1. asks the game to save (admin plugin only) and waits for the save line;
+2. pauses the image's updater and stops the server through supervisord,
+   which waits for the shutdown save;
+3. zips the stopped world into `skald-backups/pre-restart-<time>.zip`, with
+   its sha256 in a `.sha256` file next to it;
+4. checks the copy: the size, the sha256 of the file read back, every entry
+   read through its CRC, and a complete world: the newest finished save's
+   `.db2` and `.fwl2` (or the pre-1.0 `.db` and `.fwl`);
+5. starts the server and the updater again (the image updates the game on
+   start when it does that);
+6. waits up to 20 minutes for the world to load and, with crossplay, for a
+   new join code, and posts it to Discord and phones.
+
+Waiting and the countdown can be cancelled; from the save on, the run goes
+to the end. A failed backup or check never leaves the server down: the world
+was not touched, so the server is started again and the run ends failed,
+with a Discord and phone alert. The copy shows up in the restore list. Only
+the newest five `pre-restart-*.zip` are kept; `pre-restore-*.zip` are never
+deleted. While a safe restart runs, a plain restart, a restore and applying
+settings now are refused, and settings waiting for an empty server wait for
+it (its restart applies them); backups and update checks still run.
+
+The run lives in the agent, so it carries on when skald-web restarts. A
+restart of the agent itself (it restarts with the game pod) ends it.

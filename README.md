@@ -22,7 +22,7 @@ on one password-protected page your friends can open on their phones:
 - who's online, who played when, how often they died, streaks and badges
 - a world map drawn from the save: bases, portals, graves, ships, pins and the bosses you've found
 - what's in every chest, cart and ship you built, searchable ("where's our iron?")
-- backups, restarts and server settings, behind press-and-hold buttons
+- backups, restarts and server settings, behind press-and-hold buttons, and a safe restart that waits for an empty server, warns players, checks a fresh backup and posts the new join code
 - the live server log, plus Prometheus metrics and a Grafana dashboard
 
 It works with the [community Valheim server image](https://github.com/community-valheim-tools/valheim-server-docker)
