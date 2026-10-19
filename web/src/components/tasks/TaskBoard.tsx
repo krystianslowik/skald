@@ -44,7 +44,7 @@ function MissingLine({ needs }: { needs: MaterialNeed[] }) {
   );
 }
 
-const TaskCard = memo(function TaskCard({ task, stock, onOpen }: { task: Task; stock: ReadonlyMap<string, number> | null; onOpen: (t: Task) => void }) {
+const TaskCard = memo(function TaskCard({ task, stock, onOpen, onUnauthorized }: { task: Task; stock: ReadonlyMap<string, number> | null; onOpen: (t: Task) => void; onUnauthorized?: () => void }) {
   const i18n = useI18n();
   const { t } = i18n;
   const [busy, setBusy] = useState(false);
@@ -58,7 +58,8 @@ const TaskCard = memo(function TaskCard({ task, stock, onOpen }: { task: Task; s
     setBusy(true);
     const r = await updateTask(task.id, { status: nextStatus(task.status) });
     setBusy(false);
-    setFailed(!r.ok);
+    if (!r.ok && r.error === "unauthorized") onUnauthorized?.();
+    setFailed(!r.ok && r.error !== "unauthorized");
   };
   const meta = [task.owner, where].filter(Boolean).join(" · ");
   return (
@@ -115,7 +116,7 @@ export function TaskBoard({ saveKey, players, onUnauthorized }: { saveKey: strin
       <AnimatePresence initial={false}>
         {items.map((task) => (
           <motion.li key={task.id} layout={reduced ? false : "position"} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={spring}>
-            <TaskCard task={task} stock={stock} onOpen={onOpen} />
+            <TaskCard task={task} stock={stock} onOpen={onOpen} onUnauthorized={onUnauthorized} />
           </motion.li>
         ))}
       </AnimatePresence>
@@ -154,7 +155,7 @@ export function TaskBoard({ saveKey, players, onUnauthorized }: { saveKey: strin
       {open !== null && (open === "new" || editing) && (
         <ChunkBoundary overlay onClose={close}>
           <Suspense fallback={null}>
-            <TaskSheet key={open} task={editing} stock={stock} players={players} onClose={close} />
+            <TaskSheet key={open} task={editing} stock={stock} players={players} onClose={close} onUnauthorized={onUnauthorized} />
           </Suspense>
         </ChunkBoundary>
       )}

@@ -72,9 +72,10 @@ function clean(s: string, newlines: boolean): boolean {
   return true;
 }
 
+/** Trimmed, tabs (pasted from a table) as spaces; null when not a string, too long, or holding control characters. */
 function text(v: unknown, max: number, newlines = false): string | null {
   if (typeof v !== "string") return null;
-  const s = v.trim();
+  const s = v.replace(/\t/g, " ").trim();
   return len(s) <= max && clean(s, newlines) ? s : null;
 }
 

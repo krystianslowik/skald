@@ -100,6 +100,10 @@ describe("parseTaskInput", () => {
     expect(parseTaskInput([], true)).toEqual({ ok: false, error: "body" });
   });
 
+  it("takes tabs pasted from a table as spaces", () => {
+    expect(parseTaskInput({ title: "Forge\tnow", note: "Wood\t10\nStone\t4" }, false)).toEqual({ ok: true, value: { title: "Forge now", note: "Wood 10\nStone 4" } });
+  });
+
   it("keeps newlines in a note, merges repeated materials, and takes a null target", () => {
     const r = parseTaskInput({ title: "Ship", note: "keel first\nthen sail", target: null, materials: [{ item: "Wood", qty: 2 }, { item: "Resin", qty: 1 }, { item: "Wood", qty: 3 }] }, false);
     expect(r).toEqual({ ok: true, value: { title: "Ship", note: "keel first\nthen sail", target: null, materials: [{ item: "Wood", qty: 5 }, { item: "Resin", qty: 1 }] } });
@@ -128,12 +132,17 @@ describe("TaskStore", () => {
     expect(again.ok && again.completed).toBe(false);
     const reopened = store.update(1, { status: "todo" });
     expect(reopened.ok && reopened.task.doneAt).toBeNull();
+    // Finished again: done, but the saga already has its line.
+    const twice = store.update(1, { status: "done" });
+    expect(twice.ok && twice.task.status).toBe("done");
+    expect(twice.ok && twice.completed).toBe(false);
+    store.update(1, { status: "todo" });
     expect(store.update(9, { title: "x" })).toEqual({ ok: false, error: "not_found" });
 
     expect(store.remove(1)).toBe(true);
     expect(store.remove(1)).toBe(false);
     expect(store.list()).toEqual([]);
-    expect(seen.map((l) => l.length)).toEqual([1, 1, 1, 1, 1, 0]);
+    expect(seen.map((l) => l.length)).toEqual([1, 1, 1, 1, 1, 1, 1, 0]);
     expect(seen[1]![0]!.materials).toEqual([{ item: "Copper", qty: 6 }]);
   });
 
@@ -142,9 +151,15 @@ describe("TaskStore", () => {
     try {
       const a = new TaskStore(path);
       a.create({ title: "Karve", materials: [{ item: "FineWood", qty: 30 }], target: { kind: "base", name: "Harbour" } });
+      a.update(1, { status: "done" });
+      a.update(1, { status: "todo" });
       a.close();
       const b = new TaskStore(path);
       expect(b.list()).toMatchObject([{ id: 1, title: "Karve", materials: [{ item: "FineWood", qty: 30 }], target: { kind: "base", name: "Harbour" } }]);
+      // The saga line is remembered across the restart, and never sent.
+      expect("logged" in b.list()[0]!).toBe(false);
+      const again = b.update(1, { status: "done" });
+      expect(again.ok && again.completed).toBe(false);
       b.close();
     } finally {
       for (const f of [path, `${path}-wal`, `${path}-shm`]) await Bun.file(f).delete().catch(() => {});

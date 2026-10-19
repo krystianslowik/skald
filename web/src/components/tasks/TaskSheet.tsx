@@ -4,7 +4,7 @@ import { parseTaskInput, shortfall, TASK_LIMITS, TASK_STATUSES, type TaskInputEr
 import { useI18n } from "../../i18n";
 import { BOSSES } from "../../lib/world";
 import { itemLabel } from "../../lib/storage";
-import { createTask, deleteTask, updateTask, type Task, type TaskInput, type TaskMaterial, type TaskResult, type TaskTarget } from "../../lib/tasks";
+import { changedFields, createTask, deleteTask, updateTask, type Task, type TaskInput, type TaskMaterial, type TaskResult, type TaskTarget } from "../../lib/tasks";
 import { ItemSearch } from "../admin/ItemPicker";
 import { Btn, Chip, Stepper, useArmed } from "../admin/parts";
 import { Sheet, SheetClose } from "../Sheet";
@@ -44,7 +44,7 @@ const qtyStep = (n: number) => (n >= 100 ? 10 : n >= 20 ? 5 : 1);
  * material list (by hand or from a recipe, each line with what the stores
  * hold) and a note. Deleting needs a second tap.
  */
-export default function TaskSheet({ task, stock, players, onClose }: { task: Task | null; stock: ReadonlyMap<string, number> | null; players: readonly string[]; onClose: () => void }) {
+export default function TaskSheet({ task, stock, players, onClose, onUnauthorized }: { task: Task | null; stock: ReadonlyMap<string, number> | null; players: readonly string[]; onClose: () => void; onUnauthorized?: () => void }) {
   const { t, lookup, number } = useI18n();
   const ids = useId();
   const [title, setTitle] = useState(task?.title ?? "");
@@ -76,10 +76,14 @@ export default function TaskSheet({ task, stock, players, onClose }: { task: Tas
       setError({ field: checked.error, text: t(`tasks.error.${checked.error}`) });
       return;
     }
+    // An edit sends only what changed here: someone else's change to another field stays.
+    const diff = task ? changedFields(task, checked.value as Required<TaskInput>) : checked.value;
+    if (task && Object.keys(diff).length === 0) return onClose();
     setBusy(true);
-    const r = task ? await updateTask(task.id, checked.value) : await createTask(checked.value);
+    const r = task ? await updateTask(task.id, diff) : await createTask(diff);
     setBusy(false);
     if (r.ok) onClose();
+    else if (r.error === "unauthorized") onUnauthorized?.();
     else setError({ field: r.field, text: failText(r) });
   };
 
@@ -94,6 +98,7 @@ export default function TaskSheet({ task, stock, players, onClose }: { task: Tas
     const r = await deleteTask(task.id);
     setBusy(false);
     if (r.ok || r.error === "not_found") onClose();
+    else if (r.error === "unauthorized") onUnauthorized?.();
     else setError({ text: failText(r) });
   };
 
@@ -108,7 +113,14 @@ export default function TaskSheet({ task, stock, players, onClose }: { task: Tas
   };
   const addRecipe = (r: Recipe) => {
     navigator.vibrate?.(6);
-    setMaterials((ms) => expandRecipe(ms, r).slice(0, TASK_LIMITS.materials));
+    const next = expandRecipe(materials, r);
+    // All of a recipe or none of it: a list cut short would understate what is needed.
+    if (next.length > TASK_LIMITS.materials) {
+      setError({ field: "materials", text: t("tasks.materials.full", { n: TASK_LIMITS.materials }) });
+      return;
+    }
+    setMaterials(next);
+    if (error?.field === "materials") setError(null);
     if (r.target?.kind === "boss" && targetKind === "none") {
       setTargetKind("boss");
       setBoss(r.target.key);

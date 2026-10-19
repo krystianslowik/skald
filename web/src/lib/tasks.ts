@@ -62,12 +62,13 @@ export function useTasks(onUnauthorized?: () => void): Task[] | null {
 /**
  * Puts one task in the list at once, before the socket confirms. A newer
  * copy the socket already brought (someone else's edit right after this
- * one) is kept.
+ * one) is kept, and an edit answer never brings back a task the socket has
+ * since reported deleted.
  */
-function upsert(task: Task): void {
+function upsert(task: Task, created: boolean): void {
   const list = current ?? [];
   const have = list.find((t) => t.id === task.id);
-  if (have && have.updatedAt > task.updatedAt) return;
+  if (have ? have.updatedAt > task.updatedAt : !created) return;
   publish(have ? list.map((t) => (t.id === task.id ? task : t)) : [...list, task]);
 }
 
@@ -101,13 +102,13 @@ async function send(method: string, path: string, body?: unknown): Promise<TaskR
 
 export async function createTask(input: TaskInput): Promise<TaskResult> {
   const r = await send("POST", "/api/tasks", input);
-  if (r.ok && r.task) upsert(r.task);
+  if (r.ok && r.task) upsert(r.task, true);
   return r;
 }
 
 export async function updateTask(id: number, input: TaskInput): Promise<TaskResult> {
   const r = await send("PATCH", `/api/tasks/${id}`, input);
-  if (r.ok && r.task) upsert(r.task);
+  if (r.ok && r.task) upsert(r.task, false);
   return r;
 }
 
@@ -115,6 +116,21 @@ export async function deleteTask(id: number): Promise<TaskResult> {
   const r = await send("DELETE", `/api/tasks/${id}`);
   if ((r.ok || r.error === "not_found") && current) publish(current.filter((t) => t.id !== id));
   return r;
+}
+
+/**
+ * What an edit changed against the task as it was opened, so saving one
+ * field never undoes what someone else changed in another meanwhile.
+ */
+export function changedFields(before: Task, after: Required<TaskInput>): TaskInput {
+  const out: TaskInput = {};
+  if (after.title !== before.title) out.title = after.title;
+  if (after.owner !== before.owner) out.owner = after.owner;
+  if (after.status !== before.status) out.status = after.status;
+  if (after.note !== before.note) out.note = after.note;
+  if (JSON.stringify(after.target) !== JSON.stringify(before.target)) out.target = after.target;
+  if (JSON.stringify(after.materials) !== JSON.stringify(before.materials)) out.materials = after.materials;
+  return out;
 }
 
 /** The status a task's quick button moves it to: to do, then doing, then done; done reopens. */

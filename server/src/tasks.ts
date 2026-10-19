@@ -2,7 +2,12 @@ import { Database } from "bun:sqlite";
 import { TASK_LIMITS, type Task, type TaskInput } from "./taskmodel";
 
 export type TaskChange =
-  | { ok: true; task: Task; /** The edit moved it to done from an open status. */ completed: boolean }
+  | {
+      ok: true;
+      task: Task;
+      /** The change finished the task for the first time: worth a saga line. Reopening and finishing it again is not. */
+      completed: boolean;
+    }
   | { ok: false; error: "not_found" | "too_many" };
 
 /**
@@ -16,6 +21,8 @@ export class TaskStore {
   private db: Database;
   private listeners = new Set<(tasks: Task[]) => void>();
   private cache: Task[] | null = null;
+  /** Tasks the saga already has a line for; kept in the row as `logged`, never sent. */
+  private logged = new Set<number>();
 
   constructor(path: string, private readonly clock: () => number = Date.now) {
     this.db = new Database(path, { create: true });
@@ -33,7 +40,15 @@ export class TaskStore {
 
   /** Every task, oldest first. */
   list(): Task[] {
-    this.cache ??= (this.db.query("SELECT id, data FROM tasks ORDER BY id").all() as { id: number; data: string }[]).map((r) => ({ ...(JSON.parse(r.data) as Task), id: r.id }));
+    if (!this.cache) {
+      const rows = this.db.query("SELECT id, data FROM tasks ORDER BY id").all() as { id: number; data: string }[];
+      this.logged.clear();
+      this.cache = rows.map((r) => {
+        const { logged, ...task } = JSON.parse(r.data) as Task & { logged?: boolean };
+        if (logged) this.logged.add(r.id);
+        return { ...task, id: r.id };
+      });
+    }
     return this.cache;
   }
 
@@ -57,10 +72,12 @@ export class TaskStore {
       updatedAt: now,
       doneAt: status === "done" ? now : null,
     };
-    const res = this.db.query("INSERT INTO tasks (data) VALUES (?)").run(JSON.stringify(task));
+    const done = status === "done";
+    const res = this.db.query("INSERT INTO tasks (data) VALUES (?)").run(JSON.stringify(done ? { ...task, logged: true } : task));
     const created = { ...task, id: Number(res.lastInsertRowid) };
-    this.changed();
-    return { ok: true, task: created, completed: status === "done" };
+    if (done) this.logged.add(created.id);
+    this.changed([...this.list(), created]);
+    return { ok: true, task: created, completed: done };
   }
 
   update(id: number, input: TaskInput): TaskChange {
@@ -68,18 +85,24 @@ export class TaskStore {
     if (!prev) return { ok: false, error: "not_found" };
     const now = new Date(this.clock()).toISOString();
     const next: Task = { ...prev, ...input, id, updatedAt: now };
-    const completed = prev.status !== "done" && next.status === "done";
-    if (completed) next.doneAt = now;
+    const finished = prev.status !== "done" && next.status === "done";
+    if (finished) next.doneAt = now;
     else if (next.status !== "done") next.doneAt = null;
+    // One saga line per task: a task cycled through done again stays quiet.
+    const completed = finished && !this.logged.has(id);
+    if (completed) this.logged.add(id);
     const { id: _, ...data } = next;
-    this.db.query("UPDATE tasks SET data = ? WHERE id = ?").run(JSON.stringify(data), id);
-    this.changed();
+    this.db.query("UPDATE tasks SET data = ? WHERE id = ?").run(JSON.stringify(this.logged.has(id) ? { ...data, logged: true } : data), id);
+    this.changed(this.list().map((t) => (t.id === id ? next : t)));
     return { ok: true, task: next, completed };
   }
 
   remove(id: number): boolean {
     const gone = this.db.query("DELETE FROM tasks WHERE id = ?").run(id).changes > 0;
-    if (gone) this.changed();
+    if (gone) {
+      this.logged.delete(id);
+      this.changed(this.list().filter((t) => t.id !== id));
+    }
     return gone;
   }
 
@@ -89,9 +112,9 @@ export class TaskStore {
     return () => this.listeners.delete(fn);
   }
 
-  private changed(): void {
-    this.cache = null;
-    const tasks = this.list();
+  /** The list after a change, patched in place of a reread. */
+  private changed(tasks: Task[]): void {
+    this.cache = tasks;
     for (const fn of this.listeners) {
       try {
         fn(tasks);

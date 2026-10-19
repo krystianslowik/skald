@@ -796,7 +796,8 @@ start. The NetworkPolicy needs no change: the plugin is loopback only.
   `logtopic=1` gets every line as before. The 15 s state poll goes out only
   when something in the state changed, as a `{"type":"state","partial":true}`
   message with just the top-level parts that did (the first state on a socket
-  is always whole). Frames are compressed (permessage-deflate) for every
+  is always whole). The shared tasks go out whole as `{"type":"tasks"}` when
+  a socket opens and after every change to one of them. Frames are compressed (permessage-deflate) for every
   browser that asks, which all current ones do; a reverse proxy passes this
   on without extra settings.
 
@@ -811,7 +812,9 @@ spawn items, kill, ban and teleport. Keep the password strong and the panel
 behind your access layer, or set an admin password:
 
 - The panel password then only views (the map, live players and the saga
-  included).
+  included), with one exception: the shared task board. Tasks belong to the
+  group, so anyone signed in adds, edits, finishes and deletes them
+  (`/api/tasks`), and a finished task adds a "Task done" line to the saga.
 - Admin commands, restarts, backups, updates and saving or applying server
   settings answer 403 until the browser unlocks an admin session with the
   admin password (`POST /api/admin/unlock`, rate-limited like the login: 5

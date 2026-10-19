@@ -2,7 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../i18n";
-import { resetTasks, setTasks, type Task } from "../../lib/tasks";
+import { resetTasks, setTasks, updateTask, useTasks, type Task } from "../../lib/tasks";
+import { renderHook } from "@testing-library/react";
 import type { AgentEvent } from "../../types";
 import { Saga } from "../Saga";
 import { TaskBoard } from "./TaskBoard";
@@ -32,7 +33,7 @@ interface Call {
 }
 
 /** /api/storage answers with `containers`; task writes answer with what the server would. */
-function stubFetch(containers: ReturnType<typeof chest>[] | null) {
+function stubFetch(containers: ReturnType<typeof chest>[] | null, status = 200) {
   const calls: Call[] = [];
   let nextId = 100;
   vi.stubGlobal(
@@ -41,6 +42,7 @@ function stubFetch(containers: ReturnType<typeof chest>[] | null) {
       const method = init?.method ?? "GET";
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined;
       calls.push({ method, url, body });
+      if (status !== 200 && url.startsWith("/api/tasks") && method !== "GET") return Response.json({ error: "unauthorized" }, { status });
       if (url === "/api/storage") {
         if (!containers) return new Response("{}", { status: 404 });
         return Response.json({ generation: 1, savedAt: "", showNames: false, containers });
@@ -134,6 +136,64 @@ describe("task board", () => {
     expect(screen.getByRole("button", { name: "Nowe zadanie" })).toBeInTheDocument();
     expect(screen.getByText(/W toku/).parentElement).toHaveTextContent("W toku · w bazie Przystań");
     expect(await screen.findByText(/Ten serwer nie pokazuje zapasów/)).toBeInTheDocument();
+  });
+});
+
+describe("task edits", () => {
+  it("send only what changed, so another player's change to another field stays", async () => {
+    const calls = stubFetch([]);
+    setTasks([task(5, { title: "Forge", owner: "Ragnar", note: "by the river", materials: [{ item: "Copper", qty: 6 }] })]);
+    inLocale(<TaskBoard saveKey="a" players={[]} />);
+    fireEvent.click(screen.getByText("Forge"));
+    const sheet = await screen.findByRole("dialog");
+    fireEvent.change(within(sheet).getByLabelText("Note"), { target: { value: "by the river, north bank" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")).toEqual({ method: "PATCH", url: "/api/tasks/5", body: { note: "by the river, north bank" } }));
+  });
+
+  it("do not bring back a task the socket reported deleted", async () => {
+    stubFetch([]);
+    setTasks([task(7)]);
+    const board = renderHook(() => useTasks());
+    const pending = updateTask(7, { status: "doing" });
+    act(() => setTasks([]));
+    await act(() => pending);
+    expect(board.result.current).toEqual([]);
+  });
+
+  it("go back to the login when the session is gone", async () => {
+    stubFetch([], 401);
+    setTasks([task(1)]);
+    const out = vi.fn();
+    inLocale(<TaskBoard saveKey="a" players={[]} onUnauthorized={out} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start Task 1" }));
+    await waitFor(() => expect(out).toHaveBeenCalled());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("take a whole recipe or none of it", async () => {
+    stubFetch([]);
+    const many = Array.from({ length: 29 }, (_, i) => ({ item: `Thing${i}`, qty: 1 }));
+    setTasks([task(2, { title: "Big build", materials: many })]);
+    inLocale(<TaskBoard saveKey="a" players={[]} />);
+    fireEvent.click(screen.getByText("Big build"));
+    const sheet = await screen.findByRole("dialog");
+    fireEvent.click(within(sheet).getByRole("button", { name: "From a recipe" }));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Karve" }));
+    expect(within(sheet).getByRole("alert")).toHaveTextContent("A task holds up to 30 materials.");
+    expect(within(sheet).queryByText("Finewood")).not.toBeInTheDocument();
+  });
+
+  it("ask the stores once when the board and the stores mount together", async () => {
+    const calls = stubFetch([chest([["Wood", 1]])]);
+    setTasks([]);
+    inLocale(
+      <>
+        <TaskBoard saveKey="s" players={[]} />
+        <TaskBoard saveKey="s" players={[]} />
+      </>,
+    );
+    await waitFor(() => expect(calls.filter((c) => c.url === "/api/storage")).toHaveLength(1));
   });
 });
 
