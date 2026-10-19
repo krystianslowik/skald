@@ -49,7 +49,7 @@
 | `PROM_NAMESPACE` | `$POD_NAMESPACE`, else `valheim` | Namespace label in the cAdvisor queries |
 | `PROM_CONTAINER` | `valheim` | Container label of the game server |
 | `PROM_POD_REGEX` | `valheim-[a-z0-9]+-[a-z0-9]+` | Pod regex for the network series (anchored by PromQL) |
-| `DB_PATH` | `/data/skald.db` | SQLite file for the event history, the panel's Discord webhook and the phone notification keys and devices |
+| `DB_PATH` | `/data/skald.db` | SQLite file for the event history, the panel's Discord webhook, the phone notification keys and devices, and the shared tasks |
 | `BIND` | `0.0.0.0:8080` | Listen address |
 | `METRICS_BIND` | (empty = off) | Prometheus listener, e.g. `0.0.0.0:9465`, serving `GET /metrics` with `skald_build_info`. No session, like the agent's `METRICS_ADDR`: restrict it with a NetworkPolicy or firewall. The panel port never serves `/metrics` |
 | `WEB_ROOT` | `../web/dist` | Built SPA, relative to the working directory |
@@ -796,7 +796,9 @@ start. The NetworkPolicy needs no change: the plugin is loopback only.
   `logtopic=1` gets every line as before. The 15 s state poll goes out only
   when something in the state changed, as a `{"type":"state","partial":true}`
   message with just the top-level parts that did (the first state on a socket
-  is always whole). Frames are compressed (permessage-deflate) for every
+  is always whole). The shared tasks go out whole as `{"type":"tasks"}` when
+  a socket opens, then one at a time as `{"type":"task"}` (added or changed)
+  and `{"type":"task_gone","id":...}`. Frames are compressed (permessage-deflate) for every
   browser that asks, which all current ones do; a reverse proxy passes this
   on without extra settings.
 
@@ -811,7 +813,11 @@ spawn items, kill, ban and teleport. Keep the password strong and the panel
 behind your access layer, or set an admin password:
 
 - The panel password then only views (the map, live players and the saga
-  included).
+  included), with one exception: the shared task board. Tasks belong to the
+  group, so anyone signed in adds, edits, finishes and deletes them
+  (`/api/tasks`, at most 30 changes a minute from one address), and the
+  first time a task is finished it adds a "Task done" line to the saga (the
+  newest 20 such lines are kept).
 - Admin commands, restarts, backups, updates and saving or applying server
   settings answer 403 until the browser unlocks an admin session with the
   admin password (`POST /api/admin/unlock`, rate-limited like the login: 5

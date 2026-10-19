@@ -12,6 +12,8 @@ import { metricsFetch, VERSION } from "./buildinfo";
 import { log } from "./log";
 import { cachedMetrics, fetchMetrics } from "./prom";
 import { mountStatic } from "./static";
+import { doneEvent } from "./taskroutes";
+import { TaskStore } from "./tasks";
 import type { Metrics } from "./types";
 import { LIVE_WEBSOCKET, liveSocket, liveSocketData, type LiveSocketData } from "./live";
 import { UpdateChecker } from "./update";
@@ -72,6 +74,7 @@ if (cfg.mock) {
 
 const store = new HistoryStore(cfg.dbPath);
 const hub = new Hub(agent, store, { timeZone: cfg.timeZone });
+const tasks = new TaskStore(store.connection);
 // Subscribed before start: the first state it sees is its baseline, and
 // nothing that happened before boot is sent.
 // Always there, so a webhook saved in the admin sheet later starts from the same
@@ -118,12 +121,13 @@ const app = createApp({
   push,
   version: VERSION,
   update: updates ? () => updates.get() : undefined,
+  tasks: { store: tasks, onDone: (task) => hub.record("task", doneEvent(task)) },
 });
 
 // Static SPA, resolved relative to the process CWD (image: /app/bin -> /app/web/dist).
 mountStatic(app, cfg.webRoot, cfg.locale);
 
-const live = liveSocket(hub);
+const live = liveSocket(hub, tasks);
 const originPolicy = panelOriginPolicy(cfg);
 const liveRefused = (origin: string, expected: string) =>
   log.warn("cross-origin request refused", { method: "GET", route: "/live", status: 403, origin: origin.slice(0, 200), expected, hint: "set PUBLIC_ORIGIN to the address the panel is opened on" });

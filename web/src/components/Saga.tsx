@@ -242,6 +242,11 @@ export function describe(i: I18n, ev: AgentEvent): { text: string; tone: Tone; p
     }
     case "admin":
       return { text: describeAdmin(i, d), tone: d.result === "ok" ? "admin" : "death" };
+    case "task": {
+      const title = String(d.title ?? "");
+      if (!title) return null;
+      return { text: typeof d.owner === "string" && d.owner ? t("saga.taskBy", { title, owner: d.owner }) : t("saga.task", { title }), tone: "action" };
+    }
     default:
       return null;
   }

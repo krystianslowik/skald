@@ -9,6 +9,10 @@ above them.
 
 ## [Unreleased]
 
+### Added
+
+- Shared tasks: a Tasks board on the Saga tab (on wide screens above the village stores) where anyone signed in to the panel can add what the group is working on, with who does it, a boss or base it is for, a note and a material list. Materials are typed in by hand or added from a short list of recipes (crafting stations, chests, portal, cart and ships, boss offerings). Each task shows only what the chests, carts and ships do not already hold, and the list updates after every world save. Changes show up at once on every open panel; when two people change the same task's status, owner or materials at once, the second is told and shown the newer version instead of overwriting it. Deleting asks for a second tap, and a finished task gets a line in the saga. With an admin password set, the board is the one thing the panel password can change.
+
 ## [2026.10.23] - 2026-10-19
 
 ### Added

@@ -19,6 +19,7 @@ import { Runes } from "./Runes";
 import { Saga } from "./Saga";
 import { Treasury } from "./Treasury";
 import { VillageStores } from "./storage/VillageStores";
+import { TaskBoard } from "./tasks/TaskBoard";
 import type { MapFocus } from "./map/MapView";
 import type { StoreEntry } from "../lib/storage";
 import { Progress, World } from "./World";
@@ -199,6 +200,11 @@ export function Dashboard({ live, onLogout, onUnauthorized = () => {} }: { live:
       <VillageStores saveKey={saveKey} onShow={showStore} />
     </Plank>
   );
+  const tasks = (
+    <Plank title={t("tasks.title")} id="tasks" aside={t("tasks.aside")}>
+      <TaskBoard saveKey={saveKey} players={state.history.players.map((p) => p.name)} onUnauthorized={onUnauthorized} />
+    </Plank>
+  );
   const saga = (
     <Plank title={t("plank.saga")} id="saga" aside={t("plank.saga.aside")} className="lg:col-span-7">
       <Saga events={state.history.events} online={players} />
@@ -264,6 +270,7 @@ export function Dashboard({ live, onLogout, onUnauthorized = () => {} }: { live:
               )}
               {shownTab === "saga" && (
                 <>
+                  {tasks}
                   {stores}
                   {saga}
                   {ranking}
@@ -303,6 +310,7 @@ export function Dashboard({ live, onLogout, onUnauthorized = () => {} }: { live:
               {progress}
             </div>
             {mapBoard}
+            {tasks}
             {stores}
             <div className="grid gap-5 lg:grid-cols-12 lg:gap-6">
               {saga}
