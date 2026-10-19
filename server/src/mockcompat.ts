@@ -21,7 +21,7 @@ export function mockCompat(mode: string, build: string, net: number, now: number
   if (mode === "fail") {
     save.status = "fail";
     save.reason = "containers_unreadable";
-    save.detail = { ...save.detail, containersUnreadable: 41, containerReason: "unreadable inventory: version 111" };
+    save.detail = { ...save.detail, containersUnreadable: 41, containerReason: "unreadable inventory: version 111", containerReasonCode: "inventory_version", containerReasonValue: 111 };
     bridge.status = "warn";
     bridge.reason = "untested";
     bridge.detail = { ...bridge.detail, tested: false };

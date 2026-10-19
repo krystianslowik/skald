@@ -2118,6 +2118,7 @@ export const en = {
   "compat.why.flags": "an item has unknown flags ({v})",
   "compat.why.trailing": "{v} unknown bytes follow the last item",
   "compat.why.truncated": "the save is cut short",
+  "compat.why.varint": "a name in the save has a length Skald cannot read",
   "compat.save.chunks_unreadable": "{n} parts of the world could not be read.",
   "compat.save.locations_unreadable": "The generated locations could not be read.",
   "compat.save.meta_unreadable": "The world file (.fwl) could not be read.",

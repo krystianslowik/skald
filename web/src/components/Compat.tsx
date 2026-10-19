@@ -52,8 +52,20 @@ export function StatusMark({ status, size = 18 }: { status: CompatStatus; size?:
   );
 }
 
-// The agent's reasons for an unreadable container inventory (worldmap's
-// parseInventory, "worldmap: " already stripped), each with its one value.
+// The agent's reason codes for an unreadable container inventory (worldmap's
+// ReasonCodes), with the value each one carries. "other" has no text: the
+// agent's own words are shown.
+const WHY_CODES: Record<string, { key: TextKey; value?: (v: number) => string }> = {
+  inventory_version: { key: "compat.why.version", value: String },
+  inventory_items: { key: "compat.why.items", value: String },
+  inventory_flags: { key: "compat.why.flags", value: (v) => `0x${v.toString(16)}` },
+  inventory_trailing: { key: "compat.why.trailing", value: String },
+  truncated: { key: "compat.why.truncated" },
+  bad_varint: { key: "compat.why.varint" },
+};
+
+// Agents before the codes sent only the text ("worldmap: " already
+// stripped); these read it, each with its one value.
 const CONTAINER_WHY: [RegExp, TextKey][] = [
   [/^unreadable inventory: version (-?\d+)$/, "compat.why.version"],
   [/^unreadable inventory: (\d+) items$/, "compat.why.items"],
@@ -62,8 +74,13 @@ const CONTAINER_WHY: [RegExp, TextKey][] = [
   [/^truncated data$/, "compat.why.truncated"],
 ];
 
-/** Why containers did not read, in words; the agent's own text when it is a new shape. */
-export function containerWhy(i: I18n, raw: string): string {
+/**
+ * Why containers did not read, in words: from the agent's reason code, else
+ * from its text, else the text itself when it is a new shape.
+ */
+export function containerWhy(i: I18n, raw: string, code?: unknown, value?: unknown): string {
+  const known = typeof code === "string" ? WHY_CODES[code] : undefined;
+  if (known) return i.t(known.key, { v: known.value ? known.value(Number(value) || 0) : "" });
   for (const [re, key] of CONTAINER_WHY) {
     const m = re.exec(raw);
     if (m) return i.t(key, { v: m[1] ?? "" });
@@ -81,7 +98,7 @@ export function checkText(i: I18n, c: CompatCheck): string {
     plugin: String(d.plugin ?? "?"),
     bridge: shortBuild(String(d.gameBuild ?? "")),
     n: c.name === "save" && c.reason === "chunks_unreadable" ? num("chunksUnreadable") : num("containersUnreadable"),
-    why: containerWhy(i, String(d.containerReason ?? "")),
+    why: containerWhy(i, String(d.containerReason ?? ""), d.containerReasonCode, d.containerReasonValue),
     gen: num("generation"),
     chunks: num("chunks"),
     s: num("worldLoadedSeconds"),

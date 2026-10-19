@@ -16,6 +16,9 @@ func TestHealthCountsTheWholeSave(t *testing.T) {
 		h.ChunksUnreadable != 0 || h.Chunks != 4 || h.Failure != "" || h.LocationsUnreadable || h.MetaUnreadable {
 		t.Fatalf("health = %+v", h)
 	}
+	if h.ContainerWhy.Code == "" || h.ContainerWhy.Code == ReasonOther {
+		t.Errorf("reason code = %+v for %q", h.ContainerWhy, h.ContainerReason)
+	}
 	if strings.Contains(h.ContainerReason, "worldmap:") || strings.Contains(h.ContainerReason, dir) {
 		t.Errorf("reason carries a prefix or a path: %q", h.ContainerReason)
 	}

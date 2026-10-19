@@ -66,6 +66,12 @@ const STRINGS = {
     "compat.reason.world_loaded_missing": "no world loaded line",
     "compat.reason.join_code_missing": "no join code",
     "compat.reason.map_behind": "the map is not built from the newest save",
+    "compat.why.inventory_version": "the game saves inventories in a new format (version {v}) that Skald does not know yet",
+    "compat.why.inventory_items": "a container lists {v} items, more than fit",
+    "compat.why.inventory_flags": "an item has unknown flags ({v})",
+    "compat.why.inventory_trailing": "{v} unknown bytes follow the last item",
+    "compat.why.truncated": "the save is cut short",
+    "compat.why.bad_varint": "a name in the save has a length Skald cannot read",
     adminFailed: "{actor}: {command} failed ({error})",
     settingsFailed: "Applying the new settings failed ({error})",
     actionFailed: "{action} failed ({error})",
@@ -109,6 +115,12 @@ const STRINGS = {
     "compat.reason.world_loaded_missing": "brak wpisu o wczytaniu świata",
     "compat.reason.join_code_missing": "brak kodu dołączenia",
     "compat.reason.map_behind": "mapa nie jest zbudowana z najnowszego zapisu",
+    "compat.why.inventory_version": "gra zapisuje ekwipunek w nowym formacie (wersja {v}), którego Skald jeszcze nie zna",
+    "compat.why.inventory_items": "skrzynia podaje {v} przedmiotów, więcej niż się mieści",
+    "compat.why.inventory_flags": "przedmiot ma nieznane znaczniki ({v})",
+    "compat.why.inventory_trailing": "po ostatnim przedmiocie zostały nieznane bajty ({v})",
+    "compat.why.truncated": "zapis jest ucięty",
+    "compat.why.bad_varint": "nazwa w zapisie ma długość, której Skald nie umie odczytać",
     adminFailed: "{actor}: {command} nie powiodło się ({error})",
     settingsFailed: "Nie udało się zastosować nowych ustawień ({error})",
     actionFailed: "{action} nie powiodło się ({error})",
@@ -282,12 +294,23 @@ function compatLines(r: CompatResult, followUp: boolean, locale: Locale): string
     const d = c.detail ?? {};
     const reason = c.reason ?? "";
     const n = String((reason === "chunks_unreadable" ? d.chunksUnreadable : d.containersUnreadable) ?? "");
-    const text = s[`compat.reason.${reason}`] ? fill(s[`compat.reason.${reason}`]!, { n, why: escapeMd(String(d.containerReason ?? "")) }) : escapeMd(reason);
+    const text = s[`compat.reason.${reason}`] ? fill(s[`compat.reason.${reason}`]!, { n, why: containerWhy(d, s) }) : escapeMd(reason);
     lines.push(`- ${s[`compat.check.${c.name}`] ?? escapeMd(c.name)}: ${text}`);
   }
   if (r.awaitingSave) lines.push(s["compat.awaitingSave"]!);
   if (r.status !== "ok") lines.push(s["compat.panel"]!);
   return lines;
+}
+
+/**
+ * Why containers did not read, from the agent's reason code (and its value);
+ * the agent's own text, escaped, for a code without words here.
+ */
+function containerWhy(d: Record<string, unknown>, s: Record<string, string>): string {
+  const text = typeof d.containerReasonCode === "string" ? s[`compat.why.${d.containerReasonCode}`] : undefined;
+  if (!text) return escapeMd(String(d.containerReason ?? ""));
+  const v = Number(d.containerReasonValue) || 0;
+  return fill(text, { v: d.containerReasonCode === "inventory_flags" ? `0x${v.toString(16)}` : String(v) });
 }
 
 /** Discord's 429 wait: the body's `retry_after`, else the header, both in seconds. */

@@ -33,9 +33,10 @@ type Health struct {
 	ChunksUnreadable int
 	// ContainersUnreadable is the containers whose inventory did not decode;
 	// ContainerReason one of their reasons ("unreadable inventory: version
-	// 111"), without paths.
+	// 111"), without paths, and ContainerWhy the same reason as a code.
 	ContainersUnreadable int
 	ContainerReason      string
+	ContainerWhy         InvReason
 	// LocationsUnreadable: the .db2 did not read (generated locations are
 	// from the build before). MetaUnreadable: the .fwl did not.
 	LocationsUnreadable bool
@@ -68,16 +69,16 @@ func (b *Builder) setFailure(reason string) {
 }
 
 // containerReason picks one reason among the refused inventories of the
-// save, the same one on every build.
-func containerReason(chunks []*chunkData) string {
-	reason := ""
+// save, the same one on every build, as text and as a code.
+func containerReason(chunks []*chunkData) (string, InvReason) {
+	reason, why := "", InvReason{}
 	for _, c := range chunks {
 		if c.badInventoryErr != nil {
 			r := strings.TrimPrefix(c.badInventoryErr.Error(), "worldmap: ")
 			if reason == "" || r < reason {
-				reason = r
+				reason, why = r, reasonOf(c.badInventoryErr)
 			}
 		}
 	}
-	return reason
+	return reason, why
 }

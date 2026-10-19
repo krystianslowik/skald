@@ -10,6 +10,11 @@ import { emptyAgentState, type AdminStatus, type ApiState, type CompatView } fro
 import { CompatNotice, CompatRows, containerWhy } from "./Compat";
 import { Dashboard } from "./Dashboard";
 
+// Node's fs and cwd in the test runner; the web's tsconfig has no Node types.
+const fs = "node:fs";
+const { readFileSync } = (await import(/* @vite-ignore */ fs)) as { readFileSync(path: string, enc: "utf8"): string };
+const repo = `${(globalThis as unknown as { process: { cwd(): string } }).process.cwd()}/..`;
+
 const NOW = Date.parse("2026-10-18T20:00:00Z");
 const view = (mode: string): CompatView => mockCompat(mode, "l-1.0.20", 41, NOW);
 const inLocale = (ui: ReactElement, locale: "en" | "pl" = "en") => render(<I18nProvider locale={locale}>{ui}</I18nProvider>);
@@ -68,6 +73,28 @@ describe("compatibility rows", () => {
     expect(containerWhy(en, "unreadable inventory: 3 trailing bytes")).toBe("3 unknown bytes follow the last item");
     expect(containerWhy(pl, "truncated data")).toBe("zapis jest ucięty");
     expect(containerWhy(en, "bad varint")).toBe("bad varint");
+  });
+
+  it("words the agent's reason codes, whatever its text says (#152)", () => {
+    const pl = makeI18n("pl");
+    const en = makeI18n("en");
+    expect(containerWhy(en, "reworded: v111", "inventory_version", 111)).toBe("the game saves inventories in a new format (version 111) that Skald does not know yet");
+    expect(containerWhy(pl, "reworded", "inventory_flags", 0x80)).toBe("przedmiot ma nieznane znaczniki (0x80)");
+    expect(containerWhy(en, "reworded", "inventory_trailing", 3)).toBe("3 unknown bytes follow the last item");
+    expect(containerWhy(pl, "bad varint", "bad_varint", 0)).toBe("nazwa w zapisie ma długość, której Skald nie umie odczytać");
+    // "other" and codes from a newer agent show the agent's own words.
+    expect(containerWhy(en, "something new", "other", 0)).toBe("something new");
+    expect(containerWhy(en, "something newer", "inventory_shape", 2)).toBe("something newer");
+  });
+
+  it("has words in both locales for every reason code the agent sends", () => {
+    const src = readFileSync(`${repo}/agent/internal/worldmap/inventory.go`, "utf8");
+    const codes = [...src.matchAll(/^\s*Reason\w+\s*=\s*"(\w+)"/gm)].map((m) => m[1]!);
+    expect(codes).toContain("inventory_version");
+    for (const locale of ["en", "pl"] as const) {
+      const i = makeI18n(locale);
+      for (const code of codes.filter((c) => c !== "other")) expect(containerWhy(i, "raw", code, 7), `${locale} ${code}`).not.toBe("raw");
+    }
   });
 
   it("shows an unknown reason code instead of nothing", () => {

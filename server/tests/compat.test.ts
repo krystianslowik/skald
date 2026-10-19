@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
 import { HttpAgent } from "../src/agent";
 import { applyEvent } from "../src/apply";
 import { MockAgent } from "../src/mock";
@@ -56,7 +57,7 @@ describe("compat notifications", () => {
     expect(d.sent).toHaveLength(1);
     expect(d.sent[0]!.split("\n")).toEqual([
       "Skald checked the game update from 1.0.16 to 1.0.20: something broke",
-      "- Save: 41 containers unreadable (unreadable inventory: version 111)",
+      "- Save: 41 containers unreadable (the game saves inventories in a new format (version 111) that Skald does not know yet)",
       "- Admin plugin: not tested on this build yet, commands wait for a confirmation",
       "Details in the admin sheet.",
     ]);
@@ -115,7 +116,32 @@ describe("compat notifications", () => {
     const r = { ...failed(), build: "l-1.0.20*", previousBuild: "l-1.0.16_" };
     const lines = formatBatch([{ kind: "compat", result: r, followUp: false }], "pl");
     expect(lines[0]).toBe("Skald sprawdził aktualizację gry z 1.0.16\\_ do 1.0.20\\*: coś przestało działać");
-    expect(lines[1]).toBe("- Zapis świata: nieczytelne skrzynie: 41 (unreadable inventory: version 111)");
+    expect(lines[1]).toBe("- Zapis świata: nieczytelne skrzynie: 41 (gra zapisuje ekwipunek w nowym formacie (wersja 111), którego Skald jeszcze nie zna)");
+  });
+
+  it("words the reason containers did not read from its code, else shows the agent's text (#152)", () => {
+    const r = failed();
+    const save = (detail: Record<string, unknown>) => {
+      r.checks[1] = { name: "save", status: "fail", reason: "containers_unreadable", detail: { containersUnreadable: 2, ...detail } };
+      return formatBatch([{ kind: "compat", result: r, followUp: false }], "en")[1];
+    };
+    expect(save({ containerReason: "reworded", containerReasonCode: "inventory_flags", containerReasonValue: 128 })).toBe("- Save: 2 containers unreadable (an item has unknown flags (0x80))");
+    expect(save({ containerReason: "a *new* shape", containerReasonCode: "other", containerReasonValue: 0 })).toBe("- Save: 2 containers unreadable (a \\*new\\* shape)");
+    // An agent from before the codes.
+    expect(save({ containerReason: "unreadable inventory: version 111" })).toBe("- Save: 2 containers unreadable (unreadable inventory: version 111)");
+  });
+
+  it("has words in both languages for every reason code the agent sends", () => {
+    const src = readFileSync(`${import.meta.dir}/../../agent/internal/worldmap/inventory.go`, "utf8");
+    const codes = [...src.matchAll(/^\s*Reason\w+\s*=\s*"(\w+)"/gm)].map((m) => m[1]!);
+    expect(codes).toContain("inventory_version");
+    const r = failed();
+    for (const locale of ["en", "pl"] as const) {
+      for (const code of codes.filter((c) => c !== "other")) {
+        r.checks[1] = { name: "save", status: "fail", reason: "containers_unreadable", detail: { containersUnreadable: 1, containerReason: "raw", containerReasonCode: code, containerReasonValue: 7 } };
+        expect(formatBatch([{ kind: "compat", result: r, followUp: false }], locale)[1]).not.toContain("(raw)");
+      }
+    }
   });
 });
 

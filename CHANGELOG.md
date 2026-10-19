@@ -13,6 +13,7 @@ above them.
 
 - With the admin plugin installed, two players whose characters have the same name now show as two players: at the fire, on the map, in the admin sheet, in the saga and in Discord and Telegram messages. A player who reconnects stays one player and is no longer announced as leaving and joining. Before, same-name players showed as one, and when one of them left, the other could drop off the list while still playing. Without the plugin, same-name players still show as one entry, which now stays listed until both have left, and a reconnect is never mistaken for a new player.
 - With the admin plugin installed, each player's platform badge comes from the game itself. Before, it was guessed from the order players connected in, so a player could get the badge of someone who connected but never loaded in (for example an Xbox player shown as Steam). The badge is corrected within a few seconds of joining, in the player list and on the profile. The agent asks the plugin only while a new player is not settled yet. Servers without the plugin keep the old guess.
+- When the compatibility check finds containers it cannot read after a game update, the Discord and Telegram summary now explains why in plain words, in English or Polish (for example "the game saves inventories in a new format"), as the panel does. Before, it quoted the agent's English error. The panel no longer depends on the agent's exact wording, and if a reason is new, both show the agent's own text.
 
 ## [2026.10.19] - 2026-10-19
 
