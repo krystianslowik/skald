@@ -52,7 +52,7 @@ export function summarize(events: AgentEvent[], since: number, now: number, live
     const playtimeMs = p.playtimeMs - (old?.playtimeMs ?? 0);
     const sessions = p.sessions - (old?.sessions ?? 0);
     const deaths = p.deaths - (old?.deaths ?? 0);
-    if (playtimeMs > 0 || sessions > 0 || deaths > 0) players.push({ name: p.name, playtimeMs, sessions, deaths, online: p.online });
+    if (playtimeMs > 0 || sessions > 0 || deaths > 0) players.push({ name: p.name, playtimeMs, sessions, deaths, online: live && p.online });
   }
   players.sort((a, b) => b.playtimeMs - a.playtimeMs || a.name.localeCompare(b.name));
 
@@ -151,5 +151,5 @@ export function worldFacts(map: ApiMap): Omit<CatchupWorld, "id"> {
  * viewer cannot try seed names against it to recover the seed.
  */
 export function worldId(secret: string, seedName: string, seed: number): string {
-  return createHmac("sha256", secret).update(`${seedName}|${seed}`).digest("base64url").slice(0, 16);
+  return createHmac("sha256", secret).update(`skald-world|${seedName}|${seed}`).digest("base64url").slice(0, 16);
 }

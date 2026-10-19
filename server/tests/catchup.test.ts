@@ -71,7 +71,7 @@ describe("summarize", () => {
     const until = T0 + 100 * MIN - 1;
     expect(s.until).toBe(new Date(until).toISOString());
     expect(s.raids).toBe(0);
-    expect(s.players).toEqual([{ name: "Freya", playtimeMs: until - (T0 + 50 * MIN), sessions: 0, deaths: 1, online: true }]);
+    expect(s.players).toEqual([{ name: "Freya", playtimeMs: until - (T0 + 50 * MIN), sessions: 0, deaths: 1, online: false }]);
     // A death at the newest stored time belongs to the next window only, not to both.
     const tail = [...events, ev(110, "death", { name: "Freya" })];
     const cutShort = summarize(tail, T0 + 50 * MIN, T0 + 200 * MIN, false);
