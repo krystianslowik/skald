@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.26] - 2026-10-19
+
 ### Added
 
 - Safe restart, in the admin sheet: wait until nobody plays (or until a deadline you choose, then warn whoever is still on), count down in game with the admin plugin and on Discord and phones, save, stop, back up the world and check the backup (size, checksum, a complete world), start again, wait for the world and the new join code, and post the code. Each step shows live in the admin sheet and the run lands in the Saga. It can be cancelled while it waits or counts down. If the backup or its check fails, the server is started again anyway and Discord and phones get an alert. Needs the admin password when one is set.
