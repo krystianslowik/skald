@@ -7,6 +7,7 @@ import { gameClock } from "../lib/admin";
 import { refusalReason } from "../lib/refusal";
 import { describeSafeRestart } from "../lib/safeRestart";
 import { itemLabel } from "../lib/storage";
+import { firesText } from "../lib/fires";
 import { useI18n, type I18n, type TextKey } from "../i18n";
 import { PlayerName } from "./PlayerName";
 import { DayLabel } from "./RelativeTime";
@@ -47,7 +48,7 @@ export function actionTitle(i: Pick<I18n, "t">, name: string): string {
 export type Tone = "join" | "leave" | "death" | "save" | "slow" | "server" | "action" | "raid" | "settings" | "admin";
 
 /** Commands whose saga line names a player when there was one ("for X", "near X"). */
-const WITH_PLAYER = new Set(["spawn", "creature-spawn", "creature-kill", "creature-tame", "repair", "fill", "fill-kilns", "fill-smelters", "fill-fermenters", "grow", "map-reveal", "map-pins", "event-start"]);
+const WITH_PLAYER = new Set(["spawn", "creature-spawn", "creature-kill", "creature-tame", "repair", "fill", "fill-kilns", "fill-smelters", "fill-fermenters", "refuel-fires", "grow", "map-reveal", "map-pins", "event-start"]);
 
 /** "20 Wood, Iron sword ★3 and 2 more": what a spawn dropped. */
 function itemsText(i: Pick<I18n, "lookup" | "t">, d: Record<string, unknown>): string {
@@ -156,6 +157,8 @@ export function describeAdmin(i: I18n, d: Record<string, unknown>): string {
     case "fill-smelters":
     case "fill-fermenters":
       return describeFill(i, command, d, actor, player);
+    case "refuel-fires":
+      return describeRefuel(i, d, actor, player);
     case "grow":
       vars.n = Number(d.plants ?? 0);
       break;
@@ -185,6 +188,19 @@ function describeFill(i: I18n, command: "fill-kilns" | "fill-smelters" | "fill-f
   const untouched = (Number(d.skipped ?? 0) || 0) + (Number(d.full ?? 0) || 0) > 0;
   const key = `saga.admin.${command}${untouched ? ".unchanged" : ".none"}${player ? "" : ".at"}`;
   return i.lookup(key, vars) ?? i.t("saga.admin.generic", { actor, what: i.t(`saga.admin.cmd.${command}`) });
+}
+
+/**
+ * "refuelled 14 torches and 3 campfires near Ragnar"; or that the fires there
+ * were full, or that nobody had them loaded, or that there were none.
+ */
+function describeRefuel(i: I18n, d: Record<string, unknown>, actor: string, player: string): string {
+  const num = (k: string) => Number(d[k] ?? 0) || 0;
+  const what = firesText(i, d.byPrefab, num("fires"));
+  const at = player ? "" : ".at";
+  if (num("fires") > 0 && what) return i.t(player ? "saga.admin.refuel-fires" : "saga.admin.refuel-fires.at", { actor, player, what });
+  const why = num("full") > 0 ? ".unchanged" : num("unloaded") > 0 ? ".unloaded" : ".none";
+  return i.lookup(`saga.admin.refuel-fires${why}${at}`, { actor, player }) ?? i.t("saga.admin.generic", { actor, what: i.t("saga.admin.cmd.refuel-fires") });
 }
 
 const SETTINGS_APPLY: Record<string, TextKey> = {

@@ -383,6 +383,24 @@ describe("mock bridge", () => {
     mock.stop();
   });
 
+  it("refuels the fires around a player, counted by prefab", async () => {
+    const mock = new MockAgent(Date.now, "UTC");
+    const evs: AgentEvent[] = [];
+    const abort = new AbortController();
+    void mock.stream(1_000_000, (e) => evs.push(e), abort.signal);
+    const run = (body: Record<string, unknown>) => mock.bridge({ op: "run", command: "refuel-fires", body: { player: "Ragnar", ...body }, actor: "t" });
+    expect((await run({ radius: 20 })).status).toBe(200);
+    expect((await run({ radius: 100 })).status).toBe(200);
+    expect((await run({ radius: 250 })).status).toBe(400);
+    const runs = evs.filter((e) => e.type === "admin").map((e) => e.data);
+    expect(runs.map((f) => f.result)).toEqual(["ok", "ok", "error"]);
+    expect(runs[0]).toMatchObject({ command: "refuel-fires", radius: 20, fires: 10, full: 2, unloaded: 0, byPrefab: { piece_groundtorch_wood: 6, piece_walltorch: 4 }, player: "Ragnar" });
+    // A wider radius reaches more fires, and one nobody has loaded.
+    expect(runs[1]).toMatchObject({ radius: 100, fires: 21, unloaded: 1, byPrefab: { fire_pit: 3, hearth: 1 } });
+    abort.abort();
+    mock.stop();
+  });
+
   it("adds items to a chest by the plugin's rules, shown on the map after the next save", async () => {
     const mock = new MockAgent(Date.now, "UTC");
     const evs: AgentEvent[] = [];

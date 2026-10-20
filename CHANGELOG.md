@@ -9,6 +9,11 @@ above them.
 
 ## [Unreleased]
 
+### Added
+
+- Refuel fires in the admin panel's Base helpers: every torch, wall sconce, campfire, hearth, brazier and lantern around a player, the main base or a spot picked on the map gets topped up to the full with its own fuel. Pick 20, 50 or 100 m around. The result and the Saga say what was lit ("Refuelled 14 torches and 3 campfires near Ragnar"), or that the fires there were already full or that nobody nearby has them loaded. Fires that burn forever are left alone, and, like filling kilns and smelters, it only reaches what a player has loaded nearby (#193).
+- **Operators:** Refuel fires needs the bridge plugin **v0.5.0** (the `skald-bridge` image of this release) and the Skald agent of this release, which means a game restart to deploy: the new plugin loads only when the game restarts (empty server, backup first). It adds `POST /v1/build/refuel-fires`. With an older plugin or agent the button is greyed out and says which one to update; everything else works as before.
+
 ## [2026.10.29] - 2026-10-19
 
 ### Changed

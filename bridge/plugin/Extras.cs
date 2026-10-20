@@ -396,6 +396,43 @@ namespace Skald.Bridge
             return Ok(new { fermenters, skipped, full, unloaded, added, near, radius = r });
         }
 
+        // POST /v1/build/refuel-fires: every fire a player could feed by hand
+        // (torches, sconces, campfires, hearths, braziers, lanterns) gets its
+        // fuel set to its own maximum. Like the fill commands it goes through
+        // the client simulating the fire, with the game's own
+        // RPC_SetFuelAmount, so everyone nearby sees it lit at once.
+        public static object RefuelFires(JObject a)
+        {
+            Net();
+            var pos = Target(a, out string near);
+            float r = Radius(a, 30f);
+            int fires = 0, full = 0, unloaded = 0;
+            var byPrefab = new Dictionary<string, int>();
+            foreach (var z in ZdosAround(pos, r))
+            {
+                var fp = PrefabComponent<Fireplace>(z);
+                if (fp == null) continue;
+                string name = PrefabName(z);
+                var fire = new Fire
+                {
+                    Prefab = name,
+                    Fuel = fp.m_fuelItem != null ? fp.m_fuelItem.name : null,
+                    MaxFuel = fp.m_maxFuel,
+                    Infinite = fp.m_infiniteFuel,
+                    CanRefill = fp.m_canRefill,
+                };
+                if (!RefuelPlan.Takes(fire)) continue;
+                long owner = LoadedBy(z);
+                if (owner == 0) { unloaded++; continue; }
+                if (RefuelPlan.Full(fire, z.GetFloat(ZDOVars.s_fuel))) { full++; continue; }
+                // The owner writes the fuel, so it is not lost to its next burn tick.
+                ZRoutedRpc.instance.InvokeRoutedRPC(owner, z.m_uid, "RPC_SetFuelAmount", RefuelPlan.Target(fire));
+                Count(byPrefab, name);
+                fires++;
+            }
+            return Ok(new { fires, full, unloaded, byPrefab, near, radius = r });
+        }
+
         // The 0.1/0.2 command, kept for older panels: every Smelter gets its
         // first (or the requested) input and fuel, fermenters get mead base.
         // The panel now uses fill-kilns and fill-smelters.

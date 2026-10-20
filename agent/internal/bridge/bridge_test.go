@@ -101,6 +101,12 @@ func (f *fakePlugin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/v1/containers/add":
 		ok(map[string]any{"prefab": "piece_chest_wood", "item": "Iron", "amount": 20, "position": map[string]any{"x": 10.5, "y": 31.2, "z": -4}, "loaded": true, "room": 460,
 			"slots": []any{map[string]any{"x": 0, "y": 0, "added": 10, "stack": 30}, map[string]any{"x": 3, "y": 0, "added": 10, "stack": 10}}})
+	case "/v1/build/refuel-fires":
+		by := map[string]any{"piece_groundtorch_wood": 14, "fire_pit": 3}
+		for i := 0; i < 30; i++ {
+			by[fmt.Sprintf("piece_modded_fire_%02d", i)] = 1
+		}
+		ok(map[string]any{"fires": 47, "full": 2, "unloaded": 1, "byPrefab": by, "near": "Ragnar", "radius": 20, "uid": 1234567890123456789})
 	case "/v1/build/fill-kilns":
 		ok(map[string]any{"kilns": 2, "full": 1, "unloaded": 0, "added": map[string]any{"Wood": 2}, "near": "position", "radius": 50})
 	default:
@@ -507,6 +513,34 @@ func TestFillAuditSaysWhatWentIn(t *testing.T) {
 	}
 	if added, _ := f["added"].(map[string]any); added["MeadBaseTasty"] != float64(2) {
 		t.Fatalf("fill-fermenters added %+v", f["added"])
+	}
+}
+
+func TestRefuelAuditCountsFiresByPrefab(t *testing.T) {
+	if Commands["refuel-fires"].Path != "/v1/build/refuel-fires" {
+		t.Fatalf("refuel-fires missing from the allow-list")
+	}
+	hub := events.New(100, 10)
+	c := newClient(t, &fakePlugin{build: "l-1.0.17"}, hub, "")
+	if _, err := c.Run(context.Background(), "refuel-fires", map[string]any{"radius": 20, "player": "Ragnar"}, "k"); err != nil {
+		t.Fatal(err)
+	}
+	evs := adminEvents(t, hub)
+	if len(evs) != 1 {
+		t.Fatalf("want 1 admin event, got %+v", evs)
+	}
+	b, _ := json.Marshal(evs)
+	if strings.Contains(string(b), "1234567890123456789") {
+		t.Fatalf("leaked a uid: %s", b)
+	}
+	e := evs[0]
+	if e["command"] != "refuel-fires" || e["fires"] != float64(47) || e["full"] != float64(2) || e["unloaded"] != float64(1) || e["radius"] != float64(20) || e["player"] != "Ragnar" {
+		t.Fatalf("refuel-fires %+v", e)
+	}
+	by, _ := e["byPrefab"].(map[string]any)
+	// The biggest groups always make it into a capped event, whatever the map order.
+	if by["piece_groundtorch_wood"] != float64(14) || by["fire_pit"] != float64(3) || len(by) != 20 {
+		t.Fatalf("refuel-fires byPrefab %+v", e["byPrefab"])
 	}
 }
 
