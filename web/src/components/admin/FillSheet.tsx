@@ -6,7 +6,7 @@ import { useI18n, type I18n } from "../../i18n";
 import { Sheet } from "../Sheet";
 import { ItemIcon } from "../storage/ItemIcon";
 import { targetBody, useAdmin, type FillChoice, type Target } from "./AdminContext";
-import { AdminHead, Btn, TargetChips } from "./parts";
+import { AdminHead, Btn, targetLabel, TargetChips } from "./parts";
 
 type Coal = NonNullable<FillChoice["coal"]>;
 type Step = "pick" | "coal" | "confirm" | "done";
@@ -104,7 +104,7 @@ export function FillSheet({
   // "Mead Base: Tasty" -> "Tasty": the tile is already under "Which mead base?".
   const label = (item: string) => (smelters ? fullLabel(item) : fullLabel(item).replace(/^[^:]+:\s*/, ""));
   const stationName = (prefab: string) => lookup(`admin.fill.station.${prefab}`) ?? prettify(prefab);
-  const where = "player" in target ? t("admin.fill.near", { name: target.player }) : target.label === "base" ? t("admin.fill.atBase") : t("admin.fill.atPoint", { x: Math.round(target.at.x), z: Math.round(target.at.z) });
+  const where = targetLabel(t, target);
 
   const choose = (item: string) => {
     navigator.vibrate?.(6);

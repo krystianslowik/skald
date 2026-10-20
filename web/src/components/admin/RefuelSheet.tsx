@@ -4,7 +4,7 @@ import { useI18n, type I18n } from "../../i18n";
 import { Sheet } from "../Sheet";
 import { ItemIcon } from "../storage/ItemIcon";
 import { targetBody, useAdmin, type Target } from "./AdminContext";
-import { AdminHead, Btn, Chip, TargetChips } from "./parts";
+import { AdminHead, Btn, Chip, TargetChips, targetLabel } from "./parts";
 
 /** The radius choices, in metres; the bridge takes at most 100. */
 export const REFUEL_RADII = [20, 50, 100] as const;
@@ -51,7 +51,7 @@ export function RefuelSheet({ target: initial, radius: initialRadius, onClose }:
     remember({ radius: r });
   };
 
-  const where = "player" in target ? t("admin.fill.near", { name: target.player }) : target.label === "base" ? t("admin.fill.atBase") : t("admin.fill.atPoint", { x: Math.round(target.at.x), z: Math.round(target.at.z) });
+  const where = targetLabel(t, target);
   const summary = t("admin.refuel.sum", { where, r: radius });
   const title = t("admin.refuel.title");
   const blocked = !!admin?.blocker;

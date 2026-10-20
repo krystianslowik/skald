@@ -747,8 +747,8 @@ function WorldKeys({ catalog, onChange }: { catalog: AdminCatalog | null; onChan
 }
 
 /**
- * Repair, fill, refuel, grow, reveal the map: around a base or a player,
- * within 100 m. Kilns only ever take wood, so they fill in one tap; smelters
+ * Repair, fill, refuel, grow, reveal the map: around a base or a player
+ * (50 m; refuelling 20 to 100 m, the map 60 m). Kilns only ever take wood, so they fill in one tap; smelters
  * and fermenters open a short flow to pick what goes in, and refuelling fires
  * one to pick how far.
  */

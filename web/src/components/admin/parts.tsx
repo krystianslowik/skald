@@ -1,6 +1,6 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import type { Platform } from "../../types";
-import { useI18n, type TextKey } from "../../i18n";
+import { useI18n, type I18n, type TextKey } from "../../i18n";
 import { PlatformGlyph } from "../PlatformGlyph";
 import { SheetClose } from "../Sheet";
 import { BLOCKER_TEXT, useAdmin, type Target } from "./AdminContext";
@@ -171,6 +171,12 @@ export function Stepper({ value, min, max, onChange, label, step = 1, format, ed
  * Where a command acts: one of the players at the fire, the main base, or a
  * point picked on the map.
  */
+/** "near Ragnar", "around the main base", "around x 120, z -34": where a base helper acts. */
+export function targetLabel(t: I18n["t"], target: Target): string {
+  if ("player" in target) return t("admin.fill.near", { name: target.player });
+  return target.label === "base" ? t("admin.fill.atBase") : t("admin.fill.atPoint", { x: Math.round(target.at.x), z: Math.round(target.at.z) });
+}
+
 export function TargetChips({ value, onChange, allowBase = true, allowMap = true, exclude }: { value: Target | null; onChange: (t: Target) => void; allowBase?: boolean; allowMap?: boolean; exclude?: string }) {
   const { t } = useI18n();
   const admin = useAdmin();

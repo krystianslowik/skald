@@ -2100,7 +2100,7 @@ export const en = {
   "admin.base.oldFerment": "Admin plugin {plugin} cannot fill fermenters: that needs 0.4.0 or later.",
   "admin.base.oldAgent": "The Skald agent does not know every fill command yet: update the agent.",
   "admin.base.oldRefuel": "Admin plugin {plugin} cannot refuel fires: that needs 0.5.0 or later.",
-  "admin.base.note": "Works on what a player has loaded nearby (within 50 m; the map within 60 m).",
+  "admin.base.note": "Works on what a player has loaded nearby (within 50 m; fires as far as you pick, up to 100 m; the map within 60 m).",
   "admin.fill.title": "Fill smelters",
   "admin.fill.current": "Keep the current ore",
   "admin.fill.currentNote": "Each smelter and furnace gets more of the ore it already holds. One holding no ore gets no ore, only coal if you add coal.",

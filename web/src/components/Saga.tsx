@@ -198,7 +198,7 @@ function describeRefuel(i: I18n, d: Record<string, unknown>, actor: string, play
   const num = (k: string) => Number(d[k] ?? 0) || 0;
   const what = firesText(i, d.byPrefab, num("fires"));
   const at = player ? "" : ".at";
-  if (num("fires") > 0 && what) return i.t(player ? "saga.admin.refuel-fires" : "saga.admin.refuel-fires.at", { actor, player, what });
+  if (num("fires") > 0) return i.t(player ? "saga.admin.refuel-fires" : "saga.admin.refuel-fires.at", { actor, player, what });
   const why = num("full") > 0 ? ".unchanged" : num("unloaded") > 0 ? ".unloaded" : ".none";
   return i.lookup(`saga.admin.refuel-fires${why}${at}`, { actor, player }) ?? i.t("saga.admin.generic", { actor, what: i.t("saga.admin.cmd.refuel-fires") });
 }

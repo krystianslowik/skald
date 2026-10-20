@@ -2089,7 +2089,7 @@ export const pl: Dict = {
   "admin.base.oldFerment": "Wtyczka admina {plugin} nie napełnia fermentatorów: to wymaga wersji 0.4.0 lub nowszej.",
   "admin.base.oldAgent": "Agent Skald nie zna jeszcze wszystkich poleceń napełniania: zaktualizuj agenta.",
   "admin.base.oldRefuel": "Wtyczka admina {plugin} nie dokłada do ognia: to wymaga wersji 0.5.0 lub nowszej.",
-  "admin.base.note": "Działa na to, co gracz ma wczytane w pobliżu (do 50 m; mapa do 60 m).",
+  "admin.base.note": "Działa na to, co gracz ma wczytane w pobliżu (do 50 m; ognie tak daleko, jak wybierzesz, do 100 m; mapa do 60 m).",
   "admin.fill.title": "Napełnij odlewnie",
   "admin.fill.current": "Zostaw obecną rudę",
   "admin.fill.currentNote": "Każda odlewnia i każdy piec dostaje więcej tej rudy, którą już ma. Pusta nie dostaje rudy, tylko węgiel, jeśli go dosypujesz.",
