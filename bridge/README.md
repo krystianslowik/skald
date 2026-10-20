@@ -178,6 +178,7 @@ loaded are counted as `unloaded` and skipped. `radius` is at most 100 m.
 | `POST /v1/build/fill-kilns` | `player` or `at`, `radius` | Charcoal kilns get their first input (wood) up to capacity with `RPC_AddOre`. Answers `kilns`, `skipped`, `full`, `unloaded` and `added` (item: stations) |
 | `POST /v1/build/fill-smelters` | `player` or `at`, `radius`, `what` (`ore`, `both` (default) or `coal`), `ore` (an item `GET /v1/build/stations` lists, or `current`; not needed for `coal`) | `RPC_AddOre` with that ore and/or `RPC_AddFuel`, up to capacity. A station that does not take the ore gets nothing (`skipped`); with `current` each station gets the ore at the head of its queue, and one holding no ore gets only fuel (`both`) or nothing (`ore`). Answers `smelters`, `skipped`, `full`, `unloaded`, `added` and `fuel` |
 | `POST /v1/build/fill-fermenters` | `player` or `at`, `radius`, `base` (a mead base `GET /v1/build/stations` lists) | `RPC_AddItem` with that base, once, on every empty fermenter. One still fermenting or holding mead to tap is left alone (`full`). Answers `fermenters`, `skipped`, `full`, `unloaded` and `added` (0.4.0+) |
+| `POST /v1/build/refuel-fires` | `player` or `at`, `radius` (default 50) | Every fire with a `Fireplace` component that a player built and could feed by hand (torches, sconces, campfires, hearths, braziers, lanterns, the hot tub: it has a fuel item, does not burn forever, the game lets it be refilled, and its ZDO has a `creator`) gets `RPC_SetFuelAmount` with its own `m_maxFuel`. Fires nobody built (Fuling camps, abandoned houses, dungeons; `world`) are never touched. One turned off (`state` not 1) is left off (`off`), and one whose fuel rounded up is already at the maximum is left alone (`full`), as the game does. At most 500 fires per call; `capped` says the call stopped there. The `Fireplace` values are read once per prefab. Answers `fires`, `full`, `off`, `world`, `unloaded`, `capped` and `byPrefab` (prefab: fires refuelled) (0.5.0+) |
 | `GET /v1/build/stations` | | Every kiln and smelter prefab with the items it takes, in the game's order, read from the prefabs' `Smelter` components, and every fermenter with the mead bases its `Fermenter` component takes: `{kilns:[{prefab, inputs}], smelters:[{prefab, fuel, inputs}], fermenters:[{prefab, inputs}]}` (`fermenters` 0.4.0+). A kiln burns nothing and makes what a smelter burns; a smelter burns what a kiln makes. Windmills, spinning wheels and the eitr refinery are neither |
 | `POST /v1/build/grow` | `player` or `at`, `radius` | Back-dates the plant time of crops and saplings |
 | `GET /v1/tombstones` | | `id, owner, position, loaded` |
@@ -368,6 +369,14 @@ uninitialised `Minimap` and the palette lookup have not run against a loaded
 world yet. Check after deploying: `GET /v1/terrain/info` answers, its `forest`
 is `mask` and `palette.source` says whether the colours came from the game;
 `X-Skald-Sample-Ms` on a 260 x 260 tile shows the real cost per tile.
+
+**New in v0.5.0, not yet verified on a live server:** `build/refuel-fires`
+compiles against the 1.0 reference assemblies, and which fires it takes and what
+it leaves alone (not built by a player, unloaded, turned off, full) are
+unit-tested in `tests/RefuelPlanTests.cs`. Not yet seen in
+a loaded world: the `Fireplace` values of the real prefabs and the owning client
+applying `RPC_SetFuelAmount` (stand next to a half-burnt torch, refuel it from the
+panel, and its flame should grow at once).
 
 **New in v0.4.0, not yet verified on a live server:** `build/fill-fermenters`
 and the `fermenters` list in `build/stations` compile against the 1.0 reference

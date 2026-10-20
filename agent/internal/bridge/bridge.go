@@ -77,6 +77,7 @@ var Commands = map[string]Command{
 	"fill-kilns":       {Path: "/v1/build/fill-kilns"},
 	"fill-smelters":    {Path: "/v1/build/fill-smelters"},
 	"fill-fermenters":  {Path: "/v1/build/fill-fermenters"},
+	"refuel-fires":     {Path: "/v1/build/refuel-fires"},
 	"grow":             {Path: "/v1/build/grow"},
 	"map-reveal":       {Path: "/v1/map/reveal"},
 	"map-pins":         {Path: "/v1/map/pins"},
@@ -1054,7 +1055,7 @@ func (c *Client) summarizeResult(cmd string, data json.RawMessage, ev map[string
 	if json.Unmarshal(data, &d) != nil {
 		return
 	}
-	for _, k := range []string{"killed", "tamed", "alreadyTamed", "repaired", "smelters", "kilns", "skipped", "full", "fermenters", "plants", "sentTo", "stopped", "started", "label", "stacks", "unloaded", "day", "loaded"} {
+	for _, k := range []string{"killed", "tamed", "alreadyTamed", "repaired", "smelters", "kilns", "skipped", "full", "fermenters", "fires", "off", "world", "capped", "plants", "sentTo", "stopped", "started", "label", "stacks", "unloaded", "day", "loaded"} {
 		if v, ok := d[k]; ok {
 			ev[k] = v
 		}
@@ -1081,6 +1082,34 @@ func (c *Client) summarizeResult(cmd string, data json.RawMessage, ev map[string
 			}
 		}
 		ev["added"] = added
+	}
+	// What refuel-fires lit: prefab -> fires, the biggest groups first when
+	// there are more kinds than an event keeps.
+	if m, ok := d["byPrefab"].(map[string]any); ok {
+		type group struct {
+			prefab string
+			n      float64
+		}
+		var groups []group
+		for k, v := range m {
+			if n, ok := v.(float64); ok {
+				groups = append(groups, group{truncate(k, 64), n})
+			}
+		}
+		sort.Slice(groups, func(i, j int) bool {
+			if groups[i].n != groups[j].n {
+				return groups[i].n > groups[j].n
+			}
+			return groups[i].prefab < groups[j].prefab
+		})
+		by := map[string]any{}
+		for _, g := range groups {
+			if len(by) == 20 {
+				break
+			}
+			by[g.prefab] = g.n
+		}
+		ev["byPrefab"] = by
 	}
 	if s, ok := d["fuel"].(string); ok && s != "" {
 		ev["fuel"] = truncate(s, 64)

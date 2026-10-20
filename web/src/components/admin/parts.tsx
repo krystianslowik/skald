@@ -1,6 +1,6 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import type { Platform } from "../../types";
-import { useI18n, type TextKey } from "../../i18n";
+import { useI18n, type I18n, type TextKey } from "../../i18n";
 import { PlatformGlyph } from "../PlatformGlyph";
 import { SheetClose } from "../Sheet";
 import { BLOCKER_TEXT, useAdmin, type Target } from "./AdminContext";
@@ -165,6 +165,12 @@ export function Stepper({ value, min, max, onChange, label, step = 1, format, ed
       </button>
     </div>
   );
+}
+
+/** "near Ragnar", "around the main base", "around x 120, z -34": where a base helper acts. */
+export function targetLabel(t: I18n["t"], target: Target): string {
+  if ("player" in target) return t("admin.fill.near", { name: target.player });
+  return target.label === "base" ? t("admin.fill.atBase") : t("admin.fill.atPoint", { x: Math.round(target.at.x), z: Math.round(target.at.z) });
 }
 
 /**

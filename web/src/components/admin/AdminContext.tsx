@@ -42,6 +42,7 @@ export type AdminView = (
   | { kind: "point"; x: number; z: number }
   | { kind: "restore"; backup: RestoreBackup }
   | { kind: "fill"; station: "smelters" | "fermenters"; target: Target; choice?: FillChoice; catalog?: AdminCatalog | null }
+  | { kind: "refuel"; target: Target; radius?: number }
   | { kind: "chest"; chest: MapContainer }
 ) & { picked?: { x: number; z: number } };
 

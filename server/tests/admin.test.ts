@@ -383,6 +383,26 @@ describe("mock bridge", () => {
     mock.stop();
   });
 
+  it("refuels the fires around a player, counted by prefab", async () => {
+    const mock = new MockAgent(Date.now, "UTC");
+    const evs: AgentEvent[] = [];
+    const abort = new AbortController();
+    void mock.stream(1_000_000, (e) => evs.push(e), abort.signal);
+    const run = (body: Record<string, unknown>) => mock.bridge({ op: "run", command: "refuel-fires", body: { player: "Ragnar", ...body }, actor: "t" });
+    expect((await run({ radius: 20 })).status).toBe(200);
+    expect((await run({ radius: 100 })).status).toBe(200);
+    expect((await run({ radius: 250 })).status).toBe(400);
+    // Without a radius: 50 m, like the panel's middle choice.
+    expect(((await run({})).body as { data: { radius: number } }).data.radius).toBe(50);
+    const runs = evs.filter((e) => e.type === "admin").map((e) => e.data);
+    expect(runs.map((f) => f.result)).toEqual(["ok", "ok", "error", "ok"]);
+    expect(runs[0]).toMatchObject({ command: "refuel-fires", radius: 20, fires: 10, full: 2, off: 1, world: 0, unloaded: 0, capped: false, byPrefab: { piece_groundtorch_wood: 6, piece_walltorch: 4 }, player: "Ragnar" });
+    // A wider radius reaches more fires, one nobody has loaded and one no player built.
+    expect(runs[1]).toMatchObject({ radius: 100, fires: 21, unloaded: 1, world: 1, byPrefab: { fire_pit: 3, hearth: 1, piece_bathtub: 1 } });
+    abort.abort();
+    mock.stop();
+  });
+
   it("adds items to a chest by the plugin's rules, shown on the map after the next save", async () => {
     const mock = new MockAgent(Date.now, "UTC");
     const evs: AgentEvent[] = [];

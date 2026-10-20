@@ -885,6 +885,7 @@ export const ADMIN_COMMANDS = [
   "fill-kilns",
   "fill-smelters",
   "fill-fermenters",
+  "refuel-fires",
   "grow",
   "map-reveal",
   "map-pins",

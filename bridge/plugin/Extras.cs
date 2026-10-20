@@ -396,6 +396,66 @@ namespace Skald.Bridge
             return Ok(new { fermenters, skipped, full, unloaded, added, near, radius = r });
         }
 
+        // Every prefab's fire, read from its Fireplace component once per
+        // prefab hash (null for prefabs without one), like Stations().
+        static readonly Dictionary<int, Fire> fires = new Dictionary<int, Fire>();
+
+        static Fire FireOf(ZDO z)
+        {
+            int hash = z.GetPrefab();
+            if (fires.TryGetValue(hash, out var known)) return known;
+            var prefab = ZNetScene.instance.GetPrefab(hash);
+            var fp = prefab != null ? prefab.GetComponent<Fireplace>() : null;
+            var fire = fp == null ? null : new Fire
+            {
+                Prefab = prefab.name,
+                Fuel = fp.m_fuelItem != null ? fp.m_fuelItem.name : null,
+                MaxFuel = fp.m_maxFuel,
+                Infinite = fp.m_infiniteFuel,
+                CanRefill = fp.m_canRefill,
+            };
+            // An unknown hash is not kept: the scene may not have every prefab yet.
+            if (prefab != null) fires[hash] = fire;
+            return fire;
+        }
+
+        // POST /v1/build/refuel-fires: every fire a player built and could
+        // feed by hand (torches, sconces, campfires, hearths, braziers,
+        // lanterns, the hot tub) gets its fuel set to its own maximum. Like
+        // the fill commands it goes through the client simulating the fire,
+        // with the game's own RPC_SetFuelAmount, so everyone nearby sees it
+        // lit at once. Fires nobody built (camps, dungeons) are never touched.
+        public static object RefuelFires(JObject a)
+        {
+            Net();
+            var pos = Target(a, out string near);
+            float r = Radius(a, 50f);
+            int lit = 0, full = 0, off = 0, world = 0, unloaded = 0;
+            bool capped = false;
+            var byPrefab = new Dictionary<string, int>();
+            foreach (var z in ZdosAround(pos, r))
+            {
+                var fire = FireOf(z);
+                if (!RefuelPlan.Takes(fire)) continue;
+                if (lit >= RefuelPlan.MaxFires) { capped = true; break; }
+                long owner = LoadedBy(z);
+                switch (RefuelPlan.Step(fire, z.GetLong(ZDOVars.s_creator), owner != 0, z.GetInt(ZDOVars.s_state, 1), z.GetFloat(ZDOVars.s_fuel)))
+                {
+                    case RefuelStep.World: world++; break;
+                    case RefuelStep.Unloaded: unloaded++; break;
+                    case RefuelStep.Off: off++; break;
+                    case RefuelStep.Full: full++; break;
+                    default:
+                        // The owner writes the fuel, so it is not lost to its next burn tick.
+                        ZRoutedRpc.instance.InvokeRoutedRPC(owner, z.m_uid, "RPC_SetFuelAmount", RefuelPlan.Target(fire));
+                        Count(byPrefab, fire.Prefab);
+                        lit++;
+                        break;
+                }
+            }
+            return Ok(new { fires = lit, full, off, world, unloaded, capped, byPrefab, near, radius = r });
+        }
+
         // The 0.1/0.2 command, kept for older panels: every Smelter gets its
         // first (or the requested) input and fuel, fermenters get mead base.
         // The panel now uses fill-kilns and fill-smelters.

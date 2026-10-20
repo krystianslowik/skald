@@ -747,9 +747,10 @@ function WorldKeys({ catalog, onChange }: { catalog: AdminCatalog | null; onChan
 }
 
 /**
- * Repair, fill, grow, reveal the map: around a base or a player, within 100 m.
- * Kilns only ever take wood, so they fill in one tap; smelters and fermenters
- * open a short flow to pick what goes in.
+ * Repair, fill, refuel, grow, reveal the map: around a base or a player
+ * (50 m; refuelling 20 to 100 m, the map 60 m). Kilns only ever take wood, so they fill in one tap; smelters
+ * and fermenters open a short flow to pick what goes in, and refuelling fires
+ * one to pick how far.
  */
 function BaseHelpers({ catalog, picked }: { catalog: AdminCatalog | null; picked: Target | null }) {
   const i18n = useI18n();
@@ -768,6 +769,12 @@ function BaseHelpers({ catalog, picked }: { catalog: AdminCatalog | null; picked
   const noFermenters = oldFerment || agentLacks("fill-fermenters");
   const whyId = useId();
   const reason = oldFerment ? t(oldFill ? "admin.base.oldFill" : "admin.base.oldFerment", { plugin: bridge?.plugin ?? "?" }) : noKilns || noSmelters || noFermenters ? t("admin.base.oldAgent") : null;
+  // Fires refuel from bridge 0.5.0.
+  const oldRefuel = pluginBelow(admin.status, "0.5.0");
+  const noRefuel = oldRefuel || agentLacks("refuel-fires");
+  const refuelReason = oldRefuel ? t("admin.base.oldRefuel", { plugin: bridge?.plugin ?? "?" }) : noRefuel ? t("admin.base.oldAgentRefuel") : null;
+  const refuelWhyId = useId();
+  const refuelOwnLine = !!refuelReason && refuelReason !== reason;
   const go = (command: "repair" | "fill-kilns" | "grow" | "map-reveal", done: Done) => target && void admin.run(command, { radius: command === "map-reveal" ? 60 : 50, ...targetBody(target) }, { done });
   const fill = (station: "smelters" | "fermenters") => target && admin.open({ kind: "fill", station, target, catalog });
   return (
@@ -786,6 +793,10 @@ function BaseHelpers({ catalog, picked }: { catalog: AdminCatalog | null; picked
           <ItemIcon name="MeadBaseTasty" size={20} iconSize={28} className="text-label" />
           {t("admin.ferment.title")}
         </Btn>
+        <Btn disabled={off || noRefuel} describedBy={noRefuel ? (refuelOwnLine ? refuelWhyId : whyId) : undefined} onClick={() => target && admin.open({ kind: "refuel", target })} className="justify-start pl-2.5 text-left">
+          <ItemIcon name="Torch" size={20} iconSize={28} className="text-label" />
+          {t("admin.refuel.title")}
+        </Btn>
         <Btn disabled={off} onClick={() => go("repair", t("admin.base.repaired"))}>
           {t("admin.base.repair")}
         </Btn>
@@ -799,6 +810,11 @@ function BaseHelpers({ catalog, picked }: { catalog: AdminCatalog | null; picked
       {reason && (
         <p id={whyId} className="mt-2 text-xs text-flame">
           {reason}
+        </p>
+      )}
+      {refuelOwnLine && (
+        <p id={refuelWhyId} className="mt-2 text-xs text-flame">
+          {refuelReason}
         </p>
       )}
       <p className="mt-2 text-xs text-ash">{t("admin.base.note")}</p>
