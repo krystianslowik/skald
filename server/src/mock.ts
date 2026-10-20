@@ -1008,15 +1008,18 @@ export class MockAgent implements AgentSource {
         break;
       }
       case "refuel-fires": {
-        // The plugin's rule (bridge/plugin/RefuelPlan.cs) on a base whose
+        // The plugin's rules (bridge/plugin/RefuelPlan.cs) on a base whose
         // torches and fires burn down: a wider radius reaches more of them,
-        // two hearth fires are still full, and one far campfire is unloaded.
-        const radius = Number(body.radius ?? 30);
+        // two hearth fires are still full, a lantern is turned off, and at
+        // 100 m one far campfire is unloaded and a Fuling camp's bonfire (not
+        // built by a player) is left alone.
+        const radius = Number(body.radius ?? 50);
         if (!(radius > 0 && radius <= 100)) return fail(400, "'radius' must be in (0, 100]");
         const byPrefab: Record<string, number> =
-          radius <= 20 ? { piece_groundtorch_wood: 6, piece_walltorch: 4 } : radius <= 50 ? { piece_groundtorch_wood: 9, piece_walltorch: 5, fire_pit: 2, piece_brazierfloor01: 1 } : { piece_groundtorch_wood: 9, piece_walltorch: 5, fire_pit: 3, piece_brazierfloor01: 2, hearth: 1, piece_jackoturnip: 1 };
+          radius <= 20 ? { piece_groundtorch_wood: 6, piece_walltorch: 4 } : radius <= 50 ? { piece_groundtorch_wood: 9, piece_walltorch: 5, fire_pit: 2, piece_brazierfloor01: 1 } : { piece_groundtorch_wood: 9, piece_walltorch: 5, fire_pit: 3, piece_brazierfloor01: 2, hearth: 1, piece_bathtub: 1 };
         const fires = Object.values(byPrefab).reduce((a, b) => a + b, 0);
-        data = { fires, full: 2, unloaded: radius > 50 ? 1 : 0, byPrefab, near, radius };
+        const far = radius > 50 ? 1 : 0;
+        data = { fires, full: 2, off: 1, world: far, unloaded: far, capped: false, byPrefab, near, radius };
         break;
       }
       case "chest-add": {
@@ -1038,7 +1041,7 @@ export class MockAgent implements AgentSource {
     this.log(`[Info   :Skald Bridge] [SkaldBridge] audit actor=${actor} cmd=POST /v1/${command} result=ok ${JSON.stringify({ ok: true, data })}`);
     const counts: Record<string, unknown> = {};
     if (!Array.isArray(data)) {
-      for (const k of ["killed", "tamed", "repaired", "smelters", "kilns", "skipped", "full", "fermenters", "fires", "unloaded", "plants", "sentTo", "stopped", "started", "label", "stacks", "day", "loaded"]) if (k in data) counts[k] = data[k];
+      for (const k of ["killed", "tamed", "repaired", "smelters", "kilns", "skipped", "full", "fermenters", "fires", "off", "world", "capped", "unloaded", "plants", "sentTo", "stopped", "started", "label", "stacks", "day", "loaded"]) if (k in data) counts[k] = data[k];
       if (data.added && typeof data.added === "object") counts.added = data.added;
       if (data.byPrefab && typeof data.byPrefab === "object") counts.byPrefab = data.byPrefab;
       if (typeof data.fuel === "string") counts.fuel = data.fuel;

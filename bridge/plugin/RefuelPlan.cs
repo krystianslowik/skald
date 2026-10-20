@@ -17,6 +17,9 @@ namespace Skald.Bridge
         public bool CanRefill = true;
     }
 
+    // What a refuel does with one fire in range.
+    enum RefuelStep { Refuel, World, Unloaded, Off, Full }
+
     // The game-independent half of POST /v1/build/refuel-fires, unit-tested
     // in bridge/tests.
     static class RefuelPlan
@@ -28,6 +31,23 @@ namespace Skald.Bridge
         // Full the way the game judges it: the level rounded up has reached
         // the maximum, so a fire at 9.3 of 10 takes no more wood in game.
         public static bool Full(Fire f, float fuel) => Math.Ceiling(fuel) >= f.MaxFuel;
+
+        // At most this many fires get fuel in one call; the rest wait for the next.
+        public const int MaxFires = 500;
+
+        // What happens to one fire a player could feed (Takes), in this
+        // order: one no player built (creator 0: Fuling camps, abandoned
+        // houses, dungeons) is never touched; one nobody has loaded cannot
+        // take the RPC; one turned off (state other than 1) would not burn
+        // anyway, so it is not counted as lit; a full one needs nothing.
+        public static RefuelStep Step(Fire f, long creator, bool loaded, int state, float fuel)
+        {
+            if (creator == 0) return RefuelStep.World;
+            if (!loaded) return RefuelStep.Unloaded;
+            if (state != 1) return RefuelStep.Off;
+            if (Full(f, fuel)) return RefuelStep.Full;
+            return RefuelStep.Refuel;
+        }
 
         // A refuel fills to the fire's own maximum.
         public static float Target(Fire f) => f.MaxFuel;

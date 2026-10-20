@@ -1,15 +1,17 @@
 import type { I18n } from "../i18n";
 
 /** What people call the fires a refuel lit, from the game's prefab names. */
-export type FireKind = "torch" | "campfire" | "hearth" | "brazier" | "lantern" | "candle" | "other";
+export type FireKind = "torch" | "campfire" | "hearth" | "brazier" | "lantern" | "candle" | "hottub" | "other";
 
-const KINDS: FireKind[] = ["torch", "campfire", "hearth", "brazier", "lantern", "candle", "other"];
+const KINDS: FireKind[] = ["torch", "campfire", "hearth", "brazier", "lantern", "candle", "hottub", "other"];
 
 /** A count with no kinds to it: an event without `byPrefab`. */
 type Group = { kind: FireKind | "any"; n: number };
 
-// Braziers first: none of the others' words appear in their names.
+// Braziers first: none of the others' words appear in their names. The hot
+// tub burns wood through the same Fireplace component, but is no fire.
 const RULES: [RegExp, FireKind][] = [
+  [/bathtub|hot_?tub/i, "hottub"],
   [/brazier/i, "brazier"],
   [/torch|sconce/i, "torch"],
   [/hearth/i, "hearth"],
@@ -52,5 +54,20 @@ export function fireGroups(byPrefab: unknown, total = 0): Group[] {
 /** "14 torches and 3 campfires": what a refuel lit, by kind. */
 export function firesText(i: Pick<I18n, "tn" | "intl">, byPrefab: unknown, total = 0): string {
   const parts = fireGroups(byPrefab, total).map((g) => i.tn(`admin.refuel.kind.${g.kind}`, g.n));
+  return new Intl.ListFormat(i.intl, { type: "conjunction" }).format(parts);
+}
+
+const WHY = ["unloaded", "off", "full", "world"] as const;
+
+/**
+ * Why fires in range got nothing, from the bridge's answer: "2 not loaded and
+ * 1 turned off". Fires no player built only count when nothing was lit: next
+ * to a lit base they are expected, not a problem. A capped call says so.
+ */
+export function refuelWhy(i: Pick<I18n, "t" | "intl">, d: Record<string, unknown>): string {
+  const num = (k: string) => Number(d[k] ?? 0) || 0;
+  const lit = num("fires") > 0;
+  const parts = WHY.filter((k) => num(k) > 0 && (k !== "world" || !lit)).map((k) => i.t(`admin.refuel.why.${k}`, { n: num(k) }));
+  if (d.capped === true) parts.push(i.t("admin.refuel.why.capped", { n: num("fires") }));
   return new Intl.ListFormat(i.intl, { type: "conjunction" }).format(parts);
 }

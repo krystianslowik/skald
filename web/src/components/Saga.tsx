@@ -7,7 +7,7 @@ import { gameClock } from "../lib/admin";
 import { refusalReason } from "../lib/refusal";
 import { describeSafeRestart } from "../lib/safeRestart";
 import { itemLabel } from "../lib/storage";
-import { firesText } from "../lib/fires";
+import { firesText, refuelWhy } from "../lib/fires";
 import { useI18n, type I18n, type TextKey } from "../i18n";
 import { PlayerName } from "./PlayerName";
 import { DayLabel } from "./RelativeTime";
@@ -191,16 +191,18 @@ function describeFill(i: I18n, command: "fill-kilns" | "fill-smelters" | "fill-f
 }
 
 /**
- * "refuelled 14 torches and 3 campfires near Ragnar"; or that the fires there
- * were full, or that nobody had them loaded, or that there were none.
+ * "refuelled 14 torches and 3 campfires near Ragnar (2 not loaded)"; or why
+ * nothing was refuelled; or that there were no fires.
  */
 function describeRefuel(i: I18n, d: Record<string, unknown>, actor: string, player: string): string {
-  const num = (k: string) => Number(d[k] ?? 0) || 0;
-  const what = firesText(i, d.byPrefab, num("fires"));
+  const fires = Number(d.fires ?? 0) || 0;
+  const why = refuelWhy(i, d);
   const at = player ? "" : ".at";
-  if (num("fires") > 0) return i.t(player ? "saga.admin.refuel-fires" : "saga.admin.refuel-fires.at", { actor, player, what });
-  const why = num("full") > 0 ? ".unchanged" : num("unloaded") > 0 ? ".unloaded" : ".none";
-  return i.lookup(`saga.admin.refuel-fires${why}${at}`, { actor, player }) ?? i.t("saga.admin.generic", { actor, what: i.t("saga.admin.cmd.refuel-fires") });
+  if (fires > 0) {
+    const what = firesText(i, d.byPrefab, fires);
+    return i.lookup(`saga.admin.refuel-fires${why ? ".more" : ""}${at}`, { actor, player, what, why }) ?? i.t("saga.admin.generic", { actor, what: i.t("saga.admin.cmd.refuel-fires") });
+  }
+  return i.lookup(`saga.admin.refuel-fires${why ? ".nothing" : ".none"}${at}`, { actor, player, why }) ?? i.t("saga.admin.generic", { actor, what: i.t("saga.admin.cmd.refuel-fires") });
 }
 
 const SETTINGS_APPLY: Record<string, TextKey> = {

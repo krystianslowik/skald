@@ -41,4 +41,30 @@ public class RefuelPlanTests
         Assert.Equal(10f, RefuelPlan.Target(Campfire));
         Assert.Equal(4f, RefuelPlan.Target(Torch));
     }
+
+    [Fact]
+    public void OnlyFiresAPlayerBuiltAreRefuelled()
+    {
+        // No creator: a Fuling camp bonfire, an abandoned house's fire pit, a dungeon torch.
+        Assert.Equal(RefuelStep.World, RefuelPlan.Step(Campfire, 0, true, 1, 0f));
+        Assert.Equal(RefuelStep.World, RefuelPlan.Step(Campfire, 0, false, 1, 0f));
+        Assert.Equal(RefuelStep.Refuel, RefuelPlan.Step(Campfire, 12345, true, 1, 2f));
+    }
+
+    [Fact]
+    public void UnloadedTurnedOffAndFullFiresAreLeftAlone()
+    {
+        Assert.Equal(RefuelStep.Unloaded, RefuelPlan.Step(Torch, 12345, false, 1, 0f));
+        // A lantern someone turned off stays off and is not counted as lit.
+        Assert.Equal(RefuelStep.Off, RefuelPlan.Step(Torch, 12345, true, 2, 0f));
+        Assert.Equal(RefuelStep.Off, RefuelPlan.Step(Torch, 12345, true, 2, 4f));
+        Assert.Equal(RefuelStep.Full, RefuelPlan.Step(Torch, 12345, true, 1, 4f));
+    }
+
+    [Fact]
+    public void ACallStopsAtTheCap()
+    {
+        Assert.True(RefuelPlan.MaxFires > 0);
+        Assert.Equal(500, RefuelPlan.MaxFires);
+    }
 }

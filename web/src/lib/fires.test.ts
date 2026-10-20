@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeI18n } from "../i18n";
-import { fireGroups, fireKind, firesText } from "./fires";
+import { fireGroups, fireKind, firesText, refuelWhy } from "./fires";
 
 describe("fires by kind", () => {
   it("sorts the game's fire prefabs into kinds people name", () => {
@@ -17,6 +17,7 @@ describe("fires by kind", () => {
     expect(fireKind("piece_hoodedlantern")).toBe("lantern");
     expect(fireKind("piece_jackoturnip")).toBe("lantern");
     expect(fireKind("Candle_resin")).toBe("candle");
+    expect(fireKind("piece_bathtub")).toBe("hottub");
     expect(fireKind("piece_modded_glowthing")).toBe("other");
   });
 
@@ -42,6 +43,18 @@ describe("fires by kind", () => {
     expect(firesText(makeI18n("en"), {}, 1)).toBe("1 fire");
     expect(firesText(makeI18n("pl"), by)).toBe("14 pochodni i 3 ogniska");
     expect(firesText(makeI18n("pl"), {}, 22)).toBe("22 ognie");
+    expect(firesText(makeI18n("en"), { piece_bathtub: 1, fire_pit: 2 })).toBe("2 campfires and 1 hot tub");
+    expect(firesText(makeI18n("pl"), { piece_bathtub: 2 })).toBe("2 balie");
     expect(firesText(makeI18n("pl"), { piece_groundtorch_wood: 2, hearth: 1, bonfire: 5 })).toBe("5 ognisk, 2 pochodnie i 1 palenisko");
+  });
+
+  it("says why fires were left alone: every reason, world fires only when nothing was lit", () => {
+    const en = makeI18n("en");
+    const pl = makeI18n("pl");
+    expect(refuelWhy(en, { fires: 3, unloaded: 2, off: 1, full: 0, world: 4 })).toBe("2 not loaded and 1 turned off");
+    expect(refuelWhy(en, { fires: 0, unloaded: 2, off: 1, full: 3, world: 4 })).toBe("2 not loaded, 1 turned off, 3 already full and 4 not built by players");
+    expect(refuelWhy(en, { fires: 500, capped: true })).toBe("stopped at 500, refuel again for the rest");
+    expect(refuelWhy(en, { fires: 2 })).toBe("");
+    expect(refuelWhy(pl, { fires: 0, full: 2, world: 1 })).toBe("już pełne: 2 i postawione nie przez graczy: 1");
   });
 });

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { firesText } from "../../lib/fires";
+import { firesText, refuelWhy } from "../../lib/fires";
 import { useI18n, type I18n } from "../../i18n";
 import { Sheet } from "../Sheet";
 import { ItemIcon } from "../storage/ItemIcon";
@@ -12,16 +12,18 @@ const DEFAULT_RADIUS = 50;
 
 /**
  * What a refuel really did, from the bridge's answer: the fires it lit by
- * kind, or that the ones there were full, or that none were loaded or found.
- * The same cases as the Saga line.
+ * kind, and why others got nothing (not loaded, turned off, full, not built
+ * by a player). The same cases as the Saga line.
  */
 export function refuelResult(i: Pick<I18n, "t" | "tn" | "intl">, data: unknown): string {
   const d = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
-  const num = (k: string) => Number(d[k] ?? 0) || 0;
-  if (num("fires") > 0) return i.t("admin.refuel.result", { what: firesText(i, d.byPrefab, num("fires")) });
-  if (num("full") > 0) return i.t("admin.refuel.result.full");
-  if (num("unloaded") > 0) return i.t("admin.refuel.result.unloaded");
-  return i.t("admin.refuel.result.none");
+  const fires = Number(d.fires ?? 0) || 0;
+  const why = refuelWhy(i, d);
+  if (fires > 0) {
+    const what = firesText(i, d.byPrefab, fires);
+    return why ? i.t("admin.refuel.result.more", { what, why }) : i.t("admin.refuel.result", { what });
+  }
+  return why ? i.t("admin.refuel.result.nothing", { why }) : i.t("admin.refuel.result.none");
 }
 
 /**

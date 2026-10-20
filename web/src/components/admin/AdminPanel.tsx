@@ -772,7 +772,7 @@ function BaseHelpers({ catalog, picked }: { catalog: AdminCatalog | null; picked
   // Fires refuel from bridge 0.5.0.
   const oldRefuel = pluginBelow(admin.status, "0.5.0");
   const noRefuel = oldRefuel || agentLacks("refuel-fires");
-  const refuelReason = oldRefuel ? t("admin.base.oldRefuel", { plugin: bridge?.plugin ?? "?" }) : noRefuel ? t("admin.base.oldAgent") : null;
+  const refuelReason = oldRefuel ? t("admin.base.oldRefuel", { plugin: bridge?.plugin ?? "?" }) : noRefuel ? t("admin.base.oldAgentRefuel") : null;
   const refuelWhyId = useId();
   const refuelOwnLine = !!refuelReason && refuelReason !== reason;
   const go = (command: "repair" | "fill-kilns" | "grow" | "map-reveal", done: Done) => target && void admin.run(command, { radius: command === "map-reveal" ? 60 : 50, ...targetBody(target) }, { done });

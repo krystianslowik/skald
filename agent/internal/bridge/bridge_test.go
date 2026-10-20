@@ -106,7 +106,7 @@ func (f *fakePlugin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for i := 0; i < 30; i++ {
 			by[fmt.Sprintf("piece_modded_fire_%02d", i)] = 1
 		}
-		ok(map[string]any{"fires": 47, "full": 2, "unloaded": 1, "byPrefab": by, "near": "Ragnar", "radius": 20, "uid": 1234567890123456789})
+		ok(map[string]any{"fires": 47, "full": 2, "off": 3, "world": 4, "unloaded": 1, "capped": false, "byPrefab": by, "near": "Ragnar", "radius": 20, "uid": 1234567890123456789})
 	case "/v1/build/fill-kilns":
 		ok(map[string]any{"kilns": 2, "full": 1, "unloaded": 0, "added": map[string]any{"Wood": 2}, "near": "position", "radius": 50})
 	default:
@@ -534,7 +534,7 @@ func TestRefuelAuditCountsFiresByPrefab(t *testing.T) {
 		t.Fatalf("leaked a uid: %s", b)
 	}
 	e := evs[0]
-	if e["command"] != "refuel-fires" || e["fires"] != float64(47) || e["full"] != float64(2) || e["unloaded"] != float64(1) || e["radius"] != float64(20) || e["player"] != "Ragnar" {
+	if e["command"] != "refuel-fires" || e["fires"] != float64(47) || e["full"] != float64(2) || e["unloaded"] != float64(1) || e["off"] != float64(3) || e["world"] != float64(4) || e["capped"] != false || e["radius"] != float64(20) || e["player"] != "Ragnar" {
 		t.Fatalf("refuel-fires %+v", e)
 	}
 	by, _ := e["byPrefab"].(map[string]any)

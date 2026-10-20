@@ -504,7 +504,7 @@ describe("admin", () => {
     fireEvent.click(within(flow).getByRole("button", { name: "Refuel fires" }));
     await waitFor(() => expect(calls.find((c) => c.url === "/api/admin/refuel-fires")).toBeTruthy());
     expect(calls.find((c) => c.url === "/api/admin/refuel-fires")!.body).toEqual({ radius: 100, player: "Freya" });
-    await waitFor(() => expect(within(flow).getByRole("status")).toHaveTextContent("Refuelled 14 torches and 3 campfires."));
+    await waitFor(() => expect(within(flow).getByRole("status")).toHaveTextContent("Refuelled 14 torches and 3 campfires (2 already full)."));
     fireEvent.click(within(flow).getByRole("button", { name: "Done" }));
     expect(await screen.findByRole("dialog", { name: "Admin" })).toBeInTheDocument();
   });
@@ -533,10 +533,12 @@ describe("admin", () => {
     const i = makeI18n("en");
     const p = makeI18n("pl");
     expect(refuelResult(i, { fires: 4, byPrefab: { hearth: 1, piece_brazierfloor01: 3 } })).toBe("Refuelled 3 braziers and 1 hearth.");
-    expect(refuelResult(i, { fires: 0, full: 3, unloaded: 1 })).toBe("Nothing to do: the fires there are already full.");
-    expect(refuelResult(i, { fires: 0, unloaded: 2 })).toBe("Nothing refuelled: no player has that place loaded. Someone has to be nearby.");
+    expect(refuelResult(i, { fires: 4, unloaded: 2, world: 5, byPrefab: { hearth: 1, piece_brazierfloor01: 3 } })).toBe("Refuelled 3 braziers and 1 hearth (2 not loaded).");
+    expect(refuelResult(i, { fires: 0, full: 3, unloaded: 1, off: 1 })).toBe("Nothing refuelled: 1 not loaded, 1 turned off and 3 already full.");
+    expect(refuelResult(i, { fires: 0, world: 2 })).toBe("Nothing refuelled: 2 not built by players.");
     expect(refuelResult(i, {})).toBe("Nothing refuelled: there are no fires there that take fuel.");
     expect(refuelResult(p, { fires: 7, byPrefab: { piece_walltorch: 5, bonfire: 2 } })).toBe("Dołożono do ognia: 5 pochodni i 2 ogniska.");
+    expect(refuelResult(p, { fires: 0, off: 2 })).toBe("Nic nie dołożono: zgaszone: 2.");
   });
 
   it("greys out Refuel fires on a bridge before 0.5.0 and says why, keeping the fills on", async () => {
@@ -556,7 +558,7 @@ describe("admin", () => {
     expect(within(panel).getByRole("button", { name: "Fill fermenters" })).toBeEnabled();
     const refuel = within(panel).getByRole("button", { name: "Refuel fires" });
     expect(refuel).toBeDisabled();
-    expect(refuel).toHaveAccessibleDescription("The Skald agent does not know every fill command yet: update the agent.");
+    expect(refuel).toHaveAccessibleDescription("The Skald agent does not know Refuel fires yet: update the agent.");
   });
 
   it("still offers keep-current before the catalog is in", () => {
@@ -1002,12 +1004,15 @@ describe("refuel lines in the saga", () => {
   const en = makeI18n("en");
   const pl = makeI18n("pl");
   it("counts the fires by kind, near a player or at a spot", () => {
-    const near = { actor: "k", command: "refuel-fires", result: "ok", radius: 50, fires: 17, full: 1, unloaded: 0, byPrefab: { piece_groundtorch_wood: 10, piece_walltorch: 4, fire_pit: 3 }, player: "Ragnar" };
+    const near = { actor: "k", command: "refuel-fires", result: "ok", radius: 50, fires: 17, full: 0, unloaded: 0, byPrefab: { piece_groundtorch_wood: 10, piece_walltorch: 4, fire_pit: 3 }, player: "Ragnar" };
     expect(describeAdmin(en, near)).toBe("k refuelled 14 torches and 3 campfires near Ragnar");
     expect(describeAdmin(pl, near)).toBe("k dołożył do ognia (14 pochodni i 3 ogniska) obok: Ragnar");
     expect(describeAdmin(en, { actor: "k", command: "refuel-fires", result: "ok", fires: 1, byPrefab: { hearth: 1 }, at: { x: 1, z: 2 } })).toBe("k refuelled 1 hearth");
-    expect(describeAdmin(en, { actor: "k", command: "refuel-fires", result: "ok", fires: 0, full: 4, player: "Freya" })).toBe("k found the fires near Freya already full");
-    expect(describeAdmin(en, { actor: "k", command: "refuel-fires", result: "ok", fires: 0, unloaded: 2 })).toBe("k refuelled nothing: nobody has those fires loaded");
+    expect(describeAdmin(en, { ...near, unloaded: 2, off: 1 })).toBe("k refuelled 14 torches and 3 campfires near Ragnar (2 not loaded and 1 turned off)");
+    expect(describeAdmin(pl, { ...near, unloaded: 2 })).toBe("k dołożył do ognia (14 pochodni i 3 ogniska; niewczytane: 2) obok: Ragnar");
+    expect(describeAdmin(en, { actor: "k", command: "refuel-fires", result: "ok", fires: 0, full: 4, world: 1, player: "Freya" })).toBe("k refuelled nothing near Freya: 4 already full and 1 not built by players");
+    expect(describeAdmin(en, { actor: "k", command: "refuel-fires", result: "ok", fires: 0, unloaded: 2 })).toBe("k refuelled nothing: 2 not loaded");
+    expect(describeAdmin(pl, { actor: "k", command: "refuel-fires", result: "ok", fires: 0, full: 1 })).toBe("k nie dołożył nic do ognia (już pełne: 1)");
     expect(describeAdmin(pl, { actor: "k", command: "refuel-fires", result: "ok", fires: 0, player: "Freya" })).toBe("k nie znalazł ognia do podsycenia obok: Freya");
     expect(describeAdmin(en, { actor: "k", command: "refuel-fires", result: "timeout" })).toBe("k: refuelling fires took too long");
   });
