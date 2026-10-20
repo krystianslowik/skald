@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.30] - 2026-10-20
+
 ### Added
 
 - Refuel fires in the admin panel's Base helpers: every torch, wall sconce, campfire, hearth, brazier, lantern and hot tub that a player built, around a player, the main base or a spot picked on the map, gets topped up to the full with its own fuel. Pick 20, 50 or 100 m around. The result and the Saga say what was lit ("Refuelled 14 torches and 3 campfires near Ragnar") and why any others were left alone: not loaded, turned off or already full. Fires nobody built (Fuling camps, abandoned houses, dungeons) are never touched, nor are fires that burn forever or that someone turned off. It relights burnt-out fires too, so a fire indoors may start smoking again. Like filling kilns and smelters, it only reaches what a player has loaded nearby, and one go stops at 500 fires (#193).
