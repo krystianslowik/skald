@@ -31,6 +31,8 @@ let watchdog: ReturnType<typeof setTimeout> | undefined;
 let after: (() => void)[] = [];
 /** Waiting for history to settle: every push and step of ours has landed. */
 let settled: (() => void)[] = [];
+/** history.length after the last entry we know of: the page's own pushes and links handled. */
+let known = 0;
 let scheduled = false;
 let ready = false;
 
@@ -43,6 +45,7 @@ const stateDepth = (): number => {
 function init() {
   if (ready || typeof window === "undefined") return;
   ready = true;
+  known = history.length;
   // A reload keeps history.state: an entry left by a sheet that is gone now is a plain entry.
   if (stateDepth() > 0) {
     const rest: Record<string, unknown> = { ...(history.state as Record<string, unknown>) };
@@ -103,6 +106,7 @@ function flush() {
   if (want > depth) {
     for (let i = depth; i < want; i++) history.pushState({ ...((history.state as Entry) ?? {}), [KEY]: i + 1 }, "");
     depth = want;
+    noteEntries();
   } else if (want < depth) traverse(want - depth);
   // A step back is on its way: its arrival reconciles again and lands here.
   if (pending) return;
@@ -158,6 +162,23 @@ export function leaveSheets(then: () => void): boolean {
   if (depth === 0) return false;
   traverse(-depth, then);
   return true;
+}
+
+/** Every entry so far is accounted for: the page pushed one itself, or a link was handled. */
+export function noteEntries() {
+  init();
+  known = history.length;
+}
+
+/**
+ * Whether the browser stacked an entry we did not (a link followed as a new entry), as
+ * opposed to replacing the current one or moving through history. Without the Navigation
+ * API this is a count, so an entry stacked over pruned forward entries reads as a
+ * replacement: the safe side, since only a stacked entry may be stepped back over.
+ */
+export function entryAdded(): boolean {
+  init();
+  return history.length > known;
 }
 
 /** Whether no other open sheet sits above this one (Escape closes only the top sheet). */

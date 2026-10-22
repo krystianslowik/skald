@@ -1,7 +1,7 @@
 import { createContext, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AdminCatalog, AdminCommand, AdminStatus, AgentEvent, ApiState, CompatView, MapContainer, Platform, RestoreBackup, SafeRestartRun } from "../../types";
 import { getAdminStatus, postAdmin, runAdmin, type AdminOutcome, type KitLine } from "../../lib/admin";
-import { traverse } from "../../lib/sheetHistory";
+import { entryAdded, noteEntries, traverse } from "../../lib/sheetHistory";
 import { Unauthorized } from "../../lib/api";
 import { failText } from "../../lib/refusal";
 import { useWorldMap } from "../../lib/useWorldMap";
@@ -36,7 +36,7 @@ export type { AdminTab, PanelSection };
  * aside while the map is open, then comes back with it).
  */
 export type AdminView = (
-  | { kind: "panel"; tab?: AdminTab; section?: PanelSection }
+  | { kind: "panel"; tab?: AdminTab; section?: PanelSection; link?: number }
   | { kind: "player"; name: string }
   | { kind: "items"; target: Target; lines?: KitLine[] }
   | { kind: "creatures"; target: Target }
@@ -277,50 +277,86 @@ export function AdminProvider({
 
   // A link into the admin sheet (`#admin/compat`, from a notice or a push) is opened once the
   // admin layer answers, from the page's own entry, so closing the sheet never lands on the
-  // link again. While open, the sheet's own entry carries the address (AdminPanel).
+  // link again. While open, the sheet's own entry carries the address (AdminPanel). A link
+  // the admin layer never answers for is dropped after LINK_MS.
   const link = useRef<PanelLink | null>(null);
   const [linked, setLinked] = useState(0);
   useEffect(() => {
-    const l = parseAdminHash(location.hash);
-    if (l) {
-      // Loaded at the link: nothing of ours beneath, so the entry itself becomes the fire.
-      history.replaceState(history.state, "", location.pathname + location.search);
+    let drop: ReturnType<typeof setTimeout> | undefined;
+    const hold = (l: PanelLink) => {
       link.current = l;
+      clearTimeout(drop);
+      drop = setTimeout(() => (link.current = null), LINK_MS);
       setLinked((n) => n + 1);
+    };
+    const page = (from: string) => location.pathname + location.search + (isAdminHash(from) ? "" : from);
+    const loaded = parseAdminHash(location.hash);
+    if (loaded) {
+      // Loaded at the link: nothing of ours beneath, so the entry itself becomes the fire.
+      history.replaceState(history.state, "", page(""));
+      hold(loaded);
     }
-    // Followed while the page runs (a tapped notification): the browser stacked an entry for it,
-    // over a sheet's entry if one was open. Step back to the page's entry, tab and all; the
-    // entries left above go with the sheet's next push.
+    noteEntries();
+    // How the browser got to the new hash, where it says (the Navigation API).
+    let how: string | null = null;
+    const nav = (window as { navigation?: EventTarget }).navigation;
+    const onNavigate = (e: Event) => {
+      const n = e as Event & { hashChange?: boolean; navigationType?: string };
+      if (n.hashChange) how = n.navigationType ?? null;
+    };
+    nav?.addEventListener("navigate", onNavigate);
     let stepping = false;
-    const onHash = () => {
+    const onHash = (e: HashChangeEvent) => {
+      const type = how;
+      how = null;
+      if (stepping) return;
       const l = parseAdminHash(location.hash);
-      if (stepping || !l) return;
-      link.current = l;
+      if (!l) return noteEntries();
+      const added = type ? type === "push" : entryAdded();
+      if (!added) {
+        // The entry was replaced, or reached through Back or Forward: it stays, as the page's own.
+        let from = "";
+        try {
+          from = new URL(e.oldURL).hash;
+        } catch {
+          // no previous address: the fire
+        }
+        history.replaceState(history.state, "", page(from));
+        noteEntries();
+        return hold(l);
+      }
+      // Stacked as a new entry (a tapped notification), over a sheet's entry if one was open:
+      // step back to the page's entry, tab and all. The entries left above go with the next push.
       stepping = true;
       const step = (left: number) => {
         const from = location.href;
         traverse(-1, () => {
           if (isAdminHash(location.hash) && location.href !== from && left > 0) return step(left - 1);
           // Nowhere further back: the entry itself becomes the fire.
-          if (isAdminHash(location.hash)) history.replaceState(history.state, "", location.pathname + location.search);
+          if (isAdminHash(location.hash)) history.replaceState(history.state, "", page(""));
           stepping = false;
-          setLinked((n) => n + 1);
+          noteEntries();
+          hold(l);
         });
       };
       step(8);
     };
     window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
+    return () => {
+      clearTimeout(drop);
+      window.removeEventListener("hashchange", onHash);
+      nav?.removeEventListener("navigate", onNavigate);
+    };
   }, []);
-  // A browser that follows a link fires popstate first, which closes every open sheet: the
-  // link waits until they are gone, so a sheet still sliding out cannot close it again.
-  const idle = view === null;
+  // Opened as a fresh panel over whatever shows: some browsers close every open sheet on
+  // the way (popstate), others do not. The new panel takes the sheet's entry either way, and a
+  // sheet still sliding out is replaced before it can finish closing.
   useEffect(() => {
-    if (!present || !idle || !link.current) return;
+    if (!present || !link.current) return;
     const l = link.current;
     link.current = null;
-    setView({ kind: "panel", ...l });
-  }, [present, idle, linked]);
+    setView({ kind: "panel", ...l, link: linked });
+  }, [present, linked]);
   const bridgeOn = !!bridge && bridge.reason !== "off";
   let blocker: Blocker = null;
   if (!online) blocker = "offline";
@@ -381,6 +417,9 @@ export function AdminProvider({
     </AdminCtx.Provider>
   );
 }
+
+/** A link into the admin sheet waits this long for the admin layer to answer, then is dropped. */
+const LINK_MS = 30_000;
 
 /** Gap between a sheet's header and the first toast (px). */
 const TOAST_GAP = 8;

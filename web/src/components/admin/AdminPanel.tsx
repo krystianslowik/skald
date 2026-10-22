@@ -11,7 +11,7 @@ import { ItemIcon } from "../storage/ItemIcon";
 import { PlatformGlyph } from "../PlatformGlyph";
 import { Sheet } from "../Sheet";
 import { pluginBelow, targetBody, useAdmin, type Done, type Target } from "./AdminContext";
-import { ADMIN_TABS, adminHash, PANEL_SECTIONS, rememberedTab, rememberTab, tabOf, type AdminTab, type PanelSection } from "../../lib/adminTabs";
+import { ADMIN_TABS, adminHash, isAdminHash, PANEL_SECTIONS, rememberedTab, rememberTab, tabOf, type AdminTab, type PanelSection } from "../../lib/adminTabs";
 import { sheetDepth, whenSettled } from "../../lib/sheetHistory";
 import { fillResult } from "./FillSheet";
 import { AdminGlyph } from "./glyphs";
@@ -28,9 +28,9 @@ const PRESETS = ["admin.preset.restart5", "admin.preset.boss21", "admin.preset.s
 
 /**
  * The admin sheet, in four tabs: the players (who is at the fire, a message to
- * all, the admin and ban lists), the world (time, raids, creatures, world
- * keys), the base (helpers, items) and the server (save, safe restart, the
- * compatibility check, Discord, backups, this session). A view-only session
+ * all, the admin and ban lists, this session), the world (time, raids,
+ * creatures, save, world keys), the base (helpers, items) and the server (safe
+ * restart, the compatibility check, Discord, backups, the versions). A view-only session
  * says so first, with the unlock. Bridge controls are off (with the reason on
  * top) while it cannot take commands; without a bridge only the players' lists
  * and the server's tools show.
@@ -63,16 +63,18 @@ export function AdminPanel({ picked, tab: asked, section, onClose }: { picked?: 
   const tabs = bridgeOn ? ADMIN_TABS : NO_BRIDGE_TABS;
   const tab = tabs.includes(chosen) ? chosen : tabs[0]!;
   const opened = at && tabOf(at) === tab ? at : undefined;
-  // What was picked, not what shows: a bridge that is briefly away must not overwrite it.
-  useEffect(() => rememberTab(chosen), [chosen]);
   useScrollToSection(opened);
   useAddress(opened ?? tab);
   const top = useRef<HTMLDivElement>(null);
+  // Only a tab picked here is remembered: not where a link opened the sheet, nor the tab
+  // shown in place of one that is gone while the bridge is away.
   const pick = (next: AdminTab) => {
-    if (next === tab) return;
+    if (next === chosen && next === tab) return;
+    rememberTab(next);
     setAt(undefined);
     setChosen(next);
     // Each tab starts at its top.
+    if (next === tab) return;
     const scroller = top.current?.closest<HTMLElement>("[data-sheet-body]");
     if (scroller) scroller.scrollTop = 0;
   };
@@ -120,53 +122,6 @@ export function AdminPanel({ picked, tab: asked, section, onClose }: { picked?: 
             </>
           )}
           <AccessLists />
-        </TabPanel>
-
-        {bridgeOn && (
-          <TabPanel id="world" tab={tab}>
-            <TimeSection frozen={st?.bridge.timeFrozen ?? false} />
-            <Raids catalog={catalog} picked={pickedTarget} onChange={reload} />
-            <Section title={t("admin.creatures.title")} id="admin-creatures">
-              <Btn
-                className="w-full"
-                disabled={!!admin.blocker}
-                onClick={() => admin.open({ kind: "creatures", target: pickedTarget ?? (admin.players[0] ? { player: admin.players[0].name } : { at: admin.mainBase ?? { x: 0, z: 0 }, label: "base" }) })}
-              >
-                {t("admin.creatures.open")}
-              </Btn>
-            </Section>
-            <WorldKeys catalog={catalog} onChange={reload} open={opened === "keys"} />
-          </TabPanel>
-        )}
-
-        {bridgeOn && (
-          <TabPanel id="base" tab={tab}>
-            <BaseHelpers catalog={catalog} picked={pickedTarget} />
-            <Section title={t("admin.items.title")} id="admin-items">
-              <p className="mb-2 text-sm text-ash">{t("admin.items.lead")}</p>
-              <Btn
-                className="w-full"
-                disabled={!!admin.blocker}
-                onClick={() => admin.open({ kind: "items", target: pickedTarget ?? (admin.players[0] ? { player: admin.players[0].name } : admin.mainBase ? { at: admin.mainBase, label: "base" } : { at: { x: 0, z: 0 }, label: "map" }) })}
-              >
-                {t("admin.items.open")}
-              </Btn>
-            </Section>
-          </TabPanel>
-        )}
-
-        <TabPanel id="server" tab={tab}>
-          {bridgeOn && (
-            <Section title={t("admin.save.title")} id="admin-save">
-              <Btn className="w-full" disabled={!!admin.blocker} onClick={() => void admin.run("save", {}, { done: t("admin.save.done") })}>
-                {t("admin.save.now")}
-              </Btn>
-            </Section>
-          )}
-          <SafeRestartSection />
-          <CompatSection />
-          <Notify />
-          <RestoreSection />
 
           <Section title={t("admin.you")} id="admin-you">
             <label htmlFor="admin-name" className="text-xs text-ash">
@@ -191,6 +146,51 @@ export function AdminPanel({ picked, tab: asked, section, onClose }: { picked?: 
               </div>
             ) : null}
           </Section>
+        </TabPanel>
+
+        {bridgeOn && (
+          <TabPanel id="world" tab={tab}>
+            <TimeSection frozen={st?.bridge.timeFrozen ?? false} />
+            <Raids catalog={catalog} picked={pickedTarget} onChange={reload} />
+            <Section title={t("admin.creatures.title")} id="admin-creatures">
+              <Btn
+                className="w-full"
+                disabled={!!admin.blocker}
+                onClick={() => admin.open({ kind: "creatures", target: pickedTarget ?? (admin.players[0] ? { player: admin.players[0].name } : { at: admin.mainBase ?? { x: 0, z: 0 }, label: "base" }) })}
+              >
+                {t("admin.creatures.open")}
+              </Btn>
+            </Section>
+            <Section title={t("admin.save.title")} id="admin-save">
+              <Btn className="w-full" disabled={!!admin.blocker} onClick={() => void admin.run("save", {}, { done: t("admin.save.done") })}>
+                {t("admin.save.now")}
+              </Btn>
+            </Section>
+            <WorldKeys catalog={catalog} onChange={reload} open={opened === "keys"} />
+          </TabPanel>
+        )}
+
+        {bridgeOn && (
+          <TabPanel id="base" tab={tab}>
+            <BaseHelpers catalog={catalog} picked={pickedTarget} />
+            <Section title={t("admin.items.title")} id="admin-items">
+              <p className="mb-2 text-sm text-ash">{t("admin.items.lead")}</p>
+              <Btn
+                className="w-full"
+                disabled={!!admin.blocker}
+                onClick={() => admin.open({ kind: "items", target: pickedTarget ?? (admin.players[0] ? { player: admin.players[0].name } : admin.mainBase ? { at: admin.mainBase, label: "base" } : { at: { x: 0, z: 0 }, label: "map" }) })}
+              >
+                {t("admin.items.open")}
+              </Btn>
+            </Section>
+          </TabPanel>
+        )}
+
+        <TabPanel id="server" tab={tab}>
+          <SafeRestartSection />
+          <CompatSection />
+          <Notify />
+          <RestoreSection />
           <SkaldVersion web={admin.versions.web} agent={admin.versions.agent} update={st?.update} className="mt-6 border-t border-iron/25 pt-3" />
         </TabPanel>
       </div>
@@ -252,7 +252,7 @@ function AdminTabs({ tabs, tab, onPick }: { tabs: readonly AdminTab[]; tab: Admi
 /** One tab's content; kept mounted and hidden while another tab shows. */
 function TabPanel({ id, tab, children }: { id: AdminTab; tab: AdminTab; children: ReactNode }) {
   return (
-    <div role="tabpanel" id={`admin-panel-${id}`} aria-labelledby={`admin-tab-${id}`} hidden={id !== tab}>
+    <div role="tabpanel" tabIndex={0} id={`admin-panel-${id}`} aria-labelledby={`admin-tab-${id}`} hidden={id !== tab} className="outline-none focus-visible:ring-2 focus-visible:ring-flame/60">
       {children}
     </div>
   );
@@ -261,18 +261,35 @@ function TabPanel({ id, tab, children }: { id: AdminTab; tab: AdminTab; children
 /**
  * Shows where the sheet is in the address bar, on the sheet's own history
  * entry once it is in place: Back and every other close step back to the
- * page's address, untouched.
+ * page's address, untouched. Handing the entry to another sheet (a player, a
+ * fill) gives it the page's address back, so a reload or a shared link does
+ * not open the admin sheet in its place.
  */
 function useAddress(part: AdminTab | PanelSection) {
+  // The page's address, as the sheet's entry had it before the first write.
+  const page = useRef<string | null>(null);
   useEffect(() => {
     let live = true;
     whenSettled(() => {
-      if (live && sheetDepth() > 0 && location.hash !== adminHash(part)) history.replaceState(history.state, "", adminHash(part));
+      if (!live || sheetDepth() === 0) return;
+      page.current ??= location.pathname + location.search + (isAdminHash(location.hash) ? "" : location.hash);
+      if (location.hash !== adminHash(part)) history.replaceState(history.state, "", adminHash(part));
     });
     return () => {
       live = false;
     };
   }, [part]);
+  useEffect(
+    () => () => {
+      const back = page.current;
+      if (back === null) return;
+      whenSettled(() => {
+        // Closed: the step back already landed on the page's entry. Handed over: the entry is still ours.
+        if (sheetDepth() > 0 && isAdminHash(location.hash)) history.replaceState(history.state, "", back);
+      });
+    },
+    [],
+  );
 }
 
 /** Content above a section still loads (the catalog) for about this long; the section is kept in place meanwhile. */

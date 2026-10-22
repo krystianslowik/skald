@@ -17,12 +17,12 @@ export const PANEL_SECTIONS = {
   keys: { tab: "world", heading: "admin-keys-h" },
   helpers: { tab: "base", heading: "admin-base-h" },
   items: { tab: "base", heading: "admin-items-h" },
-  save: { tab: "server", heading: "admin-save-h" },
+  save: { tab: "world", heading: "admin-save-h" },
   restart: { tab: "server", heading: "admin-safe-h" },
   compat: { tab: "server", heading: "admin-compat-h" },
   discord: { tab: "server", heading: "admin-discord-h" },
   restore: { tab: "server", heading: "admin-restore-h" },
-  you: { tab: "server", heading: "admin-you-h" },
+  you: { tab: "players", heading: "admin-you-h" },
 } as const satisfies Record<string, { tab: AdminTab; heading: string }>;
 
 /** A part of the admin sheet it can open at. */

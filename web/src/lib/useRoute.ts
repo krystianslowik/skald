@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { leaveSheets, sheetPending, traverse } from "./sheetHistory";
+import { leaveSheets, noteEntries, sheetPending, traverse } from "./sheetHistory";
 import { isAdminHash } from "./adminTabs";
 
 /** The phone's tabs; on wider screens only `map` (the full-screen map) means anything. */
@@ -60,7 +60,10 @@ export function useRoute(): [Tab, (t: Tab) => void] {
         else history.replaceState(null, "", location.pathname + location.search);
       } else {
         const state = next === "map" ? { skaldMap: true } : { skaldTab: true };
-        if (here === "fire") history.pushState(state, "", `#${next}`);
+        if (here === "fire") {
+          history.pushState(state, "", `#${next}`);
+          noteEntries();
+        }
         else history.replaceState(ours() ? state : null, "", `#${next}`);
       }
       setTab(next);

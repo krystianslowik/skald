@@ -829,8 +829,8 @@ start. The NetworkPolicy needs no change: the plugin is loopback only.
   browser that asks, which all current ones do; a reverse proxy passes this
   on without extra settings.
 
-**Who is named.** The actor in the saga is the name a device set in the admin
-sheet ("Your name in the saga", kept in that browser) folded to ASCII, or
+**Who is named.** The actor in the saga is the name a device set on the admin
+sheet's Players tab ("Your name in the saga", kept in that browser) folded to ASCII, or
 `dashboard-` plus a short hash of the session.
 
 ### Roles
@@ -850,7 +850,7 @@ behind your access layer, or set an admin password:
   admin password (`POST /api/admin/unlock`, rate-limited like the login: 5
   tries a minute, then 15 minutes).
 - The admin session is a second signed cookie, tied to the panel session,
-  that lasts 30 minutes from the last admin action. "Lock" ends it at once;
+  that lasts 30 minutes from the last admin action. "Lock" (admin sheet, Players tab) ends it at once;
   logging out ends both.
 
 ## Admins, bans and world restore

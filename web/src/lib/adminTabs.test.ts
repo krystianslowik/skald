@@ -32,6 +32,9 @@ describe("links into the admin sheet", () => {
     }
     expect(tabOf("compat")).toBe("server");
     expect(tabOf("keys")).toBe("world");
+    // Moved off the long server tab: saving with the world, your name and lock with the players.
+    expect(tabOf("save")).toBe("world");
+    expect(tabOf("you")).toBe("players");
   });
 });
 
