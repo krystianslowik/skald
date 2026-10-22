@@ -250,6 +250,10 @@ namespace Skald.Bridge
                     hasCharacter = zdo != null,
                     health = hp,
                     maxHealth = maxHp,
+                    // 0.6.0+: the link as the server sees it and what the
+                    // player simulates (Link.cs); null when unreadable.
+                    link = Link.Of(p),
+                    sim = Link.SimOf(p),
                 });
             }
             return Ok(new { time = ZNet.instance.GetTimeSeconds(), players = list });

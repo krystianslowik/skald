@@ -16,7 +16,7 @@ namespace Skald.Bridge
     public class SkaldBridgePlugin : BaseUnityPlugin
     {
         public const string Guid = "dev.skald.bridge";
-        public const string Version = "0.5.0";
+        public const string Version = "0.6.0";
         public const string Prefix = "[SkaldBridge]";
 
         internal static ManualLogSource Log;
@@ -83,6 +83,7 @@ namespace Skald.Bridge
                     Warn("time freeze dropped: " + e.Message);
                 }
             }
+            if (!Disabled) Link.Tick();
             // Drain on the Unity main thread. Bound the work per frame so a burst
             // of requests cannot stall the game loop.
             var started = DateTime.UtcNow;

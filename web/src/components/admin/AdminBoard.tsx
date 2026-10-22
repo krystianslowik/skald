@@ -5,6 +5,8 @@ import { PlatformGlyph } from "../PlatformGlyph";
 import { Plank } from "../Plank";
 import { preloadAdmin, useAdmin } from "./AdminContext";
 import { AdminGlyph } from "./glyphs";
+import { useAdminLinks } from "../../lib/adminlinks";
+import { LinkLine } from "./LinkInfo";
 import { BridgeBanner, HealthBar } from "./parts";
 
 /**
@@ -40,16 +42,18 @@ export const AdminBoard = memo(function AdminBoard() {
 function BoardPlayers() {
   const admin = useAdmin()!;
   const live = useLivePositions();
+  const links = useAdminLinks(admin.present && admin.unlocked);
   return (
     <ul className="mt-2 divide-y divide-iron/25">
       {admin.players.map((p) => {
         const lp = live.players.find((x) => (x.id ?? x.name) === (p.id ?? p.name));
         return (
           <li key={p.id ?? p.name}>
-            <button type="button" onClick={() => admin.open({ kind: "player", name: p.name })} onPointerDown={preloadAdmin} className="press flex min-h-12 w-full items-center gap-3 text-left">
+            <button type="button" onClick={() => admin.open({ kind: "player", name: p.name })} onPointerDown={preloadAdmin} className="press flex min-h-12 w-full flex-wrap items-center gap-x-3 py-1.5 text-left">
               <PlatformGlyph platform={p.platform} size={16} className="text-label" />
               <span className="w-24 shrink-0 truncate font-bold text-bone">{p.name}</span>
               {lp && <HealthBar health={lp.health} max={lp.maxHealth} className="flex-1" />}
+              <LinkLine p={links.get(p.id ?? p.name)} className="basis-full pl-7" />
             </button>
           </li>
         );

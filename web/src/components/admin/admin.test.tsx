@@ -50,6 +50,11 @@ const ACCESS: AccessState = {
   ],
 };
 
+// GET /api/admin/players: the admin-only link and simulation load (#195).
+const ADMIN_PLAYERS = [
+  { id: "Freya", name: "Freya", platform: "steam", x: 1, y: 30, z: 2, health: 50, maxHealth: 100, hasCharacter: true, link: { transport: "crossplay", pingMs: 260, replyGapMaxS: 1 }, sim: { owned: 1240, nearby: 1500, zones: 7 } },
+];
+
 const RESTORE: RestoreInfo = {
   world: "Midgard",
   running: false,
@@ -80,6 +85,7 @@ function api(st: AdminStatus, commands: (url: string, n: number) => Response = (
     if (u === "/api/admin/status") return Response.json(st);
     if (u === "/api/admin/catalog") return Response.json({ events: ["wolves"], currentEvent: null, globalKeys: ["defeated_eikthyr"], spots: ["spawn"], stations: STATIONS });
     if (u === "/api/admin/read/bans") return Response.json({ ok: true, data: [] });
+    if (u === "/api/admin/players") return Response.json({ ok: true, data: { players: ADMIN_PLAYERS } });
     if (u === "/api/admin/access" && method === "GET") return Response.json({ ok: true, data: ACCESS });
     if (u === "/api/admin/restore" && method === "GET") return Response.json({ ok: true, data: RESTORE });
     if (u === "/api/admin/unlock") return Response.json({ ok: true });
@@ -349,6 +355,25 @@ describe("admin", () => {
     expect(calls.filter((c) => c.url === "/api/admin/access/admins/add")[1]!.body).toEqual({ player: "Freya" });
   });
 
+  it("shows each player's link and load from the admin-only player list", async () => {
+    const calls = api(status());
+    renderDashboard();
+    const sheet = await openAdmin();
+    const players = within(sheet).getByRole("region", { name: "At the fire" });
+    await waitFor(() => expect(within(players).getByText("Link: poor (ping 260 ms)")).toBeInTheDocument());
+    expect(within(players).getByText("Simulates the area: 1,240 objects")).toBeInTheDocument();
+    expect(calls.some((c) => c.url === "/api/admin/players")).toBe(true);
+  });
+
+  it("never asks a view-only session for players' links", async () => {
+    const calls = api(status({ required: true, unlocked: false }));
+    renderDashboard();
+    const sheet = await openAdmin();
+    await act(async () => {});
+    expect(within(sheet).queryByText(/^Link:/)).not.toBeInTheDocument();
+    expect(calls.some((c) => c.url === "/api/admin/players")).toBe(false);
+  });
+
   it("keeps the lists and backups closed to a view-only session", async () => {
     const calls = api(status({ required: true, unlocked: false }));
     renderDashboard();
@@ -494,9 +519,9 @@ describe("admin", () => {
     fireEvent.click(within(panel).getByRole("button", { name: "Refuel fires" }));
     const flow = await screen.findByRole("dialog", { name: "Refuel fires" });
     const radii = within(flow).getByRole("group", { name: "How far around?" });
-    expect(within(radii).getAllByRole("button").map((b) => b.textContent)).toEqual(["20 m", "50 m", "100 m"]);
-    expect(within(radii).getByRole("button", { name: "50 m" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(flow).getByRole("status")).toHaveTextContent("Fires near Ragnar, within 50 m");
+    expect(within(radii).getAllByRole("button").map((b) => b.textContent)).toEqual(["20 m", "30 m", "50 m", "100 m"]);
+    expect(within(radii).getByRole("button", { name: "30 m" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(flow).getByRole("status")).toHaveTextContent("Fires near Ragnar, within 30 m");
     fireEvent.click(within(radii).getByRole("button", { name: "100 m" }));
     fireEvent.click(within(flow).getByRole("button", { name: /Freya/ }));
     expect(within(flow).getByRole("status")).toHaveTextContent("Fires near Freya, within 100 m");

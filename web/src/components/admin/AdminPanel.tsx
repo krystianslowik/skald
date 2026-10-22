@@ -5,6 +5,8 @@ import { isOriginRefusal } from "../../lib/api";
 import { gameVersion } from "../../lib/format";
 import { failText, notifyTestText } from "../../lib/refusal";
 import { useLivePositions } from "../../lib/live";
+import { useAdminLinks } from "../../lib/adminlinks";
+import { LinkLine } from "./LinkInfo";
 import { modLevel, useI18n, type TextKey } from "../../i18n";
 import { ItemIcon } from "../storage/ItemIcon";
 import { PlatformGlyph } from "../PlatformGlyph";
@@ -445,6 +447,7 @@ function Players() {
   const { t } = useI18n();
   const admin = useAdmin()!;
   const live = useLivePositions();
+  const links = useAdminLinks(admin.present && admin.unlocked);
   return (
     <Section title={t("admin.players.title")} aside={String(admin.players.length)}>
       {admin.players.length === 0 ? (
@@ -455,13 +458,14 @@ function Players() {
             const lp = live.players.find((x) => (x.id ?? x.name) === (p.id ?? p.name));
             return (
               <li key={p.id ?? p.name}>
-                <button type="button" onClick={() => admin.open({ kind: "player", name: p.name })} className="press flex min-h-12 w-full items-center gap-3 py-1.5 text-left">
+                <button type="button" onClick={() => admin.open({ kind: "player", name: p.name })} className="press flex min-h-12 w-full flex-wrap items-center gap-x-3 py-1.5 text-left">
                   <PlatformGlyph platform={p.platform} size={16} className="text-label" />
                   <span className="w-28 shrink-0 truncate font-bold text-bone">{p.name}</span>
                   {lp ? <HealthBar health={lp.health} max={lp.maxHealth} className="flex-1" /> : <span className="flex-1 text-xs text-ash">{t("admin.players.noPos")}</span>}
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" className="shrink-0 text-ash" aria-hidden>
                     <path d="M6 3l5 5-5 5" />
                   </svg>
+                  <LinkLine p={links.get(p.id ?? p.name)} className="basis-full pl-7" />
                 </button>
               </li>
             );

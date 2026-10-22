@@ -7,8 +7,8 @@ import { targetBody, useAdmin, type Target } from "./AdminContext";
 import { AdminHead, Btn, Chip, TargetChips, targetLabel } from "./parts";
 
 /** The radius choices, in metres; the bridge takes at most 100. */
-export const REFUEL_RADII = [20, 50, 100] as const;
-const DEFAULT_RADIUS = 50;
+export const REFUEL_RADII = [20, 30, 50, 100] as const;
+const DEFAULT_RADIUS = 30;
 
 /**
  * What a refuel really did, from the bridge's answer: the fires it lit by

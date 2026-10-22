@@ -9,6 +9,15 @@ above them.
 
 ## [Unreleased]
 
+### Added
+
+- Who makes the game lag: the players list in the admin sheet (and in Settings) now shows each player's connection as the server sees it ("Link: poor (ping 240 ms)") and how much of their area they simulate ("Simulates the area: 1,240 objects"). The player's sheet adds the worst ping, stalls, a backlog the server is holding back world updates for, how many objects are near them and in how many zones, and a short note on why it matters: in Valheim the player who loads an area first runs it for everyone near, so one bad line or slow PC makes the whole area stutter while the server itself is idle. Ping below 120 ms counts as good, below 250 ms as fair; stalls of 2.5 s or more, or a backlog over 8 KB (where the game stops sending that player world updates), count as poor. Only admins see it, and the open admin views refresh it every 5 seconds. On crossplay the game has no ping of its own, so the admin plugin times the game's once-a-second keep-alive instead (#195).
+- **Operators:** this needs the bridge plugin **v0.6.0** (the `skald-bridge` image of this release) and the Skald agent of this release, so deploying it means a game restart (empty server, backup first). With an older plugin or agent the lists look as before. The numbers reach the browser only through the admin player list, which needs an admin session when an admin password is set; the live positions everyone receives do not carry them. No addresses or ids are passed on, only the kind of connection (crossplay or Steam).
+
+### Changed
+
+- Refuel fires now covers 30 m by default instead of 50 m, and 30 m is one of the choices (20, 30, 50 or 100 m). A call to the plugin without a radius also uses 30 m from plugin v0.6.0 on (#195).
+
 ## [2026.10.30] - 2026-10-20
 
 ### Added

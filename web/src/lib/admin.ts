@@ -2,7 +2,7 @@
 // the per-device things (the name in the saga, saved kits).
 
 import type { TextKey } from "../i18n";
-import type { AccessListName, AccessOp, AccessState, AdminCatalog, AdminCommand, AdminRead, AdminResult, AdminStatus, BanEntry, LivePlayer, NotifyChange, NotifyConfig, RestoreInfo } from "../types";
+import type { AccessListName, AccessOp, AccessState, AdminCatalog, AdminCommand, AdminRead, AdminResult, AdminStatus, AdminPlayer, BanEntry, NotifyChange, NotifyConfig, RestoreInfo } from "../types";
 import { originRefused, Unauthorized } from "./api";
 
 /** A command's outcome; `status` 403 + `needsAdmin` means: unlock first. */
@@ -143,7 +143,7 @@ async function getAdmin<T>(path: string): Promise<{ status: number; data: T | nu
 export const getNotify = () => getAdmin<NotifyConfig>("/api/admin/notify");
 export const getCatalog = () => getAdmin<AdminCatalog>("/api/admin/catalog");
 export const getBans = () => getAdmin<{ data: BanEntry[] }>("/api/admin/read/bans").then((r) => ({ ...r, data: r.data?.data ?? null }));
-export const getAdminPlayers = () => getAdmin<{ data: { players: (LivePlayer & { y: number })[] } }>("/api/admin/players").then((r) => ({ ...r, data: r.data?.data.players ?? null }));
+export const getAdminPlayers = () => getAdmin<{ data: { players: AdminPlayer[] } }>("/api/admin/players").then((r) => ({ ...r, data: r.data?.data.players ?? null }));
 export const readAdmin = (name: AdminRead) => getAdmin<{ data: unknown }>(`/api/admin/read/${name}`);
 export const getAccess = () => getAdmin<{ data: AccessState }>("/api/admin/access").then((r) => ({ ...r, data: r.data?.data ?? null }));
 export const getRestoreInfo = () => getAdmin<{ data: RestoreInfo }>("/api/admin/restore").then((r) => ({ ...r, data: r.data?.data ?? null }));
