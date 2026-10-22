@@ -314,10 +314,13 @@ export function createApp(deps: AppDeps): Hono {
       maxAge: Math.floor(ADMIN_IDLE_MS / 1000),
     });
   };
-  /** null when the caller may change things; otherwise the 403 to return. */
-  const needAdmin = (c: Context) => {
+  /**
+   * null when the caller may change things; otherwise the 403 to return.
+   * `touch: false` checks without restarting the idle timeout (ADMIN_NO_TOUCH).
+   */
+  const needAdmin = (c: Context, { touch = true }: { touch?: boolean } = {}) => {
     if (isAdmin(c)) {
-      touchAdmin(c);
+      if (touch) touchAdmin(c);
       return null;
     }
     return c.json({ ok: false, error: "admin_required", message: "admin session required" }, 403);
@@ -698,11 +701,7 @@ export function createApp(deps: AppDeps): Hono {
     const method = c.req.method === "HEAD" ? "GET" : c.req.method;
     const route = `${method} ${c.req.path}`;
     if (ADMIN_OPEN.has(route)) return next();
-    if (ADMIN_NO_TOUCH.has(route)) {
-      if (!isAdmin(c)) return c.json({ ok: false, error: "admin_required", message: "admin session required" }, 403);
-      return next();
-    }
-    const denied = needAdmin(c);
+    const denied = needAdmin(c, { touch: !ADMIN_NO_TOUCH.has(route) });
     if (denied) return denied;
     await next();
   });

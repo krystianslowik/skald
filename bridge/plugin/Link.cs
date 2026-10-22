@@ -159,8 +159,8 @@ namespace Skald.Bridge
                     // Steam's own ping when it has one, else the timed keep-alive.
                     pingMs = socketPing ?? s?.RttMs,
                     pingMaxMs = socketPing.HasValue ? null : s?.RttMaxMs,
-                    // Just after a stall the keep-alive cannot be paired yet: no
-                    // ping rather than a wrong one (LinkTracker.Settle).
+                    // After a stall or while a slow round trip falls the
+                    // keep-alive cannot be paired: no ping rather than a wrong one.
                     pingUnsure = !socketPing.HasValue && s != null && s.Unsure ? true : (bool?)null,
                     replyGapMaxS = s == null ? (float?)null : (float)Math.Round(s.ReplyGapMaxS, 1),
                     queueBytes = queue,

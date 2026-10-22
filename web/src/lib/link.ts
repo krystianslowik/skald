@@ -29,7 +29,10 @@ const grade = (v: number | undefined, fair: number, poor: number): LinkVerdict =
 
 /** The worst of ping, stalls and the send queue; null when none of them is known. */
 export function linkVerdict(l: LinkQuality | undefined): LinkVerdict | null {
-  if (!l || (l.pingMs == null && l.replyGapMaxS == null && l.queueBytes == null)) return null;
+  if (!l || (l.pingMs == null && l.replyGapMaxS == null && l.queueBytes == null && !l.pingUnsure)) return null;
+  // The plugin leaves the ping out only right after a stall or while a round
+  // trip over a second is falling: either way the link was poor just now.
+  if (l.pingUnsure && l.pingMs == null) return "poor";
   let v = grade(l.pingMs, PING_FAIR_MS, PING_POOR_MS);
   v = worse(v, grade(l.replyGapMaxS, GAP_FAIR_S, GAP_POOR_S));
   // Strictly over, like the game's own check.

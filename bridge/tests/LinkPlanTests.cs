@@ -183,6 +183,64 @@ public class LinkPlanTests
         Assert.InRange(last.RttMs.Value, (int)(after * 1000) - 60, (int)(after * 1000) + 60);
     }
 
+    [Theory]
+    [InlineData(0.1f, 2.1f)]
+    [InlineData(0.3f, 1.5f)]
+    public void ALinkRecoveringFromASlowSpellIsNeverReadSlowAfterwards(float fast, float slow)
+    {
+        // Fast, slow from 20 s, fast again from 45 s.
+        var t = new LinkTracker();
+        int afterRecovery = 0;
+        PlaySteps(t, 1, 90f, sent => sent < 20f || sent >= 45f ? fast : slow, (now, s, truth) =>
+        {
+            // Once the 10 s window holds only replies to fast pings: no
+            // number over a second (unsure, no number, is fine).
+            if (now > 45f + slow + LinkTracker.WindowS + 1f)
+            {
+                afterRecovery++;
+                if (s.RttMs.HasValue) Assert.True(s.RttMs.Value <= 1000, $"ping {s.RttMs} at {now}");
+                if (s.RttMaxMs.HasValue) Assert.True(s.RttMaxMs.Value <= 1000, $"max {s.RttMaxMs} at {now}");
+            }
+        });
+        Assert.True(afterRecovery > 1000);
+    }
+
+    [Theory]
+    [InlineData(3)]
+    [InlineData(7)]
+    [InlineData(11)]
+    [InlineData(19)]
+    [InlineData(23)]
+    public void AJitteryLinkStaysPoorAndIsNeverReadBelowItsMedian(int seed)
+    {
+        // Each ping's round trip anywhere from 0.3 to 1.8 s (median 1.05 s).
+        var rnd = new System.Random(seed);
+        var t = new LinkTracker();
+        var answered = new List<(float at, float rtt)>();
+        int checkedFrames = 0;
+        PlaySteps(t, 1, 120f, sent => 0.3f + (float)rnd.NextDouble() * 1.5f, (now, s, truth) =>
+        {
+            if (answered.Count == 0 || answered[answered.Count - 1].rtt != truth) answered.Add((now, truth));
+            if (now < 20f) return;
+            checkedFrames++;
+            // Poor every way the panel judges it (web/src/lib/link.ts): a ping of
+            // 250 ms or more, a stall of 2.5 s or more, or a ping left out as unsure.
+            Assert.True(s.Unsure || (s.RttMs ?? 0) >= 250 || s.ReplyGapMaxS >= 2.5f, $"not poor at {now}: ping {s.RttMs}, gap {s.ReplyGapMaxS}");
+            if (s.RttMs.HasValue)
+            {
+                var recent = new List<float>();
+                foreach (var a in answered) if (now - a.at <= LinkTracker.WindowS) recent.Add(a.rtt);
+                recent.Sort();
+                if (recent.Count > 0)
+                {
+                    int median = (int)(recent[recent.Count / 2] * 1000);
+                    Assert.True(s.RttMs.Value >= median - 250, $"ping {s.RttMs} under the median {median} at {now}");
+                }
+            }
+        });
+        Assert.True(checkedFrames > 1000);
+    }
+
     [Fact]
     public void AFastLinkReadsLow()
     {

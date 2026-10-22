@@ -27,6 +27,8 @@ describe("link verdict", () => {
     expect(linkVerdict({ transport: "crossplay", pingMs: 40, queueBytes: 8192 })).toBe("fair");
     expect(linkVerdict({ transport: "crossplay", pingMs: 40, queueBytes: 4352 })).toBe("fair");
     expect(linkVerdict({ transport: "crossplay", pingMs: 40, queueBytes: 4096 })).toBe("good");
+    // Unsure of the ping: only right after a stall or a slow spell, so poor.
+    expect(linkVerdict({ transport: "crossplay", pingUnsure: true, replyGapMaxS: 1.1 })).toBe("poor");
     // Without a ping: judged by what is known.
     expect(linkVerdict({ transport: "crossplay", replyGapMaxS: 1.1 })).toBe("good");
   });
@@ -108,7 +110,7 @@ describe("a ping the plugin is unsure of", () => {
       </I18nProvider>,
     );
     const section = screen.getByRole("region", { name: "Connection and area" });
-    expect(section).toHaveTextContent("stalls of up to 3.1 s · ping unknown for a moment after a stall");
+    expect(section).toHaveTextContent("stalls of up to 3.1 s · ping unknown for now, after a stall or a slow spell");
     expect(section).not.toHaveTextContent("crossplay gives no ping");
   });
 });

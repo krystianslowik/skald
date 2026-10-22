@@ -213,13 +213,17 @@ makes the whole area stutter for the others while the server itself is idle.
   but a round trip that has just gone up for good looks the same at that
   moment. So the pings sent longer ago than the shortest round trip seen are
   set aside, not dropped, and `pingMs` is left out (`pingUnsure`) until the
-  next reply settles it: replies a frame or two behind are the rest of the
-  burst and answer the set-aside pings; otherwise, if pairing it with the
-  oldest set-aside ping gives about the round trip that ended the stall, the
-  round trip went up and those pings are still in flight, and if not, they
-  were answered in the burst. When neither fits clearly, the ping stays
-  unknown until the pairing starts over (a reply that would pair to a
-  negative round trip). The
+  next reply settles it. Replies a frame or two behind are the rest of the
+  burst and answer the set-aside pings. Otherwise the set-aside pings are
+  dropped only on a clear burst (as in-flight pings they would have round
+  trips well under the one that ended the stall, and the listed ping gives
+  the round trip from before the stall); in every other case they are kept,
+  which can read high but never low, and the ping stays unsure unless the
+  reply clearly matches a step up. A round trip over a second that falls by
+  100 ms or more without a stall also makes the ping unsure (see the known
+  limit below). Unsure ends with clear evidence, a drained burst, or a
+  reply that would pair to a negative round trip; the panel counts an
+  unsure ping as a poor link. The
   ping timer is read through a getter compiled once (plain reflection if the
   runtime cannot compile). On Steam, the
   socket's own ping is used when `GetConnectionQuality` gives one.
@@ -451,12 +455,19 @@ standing still, and a player alone at a base should own most of its objects.
 Known limit of the keep-alive timing, from simulation only: when the round
 trip falls by more than the second between pings (a link recovering from a
 lag spike), the ordered socket delivers several replies in one frame with no
-stall before them, and with a fall of whole seconds the replies after it
-come at the same times as before. Nothing the plugin can see changes, so
-`pingMs` can stay high by those whole seconds until the next stall resyncs
-it (simulated 2.1 s back to 0.1 s: reads about 1.1 s). Stalls and the send
-backlog are not affected. Rises of the round trip and bursts after a stall
-are handled; see `tests/LinkPlanTests.cs`.
+stall before them, and the pairing ends up whole seconds high. Only the
+remainder of the fall after whole ping intervals shows (1.5 to 0.3 s reads
+as 1.5 to 1.3 s; a fall of exactly whole seconds shows nothing). So a round
+trip over a second that falls by 100 ms or more makes the ping unsure; it
+stays unsure until clear evidence realigns the pairing, which on a link
+that stays calm can take until its next stall or burst. In simulation: 2.1 s
+back to 0.1 s and 1.5 s back to 0.3 s never read over a second afterwards
+(unsure instead), a single 2.6 s spike on a 1.2 s link leaves it unsure, and
+a round trip jittering between 0.3 and 1.8 s stays poor and never reads
+under its median. A recovery by exactly whole seconds with no jitter at all
+is not seen and can still read high. Stalls and the send backlog are not
+affected. Steps up and bursts after a stall read right; see
+`tests/LinkPlanTests.cs`.
 
 **New in v0.5.0, not yet verified on a live server:** `build/refuel-fires`
 compiles against the 1.0 reference assemblies, and which fires it takes and what
