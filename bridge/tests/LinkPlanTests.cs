@@ -116,6 +116,73 @@ public class LinkPlanTests
         Assert.InRange(t.Snapshot(2, 0.06f).ReplyGapMaxS, 0.49f, 0.51f);
     }
 
+    // Like Play, with each ping's round trip from rttAt(send time) and the
+    // socket's ordered delivery (a reply never overtakes an earlier one).
+    // check(now, snapshot, true round trip of the pings answered lately) runs
+    // every frame.
+    static void PlaySteps(LinkTracker t, long uid, float seconds, System.Func<float, float> rttAt, System.Action<float, LinkSample, float> check)
+    {
+        float now = 0f, pingTimer = 0f, wait = 0f, lastTrue = rttAt(0f);
+        var replies = new Queue<(float at, float rtt)>();
+        float latest = 0f;
+        for (; now < seconds; now += Frame)
+        {
+            while (replies.Count > 0 && replies.Peek().at <= now + Frame)
+            {
+                lastTrue = replies.Dequeue().rtt;
+                wait = 0f;
+            }
+            pingTimer += Frame;
+            wait += Frame;
+            if (pingTimer > 1f)
+            {
+                pingTimer = 0f;
+                float sent = now + Frame, at = sent + rttAt(sent);
+                if (at < latest) at = latest;
+                latest = at;
+                replies.Enqueue((at, at - sent));
+            }
+            t.Observe(uid, now + Frame, wait, pingTimer);
+            check(now + Frame, t.Snapshot(uid, now + Frame), lastTrue);
+        }
+    }
+
+    [Theory]
+    [InlineData(0.3f, 1.5f)]
+    [InlineData(0.1f, 2.1f)]
+    [InlineData(0.2f, 1.6f)]
+    public void ARoundTripThatStepsUpIsNeverReadLow(float before, float after)
+    {
+        var t = new LinkTracker();
+        LinkSample last = null;
+        bool sawUnsure = false;
+        PlaySteps(t, 1, 60f, sent => sent < 20f ? before : after, (now, s, truth) =>
+        {
+            last = s;
+            if (s.Unsure)
+            {
+                // Between the reply that ends the wait and the next one: no number.
+                sawUnsure = true;
+                Assert.Null(s.RttMs);
+                Assert.Null(s.RttMaxMs);
+            }
+            // Unsure (null) is fine; a number well under the round trip of the
+            // pings it covers is not. Once the 10 s window holds only replies
+            // to pings sent after the step, every sample must be the new one.
+            if (now > 20f + after + LinkTracker.WindowS + 1f && s.RttMs.HasValue)
+            {
+                Assert.InRange(s.RttMs.Value, (int)(after * 1000) - 60, (int)(after * 1000) + 60);
+                Assert.InRange(s.RttMaxMs.Value, (int)(after * 1000) - 60, (int)(after * 1000) + 60);
+            }
+            // Before that, never below the slower of what it has seen lately.
+            if (now > 20f + after + 1f && s.RttMaxMs.HasValue) Assert.True(s.RttMaxMs.Value >= (int)(after * 1000) - 60, $"max {s.RttMaxMs} at {now}");
+        });
+        Assert.True(sawUnsure);
+        // And it settles on the new round trip rather than staying unsure.
+        Assert.False(last.Unsure);
+        Assert.InRange(last.RttMs.Value, (int)(after * 1000) - 60, (int)(after * 1000) + 60);
+    }
+
     [Fact]
     public void AFastLinkReadsLow()
     {

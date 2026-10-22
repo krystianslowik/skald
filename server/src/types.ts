@@ -991,6 +991,8 @@ export interface LinkQuality {
   pingMs?: number;
   /** Worst round trip over the last 10 s, ms. */
   pingMaxMs?: number;
+  /** No ping right now: just after a stall the plugin cannot pair replies with pings yet. */
+  pingUnsure?: boolean;
   /** Longest wait for a keep-alive reply in the last 10 s, s: about 1 when healthy. */
   replyGapMaxS?: number;
   /** Bytes the server still has to get through to the player, rounded down; above 8 KiB the game holds back world updates. */

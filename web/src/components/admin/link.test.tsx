@@ -98,6 +98,21 @@ describe("link wording", () => {
   });
 });
 
+describe("a ping the plugin is unsure of", () => {
+  it("judges by the stall and says why there is no ping", () => {
+    const p: PlayerLink = { link: { transport: "crossplay", pingUnsure: true, replyGapMaxS: 3.1, queueBytes: 0 }, sim: { owned: 10, nearby: 20, zones: 1 } };
+    expect(linkText(makeI18n("en"), p)).toBe("Link: poor");
+    render(
+      <I18nProvider locale="en">
+        <LinkDetail p={p} />
+      </I18nProvider>,
+    );
+    const section = screen.getByRole("region", { name: "Connection and area" });
+    expect(section).toHaveTextContent("stalls of up to 3.1 s · ping unknown for a moment after a stall");
+    expect(section).not.toHaveTextContent("crossplay gives no ping");
+  });
+});
+
 describe("admin-only link polling", () => {
   afterEach(() => {
     vi.unstubAllGlobals();

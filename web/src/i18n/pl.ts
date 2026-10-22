@@ -1905,6 +1905,7 @@ export const pl: Dict = {
   "admin.link.stall": "przestoje do {s} s",
   "admin.link.queue": "{kb} KB czeka na wysłanie",
   "admin.link.held": "{kb} KB czeka, więc serwer wstrzymuje mu zmiany w świecie",
+  "admin.link.pingUnsure": "ping chwilowo nieznany po przestoju",
   "admin.link.noPing": "crossplay nie podaje jeszcze pingu, ocena po przestojach i zaległościach",
   "admin.link.hint": "Kto pierwszy wczyta okolicę, ten ją liczy dla wszystkich obok: stworzenia, ogień, wozy i łodzie ruszają się tak, jak mówi jego gra. Przy słabym łączu albo słabym komputerze całej okolicy tnie się gra, choć sam serwer stoi bezczynnie. Ping poniżej 120 ms jest dobry, poniżej 250 ms średni.",
   "admin.sim.line": plural({ one: "Liczy okolicę: {n} obiekt", few: "Liczy okolicę: {n} obiekty", many: "Liczy okolicę: {n} obiektów", other: "Liczy okolicę: {n} obiektu" }),

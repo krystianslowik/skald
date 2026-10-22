@@ -139,7 +139,7 @@ Commands that act at a place take either `player` or `at: {x, z[, y]}`. Without
 | Method + path | Body | Does |
 |---|---|---|
 | `GET /v1/health` | | Plugin version, game build, world loaded, frozen time, which game singletons exist |
-| `GET /v1/players` | | `uid, name, platformId, userId, playfabId, position{x,y,z}, hasCharacter, health, maxHealth, link, sim` per connected player. Position comes from the character ZDO, falling back to the peer reference position. `link` (0.6.0+, null when unreadable): `transport` (`playfab`, `steam`, `tcp` or `other`, from the socket's type name; the agent passes `playfab` on as `crossplay` and `tcp` as `other`), `pingMs` and `pingMaxMs` (median and worst round trip over 10 s, see [Link and simulation load](#link-and-simulation-load)), `replyGapMaxS`, `queueBytes`, `outBps`, `inBps`. `sim` (0.6.0+): `owned`, `nearby`, `zones`. Cheap enough to poll every 2 s |
+| `GET /v1/players` | | `uid, name, platformId, userId, playfabId, position{x,y,z}, hasCharacter, health, maxHealth, link, sim` per connected player. Position comes from the character ZDO, falling back to the peer reference position. `link` (0.6.0+, null when unreadable): `transport` (`playfab`, `steam`, `tcp` or `other`, from the socket's type name; the agent passes `playfab` on as `crossplay` and `tcp` as `other`), `pingMs` and `pingMaxMs` (median and worst round trip over 10 s, see [Link and simulation load](#link-and-simulation-load)), `pingUnsure` (true while, just after a stall, the round trip is left out rather than guessed), `replyGapMaxS`, `queueBytes`, `outBps`, `inBps`. `sim` (0.6.0+): `owned`, `nearby`, `zones`. Cheap enough to poll every 2 s |
 | `POST /v1/broadcast` | `text`, `type`: `center` (default) / `topleft` / `narrator` | Sends the game's `ShowMessage` routed RPC to everybody. `narrator` is a center message in gold italics, using TMP rich text with the text inside `<noparse>`. `chat` answers 501: the Xbox client did not show a shout sent from the server, which has no sender platform id |
 | `POST /v1/save` | | `ZNet.Save`. The log shows `World save (5/5) done` |
 | `POST /v1/kick` | `player` | `ZNet.Kick` with the player's platform id |
@@ -209,9 +209,17 @@ makes the whole area stutter for the others while the server itself is idle.
   reply with no ping left to pair restarts the pairing. A reply in each of
   two frames in a row is told apart by the ping timer, which grows by the
   same frame time as the wait. After a stall (a wait over 1.5 s) the replies
-  to the pings sent during it often arrive in one frame and only one shows,
-  so pings sent longer ago than the shortest round trip seen are dropped as
-  answered; otherwise every later round trip would read seconds high. The
+  to the pings sent during it often arrive in one frame and only one shows;
+  but a round trip that has just gone up for good looks the same at that
+  moment. So the pings sent longer ago than the shortest round trip seen are
+  set aside, not dropped, and `pingMs` is left out (`pingUnsure`) until the
+  next reply settles it: replies a frame or two behind are the rest of the
+  burst and answer the set-aside pings; otherwise, if pairing it with the
+  oldest set-aside ping gives about the round trip that ended the stall, the
+  round trip went up and those pings are still in flight, and if not, they
+  were answered in the burst. When neither fits clearly, the ping stays
+  unknown until the pairing starts over (a reply that would pair to a
+  negative round trip). The
   ping timer is read through a getter compiled once (plain reflection if the
   runtime cannot compile). On Steam, the
   socket's own ping is used when `GetConnectionQuality` gives one.
@@ -439,6 +447,16 @@ dedicated server), and `ZDOMan.FindSectorObjects` called from a plugin. Check
 after deploying with a player on crossplay: `pingMs` should be plausible
 (compare with the in-game F2 ping), `replyGapMaxS` near 1, `queueBytes` near 0
 standing still, and a player alone at a base should own most of its objects.
+
+Known limit of the keep-alive timing, from simulation only: when the round
+trip falls by more than the second between pings (a link recovering from a
+lag spike), the ordered socket delivers several replies in one frame with no
+stall before them, and with a fall of whole seconds the replies after it
+come at the same times as before. Nothing the plugin can see changes, so
+`pingMs` can stay high by those whole seconds until the next stall resyncs
+it (simulated 2.1 s back to 0.1 s: reads about 1.1 s). Stalls and the send
+backlog are not affected. Rises of the round trip and bursts after a stall
+are handled; see `tests/LinkPlanTests.cs`.
 
 **New in v0.5.0, not yet verified on a live server:** `build/refuel-fires`
 compiles against the 1.0 reference assemblies, and which fires it takes and what

@@ -1916,6 +1916,7 @@ export const en = {
   "admin.link.stall": "stalls of up to {s} s",
   "admin.link.queue": "{kb} KB waiting to be sent",
   "admin.link.held": "{kb} KB waiting, so the server holds back world updates to them",
+  "admin.link.pingUnsure": "ping unknown for a moment after a stall",
   "admin.link.noPing": "crossplay gives no ping yet, judged by stalls and backlog",
   "admin.link.hint": "The player who loads an area first simulates it for everyone near: creatures, fires, carts and ships move as their game says. On a poor link or a slow PC the whole area stutters for the others, even with the server idle. Ping below 120 ms is good, below 250 ms fair.",
   "admin.sim.line": plural({ one: "Simulates the area: {n} object", other: "Simulates the area: {n} objects" }),

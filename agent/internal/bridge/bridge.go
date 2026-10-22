@@ -149,6 +149,12 @@ type Client struct {
 	acked    string
 	// last positions published, to skip unchanged samples.
 	lastPositions string
+
+	// readMu serialises reads of the plugin's player list; playersRaw is
+	// the last one, read at playersAt (see readPlayers).
+	readMu     sync.Mutex
+	playersRaw []byte
+	playersAt  time.Time
 }
 
 // New returns a client; nil when token is empty (the bridge is off).
@@ -477,6 +483,9 @@ type Link struct {
 	// plugin); PingMaxMs the worst. Rounded to 10 ms.
 	PingMs    *int `json:"pingMs,omitempty"`
 	PingMaxMs *int `json:"pingMaxMs,omitempty"`
+	// PingUnsure: the ping is left out because, just after a stall, the
+	// plugin cannot tell which reply answers which ping yet.
+	PingUnsure bool `json:"pingUnsure,omitempty"`
 	// ReplyGapMaxS is the longest wait for a keep-alive reply in the last
 	// 10 s: about 1 s on a healthy link, more when it stalls.
 	ReplyGapMaxS *float64 `json:"replyGapMaxS,omitempty"`
@@ -501,6 +510,7 @@ type rawLink struct {
 	Transport    string   `json:"transport"`
 	PingMs       *float64 `json:"pingMs"`
 	PingMaxMs    *float64 `json:"pingMaxMs"`
+	PingUnsure   bool     `json:"pingUnsure"`
 	ReplyGapMaxS *float64 `json:"replyGapMaxS"`
 	QueueBytes   *float64 `json:"queueBytes"`
 	OutBps       *float64 `json:"outBps"`
@@ -523,6 +533,7 @@ func (r *rawLink) link() *Link {
 	}
 	l.PingMs = roundTo(r.PingMs, 10)
 	l.PingMaxMs = roundTo(r.PingMaxMs, 10)
+	l.PingUnsure = r.PingUnsure && l.PingMs == nil
 	if r.ReplyGapMaxS != nil && *r.ReplyGapMaxS >= 0 {
 		v := round1(*r.ReplyGapMaxS)
 		l.ReplyGapMaxS = &v
@@ -579,10 +590,38 @@ type rawPlayer struct {
 	Sim          *rawSim  `json:"sim"`
 }
 
-// Players reads the connected players and refreshes the private tables.
+// playersShareFor is how long one read of the plugin's player list serves
+// every caller (the positions poll, admin tabs polling links, the sync):
+// the plugin builds it on the game's main thread, link and simulation load
+// included, so callers share it rather than multiply that work.
+const playersShareFor = 2 * time.Second
+
+// Players reads the connected players, sharing a read up to 2 s old, and
+// refreshes the private tables.
 func (c *Client) Players(ctx context.Context) ([]Player, error) {
+	return c.players(ctx, playersShareFor)
+}
+
+// readPlayers fetches the plugin's list, or hands out the last one while it
+// is younger than maxAge. One fetch at a time: callers arriving during it
+// wait and share its answer.
+func (c *Client) readPlayers(ctx context.Context, maxAge time.Duration) ([]byte, time.Time, error) {
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
+	if maxAge > 0 && c.playersRaw != nil && time.Since(c.playersAt) < maxAge {
+		return c.playersRaw, c.playersAt, nil
+	}
 	readAt := time.Now()
 	data, err := c.call(ctx, http.MethodGet, "/v1/players", "", nil)
+	if err != nil {
+		return nil, readAt, err
+	}
+	c.playersRaw, c.playersAt = data, readAt
+	return data, readAt, nil
+}
+
+func (c *Client) players(ctx context.Context, maxAge time.Duration) ([]Player, error) {
+	data, readAt, err := c.readPlayers(ctx, maxAge)
 	if err != nil {
 		return nil, err
 	}
@@ -940,13 +979,14 @@ func number(v any) (float64, bool) {
 	return 0, false
 }
 
-// uidOf finds a connected player's uid by name, from a fresh player list.
+// uidOf finds a connected player's uid by name, from a fresh player list:
+// never a shared one, so a player who joined a second ago can be named.
 func (c *Client) uidOf(ctx context.Context, name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "", &Error{http.StatusBadRequest, "missing player name"}
 	}
-	if _, err := c.Players(ctx); err != nil {
+	if _, err := c.players(ctx, 0); err != nil {
 		return "", err
 	}
 	c.mu.Lock()

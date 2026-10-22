@@ -54,7 +54,10 @@ export function LinkDetail({ p }: { p: Live }) {
   if (l?.pingMaxMs != null && l.pingMs != null && l.pingMaxMs > l.pingMs) facts.push(t("admin.link.worst", { ms: l.pingMaxMs }));
   if (l?.replyGapMaxS != null && l.replyGapMaxS >= GAP_FAIR_S) facts.push(t("admin.link.stall", { s: number(l.replyGapMaxS, 1) }));
   if (l?.queueBytes != null && l.queueBytes > QUEUE_FAIR_B) facts.push(t(l.queueBytes > QUEUE_POOR_B ? "admin.link.held" : "admin.link.queue", { kb: number(l.queueBytes / 1024, 0) }));
-  if (l?.pingMs == null && l?.transport === "crossplay") facts.push(t("admin.link.noPing"));
+  if (l?.pingMs == null) {
+    if (l?.pingUnsure) facts.push(t("admin.link.pingUnsure"));
+    else if (l?.transport === "crossplay") facts.push(t("admin.link.noPing"));
+  }
   return (
     <Section title={t("admin.link.title")}>
       <div className="slot space-y-1.5 px-3 py-2.5 text-sm">

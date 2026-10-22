@@ -13,6 +13,9 @@ namespace Skald.Bridge
         // in seconds. About 1 on a healthy link (one ping a second); a stalled
         // link climbs towards the game's 30 s timeout.
         public float ReplyGapMaxS;
+        // The round trip is not known right now (just after a stall that a
+        // later reply has not explained yet): RttMs and RttMaxMs are null.
+        public bool Unsure;
     }
 
     // What one player simulates: the objects in their active area (the zones
@@ -35,6 +38,11 @@ namespace Skald.Bridge
     sealed class LinkTracker
     {
         public const float WindowS = 10f;
+        // How close (s) the round trip from a set-aside ping must come to the
+        // one that ended the stall to count as a step up.
+        const float SameRttS = 0.25f;
+        // Replies this close behind each other are one burst.
+        const float BurstS = 0.1f;
         // Pings kept waiting for a reply; the game gives up after 30 s.
         const int MaxInFlight = 32;
         // A wait for a reply this long may end with several replies at once.
@@ -44,6 +52,12 @@ namespace Skald.Bridge
         {
             public float LastWait = -1f, LastPingTimer = -1f;
             public int Replies;
+            // The round trip is not known right now (see Settle).
+            public bool Unsure;
+            // Pings a stall-ending reply took as answered, kept until the next
+            // reply shows whether they were, and that reply's round trip.
+            public readonly List<float> Maybe = new List<float>();
+            public float StallRtt;
             public readonly Queue<float> Sent = new Queue<float>();
             public readonly Queue<(float t, int ms)> Rtts = new Queue<(float, int)>();
             public readonly Queue<(float t, float gap)> Gaps = new Queue<(float, float)>();
@@ -67,20 +81,37 @@ namespace Skald.Bridge
             {
                 p.Replies++;
                 p.Gaps.Enqueue((now, p.LastWait));
-                if (pingTimer.HasValue && p.Sent.Count > 0)
+                // Handled during the frame the wait restarted in: half of it.
+                float at = now - wait / 2f;
+                bool stall = p.LastWait > StallS;
+                if (pingTimer.HasValue && p.Maybe.Count > 0 && p.LastWait < BurstS)
                 {
-                    // Handled during the frame the wait restarted in: half of it.
-                    float rtt = now - wait / 2f - p.Sent.Dequeue();
-                    if (rtt >= 0f && rtt < 30f) p.Rtts.Enqueue((now, (int)Math.Round(rtt * 1000f)));
-                    else p.Sent.Clear(); // out of step: start over with the next ping
+                    // The rest of a burst, a frame or two behind the reply that
+                    // ended the stall: it answers a ping set aside. Pings go out
+                    // a second apart, so a step up never answers this fast.
+                    p.Rtts.Enqueue((now, Ms(at - p.Maybe[0])));
+                    p.Maybe.RemoveAt(0);
+                    if (p.Maybe.Count == 0) p.Unsure = false;
                 }
-                // A reply ending a stall often comes with the replies to the
-                // pings sent during it, in one frame, and only one shows. Left
-                // listed, every round trip after it would read seconds high.
-                // A ping sent longer ago than the shortest round trip seen was
-                // answered with it; a later one is still on its way (a long
-                // first wait after joining is the same case on a slow link).
-                if (p.LastWait > StallS) DropAnswered(p, now - wait / 2f);
+                else if (pingTimer.HasValue && p.Maybe.Count > 0 && !stall) Settle(p, now, at);
+                else if (pingTimer.HasValue && p.Sent.Count > 0)
+                {
+                    float rtt = at - p.Sent.Dequeue();
+                    if (rtt >= 0f && rtt < 30f)
+                    {
+                        p.Rtts.Enqueue((now, Ms(rtt)));
+                        if (stall) DropAnswered(p, at, rtt);
+                    }
+                    else
+                    {
+                        // Out of step: start over with the next ping, which
+                        // also settles any doubt about the pairing.
+                        p.Sent.Clear();
+                        p.Maybe.Clear();
+                        p.Unsure = false;
+                    }
+                }
+                else if (stall) DropAnswered(p, at, -1f);
             }
             if (pingTimer.HasValue)
             {
@@ -111,24 +142,67 @@ namespace Skald.Bridge
             foreach (var t in sent) p.Sent.Enqueue(t);
         }
 
+        static int Ms(float s) => (int)Math.Round(s * 1000f);
+
+        // A reply ending a stall often comes with the replies to the pings
+        // sent during it, in one frame, and only one shows: left listed, every
+        // round trip after it would read seconds high. A ping sent longer ago
+        // than the shortest round trip seen is taken as answered with it; a
+        // later one is still on its way (a long first wait after joining on a
+        // slow link is the same case). But a round trip that has just gone up
+        // for good looks the same at this point, and then the pings set aside
+        // are still on their way: they are kept in Maybe, and the round trip
+        // is unsure until the next reply settles it.
+        static void DropAnswered(Peer p, float repliedAt, float rtt)
+        {
+            p.Maybe.Clear();
+            int min = int.MaxValue;
+            foreach (var r in p.Rtts) min = Math.Min(min, r.ms);
+            float before = p.Rtts.Count == 0 ? float.MaxValue : repliedAt - min * 0.8f / 1000f;
+            while (p.Sent.Count > 0 && p.Sent.Peek() < before) p.Maybe.Add(p.Sent.Dequeue());
+            if (p.Maybe.Count == 0) return;
+            p.StallRtt = rtt;
+            p.Unsure = true;
+        }
+
+        // The first reply after pings were set aside. If they were answered
+        // in the stall, it answers the oldest ping still listed. If the round
+        // trip went up instead, it answers the oldest one set aside, and
+        // pairing them gives about the round trip that ended the stall. Only
+        // a clear match decides; otherwise the round trip stays unsure until
+        // the pairing starts over.
+        static void Settle(Peer p, float now, float at)
+        {
+            float kept = at - p.Maybe[0];
+            float dropped = p.Sent.Count > 0 ? at - p.Sent.Peek() : -1f;
+            bool keptFits = p.StallRtt >= 0f && Math.Abs(kept - p.StallRtt) < SameRttS;
+            bool droppedFits = dropped >= 0f && p.StallRtt >= 0f && Math.Abs(dropped - p.StallRtt) < SameRttS;
+            if (keptFits && !droppedFits)
+            {
+                // A step up: the set-aside pings are still in flight.
+                var all = new List<float>(p.Maybe);
+                all.AddRange(p.Sent);
+                p.Sent.Clear();
+                for (int i = 1; i < all.Count; i++) p.Sent.Enqueue(all[i]);
+                p.Rtts.Enqueue((now, Ms(kept)));
+                p.Unsure = false;
+            }
+            else if (!keptFits && dropped >= 0f)
+            {
+                // Answered in the stall, as taken.
+                p.Sent.Dequeue();
+                p.Rtts.Enqueue((now, Ms(dropped)));
+                p.Unsure = false;
+            }
+            else if (p.Sent.Count > 0) p.Sent.Dequeue();
+            p.Maybe.Clear();
+        }
+
         // Whether a reply came in since the last frame. The wait restarts
         // when one is handled, so it drops; but a reply in each of two
         // frames in a row can leave it no lower than the frame before. The
         // ping timer grows by the same frame time as the wait, so without a
         // reply the wait must have grown by exactly that much.
-        static void DropAnswered(Peer p, float repliedAt)
-        {
-            if (p.Rtts.Count == 0)
-            {
-                p.Sent.Clear();
-                return;
-            }
-            int min = int.MaxValue;
-            foreach (var r in p.Rtts) min = Math.Min(min, r.ms);
-            float before = repliedAt - min * 0.8f / 1000f;
-            while (p.Sent.Count > 0 && p.Sent.Peek() < before) p.Sent.Dequeue();
-        }
-
         static bool Replied(Peer p, float wait, float? pingTimer)
         {
             if (p.LastWait < 0) return false;
@@ -144,7 +218,8 @@ namespace Skald.Bridge
             Trim(p, now);
             var s = new LinkSample { ReplyGapMaxS = Math.Max(0f, p.LastWait) };
             foreach (var g in p.Gaps) s.ReplyGapMaxS = Math.Max(s.ReplyGapMaxS, g.gap);
-            if (p.Rtts.Count > 0)
+            s.Unsure = p.Unsure;
+            if (p.Rtts.Count > 0 && !p.Unsure)
             {
                 var ms = new List<int>(p.Rtts.Count);
                 foreach (var r in p.Rtts) ms.Add(r.ms);

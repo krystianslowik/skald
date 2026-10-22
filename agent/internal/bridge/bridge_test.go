@@ -207,11 +207,45 @@ func TestPlayersLinkAndSim(t *testing.T) {
 	}
 }
 
+func TestPlayerReadsAreShared(t *testing.T) {
+	f := &fakePlugin{build: "l-1.0.17"}
+	c := newClient(t, f, nil, "")
+	reads := func() int { f.mu.Lock(); defer f.mu.Unlock(); return f.reads }
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); _, _ = c.Players(ctx) }()
+	}
+	wg.Wait()
+	if _, err := c.Players(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Six callers within 2 s: one read of the plugin's list.
+	if n := reads(); n != 1 {
+		t.Fatalf("reads = %d, want 1", n)
+	}
+	// A command naming a player reads afresh.
+	if _, err := c.Run(ctx, "kick", map[string]any{"player": "Ragnar"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if n := reads(); n != 2 {
+		t.Fatalf("reads after a command = %d, want 2", n)
+	}
+}
+
 func TestRawLinkIsSanitised(t *testing.T) {
 	f := func(v float64) *float64 { return &v }
 	l := (&rawLink{Transport: "203.0.113.7:2456", PingMs: f(-1), QueueBytes: f(math.NaN()), OutBps: f(1e12), ReplyGapMaxS: f(-2)}).link()
 	if l.Transport != "other" || l.PingMs != nil || l.QueueBytes != nil || l.OutBps != nil || l.ReplyGapMaxS != nil {
 		t.Fatalf("got %+v", l)
+	}
+	if u := (&rawLink{Transport: "playfab", PingUnsure: true, ReplyGapMaxS: f(3.1)}).link(); !u.PingUnsure || u.PingMs != nil {
+		t.Fatalf("unsure %+v", u)
+	}
+	// A ping and "unsure" together: the ping wins.
+	if u := (&rawLink{Transport: "playfab", PingUnsure: true, PingMs: f(120)}).link(); u.PingUnsure {
+		t.Fatalf("unsure with ping %+v", u)
 	}
 	if (&rawLink{Transport: "steam"}).link().Transport != "steam" || (*rawLink)(nil).link() != nil {
 		t.Fatal("transport")

@@ -136,6 +136,12 @@ export function panelOriginPolicy(o: { publicOrigins?: readonly string[]; truste
 
 /** The admin routes a signed-in non-admin may call. */
 const ADMIN_OPEN = new Set(["GET /api/admin/status", "POST /api/admin/unlock", "POST /api/admin/lock"]);
+/**
+ * Admin-only reads that a panel polls on its own (the players' links, every
+ * 5 s while an admin view is open): checked like every admin call, but they
+ * do not restart the idle timeout, or a tab left open would never lock.
+ */
+const ADMIN_NO_TOUCH = new Set(["GET /api/admin/players"]);
 
 export function createApp(deps: AppDeps): Hono {
   const app = new Hono();
@@ -690,7 +696,12 @@ export function createApp(deps: AppDeps): Hono {
   // the order the routes are registered in does not decide who may call them.
   app.use("/api/admin/*", async (c, next) => {
     const method = c.req.method === "HEAD" ? "GET" : c.req.method;
-    if (ADMIN_OPEN.has(`${method} ${c.req.path}`)) return next();
+    const route = `${method} ${c.req.path}`;
+    if (ADMIN_OPEN.has(route)) return next();
+    if (ADMIN_NO_TOUCH.has(route)) {
+      if (!isAdmin(c)) return c.json({ ok: false, error: "admin_required", message: "admin session required" }, 403);
+      return next();
+    }
     const denied = needAdmin(c);
     if (denied) return denied;
     await next();
