@@ -8,7 +8,7 @@ import { useWorldMap } from "../../lib/useWorldMap";
 import { useI18n, type TextKey } from "../../i18n";
 import { compareVersions } from "@server/version";
 import { lazyChunk, preload } from "../../lib/chunks";
-import { isAdminHash, parseAdminHash, type AdminTab, type PanelLink, type PanelSection } from "../../lib/adminTabs";
+import { isAdminHash, pageUnderSheet, parseAdminHash, type AdminTab, type PanelLink, type PanelSection } from "../../lib/adminTabs";
 import { ChunkBoundary } from "../ErrorBoundary";
 
 const AdminSheets = lazyChunk(() => import("./AdminSheets"), "AdminSheets");
@@ -289,7 +289,8 @@ export function AdminProvider({
       drop = setTimeout(() => (link.current = null), LINK_MS);
       setLinked((n) => n + 1);
     };
-    const page = (from: string) => location.pathname + location.search + (isAdminHash(from) ? "" : from);
+    // The page's address to go back to: the one under the open admin sheet when the link came from its address.
+    const page = (from: string) => (isAdminHash(from) ? (pageUnderSheet() ?? location.pathname + location.search) : location.pathname + location.search + from);
     const loaded = parseAdminHash(location.hash);
     if (loaded) {
       // Loaded at the link: nothing of ours beneath, so the entry itself becomes the fire.

@@ -14,7 +14,7 @@ import { restoreProgress, RestoreSheet } from "./WorldTools";
 import { platformOf } from "./parts";
 import { AdminProvider, toastTop, useAdmin, type Admin } from "./AdminContext";
 import { forgetTab } from "../../lib/adminTabs";
-import { sheetDepth, sheetPending } from "../../lib/sheetHistory";
+import { noteEntries, sheetDepth, sheetPending } from "../../lib/sheetHistory";
 import { useRoute } from "../../lib/useRoute";
 import { BRIDGE_PLUGIN_VERSION } from "@server/bridgeplugin";
 
@@ -415,6 +415,74 @@ describe("tabs (#153)", () => {
     expect(selected(sheet)).toBe("Players");
     fireEvent.click(within(sheet).getByRole("tab", { name: "Players" }));
     expect(localStorage.getItem("skald.admin.tab")).toBe("players");
+  });
+
+  it("gives back the page's own address when a link replaces the open admin sheet's entry", async () => {
+    history.replaceState(null, "", "/#saga");
+    api(status());
+    renderDashboard();
+    const route = renderHook(() => useRoute());
+    await openAdmin();
+    await settled();
+    await waitFor(() => expect(location.hash).toBe("#admin/players"));
+    await act(async () => {
+      // As Chromium does it: the replaced entry loses its state, popstate closes the sheets, then the hash change.
+      history.replaceState(null, "", "/#admin/compat");
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+      window.dispatchEvent(new HashChangeEvent("hashchange", { oldURL: `${location.origin}/#admin/players`, newURL: location.href }));
+    });
+    await waitFor(() => expect(within(screen.getByRole("dialog", { name: "Admin" })).getByRole("tab", { selected: true })).toHaveTextContent("Server"));
+    await settled();
+    await waitFor(() => expect(location.hash).toBe("#admin/compat"));
+    await close(screen.getByRole("dialog", { name: "Admin" }));
+    expect(location.hash).toBe("#saga");
+    expect(route.result.current[0]).toBe("saga");
+  });
+
+  describe("with the Navigation API", () => {
+    /** The browser's own word on how it got to the new hash, then the hash change. */
+    const arrive = (type: string, to: string, from: string) => {
+      const nav = (window as unknown as { navigation: EventTarget }).navigation;
+      nav.dispatchEvent(Object.assign(new Event("navigate"), { hashChange: true, navigationType: type }));
+      // Stacked either way, so the entry count alone would say "added" (no forward entries to prune).
+      history.pushState(null, "", location.href);
+      noteEntries();
+      history.pushState(null, "", to);
+      window.dispatchEvent(new HashChangeEvent("hashchange", { oldURL: `${location.origin}${from}`, newURL: location.href }));
+    };
+
+    it.each(["replace", "traverse"])("opens a %s link in place, whatever the entry count says", async (type) => {
+      vi.stubGlobal("navigation", new EventTarget());
+      history.replaceState(null, "", "/#saga");
+      api(status());
+      renderDashboard();
+      await screen.findByRole("button", { name: "Admin" });
+      await settled();
+      const go = vi.spyOn(history, "go");
+      await act(async () => arrive(type, "/#admin/raids", "/#saga"));
+      const sheet = await screen.findByRole("dialog", { name: "Admin" });
+      expect(selected(sheet)).toBe("World");
+      expect(go).not.toHaveBeenCalledWith(-1);
+      go.mockRestore();
+    });
+
+    it("steps back over a pushed link", async () => {
+      vi.stubGlobal("navigation", new EventTarget());
+      history.replaceState(null, "", "/#saga");
+      api(status());
+      renderDashboard();
+      await screen.findByRole("button", { name: "Admin" });
+      await settled();
+      const go = vi.spyOn(history, "go");
+      await act(async () => arrive("push", "/#admin/raids", "/#saga"));
+      const sheet = await screen.findByRole("dialog", { name: "Admin" });
+      expect(selected(sheet)).toBe("World");
+      expect(go).toHaveBeenCalledWith(-1);
+      go.mockRestore();
+      await settled();
+      await close(sheet);
+      expect(location.hash).toBe("#saga");
+    });
   });
 
   it("names the tabs in Polish", async () => {

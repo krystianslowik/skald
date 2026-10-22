@@ -55,6 +55,17 @@ export const adminHash = (part: AdminTab | PanelSection): string => `#admin/${pa
 /** The tab a section sits in. */
 export const tabOf = (section: PanelSection): AdminTab => PANEL_SECTIONS[section].tab;
 
+/** The page's own address under the open admin sheet, whose entry shows `#admin/...` instead. */
+let underSheet: string | null = null;
+
+/** Where the page was when the open admin sheet took its entry; null with no sheet open. */
+export const pageUnderSheet = (): string | null => underSheet;
+
+/** Set by the open admin sheet; `was` clears it only if it is still that sheet's. */
+export function setPageUnderSheet(page: string | null, was?: string): void {
+  if (page !== null || was === undefined || underSheet === was) underSheet = page;
+}
+
 const KEY = "skald.admin.tab";
 /** The choice for this visit when storage refused it; wins over what is stored. */
 let memory: AdminTab | null = null;

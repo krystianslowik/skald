@@ -11,7 +11,7 @@ import { ItemIcon } from "../storage/ItemIcon";
 import { PlatformGlyph } from "../PlatformGlyph";
 import { Sheet } from "../Sheet";
 import { pluginBelow, targetBody, useAdmin, type Done, type Target } from "./AdminContext";
-import { ADMIN_TABS, adminHash, isAdminHash, PANEL_SECTIONS, rememberedTab, rememberTab, tabOf, type AdminTab, type PanelSection } from "../../lib/adminTabs";
+import { ADMIN_TABS, adminHash, isAdminHash, PANEL_SECTIONS, rememberedTab, rememberTab, setPageUnderSheet, tabOf, type AdminTab, type PanelSection } from "../../lib/adminTabs";
 import { sheetDepth, whenSettled } from "../../lib/sheetHistory";
 import { fillResult } from "./FillSheet";
 import { AdminGlyph } from "./glyphs";
@@ -55,8 +55,8 @@ export function AdminPanel({ picked, tab: asked, section, onClose }: { picked?: 
     if (canRead) reload();
   }, [canRead, reload]);
 
-  // The section asked for, until another tab is picked. A link always opens a fresh sheet
-  // (AdminContext waits for open sheets to close), so these are read once.
+  // The section asked for, until another tab is picked. A link always mounts a fresh panel
+  // (AdminSheets keys it by the link), so these are read once.
   const [at, setAt] = useState(section);
   const [chosen, setChosen] = useState<AdminTab>(() => (section ? tabOf(section) : (asked ?? rememberedTab() ?? "players")));
   const bridgeOn = admin?.bridgeOn ?? false;
@@ -272,7 +272,10 @@ function useAddress(part: AdminTab | PanelSection) {
     let live = true;
     whenSettled(() => {
       if (!live || sheetDepth() === 0) return;
-      page.current ??= location.pathname + location.search + (isAdminHash(location.hash) ? "" : location.hash);
+      if (page.current === null) {
+        page.current = location.pathname + location.search + (isAdminHash(location.hash) ? "" : location.hash);
+        setPageUnderSheet(page.current);
+      }
       if (location.hash !== adminHash(part)) history.replaceState(history.state, "", adminHash(part));
     });
     return () => {
@@ -283,6 +286,7 @@ function useAddress(part: AdminTab | PanelSection) {
     () => () => {
       const back = page.current;
       if (back === null) return;
+      setPageUnderSheet(null, back);
       whenSettled(() => {
         // Closed: the step back already landed on the page's entry. Handed over: the entry is still ours.
         if (sheetDepth() > 0 && isAdminHash(location.hash)) history.replaceState(history.state, "", back);
