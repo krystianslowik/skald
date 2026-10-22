@@ -84,7 +84,8 @@ agent knows it. In Kubernetes, hand it over with the downward API on the
 `containerName` is the game container's name. Only add this when the game
 container sets `resources.limits.memory`: without a limit, Kubernetes fills in
 the node's allocatable memory instead, and the bar would measure against the
-whole node. In Compose, set `GAME_MEMORY_LIMIT` in `.env` to the game
+whole node. The value is read when the pod starts, so a changed limit shows
+once the pod is recreated. In Compose, set `GAME_MEMORY_LIMIT` in `.env` to the game
 service's `mem_limit` (Docker's `6g` is `6Gi` here), or leave it empty.
 
 ## Changing a password

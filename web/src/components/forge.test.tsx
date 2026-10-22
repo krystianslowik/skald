@@ -63,6 +63,14 @@ describe("Forge memory meter", () => {
     expect(screen.queryByText(/^\/ /)).toBeNull();
   });
 
+  it("leaves the limit out before the first memory sample", async () => {
+    const { container } = forge(6 * GiB, "en", { ...metrics(), memory: [] });
+    const meter = await memoryMeter();
+    expect(meter).toHaveAttribute("aria-valuetext", "0 B now, 0% of the 6-hour peak");
+    expect(container.querySelector("[data-testid=meter-peak]")).toBeNull();
+    expect(screen.queryByText(/^\/ /)).toBeNull();
+  });
+
   it("says it in Polish", async () => {
     forge(6 * GiB, "pl");
     const meter = await memoryMeter();
