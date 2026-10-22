@@ -221,9 +221,11 @@ makes the whole area stutter for the others while the server itself is idle.
   which can read high but never low, and the ping stays unsure unless the
   reply clearly matches a step up. A round trip over a second that falls by
   100 ms or more without a stall also makes the ping unsure (see the known
-  limit below). Unsure ends with clear evidence, a drained burst, or a
-  reply that would pair to a negative round trip; the panel counts an
-  unsure ping as a poor link. The
+  limit below). Unsure ends with a round trip under 900 ms (pairing a reply
+  with a ping one too early adds a whole interval, so such a sample proves
+  there is no over-read), clear evidence, a drained burst, or a reply that
+  would pair to a negative round trip. An unsure ping is no verdict of its
+  own: the panel then judges the link by stalls and the send backlog. The
   ping timer is read through a getter compiled once (plain reflection if the
   runtime cannot compile). On Steam, the
   socket's own ping is used when `GetConnectionQuality` gives one.
@@ -458,16 +460,24 @@ lag spike), the ordered socket delivers several replies in one frame with no
 stall before them, and the pairing ends up whole seconds high. Only the
 remainder of the fall after whole ping intervals shows (1.5 to 0.3 s reads
 as 1.5 to 1.3 s; a fall of exactly whole seconds shows nothing). So a round
-trip over a second that falls by 100 ms or more makes the ping unsure; it
-stays unsure until clear evidence realigns the pairing, which on a link
-that stays calm can take until its next stall or burst. In simulation: 2.1 s
-back to 0.1 s and 1.5 s back to 0.3 s never read over a second afterwards
-(unsure instead), a single 2.6 s spike on a 1.2 s link leaves it unsure, and
-a round trip jittering between 0.3 and 1.8 s stays poor and never reads
-under its median. A recovery by exactly whole seconds with no jitter at all
-is not seen and can still read high. Stalls and the send backlog are not
-affected. Steps up and bursts after a stall read right; see
-`tests/LinkPlanTests.cs`.
+trip over a second that falls by 100 ms or more makes the ping unsure, until
+a round trip under 900 ms shows the pairing is sound. In simulation:
+
+- 1.1 to 0.2 s (no bunching): known and right again within a few replies.
+- 1.5 to 0.3 s and 2.1 to 0.1 s: unsure for good on a calm link (never a
+  wrong number); the panel then goes by stalls and backlog.
+- 1.2 to 1.05 s: also unsure for good, though nothing bunched, since a fall
+  that small looks the same as the remainder of a bunched one. The link then
+  shows without a ping, judged by stalls and backlog alone.
+- Round trips jittering between 0.8 and 1.6 s: unsure about half the time.
+  Between 0.3 and 1.8 s: unsure most of the time and, when shown, never under
+  the median but at times seconds over it (set-aside pings are kept when the
+  evidence is unclear).
+- A recovery by exactly whole seconds with no jitter at all is not seen and
+  can still read high.
+
+Stalls and the send backlog are not affected. Steps up and bursts after a
+stall read right; see `tests/LinkPlanTests.cs`.
 
 **New in v0.5.0, not yet verified on a live server:** `build/refuel-fires`
 compiles against the 1.0 reference assemblies, and which fires it takes and what

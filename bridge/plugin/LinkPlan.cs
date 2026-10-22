@@ -160,14 +160,18 @@ namespace Skald.Bridge
         // some never show, which leaves the pairing whole seconds high. What
         // shows of the fall is only its remainder after whole ping intervals
         // (1.5 to 0.3 s reads as 1.5 to 1.3 s), so any clear fall counts.
-        // The ping is left out until clear evidence, a drained burst or a
-        // pairing that starts over realigns it (a stall alone does not);
-        // over a second it was poor anyway.
+        // The ping is left out until a sample under 900 ms (which a pairing
+        // one ping too early cannot give), clear evidence, a drained burst or
+        // a pairing that starts over shows it is sound (a stall alone does not).
         const int RecoverAboveMs = 1000, RecoverFallMs = 100;
 
         static void Sample(Peer p, float now, int ms)
         {
             if (p.LastRttMs >= RecoverAboveMs && p.LastRttMs - ms >= RecoverFallMs) p.Unsure = true;
+            // Pairing a reply with a ping one too early adds at least a ping
+            // interval, so a sample this far under a second proves there is
+            // no over-read: the pairing is sound again.
+            if (p.Unsure && p.Maybe.Count == 0 && ms < RecoverAboveMs - 100) p.Unsure = false;
             p.LastRttMs = ms;
             p.Rtts.Enqueue((now, ms));
         }

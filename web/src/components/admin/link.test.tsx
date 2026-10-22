@@ -27,8 +27,9 @@ describe("link verdict", () => {
     expect(linkVerdict({ transport: "crossplay", pingMs: 40, queueBytes: 8192 })).toBe("fair");
     expect(linkVerdict({ transport: "crossplay", pingMs: 40, queueBytes: 4352 })).toBe("fair");
     expect(linkVerdict({ transport: "crossplay", pingMs: 40, queueBytes: 4096 })).toBe("good");
-    // Unsure of the ping: only right after a stall or a slow spell, so poor.
-    expect(linkVerdict({ transport: "crossplay", pingUnsure: true, replyGapMaxS: 1.1 })).toBe("poor");
+    // An unsure ping is no verdict by itself: a calm link with no ping is not poor.
+    expect(linkVerdict({ transport: "crossplay", pingUnsure: true, replyGapMaxS: 1 })).not.toBe("poor");
+    expect(linkVerdict({ transport: "crossplay", pingUnsure: true, replyGapMaxS: 1 })).toBe("good");
     // Without a ping: judged by what is known.
     expect(linkVerdict({ transport: "crossplay", replyGapMaxS: 1.1 })).toBe("good");
   });

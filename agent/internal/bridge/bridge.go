@@ -485,7 +485,8 @@ type Link struct {
 	PingMaxMs *int `json:"pingMaxMs,omitempty"`
 	// PingUnsure: the ping is left out because, after a stall or while a
 	// round trip over a second falls, the plugin cannot tell which reply
-	// answers which ping. The panel counts it as a poor link.
+	// answers which ping. No verdict by itself: the panel then goes by
+	// stalls and the send backlog.
 	PingUnsure bool `json:"pingUnsure,omitempty"`
 	// ReplyGapMaxS is the longest wait for a keep-alive reply in the last
 	// 10 s: about 1 s on a healthy link, more when it stalls.

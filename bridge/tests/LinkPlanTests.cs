@@ -211,21 +211,28 @@ public class LinkPlanTests
     [InlineData(11)]
     [InlineData(19)]
     [InlineData(23)]
-    public void AJitteryLinkStaysPoorAndIsNeverReadBelowItsMedian(int seed)
+    public void AJitteryLinkIsNeverReadBelowItsMedianAndAShownPingIsPoor(int seed)
     {
         // Each ping's round trip anywhere from 0.3 to 1.8 s (median 1.05 s).
         var rnd = new System.Random(seed);
         var t = new LinkTracker();
         var answered = new List<(float at, float rtt)>();
-        int checkedFrames = 0;
+        int checkedFrames = 0, poorFrames = 0, unsureFrames = 0;
         PlaySteps(t, 1, 120f, sent => 0.3f + (float)rnd.NextDouble() * 1.5f, (now, s, truth) =>
         {
             if (answered.Count == 0 || answered[answered.Count - 1].rtt != truth) answered.Add((now, truth));
             if (now < 20f) return;
             checkedFrames++;
-            // Poor every way the panel judges it (web/src/lib/link.ts): a ping of
-            // 250 ms or more, a stall of 2.5 s or more, or a ping left out as unsure.
-            Assert.True(s.Unsure || (s.RttMs ?? 0) >= 250 || s.ReplyGapMaxS >= 2.5f, $"not poor at {now}: ping {s.RttMs}, gap {s.ReplyGapMaxS}");
+            // Poor the way the panel judges it (web/src/lib/link.ts): a ping of
+            // 250 ms or more, or a stall of 2.5 s or more; unsure alone is not.
+            // The panel's verdict (web/src/lib/link.ts): poor from a ping of
+            // 250 ms or more or a stall of 2.5 s or more. An unsure ping is no
+            // verdict by itself, so while it is left out the stalls decide.
+            bool poor = (s.RttMs ?? 0) >= 250 || s.ReplyGapMaxS >= 2.5f;
+            if (poor) poorFrames++;
+            if (s.Unsure) unsureFrames++;
+            // Whenever a ping is shown, it says poor.
+            if (s.RttMs.HasValue) Assert.True(poor, $"known ping {s.RttMs} not poor at {now}");
             if (s.RttMs.HasValue)
             {
                 var recent = new List<float>();
@@ -239,6 +246,66 @@ public class LinkPlanTests
             }
         });
         Assert.True(checkedFrames > 1000);
+        System.Console.WriteLine($"jitter 0.3-1.8 seed {seed}: poor {100 * poorFrames / checkedFrames}%, unsure {100 * unsureFrames / checkedFrames}%");
+    }
+
+    [Fact]
+    public void ACalmLinkRecoveringFromJustOverASecondIsKnownAgainSoon()
+    {
+        // 1.1 s, then 0.2 s from 30 s on: the fall (0.9 s) is under a ping
+        // interval, so replies never bunch. A few replies after the fall the
+        // ping is known again, and right.
+        var t = new LinkTracker();
+        float knownAgain = -1f;
+        PlaySteps(t, 1, 70f, sent => sent < 30f ? 1.1f : 0.2f, (now, s, truth) =>
+        {
+            if (now > 30f + 1.1f + LinkTracker.WindowS + 1f)
+            {
+                Assert.False(s.Unsure, $"unsure at {now}");
+                Assert.InRange(s.RttMs.Value, 140, 260);
+            }
+            if (knownAgain < 0f && now > 31.2f && !s.Unsure && s.RttMs.HasValue && truth < 0.5f) knownAgain = now;
+        });
+        // Known again within a few replies (pings go out a second apart).
+        Assert.InRange(knownAgain, 31.2f, 36f);
+    }
+
+    [Fact]
+    public void ACalmLinkRecoveringByMoreThanASecondIsUnsureNotLow()
+    {
+        // 1.5 s, then 0.3 s from 30 s on: replies bunch once and the pairing
+        // reads a second high; nothing shows it, so the ping stays left out.
+        var t = new LinkTracker();
+        LinkSample last = null;
+        PlaySteps(t, 1, 70f, sent => sent < 30f ? 1.5f : 0.3f, (now, s, truth) =>
+        {
+            last = s;
+            // Never a reading under the true round trip.
+            if (s.RttMs.HasValue && now > 31f) Assert.True(s.RttMs.Value >= (int)(truth * 1000) - 60, $"ping {s.RttMs} under {truth} at {now}");
+            if (now > 30f + 1.5f + LinkTracker.WindowS + 1f) Assert.True(s.Unsure, $"known at {now}: {s.RttMs}");
+        });
+        Assert.Null(last.RttMs);
+    }
+
+    [Theory]
+    [InlineData(5)]
+    [InlineData(13)]
+    [InlineData(29)]
+    public void AModeratelyJitteryLinkIsUnsureOnlyPartOfTheTime(int seed)
+    {
+        // Round trips anywhere from 0.8 to 1.6 s.
+        var rnd = new System.Random(seed);
+        var t = new LinkTracker();
+        int frames = 0, unsure = 0;
+        PlaySteps(t, 1, 180f, sent => 0.8f + (float)rnd.NextDouble() * 0.8f, (now, s, truth) =>
+        {
+            if (now < 20f) return;
+            frames++;
+            if (s.Unsure) unsure++;
+        });
+        System.Console.WriteLine($"jitter 0.8-1.6 seed {seed}: unsure {100 * unsure / frames}%");
+        Assert.True(unsure < frames * 9 / 10, $"unsure {unsure} of {frames}");
+        Assert.True(unsure < frames, "never known");
     }
 
     [Fact]
