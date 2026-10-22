@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { motion } from "motion/react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { NOTIFY_KINDS, type AdminCatalog, type NotifyChange, type NotifyConfig, type NotifyKind } from "../../types";
 import { BROADCAST_MAX, changeNotify, gameClock, getCatalog, getNotify, lockAdmin, storeActorName, storedActorName, testNotify, WORLD_KEYS } from "../../lib/admin";
 import { isOriginRefusal } from "../../lib/api";
@@ -9,7 +10,9 @@ import { modLevel, useI18n, type TextKey } from "../../i18n";
 import { ItemIcon } from "../storage/ItemIcon";
 import { PlatformGlyph } from "../PlatformGlyph";
 import { Sheet } from "../Sheet";
-import { pluginBelow, targetBody, useAdmin, type Done, type PanelSection, type Target } from "./AdminContext";
+import { pluginBelow, targetBody, useAdmin, type Done, type Target } from "./AdminContext";
+import { ADMIN_TABS, adminHash, PANEL_SECTIONS, rememberedTab, rememberTab, tabOf, type AdminTab, type PanelSection } from "../../lib/adminTabs";
+import { sheetDepth, whenSettled } from "../../lib/sheetHistory";
 import { fillResult } from "./FillSheet";
 import { AdminGlyph } from "./glyphs";
 import { HoldButton } from "./HoldButton";
@@ -24,13 +27,20 @@ const STYLES: Style[] = ["center", "topleft", "narrator"];
 const PRESETS = ["admin.preset.restart5", "admin.preset.boss21", "admin.preset.saving", "admin.preset.raid", "admin.preset.welcome"] as const;
 
 /**
- * The admin sheet: everything the bridge can do to the world, in the order
- * an evening needs it, then the game's admin and ban lists and world
- * restore, which need no bridge. A view-only session says so first, with
- * the unlock. Bridge controls are off (with the reason on top) while it
- * cannot take commands.
+ * The admin sheet, in four tabs: the players (who is at the fire, a message to
+ * all, the admin and ban lists), the world (time, raids, creatures, world
+ * keys), the base (helpers, items) and the server (save, safe restart, the
+ * compatibility check, Discord, backups, this session). A view-only session
+ * says so first, with the unlock. Bridge controls are off (with the reason on
+ * top) while it cannot take commands; without a bridge only the players' lists
+ * and the server's tools show.
+ *
+ * Every tab stays mounted while the sheet is open, so a half-typed message or
+ * an armed confirm survives a look at another tab. The address shows the tab
+ * (`#admin/world`) on the sheet's own history entry, and the tab is remembered
+ * for the next time.
  */
-export function AdminPanel({ picked, section, onClose }: { picked?: { x: number; z: number }; section?: PanelSection; onClose: () => void }) {
+export function AdminPanel({ picked, tab: asked, section, onClose }: { picked?: { x: number; z: number }; tab?: AdminTab; section?: PanelSection; onClose: () => void }) {
   const { t } = useI18n();
   const admin = useAdmin();
   const [catalog, setCatalog] = useState<AdminCatalog | null>(null);
@@ -44,7 +54,38 @@ export function AdminPanel({ picked, section, onClose }: { picked?: { x: number;
   useEffect(() => {
     if (canRead) reload();
   }, [canRead, reload]);
-  useScrollToSection(section);
+
+  // The section asked for, until another tab is picked.
+  const [at, setAt] = useState(section);
+  const [chosen, setChosen] = useState<AdminTab>(() => (section ? tabOf(section) : (asked ?? rememberedTab() ?? "players")));
+  // A new link while open (a tapped notification) moves the sheet there.
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    if (!section && !asked) return;
+    setAt(section);
+    setChosen(section ? tabOf(section) : asked!);
+  }, [section, asked]);
+  const bridgeOn = admin?.bridgeOn ?? false;
+  const tabs = bridgeOn ? ADMIN_TABS : NO_BRIDGE_TABS;
+  const tab = tabs.includes(chosen) ? chosen : tabs[0]!;
+  const opened = at && tabOf(at) === tab ? at : undefined;
+  useEffect(() => rememberTab(tab), [tab]);
+  useScrollToSection(opened);
+  useAddress(opened ?? tab);
+  const top = useRef<HTMLDivElement>(null);
+  const pick = (next: AdminTab) => {
+    if (next === tab) return;
+    setAt(undefined);
+    setChosen(next);
+    // Each tab starts at its top.
+    const scroller = top.current?.closest<HTMLElement>("[data-sheet-body]");
+    if (scroller) scroller.scrollTop = 0;
+  };
+
   if (!admin) return null;
   const st = admin.status;
   const pickedTarget: Target | null = picked ? { at: picked, label: "map" } : null;
@@ -64,8 +105,9 @@ export function AdminPanel({ picked, section, onClose }: { picked?: { x: number;
           onClose={close}
         />
       )}
+      subheader={<AdminTabs tabs={tabs} tab={tab} onPick={pick} />}
     >
-      <div className="pb-6">
+      <div ref={top} className="pb-6">
         {st?.required && !st.unlocked && (
           <div role="status" className="mb-4 flex flex-wrap items-center gap-3 rounded-[3px] border border-ember/50 bg-black/35 px-4 py-3 text-sm">
             <div className="min-w-0 flex-1">
@@ -77,45 +119,171 @@ export function AdminPanel({ picked, section, onClose }: { picked?: { x: number;
             </Btn>
           </div>
         )}
-        {admin.bridgeOn ? <BridgeTools catalog={catalog} picked={pickedTarget} reload={reload} /> : <p className="mt-2 text-sm text-ash">{t("admin.noBridge")}</p>}
+        {bridgeOn ? <BridgeBanner /> : <p className="mb-4 mt-2 text-sm text-ash">{t("admin.noBridge")}</p>}
 
-        <SafeRestartSection />
-        <CompatSection />
-        <Notify />
-        <AccessLists />
-        <RestoreSection />
+        <TabPanel id="players" tab={tab}>
+          {bridgeOn && (
+            <>
+              <Players />
+              <Broadcast />
+            </>
+          )}
+          <AccessLists />
+        </TabPanel>
 
-        <Section title={t("admin.you")}>
-          <label htmlFor="admin-name" className="text-xs text-ash">
-            {t("admin.you.name")}
-          </label>
-          <input
-            id="admin-name"
-            value={name}
-            maxLength={40}
-            onChange={(e) => setName(e.target.value)}
-            onBlur={() => storeActorName(name)}
-            placeholder={t("admin.you.placeholder")}
-            className="field mt-1.5 w-full"
-            autoComplete="nickname"
-          />
-          {!st?.required ? (
-            <p className="mt-3 text-sm text-ash">{t("admin.you.open")}</p>
-          ) : st.unlocked ? (
-            <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-              <p className="flex-1 text-flame">{t("admin.you.unlocked", { min: Math.round(st.idleMs / 60000) })}</p>
-              <Btn onClick={() => void lockAdmin().then(admin.refresh)}>{t("admin.you.lock")}</Btn>
-            </div>
-          ) : null}
-        </Section>
-        <SkaldVersion web={admin.versions.web} agent={admin.versions.agent} update={st?.update} className="mt-6 border-t border-iron/25 pt-3" />
+        {bridgeOn && (
+          <TabPanel id="world" tab={tab}>
+            <TimeSection frozen={st?.bridge.timeFrozen ?? false} />
+            <Raids catalog={catalog} picked={pickedTarget} onChange={reload} />
+            <Section title={t("admin.creatures.title")} id="admin-creatures">
+              <Btn
+                className="w-full"
+                disabled={!!admin.blocker}
+                onClick={() => admin.open({ kind: "creatures", target: pickedTarget ?? (admin.players[0] ? { player: admin.players[0].name } : { at: admin.mainBase ?? { x: 0, z: 0 }, label: "base" }) })}
+              >
+                {t("admin.creatures.open")}
+              </Btn>
+            </Section>
+            <WorldKeys catalog={catalog} onChange={reload} open={opened === "keys"} />
+          </TabPanel>
+        )}
+
+        {bridgeOn && (
+          <TabPanel id="base" tab={tab}>
+            <BaseHelpers catalog={catalog} picked={pickedTarget} />
+            <Section title={t("admin.items.title")} id="admin-items">
+              <p className="mb-2 text-sm text-ash">{t("admin.items.lead")}</p>
+              <Btn
+                className="w-full"
+                disabled={!!admin.blocker}
+                onClick={() => admin.open({ kind: "items", target: pickedTarget ?? (admin.players[0] ? { player: admin.players[0].name } : admin.mainBase ? { at: admin.mainBase, label: "base" } : { at: { x: 0, z: 0 }, label: "map" }) })}
+              >
+                {t("admin.items.open")}
+              </Btn>
+            </Section>
+          </TabPanel>
+        )}
+
+        <TabPanel id="server" tab={tab}>
+          {bridgeOn && (
+            <Section title={t("admin.save.title")} id="admin-save">
+              <Btn className="w-full" disabled={!!admin.blocker} onClick={() => void admin.run("save", {}, { done: t("admin.save.done") })}>
+                {t("admin.save.now")}
+              </Btn>
+            </Section>
+          )}
+          <SafeRestartSection />
+          <CompatSection />
+          <Notify />
+          <RestoreSection />
+
+          <Section title={t("admin.you")} id="admin-you">
+            <label htmlFor="admin-name" className="text-xs text-ash">
+              {t("admin.you.name")}
+            </label>
+            <input
+              id="admin-name"
+              value={name}
+              maxLength={40}
+              onChange={(e) => setName(e.target.value)}
+              onBlur={() => storeActorName(name)}
+              placeholder={t("admin.you.placeholder")}
+              className="field mt-1.5 w-full"
+              autoComplete="nickname"
+            />
+            {!st?.required ? (
+              <p className="mt-3 text-sm text-ash">{t("admin.you.open")}</p>
+            ) : st.unlocked ? (
+              <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+                <p className="flex-1 text-flame">{t("admin.you.unlocked", { min: Math.round(st.idleMs / 60000) })}</p>
+                <Btn onClick={() => void lockAdmin().then(admin.refresh)}>{t("admin.you.lock")}</Btn>
+              </div>
+            ) : null}
+          </Section>
+          <SkaldVersion web={admin.versions.web} agent={admin.versions.agent} update={st?.update} className="mt-6 border-t border-iron/25 pt-3" />
+        </TabPanel>
       </div>
     </Sheet>
   );
 }
 
-/** Where each section's heading is, for opening the sheet at it. */
-const SECTION_HEADING: Record<PanelSection, string> = { compat: "admin-compat-h" };
+/** Without a bridge there is nothing to do to the live world or a base. */
+const NO_BRIDGE_TABS: readonly AdminTab[] = ["players", "server"];
+const TAB_LABEL: Record<AdminTab, TextKey> = { players: "admin.tab.players", world: "admin.tab.world", base: "admin.tab.base", server: "admin.tab.server" };
+/** The selected tab's slide: transform only, no bounce. */
+const SWAP = { type: "spring" as const, bounce: 0, visualDuration: 0.25 };
+
+/**
+ * The tabs as one segmented bar, like the settings' modifier steps: arrows,
+ * Home and End move between them. It scrolls sideways if the labels ever
+ * outgrow the screen, never the page.
+ */
+function AdminTabs({ tabs, tab, onPick }: { tabs: readonly AdminTab[]; tab: AdminTab; onPick: (t: AdminTab) => void }) {
+  const { t } = useI18n();
+  const buttons = useRef<(HTMLButtonElement | null)[]>([]);
+  const onKey = (e: KeyboardEvent, i: number) => {
+    const last = tabs.length - 1;
+    const next = e.key === "ArrowRight" ? Math.min(last, i + 1) : e.key === "ArrowLeft" ? Math.max(0, i - 1) : e.key === "Home" ? 0 : e.key === "End" ? last : -1;
+    if (next < 0) return;
+    e.preventDefault();
+    onPick(tabs[next]!);
+    buttons.current[next]?.focus();
+  };
+  return (
+    <div className="scroll-quiet -mx-1 overflow-x-auto px-1 pt-1">
+      <div role="tablist" aria-label={t("admin.tabs")} className="slot grid min-w-full auto-cols-[minmax(max-content,1fr)] grid-flow-col gap-0.5 p-[3px]">
+        {tabs.map((id, i) => {
+          const on = id === tab;
+          return (
+            <button
+              key={id}
+              ref={(el) => void (buttons.current[i] = el)}
+              id={`admin-tab-${id}`}
+              type="button"
+              role="tab"
+              aria-selected={on}
+              aria-controls={`admin-panel-${id}`}
+              tabIndex={on ? 0 : -1}
+              onClick={() => onPick(id)}
+              onKeyDown={(e) => onKey(e, i)}
+              className={`press-soft relative min-h-10 whitespace-nowrap rounded-[2px] px-3 text-sm font-bold coarse:min-h-11 ${on ? "text-[#10161d]" : "text-label hover:text-flame"}`}
+            >
+              {on && <motion.span layoutId="admin-tab" transition={SWAP} className="slot-selected absolute inset-0 rounded-[2px]" />}
+              <span className="relative">{t(TAB_LABEL[id])}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** One tab's content; kept mounted and hidden while another tab shows. */
+function TabPanel({ id, tab, children }: { id: AdminTab; tab: AdminTab; children: ReactNode }) {
+  return (
+    <div role="tabpanel" id={`admin-panel-${id}`} aria-labelledby={`admin-tab-${id}`} hidden={id !== tab}>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Shows where the sheet is in the address bar, on the sheet's own history
+ * entry once it is in place: Back and every other close step back to the
+ * page's address, untouched.
+ */
+function useAddress(part: AdminTab | PanelSection) {
+  useEffect(() => {
+    let live = true;
+    whenSettled(() => {
+      if (live && sheetDepth() > 0 && location.hash !== adminHash(part)) history.replaceState(history.state, "", adminHash(part));
+    });
+    return () => {
+      live = false;
+    };
+  }, [part]);
+}
+
 /** Content above a section still loads (the catalog) for about this long; the section is kept in place meanwhile. */
 const ANCHOR_MS = 2000;
 
@@ -126,7 +294,7 @@ const ANCHOR_MS = 2000;
 function useScrollToSection(section: PanelSection | undefined) {
   useEffect(() => {
     if (!section) return;
-    const heading = document.getElementById(SECTION_HEADING[section]);
+    const heading = document.getElementById(PANEL_SECTIONS[section].heading);
     const scroller = heading?.closest<HTMLElement>("[data-sheet-body]");
     if (!heading || !scroller) return;
     const align = () => {
@@ -277,7 +445,7 @@ function Notify() {
   };
 
   return (
-    <Section title={t("admin.notify.title")} aside={on ? t("admin.notify.aside.on") : t("admin.notify.aside.off")}>
+    <Section title={t("admin.notify.title")} id="admin-discord" aside={on ? t("admin.notify.aside.on") : t("admin.notify.aside.off")}>
       <p className="mb-2 text-sm text-ash">{on ? t("admin.notify.on") : !cfg ? t("admin.notify.idle") : !cfg.masked ? t("admin.notify.off") : !cfg.enabled ? t("admin.notify.paused") : t("admin.notify.noKinds")}</p>
       {!cfg ? (
         <p className="mb-2 text-sm text-ash">{canRead ? (failed ? t("admin.notify.loadFailed") : t("admin.notify.loading")) : t("admin.notify.locked")}</p>
@@ -392,61 +560,13 @@ function pickNotify(r: NotifyConfig): NotifyConfig {
   return { source: r.source, masked: r.masked ?? null, enabled: r.enabled, kinds: r.kinds ?? [] };
 }
 
-/** Everything the bridge does to the live world; shown when the agent has a bridge. */
-function BridgeTools({ catalog, picked: pickedTarget, reload }: { catalog: AdminCatalog | null; picked: Target | null; reload: () => void }) {
-  const { t } = useI18n();
-  const admin = useAdmin()!;
-  const st = admin.status;
-  return (
-    <>
-      <BridgeBanner />
-
-      <Players />
-      <Broadcast />
-
-      <Section title={t("admin.items.title")}>
-        <p className="mb-2 text-sm text-ash">{t("admin.items.lead")}</p>
-        <Btn
-          className="w-full"
-          disabled={!!admin.blocker}
-          onClick={() => admin.open({ kind: "items", target: pickedTarget ?? (admin.players[0] ? { player: admin.players[0].name } : admin.mainBase ? { at: admin.mainBase, label: "base" } : { at: { x: 0, z: 0 }, label: "map" }) })}
-        >
-          {t("admin.items.open")}
-        </Btn>
-      </Section>
-
-      <TimeSection frozen={st?.bridge.timeFrozen ?? false} />
-      <Raids catalog={catalog} picked={pickedTarget} onChange={reload} />
-
-      <Section title={t("admin.creatures.title")}>
-        <Btn
-          className="w-full"
-          disabled={!!admin.blocker}
-          onClick={() => admin.open({ kind: "creatures", target: pickedTarget ?? (admin.players[0] ? { player: admin.players[0].name } : { at: admin.mainBase ?? { x: 0, z: 0 }, label: "base" }) })}
-        >
-          {t("admin.creatures.open")}
-        </Btn>
-      </Section>
-
-      <WorldKeys catalog={catalog} onChange={reload} />
-      <BaseHelpers catalog={catalog} picked={pickedTarget} />
-
-      <Section title={t("admin.save.title")}>
-        <Btn className="w-full" disabled={!!admin.blocker} onClick={() => void admin.run("save", {}, { done: t("admin.save.done") })}>
-          {t("admin.save.now")}
-        </Btn>
-      </Section>
-    </>
-  );
-}
-
 /** Everyone at the fire, live: tap for their sheet. */
 function Players() {
   const { t } = useI18n();
   const admin = useAdmin()!;
   const live = useLivePositions();
   return (
-    <Section title={t("admin.players.title")} aside={String(admin.players.length)}>
+    <Section title={t("admin.players.title")} id="admin-players" aside={String(admin.players.length)}>
       {admin.players.length === 0 ? (
         <p className="text-sm text-ash">{t("admin.players.none")}</p>
       ) : (
@@ -487,7 +607,7 @@ function Broadcast() {
     if (r.ok) setText("");
   };
   return (
-    <Section title={t("admin.broadcast.title")}>
+    <Section title={t("admin.broadcast.title")} id="admin-broadcast">
       <div className="relative">
         <textarea
           value={text}
@@ -558,7 +678,7 @@ function TimeSection({ frozen }: { frozen: boolean }) {
   const [fraction, setFraction] = useState(0.5);
   const off = !!admin.blocker;
   return (
-    <Section title={t("admin.time.title")} aside={frozen ? t("admin.time.frozen") : undefined}>
+    <Section title={t("admin.time.title")} id="admin-time" aside={frozen ? t("admin.time.frozen") : undefined}>
       <div className="flex items-center gap-4">
         <SkyDial fraction={fraction} />
         <div className="min-w-0 flex-1">
@@ -620,7 +740,7 @@ function Raids({ catalog, picked, onChange }: { catalog: AdminCatalog | null; pi
   const events = catalog?.events ?? [];
   const cur = catalog?.currentEvent;
   return (
-    <Section title={t("admin.raids.title")}>
+    <Section title={t("admin.raids.title")} id="admin-raids">
       {cur ? (
         <div className="mb-3 flex items-center gap-3 rounded-[3px] border border-gold/40 bg-black/30 px-3 py-2">
           <span className="raid-cry flex-1 text-base">{raidLabel(cur.name)}</span>
@@ -677,19 +797,34 @@ export function describeKey(key: string, t: (k: TextKey, v?: Record<string, stri
 
 /**
  * Global keys as switches, explained. Each one changes the live game for
- * everyone at once, so every switch takes a second tap; boss keys are held to remove.
+ * everyone at once, so every switch takes a second tap; boss keys are held to
+ * remove. Rarely needed, so the list stays folded under "Advanced" with a count
+ * of what is on, unless a link asked for it.
  */
-function WorldKeys({ catalog, onChange }: { catalog: AdminCatalog | null; onChange: () => void }) {
+function WorldKeys({ catalog, onChange, open: asked }: { catalog: AdminCatalog | null; onChange: () => void; open: boolean }) {
   const { t, lookup } = useI18n();
   const admin = useAdmin()!;
   const [confirm, setConfirm] = useArmed<string | null>(null);
+  const [open, setOpen] = useState(asked);
+  useEffect(() => {
+    if (asked) setOpen(true);
+  }, [asked]);
+  const listId = useId();
   const keys = useMemo(() => new Set((catalog?.globalKeys ?? []).map((k) => k.toLowerCase())), [catalog]);
   const off = !!admin.blocker || !catalog;
   const set = (key: string, on: boolean) => void admin.run(on ? "globalkey-set" : "globalkey-remove", { key }, { done: t(on ? "admin.keys.setDone" : "admin.keys.removed", { key }) }).then(onChange);
   const extra = [...keys].filter((k) => !WORLD_KEYS.some((w) => w.key === k) && !/^activebosses/.test(k));
+  const known = WORLD_KEYS.filter(({ key }) => keys.has(key)).length;
   return (
-    <Section title={t("admin.keys.title")}>
-      <ul className="divide-y divide-iron/25">
+    <Section title={t("admin.keys.title")} id="admin-keys" aside={catalog ? t("admin.keys.on", { n: known + extra.length }) : undefined}>
+      <p className="mb-2 text-sm text-ash">{t("admin.keys.lead")}</p>
+      <button type="button" aria-expanded={open} aria-controls={listId} onClick={() => setOpen((o) => !o)} className="plaque press flex min-h-11 w-full items-center gap-3 rounded-[3px] px-4 text-left text-sm font-bold">
+        <span className="flex-1">{t("admin.keys.advanced", { n: WORLD_KEYS.length + extra.length })}</span>
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" className={`shrink-0 text-ash ${open ? "rotate-90" : ""}`} aria-hidden>
+          <path d="M6 3l5 5-5 5" />
+        </svg>
+      </button>
+      <ul id={listId} hidden={!open} className="mt-1 divide-y divide-iron/25">
         {WORLD_KEYS.map(({ key, boss }) => {
           const on = keys.has(key);
           const label = boss ? (lookup(`boss.${key}`) ?? key) : (lookup(`gkey.${key}`) ?? key);
@@ -778,7 +913,7 @@ function BaseHelpers({ catalog, picked }: { catalog: AdminCatalog | null; picked
   const go = (command: "repair" | "fill-kilns" | "grow" | "map-reveal", done: Done) => target && void admin.run(command, { radius: command === "map-reveal" ? 60 : 50, ...targetBody(target) }, { done });
   const fill = (station: "smelters" | "fermenters") => target && admin.open({ kind: "fill", station, target, catalog });
   return (
-    <Section title={t("admin.base.title")}>
+    <Section title={t("admin.base.title")} id="admin-base">
       <TargetChips value={target} onChange={setTarget} />
       <div className="mt-3 grid grid-cols-2 gap-2">
         <Btn disabled={off || noKilns} describedBy={noKilns ? whyId : undefined} onClick={() => go("fill-kilns", (data) => fillResult(i18n, "fill-kilns", data))} className="justify-start pl-2.5 text-left">

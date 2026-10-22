@@ -50,7 +50,7 @@ export function AccessLists() {
   };
 
   return (
-    <Section title={t("admin.access.title")}>
+    <Section title={t("admin.access.title")} id="admin-access">
       <p className="mb-2 text-sm text-ash">{t("admin.access.lead")}</p>
       {!state ? (
         <p className="text-sm text-ash">{canRead ? (failed ? t("admin.access.failed") : t("admin.access.loading")) : t("admin.access.locked")}</p>
@@ -207,7 +207,7 @@ export function RestoreSection() {
 
   const blocked = info?.reason ? t(REASON[info.reason]) : info?.running ? t("admin.restore.running") : null;
   return (
-    <Section title={t("admin.restore.title")} aside={info ? String(info.backups.length) : undefined}>
+    <Section title={t("admin.restore.title")} id="admin-restore" aside={info ? String(info.backups.length) : undefined}>
       <p className="mb-2 text-sm text-ash">{t("admin.restore.lead")}</p>
       {!info ? (
         <p className="text-sm text-ash">{canRead ? t("admin.access.loading") : t("admin.restore.locked")}</p>

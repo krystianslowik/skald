@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { leaveSheets, sheetPending, traverse } from "./sheetHistory";
+import { isAdminHash } from "./adminTabs";
 
 /** The phone's tabs; on wider screens only `map` (the full-screen map) means anything. */
 export type Tab = "fire" | "map" | "saga" | "settings";
@@ -31,6 +32,8 @@ export function useRoute(): [Tab, (t: Tab) => void] {
     // would close the map for a render (dropping its focus). The tap lands the tab itself.
     const sync = () => {
       if (deferred.current !== null && sheetPending()) return;
+      // The admin sheet's address (`#admin/...`, on its own history entry) sits over the tab, not instead of it.
+      if (isAdminHash(location.hash)) return;
       setTab(fromHash(location.hash));
     };
     window.addEventListener("popstate", sync);

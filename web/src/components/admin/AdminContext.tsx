@@ -7,6 +7,7 @@ import { useWorldMap } from "../../lib/useWorldMap";
 import { useI18n, type TextKey } from "../../i18n";
 import { compareVersions } from "@server/version";
 import { lazyChunk, preload } from "../../lib/chunks";
+import { isAdminHash, parseAdminHash, type AdminTab, type PanelLink, type PanelSection } from "../../lib/adminTabs";
 import { ChunkBoundary } from "../ErrorBoundary";
 
 const AdminSheets = lazyChunk(() => import("./AdminSheets"), "AdminSheets");
@@ -26,8 +27,7 @@ export interface FillChoice {
   coal: "both" | "ore" | "coal" | null;
 }
 
-/** A part of the admin sheet it can open at (the compatibility notice's details). */
-export type PanelSection = "compat";
+export type { AdminTab, PanelSection };
 
 /**
  * A sheet the admin layer shows; only one at a time, the unlock sheet over
@@ -35,7 +35,7 @@ export type PanelSection = "compat";
  * aside while the map is open, then comes back with it).
  */
 export type AdminView = (
-  | { kind: "panel"; section?: PanelSection }
+  | { kind: "panel"; tab?: AdminTab; section?: PanelSection }
   | { kind: "player"; name: string }
   | { kind: "items"; target: Target; lines?: KitLine[] }
   | { kind: "creatures"; target: Target }
@@ -234,8 +234,8 @@ export function AdminProvider({
   const startPick = useCallback(
     (req: PickRequest) => {
       setView((v) => {
-        // Coming back from the map returns to the tools, not to the section the sheet first opened at.
-        pickFrom.current = v?.kind === "panel" ? { ...v, section: undefined } : v;
+        // Coming back from the map returns to the tab it was on (remembered), not to where the sheet first opened.
+        pickFrom.current = v?.kind === "panel" ? { ...v, tab: undefined, section: undefined } : v;
         return null;
       });
       setPick(req);
@@ -273,6 +273,40 @@ export function AdminProvider({
 
   const bridge = status?.bridge;
   const present = !!status;
+
+  // A link into the admin sheet (`#admin/compat`, from a notice or a push): taken off the
+  // page's own address at once, so closing the sheet does not land on it again, and
+  // opened once the admin layer answers. While open, the sheet's own entry carries it.
+  const link = useRef<PanelLink | null>(null);
+  const [linked, setLinked] = useState(0);
+  useEffect(() => {
+    const take = (back: string) => {
+      const l = parseAdminHash(location.hash);
+      if (!l) return;
+      history.replaceState(history.state, "", back);
+      link.current = l;
+      setLinked((n) => n + 1);
+    };
+    take(location.pathname + location.search);
+    // Followed while the panel runs (a tapped notification): back to the tab it came from.
+    const onHash = (e: HashChangeEvent) => {
+      let from = "";
+      try {
+        from = new URL(e.oldURL).hash;
+      } catch {
+        // no previous address: the fire
+      }
+      take(location.pathname + location.search + (isAdminHash(from) ? "" : from));
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  useEffect(() => {
+    if (!present || !link.current) return;
+    const l = link.current;
+    link.current = null;
+    setView({ kind: "panel", ...l });
+  }, [present, linked]);
   const bridgeOn = !!bridge && bridge.reason !== "off";
   let blocker: Blocker = null;
   if (!online) blocker = "offline";

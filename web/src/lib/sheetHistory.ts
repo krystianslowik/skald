@@ -29,6 +29,8 @@ let depth = 0;
 let pending = false;
 let watchdog: ReturnType<typeof setTimeout> | undefined;
 let after: (() => void)[] = [];
+/** Waiting for history to settle: every push and step of ours has landed. */
+let settled: (() => void)[] = [];
 let scheduled = false;
 let ready = false;
 
@@ -102,6 +104,21 @@ function flush() {
     for (let i = depth; i < want; i++) history.pushState({ ...((history.state as Entry) ?? {}), [KEY]: i + 1 }, "");
     depth = want;
   } else if (want < depth) traverse(want - depth);
+  // A step back is on its way: its arrival reconciles again and lands here.
+  if (pending) return;
+  const fns = settled;
+  settled = [];
+  for (const f of fns) f();
+}
+
+/**
+ * Runs `then` once every sheet entry is in place, so it can change the top
+ * entry (an open sheet's own address) and not the page's beneath it.
+ */
+export function whenSettled(then: () => void) {
+  init();
+  settled.push(then);
+  schedule();
 }
 
 /**
