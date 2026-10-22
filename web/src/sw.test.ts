@@ -392,4 +392,13 @@ describe("service worker push", () => {
     expect(win.navigated).toBe(`${ORIGIN}/`);
     expect(sw.opened.every((u) => u.startsWith(`${ORIGIN}/`))).toBe(true);
   });
+
+  it("moves an open panel to a part of the admin sheet, keeping the link's hash", async () => {
+    const sw = boot(() => html());
+    const win = sw.openWindowAt(`${ORIGIN}/#saga`);
+    await sw.dispatch("notificationclick", { notification: { data: { url: "/#admin/compat" }, close: () => undefined } });
+    expect(win.focused).toBe(true);
+    expect(win.navigated).toBe(`${ORIGIN}/#admin/compat`);
+    expect(sw.opened).toHaveLength(0);
+  });
 });

@@ -21,7 +21,7 @@ export default function AdminSheets({ view, unlocking }: { view: AdminView | nul
   if (!admin) return null;
   return (
     <>
-      {view?.kind === "panel" && <AdminPanel picked={view.picked} section={view.section} onClose={admin.close} />}
+      {view?.kind === "panel" && <AdminPanel key={view.link ?? 0} picked={view.picked} tab={view.tab} section={view.section} onClose={admin.close} />}
       {view?.kind === "player" && <PlayerSheet key={view.name} name={view.name} onClose={admin.close} />}
       {view?.kind === "items" && <ItemPicker target={view.picked ? { at: view.picked, label: "map" } : view.target} lines={view.lines} onClose={admin.close} />}
       {view?.kind === "creatures" && <CreatureSheet target={view.picked ? { at: view.picked, label: "map" } : view.target} onClose={admin.close} />}

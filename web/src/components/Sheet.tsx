@@ -35,6 +35,7 @@ export function Sheet({
   labelledBy,
   onClose,
   header,
+  subheader,
   children,
   footer,
   width = "sm:w-115",
@@ -47,6 +48,8 @@ export function Sheet({
   labelledBy: string;
   onClose: () => void;
   header: (close: () => void) => ReactNode;
+  /** Pinned between the header and the scrolling body, and not a drag handle (tabs that scroll sideways). */
+  subheader?: ReactNode;
   children: ReactNode;
   /** Pinned under the scrolling body (a sticky action bar). */
   footer?: ReactNode;
@@ -67,6 +70,7 @@ export function Sheet({
   const scrimEl = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const headerEl = useRef<HTMLElement>(null);
+  const subEl = useRef<HTMLDivElement>(null);
   const [vertical] = useState(() => typeof window !== "undefined" && (window.matchMedia?.(BOTTOM_SHEET).matches ?? false));
   const peeks = peek && vertical;
   // Peeking sheets rest at `peekAt` until dragged up to 0; `expanded` lets the body scroll.
@@ -106,7 +110,7 @@ export function Sheet({
       const b = body.current;
       const inner = (b?.firstElementChild as HTMLElement | null)?.offsetHeight ?? 0;
       const padBottom = b ? parseFloat(getComputedStyle(b).paddingBottom) || 0 : 0;
-      const content = (headerEl.current?.offsetHeight ?? 0) + inner + padBottom;
+      const content = (headerEl.current?.offsetHeight ?? 0) + (subEl.current?.offsetHeight ?? 0) + inner + padBottom;
       const tall = Math.max(140, Math.min(size.current * 0.5, content || size.current * 0.4));
       peekAt.current = Math.max(0, size.current - tall);
     }
@@ -347,6 +351,11 @@ export function Sheet({
           {header(requestClose)}
           <div aria-hidden className="plank-rule mt-4" />
         </header>
+        {subheader && (
+          <div ref={subEl} data-sheet-subheader className="shrink-0 px-5 pb-1 sm:px-7">
+            {subheader}
+          </div>
+        )}
 
         <div
           ref={body}

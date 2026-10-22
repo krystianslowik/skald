@@ -4,6 +4,7 @@ import type { AgentSource } from "../src/agent";
 import { createApp } from "../src/app";
 import { createSession, RateLimiter, SESSION_COOKIE } from "../src/auth";
 import { HistoryStore } from "../src/db";
+import { mockCompat } from "../src/mockcompat";
 import { Hub } from "../src/hub";
 import { silentLog } from "../src/log";
 import { DiscordNotifier, NOTIFY_KINDS, type Item } from "../src/notify";
@@ -142,6 +143,14 @@ describe("notificationsFor", () => {
     ]);
     const some = notificationsFor(items, prefs({ kinds: ["boss"] }), ctx, { sent: [] }, T0, 0);
     expect(some).toEqual([{ title: "Boss defeated", body: "Bonemass defeated", tag: "boss", url: "/" }]);
+  });
+
+  it("opens a compatibility check at its details in the admin sheet, a plain update at the fire", () => {
+    const check = mockCompat("fail", "l-1.0.20", 41, T0).result!;
+    const [checked] = notificationsFor([{ kind: "compat", result: check, followUp: false }], prefs(), ctx, { sent: [] }, T0, 0);
+    expect(checked).toMatchObject({ tag: "update", url: "/#admin/compat" });
+    const [plain] = notificationsFor([{ kind: "version", version: "l-1.0.20" }], prefs(), ctx, { sent: [] }, T0, 0);
+    expect(plain).toMatchObject({ tag: "update", url: "/" });
   });
 });
 

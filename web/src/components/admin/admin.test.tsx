@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "../Dashboard";
 import { describeAdmin } from "../Saga";
 import { I18nProvider, LocaleToggle, makeI18n } from "../../i18n";
@@ -13,6 +13,9 @@ import { emptyAgentState, NOTIFY_KINDS, type AccessState, type AdminStatus, type
 import { restoreProgress, RestoreSheet } from "./WorldTools";
 import { platformOf } from "./parts";
 import { AdminProvider, toastTop, useAdmin, type Admin } from "./AdminContext";
+import { forgetTab } from "../../lib/adminTabs";
+import { noteEntries, sheetDepth, sheetPending } from "../../lib/sheetHistory";
+import { useRoute } from "../../lib/useRoute";
 import { BRIDGE_PLUGIN_VERSION } from "@server/bridgeplugin";
 
 function fixture(): ApiState {
@@ -94,10 +97,13 @@ function api(st: AdminStatus, commands: (url: string, n: number) => Response = (
 
 const renderDashboard = () => render(<Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />);
 
-async function openAdmin() {
+/** Opens the admin sheet, on `tab` when given (the tab's visible name). */
+async function openAdmin(tab?: string) {
   const button = await screen.findByRole("button", { name: "Admin" });
   fireEvent.click(button);
-  return screen.findByRole("dialog", { name: "Admin" });
+  const dialog = await screen.findByRole("dialog", { name: "Admin" });
+  if (tab) fireEvent.click(within(dialog).getByRole("tab", { name: tab }));
+  return dialog;
 }
 
 beforeAll(preloadLazyChunks);
@@ -105,6 +111,393 @@ beforeAll(preloadLazyChunks);
 afterEach(() => {
   vi.unstubAllGlobals();
   history.replaceState(null, "", "/");
+  forgetTab();
+  localStorage.removeItem("skald.admin.tab");
+});
+
+// Before the tests that fake timers: a sheet's closing slide never finishes after them.
+describe("tabs (#153)", () => {
+  /** Lets the sheets' own history steps land. */
+  const settled = () => waitFor(() => expect(sheetPending()).toBe(false));
+  // The last test's sheets step back over their entries as they unmount: let that land first.
+  beforeEach(async () => {
+    await settled();
+    history.replaceState(null, "", "/");
+  });
+  const selected = (sheet: HTMLElement) => within(sheet).getByRole("tab", { selected: true }).textContent;
+  /** A link followed in the page (a tapped notification): a new entry, popstate, then hashchange, as browsers do. */
+  const follow = (to: string, from: string) => {
+    history.pushState(null, "", to);
+    window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    window.dispatchEvent(new HashChangeEvent("hashchange", { oldURL: `${location.origin}${from}`, newURL: location.href }));
+  };
+  const close = async (sheet: HTMLElement) => {
+    fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Admin" })).toBeNull(), { timeout: 4000 });
+    await settled();
+  };
+
+  it("splits the sheet into players, world, base and server, one showing at a time", async () => {
+    api(status());
+    renderDashboard();
+    const sheet = await openAdmin();
+    expect(within(sheet).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Players", "World", "Base", "Server"]);
+    expect(selected(sheet)).toBe("Players");
+    const panel = within(sheet).getByRole("tabpanel");
+    expect(panel).toHaveAccessibleName("Players");
+    // The panel itself takes focus after the tabs, as tab panels do.
+    expect(panel).toHaveAttribute("tabindex", "0");
+    expect(within(panel).getByRole("heading", { name: "Broadcast" })).toBeInTheDocument();
+    // Your name and the session lock sit with the players.
+    expect(within(panel).getByRole("heading", { name: "You" })).toBeInTheDocument();
+    expect(within(sheet).queryByRole("heading", { name: "Safe restart" })).toBeNull();
+    fireEvent.click(within(sheet).getByRole("tab", { name: "World" }));
+    // Saving the world sits with the world.
+    expect(within(sheet).getByRole("heading", { name: "Save" })).toBeInTheDocument();
+    fireEvent.click(within(sheet).getByRole("tab", { name: "Server" }));
+    expect(within(sheet).getByRole("heading", { name: "Safe restart" })).toBeInTheDocument();
+    expect(within(sheet).queryByRole("heading", { name: "Broadcast" })).toBeNull();
+    // Arrows walk the tabs like any tab bar.
+    fireEvent.keyDown(within(sheet).getByRole("tab", { name: "Server" }), { key: "ArrowLeft" });
+    expect(selected(sheet)).toBe("Base");
+    expect(within(sheet).getByRole("tab", { name: "Base" })).toHaveFocus();
+    fireEvent.keyDown(within(sheet).getByRole("tab", { name: "Base" }), { key: "Home" });
+    expect(selected(sheet)).toBe("Players");
+  });
+
+  it("keeps what was typed on one tab while another is looked at", async () => {
+    api(status());
+    renderDashboard();
+    const sheet = await openAdmin();
+    fireEvent.change(within(sheet).getByRole("textbox", { name: "Broadcast" }), { target: { value: "Boss at nine" } });
+    fireEvent.click(within(sheet).getByRole("tab", { name: "World" }));
+    fireEvent.click(within(sheet).getByRole("tab", { name: "Players" }));
+    expect(within(sheet).getByRole("textbox", { name: "Broadcast" })).toHaveValue("Boss at nine");
+  });
+
+  it("opens on the tab picked last, kept per browser", async () => {
+    api(status());
+    renderDashboard();
+    let sheet = await openAdmin("World");
+    await close(sheet);
+    expect(localStorage.getItem("skald.admin.tab")).toBe("world");
+    sheet = await openAdmin();
+    expect(selected(sheet)).toBe("World");
+  });
+
+  it("remembers the tab for the visit without browser storage", async () => {
+    vi.stubGlobal("localStorage", {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+      removeItem: () => undefined,
+    });
+    api(status());
+    renderDashboard();
+    let sheet = await openAdmin("Base");
+    await close(sheet);
+    sheet = await openAdmin();
+    expect(selected(sheet)).toBe("Base");
+  });
+
+  it("follows a link to a section, shows where it is in the address, and leaves the page's address as it was", async () => {
+    history.replaceState(null, "", "/#admin/keys");
+    api(status());
+    renderDashboard();
+    const sheet = await screen.findByRole("dialog", { name: "Admin" });
+    expect(selected(sheet)).toBe("World");
+    // The world keys were asked for, so they are unfolded.
+    expect(await within(sheet).findByRole("switch", { name: "No map" })).toBeInTheDocument();
+    await settled();
+    await waitFor(() => expect(location.hash).toBe("#admin/keys"));
+    expect(sheetDepth()).toBe(1);
+    fireEvent.click(within(sheet).getByRole("tab", { name: "Server" }));
+    await waitFor(() => expect(location.hash).toBe("#admin/server"));
+    await close(sheet);
+    expect(location.hash).toBe("");
+    expect(sheetDepth()).toBe(0);
+  });
+
+  it("follows links to the parts moved off the server tab", async () => {
+    history.replaceState(null, "", "/#admin/you");
+    api(status());
+    renderDashboard();
+    const sheet = await screen.findByRole("dialog", { name: "Admin" });
+    expect(selected(sheet)).toBe("Players");
+    expect(within(sheet).getByRole("heading", { name: "You" })).toBeInTheDocument();
+  });
+
+  it("follows a link to a tab", async () => {
+    history.replaceState(null, "", "/#admin/base");
+    api(status());
+    renderDashboard();
+    const sheet = await screen.findByRole("dialog", { name: "Admin" });
+    expect(selected(sheet)).toBe("Base");
+    expect(within(sheet).getByRole("heading", { name: "Base helpers" })).toBeInTheDocument();
+  });
+
+  it("opens a link that arrives while the page runs, and Back returns to the phone's tab under the sheet", async () => {
+    history.replaceState(null, "", "/#settings");
+    api(status({ required: true, unlocked: false }));
+    renderDashboard();
+    const route = renderHook(() => useRoute());
+    await screen.findByRole("button", { name: "Admin" });
+    await act(async () => follow("/#admin/compat", "/#settings"));
+    const sheet = await screen.findByRole("dialog", { name: "Admin" });
+    expect(selected(sheet)).toBe("Server");
+    await settled();
+    await waitFor(() => expect(location.hash).toBe("#admin/compat"));
+    // A sheet over the admin sheet, closed by Back, lands on the admin sheet's entry: the phone keeps its tab.
+    fireEvent.click(within(sheet).getByRole("button", { name: "Unlock" }));
+    await screen.findByRole("dialog", { name: "Unlock" });
+    await settled();
+    await act(async () => {
+      history.back();
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Unlock" })).toBeNull());
+    await settled();
+    expect(route.result.current[0]).toBe("settings");
+    await act(async () => {
+      history.back();
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Admin" })).toBeNull(), { timeout: 4000 });
+    await settled();
+    expect(location.hash).toBe("#settings");
+    expect(route.result.current[0]).toBe("settings");
+  });
+
+  it("moves an open admin sheet to a link that arrives, instead of closing it", async () => {
+    history.replaceState(null, "", "/");
+    api(status());
+    renderDashboard();
+    await openAdmin("World");
+    await settled();
+    await act(async () => follow("/#admin/discord", "/#admin/world"));
+    await waitFor(() => expect(within(screen.getByRole("dialog", { name: "Admin" })).getByRole("tab", { selected: true })).toHaveTextContent("Server"), { timeout: 4000 });
+    await settled();
+    await waitFor(() => expect(location.hash).toBe("#admin/discord"));
+  });
+
+  it("reads the tab under the admin sheet's address as the one showing", async () => {
+    history.replaceState(null, "", "/");
+    api(status());
+    renderDashboard();
+    const route = renderHook(() => useRoute());
+    act(() => route.result.current[1]("saga"));
+    await waitFor(() => expect(location.hash).toBe("#saga"));
+    await openAdmin();
+    await settled();
+    await waitFor(() => expect(location.hash).toBe("#admin/players"));
+    // Going to the fire from here is a real move, not "already there".
+    act(() => route.result.current[1]("fire"));
+    await settled();
+    await waitFor(() => expect(location.hash).toBe(""));
+    expect(route.result.current[0]).toBe("fire");
+  });
+
+  it("keeps the remembered tab while the bridge is away", async () => {
+    localStorage.setItem("skald.admin.tab", "world");
+    api(status({}, { available: false, reason: "off" }));
+    renderDashboard();
+    const sheet = await openAdmin();
+    expect(selected(sheet)).toBe("Players");
+    await act(async () => {});
+    expect(localStorage.getItem("skald.admin.tab")).toBe("world");
+  });
+
+  it("keeps the page's entry when a link replaced it instead of stacking a new one", async () => {
+    history.replaceState(null, "", "/#saga");
+    api(status());
+    renderDashboard();
+    await screen.findByRole("button", { name: "Admin" });
+    await settled();
+    const go = vi.spyOn(history, "go");
+    // location.replace, or a service worker's navigate() that replaces: no entry to step back over.
+    await act(async () => {
+      history.replaceState(null, "", "/#admin/compat");
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+      window.dispatchEvent(new HashChangeEvent("hashchange", { oldURL: `${location.origin}/#saga`, newURL: location.href }));
+    });
+    const sheet = await screen.findByRole("dialog", { name: "Admin" });
+    expect(selected(sheet)).toBe("Server");
+    expect(go).not.toHaveBeenCalledWith(-1);
+    go.mockRestore();
+    await settled();
+    await close(sheet);
+    expect(location.hash).toBe("#saga");
+  });
+
+  it("gives the entry the page's address back when the admin sheet hands it to another sheet", async () => {
+    history.replaceState(null, "", "/#saga");
+    api(status());
+    renderDashboard();
+    const sheet = await openAdmin();
+    await settled();
+    await waitFor(() => expect(location.hash).toBe("#admin/players"));
+    fireEvent.click(within(sheet).getAllByRole("button", { name: /Ragnar/ })[0]!);
+    await screen.findByRole("dialog", { name: "Ragnar" });
+    await settled();
+    await waitFor(() => expect(location.hash).toBe("#saga"));
+    expect(sheetDepth()).toBe(1);
+  });
+
+  it("opens a link that arrives while another sheet is open", async () => {
+    api(status());
+    renderDashboard();
+    const sheet = await openAdmin();
+    fireEvent.click(within(sheet).getAllByRole("button", { name: /Ragnar/ })[0]!);
+    await screen.findByRole("dialog", { name: "Ragnar" });
+    await settled();
+    await act(async () => follow("/#admin/compat", "/"));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Ragnar" })).toBeNull(), { timeout: 4000 });
+    const admin = await screen.findByRole("dialog", { name: "Admin" });
+    expect(selected(admin)).toBe("Server");
+    await settled();
+    await waitFor(() => expect(location.hash).toBe("#admin/compat"));
+    await close(admin);
+    expect(location.hash).toBe("");
+  });
+
+  it("reopens the sheet on Forward onto its old address, without stepping back out", async () => {
+    api(status());
+    renderDashboard();
+    const sheet = await openAdmin("World");
+    await settled();
+    await waitFor(() => expect(location.hash).toBe("#admin/world"));
+    await close(sheet);
+    expect(location.hash).toBe("");
+    await act(async () => {
+      history.forward();
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    const again = await screen.findByRole("dialog", { name: "Admin" });
+    expect(selected(again)).toBe("World");
+    await settled();
+    await close(again);
+    expect(location.hash).toBe("");
+  });
+
+  it("takes an uppercase link too, and the phone keeps its tab", async () => {
+    history.replaceState(null, "", "/#saga");
+    api(status());
+    renderDashboard();
+    const route = renderHook(() => useRoute());
+    await screen.findByRole("button", { name: "Admin" });
+    await act(async () => follow("/#Admin/World", "/#saga"));
+    const sheet = await screen.findByRole("dialog", { name: "Admin" });
+    expect(selected(sheet)).toBe("World");
+    expect(route.result.current[0]).toBe("saga");
+  });
+
+  it("does not remember the tab a link opened, only one picked", async () => {
+    localStorage.setItem("skald.admin.tab", "world");
+    history.replaceState(null, "", "/#admin/compat");
+    api(status());
+    renderDashboard();
+    const sheet = await screen.findByRole("dialog", { name: "Admin" });
+    expect(selected(sheet)).toBe("Server");
+    await act(async () => {});
+    expect(localStorage.getItem("skald.admin.tab")).toBe("world");
+    fireEvent.click(within(sheet).getByRole("tab", { name: "Base" }));
+    expect(localStorage.getItem("skald.admin.tab")).toBe("base");
+  });
+
+  it("takes a tap on the tab shown in place of the remembered one while the bridge is away", async () => {
+    localStorage.setItem("skald.admin.tab", "world");
+    api(status({}, { available: false, reason: "off" }));
+    renderDashboard();
+    const sheet = await openAdmin();
+    expect(selected(sheet)).toBe("Players");
+    fireEvent.click(within(sheet).getByRole("tab", { name: "Players" }));
+    expect(localStorage.getItem("skald.admin.tab")).toBe("players");
+  });
+
+  it("gives back the page's own address when a link replaces the open admin sheet's entry", async () => {
+    history.replaceState(null, "", "/#saga");
+    api(status());
+    renderDashboard();
+    const route = renderHook(() => useRoute());
+    await openAdmin();
+    await settled();
+    await waitFor(() => expect(location.hash).toBe("#admin/players"));
+    await act(async () => {
+      // As Chromium does it: the replaced entry loses its state, popstate closes the sheets, then the hash change.
+      history.replaceState(null, "", "/#admin/compat");
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+      window.dispatchEvent(new HashChangeEvent("hashchange", { oldURL: `${location.origin}/#admin/players`, newURL: location.href }));
+    });
+    await waitFor(() => expect(within(screen.getByRole("dialog", { name: "Admin" })).getByRole("tab", { selected: true })).toHaveTextContent("Server"));
+    await settled();
+    await waitFor(() => expect(location.hash).toBe("#admin/compat"));
+    await close(screen.getByRole("dialog", { name: "Admin" }));
+    expect(location.hash).toBe("#saga");
+    expect(route.result.current[0]).toBe("saga");
+  });
+
+  describe("with the Navigation API", () => {
+    /** The browser's own word on how it got to the new hash, then the hash change. */
+    const arrive = (type: string, to: string, from: string) => {
+      const nav = (window as unknown as { navigation: EventTarget }).navigation;
+      nav.dispatchEvent(Object.assign(new Event("navigate"), { hashChange: true, navigationType: type }));
+      // Stacked either way, so the entry count alone would say "added" (no forward entries to prune).
+      history.pushState(null, "", location.href);
+      noteEntries();
+      history.pushState(null, "", to);
+      window.dispatchEvent(new HashChangeEvent("hashchange", { oldURL: `${location.origin}${from}`, newURL: location.href }));
+    };
+
+    it.each(["replace", "traverse"])("opens a %s link in place, whatever the entry count says", async (type) => {
+      vi.stubGlobal("navigation", new EventTarget());
+      history.replaceState(null, "", "/#saga");
+      api(status());
+      renderDashboard();
+      await screen.findByRole("button", { name: "Admin" });
+      await settled();
+      const go = vi.spyOn(history, "go");
+      await act(async () => arrive(type, "/#admin/raids", "/#saga"));
+      const sheet = await screen.findByRole("dialog", { name: "Admin" });
+      expect(selected(sheet)).toBe("World");
+      expect(go).not.toHaveBeenCalledWith(-1);
+      go.mockRestore();
+    });
+
+    it("steps back over a pushed link", async () => {
+      vi.stubGlobal("navigation", new EventTarget());
+      history.replaceState(null, "", "/#saga");
+      api(status());
+      renderDashboard();
+      await screen.findByRole("button", { name: "Admin" });
+      await settled();
+      const go = vi.spyOn(history, "go");
+      await act(async () => arrive("push", "/#admin/raids", "/#saga"));
+      const sheet = await screen.findByRole("dialog", { name: "Admin" });
+      expect(selected(sheet)).toBe("World");
+      expect(go).toHaveBeenCalledWith(-1);
+      go.mockRestore();
+      await settled();
+      await close(sheet);
+      expect(location.hash).toBe("#saga");
+    });
+  });
+
+  it("names the tabs in Polish", async () => {
+    api(status());
+    render(
+      <I18nProvider locale="pl">
+        <Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />
+      </I18nProvider>,
+    );
+    const sheet = await openAdmin();
+    expect(within(sheet).getByRole("tablist", { name: "Działy panelu admina" })).toBeInTheDocument();
+    expect(within(sheet).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Gracze", "Świat", "Baza", "Serwer"]);
+    fireEvent.click(within(sheet).getByRole("tab", { name: "Świat" }));
+    expect(within(sheet).getByRole("button", { name: /^Zaawansowane: lista kluczy/ })).toHaveAttribute("aria-expanded", "false");
+  });
 });
 
 describe("admin", () => {
@@ -216,7 +609,7 @@ describe("admin", () => {
     vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
     const calls = api(status({ notifyConfigured: true }));
     renderDashboard();
-    const dialog = await openAdmin();
+    const dialog = await openAdmin("Server");
     expect(within(dialog).getByText(/go to a Discord channel/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Send a test notification" }));
     expect(await screen.findByText("Test notification sent.")).toBeInTheDocument();
@@ -227,7 +620,7 @@ describe("admin", () => {
     vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
     api(status({ notifyConfigured: true }), () => Response.json({ ok: false, error: "busy" }, { status: 429, headers: { "Retry-After": "8" } }));
     renderDashboard();
-    const dialog = await openAdmin();
+    const dialog = await openAdmin("Server");
     fireEvent.click(within(dialog).getByRole("button", { name: "Send a test notification" }));
     expect(await screen.findByText("A test message was just sent. Try again in a few seconds.")).toBeInTheDocument();
   });
@@ -240,7 +633,7 @@ describe("admin", () => {
     vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
     api(status({ notifyConfigured: true }), answer);
     renderDashboard();
-    const dialog = await openAdmin();
+    const dialog = await openAdmin("Server");
     fireEvent.click(within(dialog).getByRole("button", { name: "Send a test notification" }));
     expect(await screen.findByText(text)).toBeInTheDocument();
   });
@@ -249,7 +642,7 @@ describe("admin", () => {
     vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
     api(status(), undefined, () => Response.json({ ok: true, source: "panel", masked: null, enabled: true, kinds: [...NOTIFY_KINDS] }));
     renderDashboard();
-    const dialog = await openAdmin();
+    const dialog = await openAdmin("Server");
     expect(await within(dialog).findByText(/Paste a Discord channel webhook/)).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Send a test notification" })).not.toBeInTheDocument();
   });
@@ -267,7 +660,7 @@ describe("admin", () => {
       return Response.json({ ok: true, ...cfg });
     });
     renderDashboard();
-    const dialog = await openAdmin();
+    const dialog = await openAdmin("Server");
     const field = await within(dialog).findByLabelText("Webhook URL");
     fireEvent.change(field, { target: { value: "https://example.com/hook" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save webhook" }));
@@ -292,7 +685,7 @@ describe("admin", () => {
     vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
     const calls = api(status({ notifyConfigured: true }), undefined, () => Response.json({ ok: true, source: "env", masked: "discord.com/api/webhooks/…4321/AbCd…", enabled: true, kinds: ["join_code"] }));
     renderDashboard();
-    const dialog = await openAdmin();
+    const dialog = await openAdmin("Server");
     expect(await within(dialog).findByText(/Set by the server environment/)).toBeInTheDocument();
     expect(within(dialog).getByText("discord.com/api/webhooks/…4321/AbCd…")).toBeInTheDocument();
     expect(within(dialog).queryByLabelText("Webhook URL")).not.toBeInTheDocument();
@@ -307,7 +700,7 @@ describe("admin", () => {
     vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
     const calls = api(status({ required: true, unlocked: false }), undefined, () => Response.json({ ok: true, source: "panel", masked: null, enabled: true, kinds: [] }));
     renderDashboard();
-    const dialog = await openAdmin();
+    const dialog = await openAdmin("Server");
     expect(within(dialog).getByText("Unlock to set the webhook and choose what goes out.")).toBeInTheDocument();
     expect(within(dialog).queryByLabelText("Webhook URL")).not.toBeInTheDocument();
     expect(calls.filter((c) => c.url === "/api/admin/notify")).toHaveLength(0);
@@ -319,7 +712,10 @@ describe("admin", () => {
     const sheet = await openAdmin();
     expect(within(sheet).queryByRole("textbox", { name: "Broadcast" })).not.toBeInTheDocument();
     expect(within(sheet).getByText(/Without the admin plugin, live commands are off/)).toBeInTheDocument();
+    // Nothing to do to the live world or a base without it: only the players' lists and the server.
+    expect(within(sheet).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Players", "Server"]);
     expect(await within(sheet).findByRole("heading", { name: "Admins and bans" })).toBeInTheDocument();
+    fireEvent.click(within(sheet).getByRole("tab", { name: "Server" }));
     expect(within(sheet).getByRole("heading", { name: "Restore a world backup" })).toBeInTheDocument();
     expect(within(sheet).getByText(/go to a Discord channel/)).toBeInTheDocument();
     expect(within(sheet).getByRole("button", { name: "Send a test notification" })).toBeEnabled();
@@ -391,7 +787,7 @@ describe("admin", () => {
   it("lists backups with the safety copies marked and opens the restore sheet", async () => {
     api(status());
     renderDashboard();
-    const sheet = await openAdmin();
+    const sheet = await openAdmin("Server");
     expect(await within(sheet).findByText("safety copy")).toBeInTheDocument();
     fireEvent.click(within(sheet).getAllByRole("button", { name: "Restore..." })[1]!);
     const restore = await screen.findByRole("dialog", { name: "Restore the world" });
@@ -401,7 +797,7 @@ describe("admin", () => {
   it("shows each backup's full date and time, never clipped", async () => {
     api(status());
     renderDashboard();
-    const sheet = await openAdmin();
+    const sheet = await openAdmin("Server");
     await within(sheet).findByText("safety copy");
     const i = makeI18n("en");
     for (const b of RESTORE.backups) {
@@ -431,7 +827,7 @@ describe("admin", () => {
   it("fills kilns with wood in one tap and says what happened", async () => {
     const calls = api(status(), () => Response.json({ ok: true, data: { kilns: 0, skipped: 0, full: 2, unloaded: 0, added: {} } }));
     renderDashboard();
-    const sheet = await openAdmin();
+    const sheet = await openAdmin("Base");
     fireEvent.click(within(sheet).getByRole("button", { name: "Fill kilns with wood" }));
     await waitFor(() => expect(calls.find((c) => c.url === "/api/admin/fill-kilns")).toBeTruthy());
     expect(calls.find((c) => c.url === "/api/admin/fill-kilns")!.body).toMatchObject({ radius: 50 });
@@ -455,7 +851,7 @@ describe("admin", () => {
   it("says on screen why Fill kilns, smelters and fermenters are off on an old bridge", async () => {
     api(status({}, { plugin: "0.2.1" }));
     renderDashboard();
-    const panel = await openAdmin();
+    const panel = await openAdmin("Base");
     for (const name of ["Fill kilns with wood", "Fill smelters", "Fill fermenters"]) {
       const b = within(panel).getByRole("button", { name });
       expect(b).toBeDisabled();
@@ -467,7 +863,7 @@ describe("admin", () => {
   it("keeps kilns and smelters on with bridge 0.3.x, and says why fermenters are off", async () => {
     api(status({}, { plugin: "0.3.0" }));
     renderDashboard();
-    const panel = await openAdmin();
+    const panel = await openAdmin("Base");
     expect(within(panel).getByRole("button", { name: "Fill kilns with wood" })).toBeEnabled();
     expect(within(panel).getByRole("button", { name: "Fill smelters" })).toBeEnabled();
     const ferment = within(panel).getByRole("button", { name: "Fill fermenters" });
@@ -478,7 +874,7 @@ describe("admin", () => {
   it("greys out a fill the agent does not list, and says to update the agent", async () => {
     api(status({}, { commands: ["fill-kilns", "fill-smelters", "repair"] }));
     renderDashboard();
-    const panel = await openAdmin();
+    const panel = await openAdmin("Base");
     expect(within(panel).getByRole("button", { name: "Fill smelters" })).toBeEnabled();
     const ferment = within(panel).getByRole("button", { name: "Fill fermenters" });
     expect(ferment).toBeDisabled();
@@ -490,7 +886,7 @@ describe("admin", () => {
       url === "/api/admin/refuel-fires" ? Response.json({ ok: true, data: { fires: 17, full: 2, unloaded: 0, byPrefab: { piece_groundtorch_wood: 10, piece_walltorch: 4, fire_pit: 3 }, near: "Freya", radius: 100 } }) : Response.json({ ok: true, data: {} }),
     );
     renderDashboard();
-    const panel = await openAdmin();
+    const panel = await openAdmin("Base");
     fireEvent.click(within(panel).getByRole("button", { name: "Refuel fires" }));
     const flow = await screen.findByRole("dialog", { name: "Refuel fires" });
     const radii = within(flow).getByRole("group", { name: "How far around?" });
@@ -544,7 +940,7 @@ describe("admin", () => {
   it("greys out Refuel fires on a bridge before 0.5.0 and says why, keeping the fills on", async () => {
     api(status({}, { plugin: "0.4.0" }));
     renderDashboard();
-    const panel = await openAdmin();
+    const panel = await openAdmin("Base");
     expect(within(panel).getByRole("button", { name: "Fill fermenters" })).toBeEnabled();
     const refuel = within(panel).getByRole("button", { name: "Refuel fires" });
     expect(refuel).toBeDisabled();
@@ -554,7 +950,7 @@ describe("admin", () => {
   it("greys out Refuel fires when the agent does not list it", async () => {
     api(status({}, { commands: ["fill-kilns", "fill-smelters", "fill-fermenters", "repair"] }));
     renderDashboard();
-    const panel = await openAdmin();
+    const panel = await openAdmin("Base");
     expect(within(panel).getByRole("button", { name: "Fill fermenters" })).toBeEnabled();
     const refuel = within(panel).getByRole("button", { name: "Refuel fires" });
     expect(refuel).toBeDisabled();
@@ -579,7 +975,7 @@ describe("admin", () => {
   it("fills smelters step by step: metal, coal, confirm, result", async () => {
     const calls = api(status(), () => Response.json({ ok: true, data: { smelters: 2, skipped: 1, full: 0, unloaded: 0, added: { IronScrap: 2 }, fuel: "Coal" } }));
     renderDashboard();
-    const panel = await openAdmin();
+    const panel = await openAdmin("Base");
     fireEvent.click(within(panel).getByRole("button", { name: "Fill smelters" }));
     const flow = await screen.findByRole("dialog", { name: "Fill smelters" });
     expect(within(flow).getByText(/Step 1 of 3/)).toBeInTheDocument();
@@ -608,7 +1004,7 @@ describe("admin", () => {
   it("says in the panel's words why the bridge refused a fill", async () => {
     api(status(), (url) => (url === "/api/admin/fill-smelters" ? Response.json({ ok: false, error: "no connected player 'Ragnar'" }, { status: 404 }) : Response.json({ ok: true, data: {} })));
     renderDashboard();
-    const panel = await openAdmin();
+    const panel = await openAdmin("Base");
     fireEvent.click(within(panel).getByRole("button", { name: "Fill smelters" }));
     const flow = await screen.findByRole("dialog", { name: "Fill smelters" });
     fireEvent.click(within(await within(flow).findByRole("list", { name: "Which metal?" })).getByRole("button", { name: /Scrap iron/ }));
@@ -622,7 +1018,7 @@ describe("admin", () => {
     const calls = api(status());
     renderDashboard();
     const run = async (ore: RegExp, coal: string, summary: string) => {
-      const panel = await openAdmin();
+      const panel = await openAdmin("Base");
       fireEvent.click(within(panel).getByRole("button", { name: "Fill smelters" }));
       const flow = await screen.findByRole("dialog", { name: "Fill smelters" });
       fireEvent.click(await within(flow).findByRole("button", { name: ore }));
@@ -647,7 +1043,7 @@ describe("admin", () => {
   it("fills fermenters with a mead base picked from the icons", async () => {
     const calls = api(status());
     renderDashboard();
-    const panel = await openAdmin();
+    const panel = await openAdmin("Base");
     fireEvent.click(within(panel).getByRole("button", { name: "Fill fermenters" }));
     const flow = await screen.findByRole("dialog", { name: "Fill fermenters" });
     const bases = await within(flow).findByRole("list", { name: "Which mead base?" });
@@ -682,7 +1078,7 @@ describe("admin", () => {
   it("asks a view-only session to unlock before it lists the ores", async () => {
     const calls = api(status({ required: true, unlocked: false }));
     renderDashboard();
-    const panel = await openAdmin();
+    const panel = await openAdmin("Base");
     fireEvent.click(within(panel).getByRole("button", { name: "Fill fermenters" }));
     const flow = await screen.findByRole("dialog", { name: "Fill fermenters" });
     expect(within(flow).getByText("Unlock admin to see what the stations take.")).toBeInTheDocument();
@@ -719,7 +1115,7 @@ describe("admin", () => {
       n === 0 ? Response.json({ ok: false, error: "admin_required" }, { status: 403 }) : Response.json({ ok: true, data: { started: true } }),
     );
     renderDashboard();
-    const sheet = await openAdmin();
+    const sheet = await openAdmin("World");
     expect(within(sheet).getByText("View only")).toBeInTheDocument();
     fireEvent.click(within(sheet).getByRole("button", { name: "Save the world now" }));
     const unlock = await screen.findByRole("dialog", { name: "Unlock" });
@@ -789,7 +1185,10 @@ describe("admin", () => {
   it("sets a world key only on a second tap", async () => {
     const calls = api(status());
     renderDashboard();
-    const sheet = await openAdmin();
+    const sheet = await openAdmin("World");
+    // Folded away under Advanced until asked for.
+    expect(within(sheet).queryByRole("switch", { name: "No map" })).toBeNull();
+    fireEvent.click(within(sheet).getByRole("button", { name: /^Advanced: the key list/ }));
     const nomap = await within(sheet).findByRole("switch", { name: "No map" });
     await waitFor(() => expect(nomap).toBeEnabled());
     fireEvent.click(nomap);
@@ -802,7 +1201,7 @@ describe("admin", () => {
   it("starts a raid only on a second tap", async () => {
     const calls = api(status());
     renderDashboard();
-    const sheet = await openAdmin();
+    const sheet = await openAdmin("World");
     fireEvent.click(await within(sheet).findByRole("button", { name: "You are being hunted..." }));
     const start = within(sheet).getByRole("button", { name: /^Start / });
     fireEvent.click(start);
@@ -1078,8 +1477,37 @@ describe("in Polish", () => {
         <Dashboard live={{ state: fixture(), logs: createLogStore(), online: true, lastAction: null }} onLogout={async () => "ok" as const} />
       </I18nProvider>,
     );
-    const sheet = await openAdmin();
+    const sheet = await openAdmin("Świat");
     expect(within(sheet).getByText("Komunikat")).toBeInTheDocument();
     expect(within(sheet).getByRole("button", { name: "Przewiń do rana" })).toBeInTheDocument();
+  });
+});
+
+// Fakes timers, so it runs last: a sheet's closing slide never finishes after it.
+describe("a link the admin layer never answers for (#153)", () => {
+  it("is dropped after half a minute instead of opening much later", async () => {
+    let up = false;
+    const st = status();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => (String(url) === "/api/admin/status" && up ? Response.json(st) : new Response("{}", { status: 503 }))),
+    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      history.replaceState(null, "", "/#admin/compat");
+      renderDashboard();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(31_000);
+      });
+      up = true;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(21_000);
+      });
+      // The admin layer answers now (the header shows its button), but the link is gone.
+      await screen.findByRole("button", { name: "Admin" });
+      expect(screen.queryByRole("dialog", { name: "Admin" })).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

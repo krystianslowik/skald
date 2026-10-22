@@ -289,7 +289,9 @@ export function notificationsFor(items: readonly Item[], prefs: PushPrefs, ctx: 
     if (it.kind === "compat") return [s[`compat.${it.result.status}` as Key] ?? ""].filter(Boolean);
     return [];
   });
-  if (updates.length > 0) out.push({ title: s["update.title"], body: clip(updates.join("\n")), tag: "update", url: "/" });
+  // A compatibility check opens the admin sheet at its details.
+  const checked = mine.some((it) => it.kind === "compat");
+  if (updates.length > 0) out.push({ title: s["update.title"], body: clip(updates.join("\n")), tag: "update", url: checked ? "/#admin/compat" : "/" });
   return out;
 }
 

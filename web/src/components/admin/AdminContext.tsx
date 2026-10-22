@@ -1,12 +1,14 @@
 import { createContext, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AdminCatalog, AdminCommand, AdminStatus, AgentEvent, ApiState, CompatView, MapContainer, Platform, RestoreBackup, SafeRestartRun } from "../../types";
 import { getAdminStatus, postAdmin, runAdmin, type AdminOutcome, type KitLine } from "../../lib/admin";
+import { entryAdded, noteEntries, traverse } from "../../lib/sheetHistory";
 import { Unauthorized } from "../../lib/api";
 import { failText } from "../../lib/refusal";
 import { useWorldMap } from "../../lib/useWorldMap";
 import { useI18n, type TextKey } from "../../i18n";
 import { compareVersions } from "@server/version";
 import { lazyChunk, preload } from "../../lib/chunks";
+import { isAdminHash, pageUnderSheet, parseAdminHash, type AdminTab, type PanelLink, type PanelSection } from "../../lib/adminTabs";
 import { ChunkBoundary } from "../ErrorBoundary";
 
 const AdminSheets = lazyChunk(() => import("./AdminSheets"), "AdminSheets");
@@ -26,8 +28,7 @@ export interface FillChoice {
   coal: "both" | "ore" | "coal" | null;
 }
 
-/** A part of the admin sheet it can open at (the compatibility notice's details). */
-export type PanelSection = "compat";
+export type { AdminTab, PanelSection };
 
 /**
  * A sheet the admin layer shows; only one at a time, the unlock sheet over
@@ -35,7 +36,7 @@ export type PanelSection = "compat";
  * aside while the map is open, then comes back with it).
  */
 export type AdminView = (
-  | { kind: "panel"; section?: PanelSection }
+  | { kind: "panel"; tab?: AdminTab; section?: PanelSection; link?: number }
   | { kind: "player"; name: string }
   | { kind: "items"; target: Target; lines?: KitLine[] }
   | { kind: "creatures"; target: Target }
@@ -234,8 +235,8 @@ export function AdminProvider({
   const startPick = useCallback(
     (req: PickRequest) => {
       setView((v) => {
-        // Coming back from the map returns to the tools, not to the section the sheet first opened at.
-        pickFrom.current = v?.kind === "panel" ? { ...v, section: undefined } : v;
+        // Coming back from the map returns to the tab it was on (remembered), not to where the sheet first opened.
+        pickFrom.current = v?.kind === "panel" ? { ...v, tab: undefined, section: undefined } : v;
         return null;
       });
       setPick(req);
@@ -273,6 +274,90 @@ export function AdminProvider({
 
   const bridge = status?.bridge;
   const present = !!status;
+
+  // A link into the admin sheet (`#admin/compat`, from a notice or a push) is opened once the
+  // admin layer answers, from the page's own entry, so closing the sheet never lands on the
+  // link again. While open, the sheet's own entry carries the address (AdminPanel). A link
+  // the admin layer never answers for is dropped after LINK_MS.
+  const link = useRef<PanelLink | null>(null);
+  const [linked, setLinked] = useState(0);
+  useEffect(() => {
+    let drop: ReturnType<typeof setTimeout> | undefined;
+    const hold = (l: PanelLink) => {
+      link.current = l;
+      clearTimeout(drop);
+      drop = setTimeout(() => (link.current = null), LINK_MS);
+      setLinked((n) => n + 1);
+    };
+    // The page's address to go back to: the one under the open admin sheet when the link came from its address.
+    const page = (from: string) => (isAdminHash(from) ? (pageUnderSheet() ?? location.pathname + location.search) : location.pathname + location.search + from);
+    const loaded = parseAdminHash(location.hash);
+    if (loaded) {
+      // Loaded at the link: nothing of ours beneath, so the entry itself becomes the fire.
+      history.replaceState(history.state, "", page(""));
+      hold(loaded);
+    }
+    noteEntries();
+    // How the browser got to the new hash, where it says (the Navigation API).
+    let how: string | null = null;
+    const nav = (window as { navigation?: EventTarget }).navigation;
+    const onNavigate = (e: Event) => {
+      const n = e as Event & { hashChange?: boolean; navigationType?: string };
+      if (n.hashChange) how = n.navigationType ?? null;
+    };
+    nav?.addEventListener("navigate", onNavigate);
+    let stepping = false;
+    const onHash = (e: HashChangeEvent) => {
+      const type = how;
+      how = null;
+      if (stepping) return;
+      const l = parseAdminHash(location.hash);
+      if (!l) return noteEntries();
+      const added = type ? type === "push" : entryAdded();
+      if (!added) {
+        // The entry was replaced, or reached through Back or Forward: it stays, as the page's own.
+        let from = "";
+        try {
+          from = new URL(e.oldURL).hash;
+        } catch {
+          // no previous address: the fire
+        }
+        history.replaceState(history.state, "", page(from));
+        noteEntries();
+        return hold(l);
+      }
+      // Stacked as a new entry (a tapped notification), over a sheet's entry if one was open:
+      // step back to the page's entry, tab and all. The entries left above go with the next push.
+      stepping = true;
+      const step = (left: number) => {
+        const from = location.href;
+        traverse(-1, () => {
+          if (isAdminHash(location.hash) && location.href !== from && left > 0) return step(left - 1);
+          // Nowhere further back: the entry itself becomes the fire.
+          if (isAdminHash(location.hash)) history.replaceState(history.state, "", page(""));
+          stepping = false;
+          noteEntries();
+          hold(l);
+        });
+      };
+      step(8);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => {
+      clearTimeout(drop);
+      window.removeEventListener("hashchange", onHash);
+      nav?.removeEventListener("navigate", onNavigate);
+    };
+  }, []);
+  // Opened as a fresh panel over whatever shows: some browsers close every open sheet on
+  // the way (popstate), others do not. The new panel takes the sheet's entry either way, and a
+  // sheet still sliding out is replaced before it can finish closing.
+  useEffect(() => {
+    if (!present || !link.current) return;
+    const l = link.current;
+    link.current = null;
+    setView({ kind: "panel", ...l, link: linked });
+  }, [present, linked]);
   const bridgeOn = !!bridge && bridge.reason !== "off";
   let blocker: Blocker = null;
   if (!online) blocker = "offline";
@@ -334,6 +419,9 @@ export function AdminProvider({
   );
 }
 
+/** A link into the admin sheet waits this long for the admin layer to answer, then is dropped. */
+const LINK_MS = 30_000;
+
 /** Gap between a sheet's header and the first toast (px). */
 const TOAST_GAP = 8;
 
@@ -351,7 +439,8 @@ export function toastTop(headers: readonly { top: number; bottom: number }[], vi
 function Toasts({ toasts }: { toasts: Toast[] }) {
   const [top, setTop] = useState<number | null>(null);
   const shown = toasts.length > 0;
-  // Sheets are portaled to the body and their headers are the dialog's own <header>. While toasts
+  // Sheets are portaled to the body and their headers are the dialog's own <header>, with the
+  // strip pinned under it (the admin sheet's tabs) counted in. While toasts
   // show, the stack follows them every frame: a sheet that opens, closes, slides or is dragged.
   useLayoutEffect(() => {
     if (!shown) {
@@ -360,7 +449,7 @@ function Toasts({ toasts }: { toasts: Toast[] }) {
     }
     let frame = 0;
     const measure = () => {
-      const headers = [...document.querySelectorAll<HTMLElement>('[role="dialog"] > header')].map((h) => h.getBoundingClientRect());
+      const headers = [...document.querySelectorAll<HTMLElement>('[role="dialog"] > header, [role="dialog"] > [data-sheet-subheader]')].map((h) => h.getBoundingClientRect());
       setTop(toastTop(headers, window.innerHeight));
       frame = requestAnimationFrame(measure);
     };
