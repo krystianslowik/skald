@@ -18,12 +18,22 @@ function peak(points: SeriesPoint[] | undefined): number {
   return m;
 }
 
-function Gauge({ title, value, children }: { title: string; value: string | null; children: React.ReactNode }) {
+function Gauge({ title, value, of, children }: { title: string; value: string | null; of?: string; children: React.ReactNode }) {
+  const { t } = useI18n();
   return (
     <div className="min-w-0">
       <div className="mb-2 flex items-baseline justify-between gap-2">
         <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-label">{title}</h3>
-        <span className="text-sm font-bold tabular-nums text-flame">{value ?? "?"}</span>
+        <span className="text-sm font-bold tabular-nums text-flame">
+          {value ?? "?"}
+          {of && (
+            <span className="font-normal text-ash">
+              <span aria-hidden> / </span>
+              <span className="sr-only"> {t("forge.of")} </span>
+              {of}
+            </span>
+          )}
+        </span>
       </div>
       {children}
     </div>
@@ -32,19 +42,39 @@ function Gauge({ title, value, children }: { title: string; value: string | null
 
 /**
  * A HUD resource bar in the game's style (health, stamina and eitr bars).
- * There is no CPU or memory limit to measure against, so the fill is the current
- * value as a share of the 6-hour peak; the label says so.
+ * With a known limit (the game container's memory limit) the fill is the
+ * current value as a share of it, and the 6-hour peak is a tick on the bar.
+ * Without one (CPU and network have none; memory when the agent was not told
+ * the limit) the fill is the current value as a share of the 6-hour peak.
+ * The label says which.
  */
-function Meter({ kind, points, value, label }: { kind: "hp" | "stamina" | "eitr"; points: SeriesPoint[]; value: string; label: string }) {
+function Meter({
+  kind,
+  points,
+  value,
+  label,
+  limit = 0,
+  format = String,
+}: {
+  kind: "hp" | "stamina" | "eitr";
+  points: SeriesPoint[];
+  value: string;
+  label: string;
+  limit?: number;
+  format?: (n: number) => string;
+}) {
   const { t } = useI18n();
   const top = peak(points);
   const now = last(points) ?? 0;
-  const frac = top > 0 ? Math.min(1, now / top) : 0;
+  const max = limit > 0 ? limit : top;
+  const frac = max > 0 ? Math.min(1, now / max) : 0;
   const pct = Math.round(frac * 100);
-  const text = t("forge.meter", { value, pct });
+  const mark = limit > 0 && top > 0 ? Math.min(1, top / limit) : null;
+  const text = limit > 0 ? t("forge.meterLimit", { value, pct, limit: format(limit), peak: format(top) }) : t("forge.meter", { value, pct });
   return (
     <div role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-valuetext={text} title={text} className={`meter meter-${kind} mb-2 h-3.5`}>
       <span className="meter-fill" style={{ transform: `scaleX(${frac})` }} />
+      {mark !== null && <span aria-hidden data-testid="meter-peak" className="meter-mark" style={{ left: `clamp(0px, calc(${(mark * 100).toFixed(2)}% - 1px), calc(100% - 2px))` }} />}
       <span aria-hidden className="meter-value">
         {value}
       </span>
@@ -127,7 +157,7 @@ export const Forge = memo(function Forge({
   server: ApiState["server"];
   world: ApiState["world"];
 }) {
-  const { t, tn, lookup, number, bytes, rate, clock, modifiers } = useI18n();
+  const { t, tn, lookup, number, bytes, ibytes, rate, clock, modifiers } = useI18n();
   const empty = t("forge.promDown");
   // Stable chart inputs: the charts only redraw when their own series change.
   const charts = useMemo(
@@ -160,7 +190,11 @@ export const Forge = memo(function Forge({
     return out;
   }, [modifiers, lookup, server.args, worldMods, worldKeys]);
   const cpuNow = m ? cores(last(m.cpu) ?? 0) : null;
-  const memNow = m ? bytes(last(m.memory) ?? 0) : null;
+  // Memory in binary units, as its limit is written (6Gi reads "6.0 GiB").
+  const memNow = m ? ibytes(last(m.memory) ?? 0) : null;
+  // Older agents leave the limit out; null or 0 means unknown. Without
+  // samples there is nothing to set against it either.
+  const memCap = m && m.memory.length > 0 ? Math.max(0, server.memoryLimitBytes ?? 0) : 0;
   const rxNow = m ? rate(last(m.rx) ?? 0) : null;
   return (
     <div className="space-y-6">
@@ -174,9 +208,9 @@ export const Forge = memo(function Forge({
             <Chart label={t("forge.cpuLabel")} series={charts.cpu} format={cores} timeFormat={clock} empty={empty} ticks={hours} />
             <Legend items={[{ color: "#e0484b", label: t("forge.legendCpu") }]} />
           </Gauge>
-          <Gauge title={t("forge.memory")} value={memNow}>
-            <Meter kind="stamina" points={m?.memory ?? []} value={memNow ?? "?"} label={t("forge.memory")} />
-            <Chart label={t("forge.memoryLabel")} series={charts.memory} format={bytes} timeFormat={clock} empty={empty} ticks={hours} />
+          <Gauge title={t("forge.memory")} value={memNow} of={memCap > 0 ? ibytes(memCap) : undefined}>
+            <Meter kind="stamina" points={m?.memory ?? []} value={memNow ?? "?"} label={t("forge.memory")} limit={memCap} format={ibytes} />
+            <Chart label={t("forge.memoryLabel")} series={charts.memory} format={ibytes} timeFormat={clock} empty={empty} ticks={hours} />
             <Legend items={[{ color: "#d9b44a", label: t("forge.legendMemory") }]} />
           </Gauge>
           <Gauge title={t("forge.network")} value={rxNow}>

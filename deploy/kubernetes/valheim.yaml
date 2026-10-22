@@ -98,6 +98,12 @@ spec:
             # Seeds the password shown on the dashboard before the first save.
             - name: PASSWORD_FILE
               value: /secrets/server-pass
+            # The game container's memory limit, for the Forge's memory bar.
+            # Keep it only while the game below sets limits.memory: without
+            # one, Kubernetes hands over the node's allocatable memory.
+            - name: GAME_MEMORY_LIMIT
+              valueFrom:
+                resourceFieldRef: {containerName: valheim, resource: limits.memory}
           resources:
             requests:
               cpu: 20m

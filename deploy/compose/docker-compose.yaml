@@ -188,6 +188,9 @@ services:
       TERRAIN_DIR: /terrain
       # The admin bridge; empty leaves the bridge routes off.
       BRIDGE_TOKEN: ${BRIDGE_TOKEN:-}
+      # The game's memory limit for the memory bar; empty measures against
+      # the 6-hour peak.
+      GAME_MEMORY_LIMIT: ${GAME_MEMORY_LIMIT:-}
     secrets: [server_pass]
     volumes:
       - valheim-config:/config:ro

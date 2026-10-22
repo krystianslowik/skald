@@ -315,6 +315,8 @@ export class MockAgent implements AgentSource {
         playersReported: 2,
         playfab: "ok",
         netStats: null,
+        // As the example manifest sets it: limits.memory 6Gi on the game.
+        memoryLimitBytes: 6 * 1024 ** 3,
       },
       // Two warriors already at the fire when the dev server starts.
       players: [

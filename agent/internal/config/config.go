@@ -2,6 +2,8 @@ package config
 
 import (
 	"errors"
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -57,6 +59,15 @@ type Config struct {
 	// BridgeTestedBuilds are game builds admin commands may run on without
 	// an acknowledgement from the panel; "*" allows any.
 	BridgeTestedBuilds []string
+	// GameMemoryLimit is the game container's memory limit in bytes; 0 when
+	// unknown. The agent is a sidecar with its own cgroup, so its
+	// /sys/fs/cgroup/memory.max is the agent's limit, not the game's: the
+	// value comes in through GAME_MEMORY_LIMIT (the downward API in
+	// Kubernetes).
+	GameMemoryLimit int64
+	// Warnings are settings that could not be read and fell back to their
+	// default; the caller logs them.
+	Warnings []string
 }
 
 func Load() (Config, error) {
@@ -93,6 +104,13 @@ func Load() (Config, error) {
 		c.TerrainCacheMB = v
 	}
 	c.TerrainBake = parseBool(os.Getenv("TERRAIN_BAKE"), true)
+	if v := os.Getenv("GAME_MEMORY_LIMIT"); v != "" {
+		n, ok := parseBytes(v)
+		if !ok {
+			c.Warnings = append(c.Warnings, fmt.Sprintf("GAME_MEMORY_LIMIT %q unreadable (want bytes, or a Ki/Mi/Gi/Ti or k/M/G/T suffix): the memory bar measures against the 6-hour peak", v))
+		}
+		c.GameMemoryLimit = n
+	}
 	if c.AgentToken == "" {
 		return c, errors.New("AGENT_TOKEN is required")
 	}
@@ -108,6 +126,39 @@ func parseBool(v string, def bool) bool {
 		return false
 	}
 	return def
+}
+
+// byteUnits are the Kubernetes quantity suffixes a memory limit may carry.
+var byteUnits = []struct {
+	suffix string
+	mult   int64
+}{
+	{"Ki", 1 << 10}, {"Mi", 1 << 20}, {"Gi", 1 << 30}, {"Ti", 1 << 40},
+	{"k", 1e3}, {"M", 1e6}, {"G", 1e9}, {"T", 1e12},
+}
+
+// parseBytes reads a byte count as the downward API writes it (plain bytes)
+// or with a Kubernetes suffix ("6Gi", "512Mi", "6G"). Empty, "max" and zero
+// ("0", "0Gi") are 0, no limit, and ok. Anything else that does not read as
+// a positive count (Docker's "6g", "1.5Gi", negative, overflow) is 0 and
+// not ok.
+func parseBytes(v string) (int64, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" || v == "max" {
+		return 0, true
+	}
+	mult := int64(1)
+	for _, u := range byteUnits {
+		if n, ok := strings.CutSuffix(v, u.suffix); ok {
+			v, mult = n, u.mult
+			break
+		}
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 || n > math.MaxInt64/mult {
+		return 0, false
+	}
+	return n * mult, true
 }
 
 // splitList reads a comma- or space-separated list; empty entries are dropped.

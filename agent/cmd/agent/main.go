@@ -42,6 +42,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	for _, w := range cfg.Warnings {
+		logger.Warn(w)
+	}
 	hub := events.New(events.DefaultRingSize, events.DefaultLogSize)
 	tracker := state.New(hub)
 
@@ -180,6 +183,8 @@ func main() {
 		Crossplay:  crossplay,
 		Logger:     logger,
 		Version:    version,
+
+		MemoryLimit: cfg.GameMemoryLimit,
 	})
 	srv = s
 	go checker.Run(ctx, 5*time.Second)

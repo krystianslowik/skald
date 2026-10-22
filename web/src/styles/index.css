@@ -575,6 +575,17 @@ body {
 .meter-stamina .meter-fill { background: linear-gradient(180deg, #e6c45a, var(--stamina) 45%, var(--stamina-lo)); }
 .meter-eitr .meter-fill { background: linear-gradient(180deg, var(--eitr-hi), var(--eitr) 50%, #6e1e5f); }
 .meter-hp .meter-fill { background: linear-gradient(90deg, var(--hp-lo), var(--hp) 30%, var(--hp-hi) 60%, var(--hp) 85%, var(--hp-lo)); }
+/* A secondary mark on a meter (the 6-hour peak on the memory bar). */
+.meter-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 2px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7);
+  opacity: 0.85;
+}
 .meter-value {
   position: absolute;
   inset: 0;
