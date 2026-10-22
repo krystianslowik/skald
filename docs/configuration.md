@@ -176,7 +176,7 @@ Webhook, Copy Webhook URL), skald-web posts short messages to that channel, in
 the `SKALD_LOCALE` language. There are two ways to give it one:
 
 - **The admin sheet** (the usual way). Paste the webhook URL into the Discord
-  section and save, then send a test message. The same section turns
+  section of the Server tab and save, then send a test message. The same section turns
   notifications on and off and picks which kinds go out. Only an admin can
   see or change it (with `ADMIN_PASSWORD_HASH` set, an unlocked admin
   session). The URL is kept in skald-web's database (`DB_PATH`), so it
@@ -309,7 +309,8 @@ writable `SETTINGS_DIR` it is kept in memory only, and an agent restart
 forgets the build before: a game update that comes with a pod restart (the
 usual case when the agent runs next to the game) is then checked as a first
 start, without "updated from", the Discord summary or the second save check. Everyone signed in to the
-panel sees the result: a section in the admin sheet, and after a check that
+panel sees the result: a section on the admin sheet's Server tab (a link to
+`#admin/compat` opens it there), and after a check that
 warns or fails, a notice at the top of the dashboard that each device can
 dismiss until the next check. Running it again needs an admin (with
 `ADMIN_PASSWORD_HASH`, an unlocked admin session) and is written to the Saga.
@@ -321,7 +322,7 @@ as metrics (`skald_compat_*`, see [metrics](metrics.md)) and serves it at
 
 Every image knows the Skald release it was built from (`2026.10.0`; a local
 build says `dev`). The panel shows it in small print under the phone's
-Settings tab and at the foot of the admin sheet. The agent and skald-web are
+Settings tab and at the foot of the admin sheet's Server tab. The agent and skald-web are
 deployed separately, so when their releases differ the same place says so,
 for example "Agent 2026.10.0, panel 2026.11.0: update the other part so they
 match". A `dev` build never warns, and neither does an agent from before
@@ -855,7 +856,7 @@ behind your access layer, or set an admin password:
 ## Admins, bans and world restore
 
 The admin sheet also edits the game's `adminlist.txt` and `bannedlist.txt`
-and restores world backups. Neither needs the bridge, so the sheet opens even
+(Players tab) and restores world backups (Server tab). Neither needs the bridge, so the sheet opens even
 without one. Both are admin-only: with `ADMIN_PASSWORD_HASH` set, even
 reading the lists needs an unlocked admin session, because they show raw
 platform ids. Ids never reach `/api/state`, the event stream or the Saga,
@@ -963,7 +964,7 @@ never pruned; delete old ones yourself.
 
 ### Safe restart
 
-The admin sheet's **Safe restart** restarts the server the way you would by
+**Safe restart**, on the admin sheet's Server tab, restarts the server the way you would by
 hand, as one run that every admin sees step by step and that lands in the
 Saga. It needs the admin password (when one is set) and a long press. You
 choose:

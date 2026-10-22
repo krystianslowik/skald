@@ -1,6 +1,7 @@
 import { createContext, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AdminCatalog, AdminCommand, AdminStatus, AgentEvent, ApiState, CompatView, MapContainer, Platform, RestoreBackup, SafeRestartRun } from "../../types";
 import { getAdminStatus, postAdmin, runAdmin, type AdminOutcome, type KitLine } from "../../lib/admin";
+import { traverse } from "../../lib/sheetHistory";
 import { Unauthorized } from "../../lib/api";
 import { failText } from "../../lib/refusal";
 import { useWorldMap } from "../../lib/useWorldMap";
@@ -274,39 +275,52 @@ export function AdminProvider({
   const bridge = status?.bridge;
   const present = !!status;
 
-  // A link into the admin sheet (`#admin/compat`, from a notice or a push): taken off the
-  // page's own address at once, so closing the sheet does not land on it again, and
-  // opened once the admin layer answers. While open, the sheet's own entry carries it.
+  // A link into the admin sheet (`#admin/compat`, from a notice or a push) is opened once the
+  // admin layer answers, from the page's own entry, so closing the sheet never lands on the
+  // link again. While open, the sheet's own entry carries the address (AdminPanel).
   const link = useRef<PanelLink | null>(null);
   const [linked, setLinked] = useState(0);
   useEffect(() => {
-    const take = (back: string) => {
-      const l = parseAdminHash(location.hash);
-      if (!l) return;
-      history.replaceState(history.state, "", back);
+    const l = parseAdminHash(location.hash);
+    if (l) {
+      // Loaded at the link: nothing of ours beneath, so the entry itself becomes the fire.
+      history.replaceState(history.state, "", location.pathname + location.search);
       link.current = l;
       setLinked((n) => n + 1);
-    };
-    take(location.pathname + location.search);
-    // Followed while the panel runs (a tapped notification): back to the tab it came from.
-    const onHash = (e: HashChangeEvent) => {
-      let from = "";
-      try {
-        from = new URL(e.oldURL).hash;
-      } catch {
-        // no previous address: the fire
-      }
-      take(location.pathname + location.search + (isAdminHash(from) ? "" : from));
+    }
+    // Followed while the page runs (a tapped notification): the browser stacked an entry for it,
+    // over a sheet's entry if one was open. Step back to the page's entry, tab and all; the
+    // entries left above go with the sheet's next push.
+    let stepping = false;
+    const onHash = () => {
+      const l = parseAdminHash(location.hash);
+      if (stepping || !l) return;
+      link.current = l;
+      stepping = true;
+      const step = (left: number) => {
+        const from = location.href;
+        traverse(-1, () => {
+          if (isAdminHash(location.hash) && location.href !== from && left > 0) return step(left - 1);
+          // Nowhere further back: the entry itself becomes the fire.
+          if (isAdminHash(location.hash)) history.replaceState(history.state, "", location.pathname + location.search);
+          stepping = false;
+          setLinked((n) => n + 1);
+        });
+      };
+      step(8);
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+  // A browser that follows a link fires popstate first, which closes every open sheet: the
+  // link waits until they are gone, so a sheet still sliding out cannot close it again.
+  const idle = view === null;
   useEffect(() => {
-    if (!present || !link.current) return;
+    if (!present || !idle || !link.current) return;
     const l = link.current;
     link.current = null;
     setView({ kind: "panel", ...l });
-  }, [present, linked]);
+  }, [present, idle, linked]);
   const bridgeOn = !!bridge && bridge.reason !== "off";
   let blocker: Blocker = null;
   if (!online) blocker = "offline";
@@ -385,7 +399,8 @@ export function toastTop(headers: readonly { top: number; bottom: number }[], vi
 function Toasts({ toasts }: { toasts: Toast[] }) {
   const [top, setTop] = useState<number | null>(null);
   const shown = toasts.length > 0;
-  // Sheets are portaled to the body and their headers are the dialog's own <header>. While toasts
+  // Sheets are portaled to the body and their headers are the dialog's own <header>, with the
+  // strip pinned under it (the admin sheet's tabs) counted in. While toasts
   // show, the stack follows them every frame: a sheet that opens, closes, slides or is dragged.
   useLayoutEffect(() => {
     if (!shown) {
@@ -394,7 +409,7 @@ function Toasts({ toasts }: { toasts: Toast[] }) {
     }
     let frame = 0;
     const measure = () => {
-      const headers = [...document.querySelectorAll<HTMLElement>('[role="dialog"] > header')].map((h) => h.getBoundingClientRect());
+      const headers = [...document.querySelectorAll<HTMLElement>('[role="dialog"] > header, [role="dialog"] > [data-sheet-subheader]')].map((h) => h.getBoundingClientRect());
       setTop(toastTop(headers, window.innerHeight));
       frame = requestAnimationFrame(measure);
     };

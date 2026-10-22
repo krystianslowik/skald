@@ -55,25 +55,16 @@ export function AdminPanel({ picked, tab: asked, section, onClose }: { picked?: 
     if (canRead) reload();
   }, [canRead, reload]);
 
-  // The section asked for, until another tab is picked.
+  // The section asked for, until another tab is picked. A link always opens a fresh sheet
+  // (AdminContext waits for open sheets to close), so these are read once.
   const [at, setAt] = useState(section);
   const [chosen, setChosen] = useState<AdminTab>(() => (section ? tabOf(section) : (asked ?? rememberedTab() ?? "players")));
-  // A new link while open (a tapped notification) moves the sheet there.
-  const first = useRef(true);
-  useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return;
-    }
-    if (!section && !asked) return;
-    setAt(section);
-    setChosen(section ? tabOf(section) : asked!);
-  }, [section, asked]);
   const bridgeOn = admin?.bridgeOn ?? false;
   const tabs = bridgeOn ? ADMIN_TABS : NO_BRIDGE_TABS;
   const tab = tabs.includes(chosen) ? chosen : tabs[0]!;
   const opened = at && tabOf(at) === tab ? at : undefined;
-  useEffect(() => rememberTab(tab), [tab]);
+  // What was picked, not what shows: a bridge that is briefly away must not overwrite it.
+  useEffect(() => rememberTab(chosen), [chosen]);
   useScrollToSection(opened);
   useAddress(opened ?? tab);
   const top = useRef<HTMLDivElement>(null);

@@ -38,12 +38,12 @@ const isTab = (s: string): s is AdminTab => (ADMIN_TABS as readonly string[]).in
 const isSection = (s: string): s is PanelSection => Object.hasOwn(PANEL_SECTIONS, s);
 
 /** Whether a URL hash points into the admin sheet (`#admin`, `#admin/...`). */
-export const isAdminHash = (hash: string): boolean => /^#?admin(\/|$)/.test(hash);
+export const isAdminHash = (hash: string): boolean => /^#?admin(\/|$)/i.test(hash);
 
 /** The link a hash makes, or null when it is not one into the admin sheet. An unknown part opens the sheet as usual. */
 export function parseAdminHash(hash: string): PanelLink | null {
   if (!isAdminHash(hash)) return null;
-  const part = hash.replace(/^#?admin\/?/, "").split(/[/?#]/)[0]!.toLowerCase();
+  const part = hash.replace(/^#?admin\/?/i, "").split(/[/?#]/)[0]!.toLowerCase();
   if (isTab(part)) return { tab: part };
   if (isSection(part)) return { section: part };
   return {};
@@ -56,7 +56,7 @@ export const adminHash = (part: AdminTab | PanelSection): string => `#admin/${pa
 export const tabOf = (section: PanelSection): AdminTab => PANEL_SECTIONS[section].tab;
 
 const KEY = "skald.admin.tab";
-/** The choice for this visit when storage refuses it. */
+/** The choice for this visit when storage refused it; wins over what is stored. */
 let memory: AdminTab | null = null;
 
 /** The tab this viewer had open last, or null. */
@@ -71,15 +71,16 @@ export function rememberedTab(): AdminTab | null {
 }
 
 export function rememberTab(tab: AdminTab): void {
-  memory = tab;
   try {
     localStorage.setItem(KEY, tab);
+    memory = null;
   } catch {
     // private mode or full: kept for this visit
+    memory = tab;
   }
 }
 
-/** Forgets the remembered tab (tests). */
+/** Forgets the visit's choice (tests). */
 export function forgetTab(): void {
   memory = null;
 }

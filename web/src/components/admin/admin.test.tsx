@@ -1,5 +1,5 @@
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "../Dashboard";
 import { describeAdmin } from "../Saga";
 import { I18nProvider, LocaleToggle, makeI18n } from "../../i18n";
@@ -119,7 +119,18 @@ afterEach(() => {
 describe("tabs (#153)", () => {
   /** Lets the sheets' own history steps land. */
   const settled = () => waitFor(() => expect(sheetPending()).toBe(false));
+  // The last test's sheets step back over their entries as they unmount: let that land first.
+  beforeEach(async () => {
+    await settled();
+    history.replaceState(null, "", "/");
+  });
   const selected = (sheet: HTMLElement) => within(sheet).getByRole("tab", { selected: true }).textContent;
+  /** A link followed in the page (a tapped notification): a new entry, popstate, then hashchange, as browsers do. */
+  const follow = (to: string, from: string) => {
+    history.pushState(null, "", to);
+    window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    window.dispatchEvent(new HashChangeEvent("hashchange", { oldURL: `${location.origin}${from}`, newURL: location.href }));
+  };
   const close = async (sheet: HTMLElement) => {
     fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Admin" })).toBeNull(), { timeout: 4000 });
@@ -218,10 +229,7 @@ describe("tabs (#153)", () => {
     renderDashboard();
     const route = renderHook(() => useRoute());
     await screen.findByRole("button", { name: "Admin" });
-    await act(async () => {
-      history.pushState(null, "", "/#admin/compat");
-      window.dispatchEvent(new HashChangeEvent("hashchange", { oldURL: `${location.origin}/#settings`, newURL: location.href }));
-    });
+    await act(async () => follow("/#admin/compat", "/#settings"));
     const sheet = await screen.findByRole("dialog", { name: "Admin" });
     expect(selected(sheet)).toBe("Server");
     await settled();
@@ -245,6 +253,45 @@ describe("tabs (#153)", () => {
     await settled();
     expect(location.hash).toBe("#settings");
     expect(route.result.current[0]).toBe("settings");
+  });
+
+  it("moves an open admin sheet to a link that arrives, instead of closing it", async () => {
+    history.replaceState(null, "", "/");
+    api(status());
+    renderDashboard();
+    await openAdmin("World");
+    await settled();
+    await act(async () => follow("/#admin/discord", "/#admin/world"));
+    await waitFor(() => expect(within(screen.getByRole("dialog", { name: "Admin" })).getByRole("tab", { selected: true })).toHaveTextContent("Server"), { timeout: 4000 });
+    await settled();
+    await waitFor(() => expect(location.hash).toBe("#admin/discord"));
+  });
+
+  it("reads the tab under the admin sheet's address as the one showing", async () => {
+    history.replaceState(null, "", "/");
+    api(status());
+    renderDashboard();
+    const route = renderHook(() => useRoute());
+    act(() => route.result.current[1]("saga"));
+    await waitFor(() => expect(location.hash).toBe("#saga"));
+    await openAdmin();
+    await settled();
+    await waitFor(() => expect(location.hash).toBe("#admin/players"));
+    // Going to the fire from here is a real move, not "already there".
+    act(() => route.result.current[1]("fire"));
+    await settled();
+    await waitFor(() => expect(location.hash).toBe(""));
+    expect(route.result.current[0]).toBe("fire");
+  });
+
+  it("keeps the remembered tab while the bridge is away", async () => {
+    localStorage.setItem("skald.admin.tab", "world");
+    api(status({}, { available: false, reason: "off" }));
+    renderDashboard();
+    const sheet = await openAdmin();
+    expect(selected(sheet)).toBe("Players");
+    await act(async () => {});
+    expect(localStorage.getItem("skald.admin.tab")).toBe("world");
   });
 
   it("names the tabs in Polish", async () => {

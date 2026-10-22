@@ -352,7 +352,7 @@ export function Sheet({
           <div aria-hidden className="plank-rule mt-4" />
         </header>
         {subheader && (
-          <div ref={subEl} className="shrink-0 px-5 pb-1 sm:px-7">
+          <div ref={subEl} data-sheet-subheader className="shrink-0 px-5 pb-1 sm:px-7">
             {subheader}
           </div>
         )}
