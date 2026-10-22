@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -64,6 +65,9 @@ type Config struct {
 	// value comes in through GAME_MEMORY_LIMIT (the downward API in
 	// Kubernetes).
 	GameMemoryLimit int64
+	// Warnings are settings that could not be read and fell back to their
+	// default; the caller logs them.
+	Warnings []string
 }
 
 func Load() (Config, error) {
@@ -100,7 +104,13 @@ func Load() (Config, error) {
 		c.TerrainCacheMB = v
 	}
 	c.TerrainBake = parseBool(os.Getenv("TERRAIN_BAKE"), true)
-	c.GameMemoryLimit = parseBytes(os.Getenv("GAME_MEMORY_LIMIT"))
+	if v := os.Getenv("GAME_MEMORY_LIMIT"); v != "" {
+		n, ok := parseBytes(v)
+		if !ok {
+			c.Warnings = append(c.Warnings, fmt.Sprintf("GAME_MEMORY_LIMIT %q unreadable (want bytes, or a Ki/Mi/Gi/Ti or k/M/G/T suffix): the memory bar measures against the 6-hour peak", v))
+		}
+		c.GameMemoryLimit = n
+	}
 	if c.AgentToken == "" {
 		return c, errors.New("AGENT_TOKEN is required")
 	}
@@ -128,10 +138,15 @@ var byteUnits = []struct {
 }
 
 // parseBytes reads a byte count as the downward API writes it (plain bytes)
-// or with a Kubernetes suffix ("6Gi", "512Mi", "6G"). Empty, "max", zero,
-// negative or unreadable values are 0: no known limit.
-func parseBytes(v string) int64 {
+// or with a Kubernetes suffix ("6Gi", "512Mi", "6G"). Empty, "max" and zero
+// ("0", "0Gi") are 0, no limit, and ok. Anything else that does not read as
+// a positive count (Docker's "6g", "1.5Gi", negative, overflow) is 0 and
+// not ok.
+func parseBytes(v string) (int64, bool) {
 	v = strings.TrimSpace(v)
+	if v == "" || v == "max" {
+		return 0, true
+	}
 	mult := int64(1)
 	for _, u := range byteUnits {
 		if n, ok := strings.CutSuffix(v, u.suffix); ok {
@@ -140,10 +155,10 @@ func parseBytes(v string) int64 {
 		}
 	}
 	n, err := strconv.ParseInt(v, 10, 64)
-	if err != nil || n <= 0 || n > math.MaxInt64/mult {
-		return 0
+	if err != nil || n < 0 || n > math.MaxInt64/mult {
+		return 0, false
 	}
-	return n * mult
+	return n * mult, true
 }
 
 // splitList reads a comma- or space-separated list; empty entries are dropped.

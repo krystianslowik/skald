@@ -45,3 +45,14 @@ describe("date and time formatting", () => {
     expect(i.date(Number.NaN)).toBe("Invalid Date");
   });
 });
+
+describe("binary byte formatting", () => {
+  it("writes memory as limits are written, with one decimal", () => {
+    const en = makeI18n("en");
+    expect(en.ibytes(6 * 1024 ** 3)).toBe("6.0 GiB");
+    expect(en.ibytes(512 * 1024 ** 2)).toBe("512.0 MiB");
+    expect(en.ibytes(1536)).toBe("1.5 KiB");
+    expect(en.ibytes(0)).toBe("0 B");
+    expect(makeI18n("pl").ibytes(1.9 * 1024 ** 3)).toBe("1,9 GiB");
+  });
+});

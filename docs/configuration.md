@@ -29,7 +29,7 @@
 | `BRIDGE_URL` | `http://127.0.0.1:9010` | The Skald bridge plugin inside the game process; the agent shares the pod's (or container's) network namespace, so loopback reaches it. See [Admin bridge](#admin-bridge) |
 | `BRIDGE_TOKEN` | (empty) | Same value as the game container's `SKALD_BRIDGE_TOKEN` (16+ characters). Empty leaves the `/bridge` routes unregistered and the admin UI hidden |
 | `BRIDGE_TESTED_BUILDS` | `l-1.0.17,l-1.0.20` | Game builds admin commands may run on without a confirmation from the panel, comma-separated; `*` allows any |
-| `GAME_MEMORY_LIMIT` | (empty) | The game container's memory limit, in bytes (as the Kubernetes downward API writes it) or with a suffix (`6Gi`, `512Mi`, `6G`). The Forge's memory bar then shows use against it, with the 6-hour peak as a mark; empty, `0` or `max` measures against the 6-hour peak instead. The agent cannot read it itself: as a sidecar its own cgroup holds its own limit, not the game's. See [Memory limit](#memory-limit) |
+| `GAME_MEMORY_LIMIT` | (empty) | The game container's memory limit, in bytes (as the Kubernetes downward API writes it) or with a Kubernetes suffix (`6Gi`, `512Mi`, `6G`; Docker's `6g` must be written `6Gi`). The Forge's memory bar then shows use against it, with the 6-hour peak as a mark; empty, `0` or `max` measures against the 6-hour peak instead. The agent cannot read it itself: as a sidecar its own cgroup holds its own limit, not the game's. See [Memory limit](#memory-limit) |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 
 ## skald-web
@@ -84,9 +84,14 @@ agent knows it. In Kubernetes, hand it over with the downward API on the
 `containerName` is the game container's name. Only add this when the game
 container sets `resources.limits.memory`: without a limit, Kubernetes fills in
 the node's allocatable memory instead, and the bar would measure against the
-whole node. The value is read when the pod starts, so a changed limit shows
-once the pod is recreated. In Compose, set `GAME_MEMORY_LIMIT` in `.env` to the game
-service's `mem_limit` (Docker's `6g` is `6Gi` here), or leave it empty.
+whole node. The value is read when the pod starts: an in-place pod resize
+does not update it, so restart the pod after changing the game's limit. In
+Compose, set `GAME_MEMORY_LIMIT` in `.env` to the game service's `mem_limit`,
+or leave it empty. Docker's `6g` must be written `6Gi`: a lowercase `g` is
+not read (the agent logs a warning and the bar measures against the peak).
+
+The whole memory gauge (use, limit, peak and the chart) is in binary units,
+as limits are written, so a `6Gi` limit reads "6.0 GiB".
 
 ## Changing a password
 

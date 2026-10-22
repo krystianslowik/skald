@@ -257,6 +257,7 @@ export const pl: Dict = {
 
   "forge.cpu": "Procesor",
   "forge.memory": "Pamięć",
+  "forge.of": "z",
   "forge.network": "Sieć",
   "forge.cores": "Rdzenie: {n}",
   "forge.cpuLabel": "Zużycie procesora, ostatnie 6 godzin",

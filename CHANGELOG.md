@@ -11,8 +11,8 @@ above them.
 
 ### Changed
 
-- The memory bar in the Forge now shows how much of the game server's memory limit is in use, so 1.9 GB of a 6 GiB limit reads as about a third full instead of nearly full. The highest use of the last 6 hours stays on the bar as a thin mark. Without a known limit the bar measures against that 6-hour peak as before (#196).
-- **Operators:** the agent learns the limit from a new `GAME_MEMORY_LIMIT` variable. The Kubernetes example fills it from the game container's `limits.memory` through the downward API; add the same `env` entry to the agent container of your own manifest (see `docs/configuration.md`). Compose has no limit on the game by default; set it in `.env` only if you give the game a `mem_limit`.
+- The memory bar in the Forge now shows how much of the game server's memory limit is in use, so 1.9 GiB of a 6 GiB limit reads as about a third full instead of nearly full. The highest use of the last 6 hours stays on the bar as a thin mark. Memory is now shown in binary units, as limits are written: a 6Gi limit reads "6.0 GiB". Without a known limit the bar measures against that 6-hour peak as before (#196).
+- **Operators:** the agent learns the limit from a new `GAME_MEMORY_LIMIT` variable. The Kubernetes example fills it from the game container's `limits.memory` through the downward API; add the same `env` entry to the agent container of your own manifest (see `docs/configuration.md`). Compose has no limit on the game by default; set it in `.env` only if you give the game a `mem_limit` (Docker's `6g` is written `6Gi` here). The value is read when the pod starts, so restart the pod after resizing the game.
 
 ## [2026.10.30] - 2026-10-20
 

@@ -268,6 +268,7 @@ export const en = {
 
   "forge.cpu": "CPU",
   "forge.memory": "Memory",
+  "forge.of": "of",
   "forge.network": "Network",
   "forge.cores": "{n} cores",
   "forge.cpuLabel": "CPU usage, last 6 hours",

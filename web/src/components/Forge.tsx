@@ -19,13 +19,20 @@ function peak(points: SeriesPoint[] | undefined): number {
 }
 
 function Gauge({ title, value, of, children }: { title: string; value: string | null; of?: string; children: React.ReactNode }) {
+  const { t } = useI18n();
   return (
     <div className="min-w-0">
       <div className="mb-2 flex items-baseline justify-between gap-2">
         <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-label">{title}</h3>
         <span className="text-sm font-bold tabular-nums text-flame">
           {value ?? "?"}
-          {of && <span className="font-normal text-ash"> / {of}</span>}
+          {of && (
+            <span className="font-normal text-ash">
+              <span aria-hidden> / </span>
+              <span className="sr-only"> {t("forge.of")} </span>
+              {of}
+            </span>
+          )}
         </span>
       </div>
       {children}
@@ -59,13 +66,11 @@ function Meter({
   const { t } = useI18n();
   const top = peak(points);
   const now = last(points) ?? 0;
-  // No samples yet: nothing to set against the limit either.
-  const cap = points.length > 0 ? limit : 0;
-  const max = cap > 0 ? cap : top;
+  const max = limit > 0 ? limit : top;
   const frac = max > 0 ? Math.min(1, now / max) : 0;
   const pct = Math.round(frac * 100);
-  const mark = cap > 0 && top > 0 ? Math.min(1, top / cap) : null;
-  const text = cap > 0 ? t("forge.meterLimit", { value, pct, limit: format(cap), peak: format(top) }) : t("forge.meter", { value, pct });
+  const mark = limit > 0 && top > 0 ? Math.min(1, top / limit) : null;
+  const text = limit > 0 ? t("forge.meterLimit", { value, pct, limit: format(limit), peak: format(top) }) : t("forge.meter", { value, pct });
   return (
     <div role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-valuetext={text} title={text} className={`meter meter-${kind} mb-2 h-3.5`}>
       <span className="meter-fill" style={{ transform: `scaleX(${frac})` }} />
@@ -152,7 +157,7 @@ export const Forge = memo(function Forge({
   server: ApiState["server"];
   world: ApiState["world"];
 }) {
-  const { t, tn, lookup, number, bytes, rate, clock, modifiers } = useI18n();
+  const { t, tn, lookup, number, bytes, ibytes, rate, clock, modifiers } = useI18n();
   const empty = t("forge.promDown");
   // Stable chart inputs: the charts only redraw when their own series change.
   const charts = useMemo(
@@ -185,9 +190,11 @@ export const Forge = memo(function Forge({
     return out;
   }, [modifiers, lookup, server.args, worldMods, worldKeys]);
   const cpuNow = m ? cores(last(m.cpu) ?? 0) : null;
-  const memNow = m ? bytes(last(m.memory) ?? 0) : null;
-  // Older agents leave it out; null or 0 means the limit is unknown.
-  const memLimit = Math.max(0, server.memoryLimitBytes ?? 0);
+  // Memory in binary units, as its limit is written (6Gi reads "6.0 GiB").
+  const memNow = m ? ibytes(last(m.memory) ?? 0) : null;
+  // Older agents leave the limit out; null or 0 means unknown. Without
+  // samples there is nothing to set against it either.
+  const memCap = m && m.memory.length > 0 ? Math.max(0, server.memoryLimitBytes ?? 0) : 0;
   const rxNow = m ? rate(last(m.rx) ?? 0) : null;
   return (
     <div className="space-y-6">
@@ -201,9 +208,9 @@ export const Forge = memo(function Forge({
             <Chart label={t("forge.cpuLabel")} series={charts.cpu} format={cores} timeFormat={clock} empty={empty} ticks={hours} />
             <Legend items={[{ color: "#e0484b", label: t("forge.legendCpu") }]} />
           </Gauge>
-          <Gauge title={t("forge.memory")} value={memNow} of={memLimit > 0 && m && m.memory.length > 0 ? bytes(memLimit) : undefined}>
-            <Meter kind="stamina" points={m?.memory ?? []} value={memNow ?? "?"} label={t("forge.memory")} limit={memLimit} format={bytes} />
-            <Chart label={t("forge.memoryLabel")} series={charts.memory} format={bytes} timeFormat={clock} empty={empty} ticks={hours} />
+          <Gauge title={t("forge.memory")} value={memNow} of={memCap > 0 ? ibytes(memCap) : undefined}>
+            <Meter kind="stamina" points={m?.memory ?? []} value={memNow ?? "?"} label={t("forge.memory")} limit={memCap} format={ibytes} />
+            <Chart label={t("forge.memoryLabel")} series={charts.memory} format={ibytes} timeFormat={clock} empty={empty} ticks={hours} />
             <Legend items={[{ color: "#d9b44a", label: t("forge.legendMemory") }]} />
           </Gauge>
           <Gauge title={t("forge.network")} value={rxNow}>

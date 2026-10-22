@@ -34,6 +34,8 @@ export interface I18n {
   duration(ms: number): string;
   ago(iso: string | null | undefined, now?: number): string;
   bytes(n: number): string;
+  /** Binary units with one decimal ("6.0 GiB"), as Kubernetes and Docker memory limits are written. */
+  ibytes(n: number): string;
   rate(bytesPerSec: number): string;
   clock(t: string | number): string;
   clockSec(t: string | number): string;
@@ -78,6 +80,7 @@ export function makeI18n(locale: Locale): I18n {
     return typeof v === "string" ? fill(v, vars) : undefined;
   };
   const bytesFmt = new Intl.NumberFormat(intl, { maximumFractionDigits: 1 });
+  const ibytesFmt = new Intl.NumberFormat(intl, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   // Built once: toLocale*String with options builds a new formatter on every call, and a tab
   // full of timestamps paid for that in the middle of its fade-in. A bad timestamp reads
   // "Invalid Date" as before instead of throwing.
@@ -102,6 +105,16 @@ export function makeI18n(locale: Locale): I18n {
       i++;
     }
     return `${bytesFmt.format(v)} ${units[i]}`;
+  };
+  const ibytes = (n: number) => {
+    const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let v = n;
+    let i = 0;
+    while (v >= 1024 && i < units.length - 1) {
+      v /= 1024;
+      i++;
+    }
+    return i === 0 ? `${number(v)} B` : `${ibytesFmt.format(v)} ${units[i]}`;
   };
 
   return {
@@ -135,6 +148,7 @@ export function makeI18n(locale: Locale): I18n {
       return tn("time.daysAgo", d);
     },
     bytes,
+    ibytes,
     rate: (b) => `${bytes(b)}/s`,
     clock: clockFmt,
     clockSec: clockSecFmt,

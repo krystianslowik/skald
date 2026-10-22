@@ -42,9 +42,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// "", "0" and "max" mean no limit; anything else that reads as 0 is a typo.
-	if v := strings.TrimSpace(os.Getenv("GAME_MEMORY_LIMIT")); cfg.GameMemoryLimit == 0 && v != "" && v != "0" && v != "max" {
-		logger.Warn("GAME_MEMORY_LIMIT unreadable, the memory bar measures against the 6-hour peak", "value", v, "want", "bytes, or with Ki/Mi/Gi/Ti or k/M/G/T")
+	for _, w := range cfg.Warnings {
+		logger.Warn(w)
 	}
 	hub := events.New(events.DefaultRingSize, events.DefaultLogSize)
 	tracker := state.New(hub)
