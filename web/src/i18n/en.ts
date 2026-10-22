@@ -274,6 +274,7 @@ export const en = {
   "forge.memoryLabel": "Working-set memory, last 6 hours",
   "forge.networkLabel": "Network traffic, last 6 hours",
   "forge.meter": "{value} now, {pct}% of the 6-hour peak",
+  "forge.meterLimit": "{value} now, {pct}% of the {limit} limit; 6-hour peak {peak}",
   "forge.rx": "download",
   "forge.tx": "upload",
   "forge.promDown": "Prometheus is silent. The charts return when it answers.",

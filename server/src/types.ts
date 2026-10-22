@@ -111,6 +111,8 @@ export interface AgentState {
     playersReported: number;
     playfab: PlayfabState;
     netStats: NetStats | null;
+    /** The game container's memory limit in bytes; null when the agent was not given one (GAME_MEMORY_LIMIT), missing from older agents. */
+    memoryLimitBytes?: number | null;
   };
   players: Player[];
   world: {
@@ -591,6 +593,7 @@ export function emptyAgentState(now = new Date()): AgentState {
       playersReported: 0,
       playfab: "connecting",
       netStats: null,
+      memoryLimitBytes: null,
     },
     players: [],
     world: { sizeBytes: 0, lastSaveAt: null, lastSaveMs: 0, meta: null },

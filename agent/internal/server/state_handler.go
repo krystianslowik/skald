@@ -53,6 +53,9 @@ type serverState struct {
 	PlayersReported int               `json:"playersReported"`
 	Playfab         string            `json:"playfab"`
 	NetStats        *state.NetStats   `json:"netStats"`
+	// MemoryLimitBytes is the game container's memory limit; null when the
+	// agent was not told (GAME_MEMORY_LIMIT unset).
+	MemoryLimitBytes *int64 `json:"memoryLimitBytes"`
 }
 
 type worldState struct {
@@ -94,6 +97,11 @@ func (s *Server) stateHandler(w http.ResponseWriter, r *http.Request) {
 		sum = &v
 	}
 
+	var memLimit *int64
+	if s.opt.MemoryLimit > 0 {
+		memLimit = &s.opt.MemoryLimit
+	}
+
 	meta := s.world.Meta()
 	now := time.Now().UTC()
 	resp := stateResponse{
@@ -112,6 +120,8 @@ func (s *Server) stateHandler(w http.ResponseWriter, r *http.Request) {
 			PlayersReported: snap.PlayersReported,
 			Playfab:         snap.Playfab,
 			NetStats:        snap.NetStats,
+
+			MemoryLimitBytes: memLimit,
 		},
 		Players:  snap.Players,
 		World:    worldState{SizeBytes: size, LastSaveAt: lastSave, LastSaveMs: snap.LastSaveMs, Meta: meta, Clock: s.clock(meta, snap.Players, now)},

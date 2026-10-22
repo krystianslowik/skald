@@ -61,3 +61,27 @@ func TestLoadBridge(t *testing.T) {
 		t.Errorf("bridge from env: %+v", c)
 	}
 }
+
+func TestLoadGameMemoryLimit(t *testing.T) {
+	t.Setenv("AGENT_TOKEN", "t")
+	for v, want := range map[string]int64{
+		"":              0,
+		"6442450944":    6442450944,
+		" 6442450944\n": 6442450944,
+		"6Gi":           6 << 30,
+		"512Mi":         512 << 20,
+		"6G":            6e9,
+		"max":           0,
+		"0":             0,
+		"-1":            0,
+		"1.5Gi":         0,
+		"Gi":            0,
+		"9999999999Ti":  0,
+	} {
+		t.Setenv("GAME_MEMORY_LIMIT", v)
+		c, err := Load()
+		if err != nil || c.GameMemoryLimit != want {
+			t.Errorf("GAME_MEMORY_LIMIT=%q -> %d (%v), want %d", v, c.GameMemoryLimit, err, want)
+		}
+	}
+}

@@ -130,12 +130,32 @@ func TestState(t *testing.T) {
 	if ns, ok := srv["netStats"]; !ok || ns != nil {
 		t.Errorf("server.netStats = %#v, want null", ns)
 	}
+	if ml, ok := srv["memoryLimitBytes"]; !ok || ml != nil {
+		t.Errorf("server.memoryLimitBytes = %#v, want null without a limit", ml)
+	}
 	backups := got["backups"].([]any)
 	if len(backups) != 1 || backups[0].(map[string]any)["name"] != "worlds-20261009-230500.zip" {
 		t.Errorf("backups = %v", backups)
 	}
 	if players, ok := got["players"].([]any); !ok || len(players) != 0 {
 		t.Errorf("players = %#v", got["players"])
+	}
+}
+
+func TestStateMemoryLimit(t *testing.T) {
+	h := newHarness(t)
+	h.s.opt.MemoryLimit = 6 << 30
+	r := h.do(t, "GET", "/state", token)
+	var got struct {
+		Server struct {
+			MemoryLimitBytes *int64 `json:"memoryLimitBytes"`
+		} `json:"server"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Server.MemoryLimitBytes == nil || *got.Server.MemoryLimitBytes != 6<<30 {
+		t.Errorf("memoryLimitBytes = %v, want %d", got.Server.MemoryLimitBytes, int64(6<<30))
 	}
 }
 

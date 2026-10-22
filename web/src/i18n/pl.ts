@@ -263,6 +263,7 @@ export const pl: Dict = {
   "forge.memoryLabel": "Pamięć robocza, ostatnie 6 godzin",
   "forge.networkLabel": "Ruch sieciowy, ostatnie 6 godzin",
   "forge.meter": "{value} teraz, {pct}% szczytu z ostatnich 6 godzin",
+  "forge.meterLimit": "{value} teraz, {pct}% limitu {limit}; szczyt z ostatnich 6 godzin {peak}",
   "forge.rx": "pobieranie",
   "forge.tx": "wysyłanie",
   "forge.promDown": "Prometheus milczy. Wykresy wrócą, gdy odpowie.",

@@ -76,6 +76,9 @@ type Options struct {
 	RecoverTimeout time.Duration
 	// Version is the Skald release the agent was built from; "dev" when empty.
 	Version string
+	// MemoryLimit is the game container's memory limit in bytes; 0 reports
+	// it as unknown (null in /state).
+	MemoryLimit int64
 }
 
 type Server struct {

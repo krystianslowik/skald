@@ -180,6 +180,8 @@ func main() {
 		Crossplay:  crossplay,
 		Logger:     logger,
 		Version:    version,
+
+		MemoryLimit: cfg.GameMemoryLimit,
 	})
 	srv = s
 	go checker.Run(ctx, 5*time.Second)

@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -57,6 +58,12 @@ type Config struct {
 	// BridgeTestedBuilds are game builds admin commands may run on without
 	// an acknowledgement from the panel; "*" allows any.
 	BridgeTestedBuilds []string
+	// GameMemoryLimit is the game container's memory limit in bytes; 0 when
+	// unknown. The agent is a sidecar with its own cgroup, so its
+	// /sys/fs/cgroup/memory.max is the agent's limit, not the game's: the
+	// value comes in through GAME_MEMORY_LIMIT (the downward API in
+	// Kubernetes).
+	GameMemoryLimit int64
 }
 
 func Load() (Config, error) {
@@ -93,6 +100,7 @@ func Load() (Config, error) {
 		c.TerrainCacheMB = v
 	}
 	c.TerrainBake = parseBool(os.Getenv("TERRAIN_BAKE"), true)
+	c.GameMemoryLimit = parseBytes(os.Getenv("GAME_MEMORY_LIMIT"))
 	if c.AgentToken == "" {
 		return c, errors.New("AGENT_TOKEN is required")
 	}
@@ -108,6 +116,34 @@ func parseBool(v string, def bool) bool {
 		return false
 	}
 	return def
+}
+
+// byteUnits are the Kubernetes quantity suffixes a memory limit may carry.
+var byteUnits = []struct {
+	suffix string
+	mult   int64
+}{
+	{"Ki", 1 << 10}, {"Mi", 1 << 20}, {"Gi", 1 << 30}, {"Ti", 1 << 40},
+	{"k", 1e3}, {"M", 1e6}, {"G", 1e9}, {"T", 1e12},
+}
+
+// parseBytes reads a byte count as the downward API writes it (plain bytes)
+// or with a Kubernetes suffix ("6Gi", "512Mi", "6G"). Empty, "max", zero,
+// negative or unreadable values are 0: no known limit.
+func parseBytes(v string) int64 {
+	v = strings.TrimSpace(v)
+	mult := int64(1)
+	for _, u := range byteUnits {
+		if n, ok := strings.CutSuffix(v, u.suffix); ok {
+			v, mult = n, u.mult
+			break
+		}
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n <= 0 || n > math.MaxInt64/mult {
+		return 0
+	}
+	return n * mult
 }
 
 // splitList reads a comma- or space-separated list; empty entries are dropped.
