@@ -19,6 +19,8 @@ const subs = new Set<() => void>();
 let users = 0;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let inFlight = false;
+// A refresh asked for while a poll was on its way: read again right after it.
+let again = false;
 
 function set(next: ReadonlyMap<string, PlayerLink>): void {
   current = next;
@@ -41,7 +43,9 @@ async function poll(): Promise<void> {
       inFlight = false;
     }
   }
-  if (users > 0) timer = setTimeout(() => void poll(), LINKS_POLL_MS);
+  const soon = again;
+  again = false;
+  if (users > 0) timer = setTimeout(() => void poll(), soon ? 0 : LINKS_POLL_MS);
 }
 
 const onVisible = () => {
@@ -72,7 +76,12 @@ function start(): () => void {
 
 /** Reads the links again now instead of at the next poll (after a simulation handover). */
 export function refreshAdminLinks(): void {
-  if (users === 0 || inFlight) return;
+  if (users === 0) return;
+  // That poll may have been answered before the change: queue one more.
+  if (inFlight) {
+    again = true;
+    return;
+  }
   if (timer) clearTimeout(timer);
   void poll();
 }

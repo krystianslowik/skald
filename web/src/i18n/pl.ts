@@ -1925,6 +1925,8 @@ export const pl: Dict = {
   "admin.handover.hint": "Przenosi na gracza {player} to, co wokół niego liczą inni gracze. Gra zostawia to przy nim, dopóki jest w pobliżu.",
   "admin.handover.done": plural({ one: "{player} liczy teraz o {n} obiekt więcej, w {zones}", few: "{player} liczy teraz o {n} obiekty więcej, w {zones}", many: "{player} liczy teraz o {n} obiektów więcej, w {zones}", other: "{player} liczy teraz o {n} obiektu więcej, w {zones}" }),
   "admin.handover.inUse": plural({ one: "{n} w użyciu zostaje", few: "{n} w użyciu zostają", many: "{n} w użyciu zostaje", other: "{n} w użyciu zostaje" }),
+  "admin.handover.failed": plural({ one: "{n} nie dało się przenieść", few: "{n} nie dało się przenieść", many: "{n} nie dało się przenieść", other: "{n} nie dało się przenieść" }),
+  "admin.handover.mayReturn": "część może wrócić do gracza na pokładzie łodzi albo do tego, kto je właśnie zmienia",
   "admin.handover.onlyInUse": plural({ one: "Nic nie przekazano ({player}): został jeden obiekt w użyciu", few: "Nic nie przekazano ({player}): zostały {n} obiekty w użyciu", many: "Nic nie przekazano ({player}): zostało {n} obiektów w użyciu", other: "Nic nie przekazano ({player}): zostało {n} obiektu w użyciu" }),
   "admin.handover.capped": "przekaż jeszcze raz, by wziąć resztę",
   "admin.handover.already": "{player} liczy już wszystko wokół, co da się przekazać",

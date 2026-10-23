@@ -1936,6 +1936,8 @@ export const en = {
   "admin.handover.hint": "Moves what other players simulate around {player} over to them. The game keeps it with them while they stay near.",
   "admin.handover.done": plural({ one: "{player} now simulates {n} more object, in {zones}", other: "{player} now simulates {n} more objects, in {zones}" }),
   "admin.handover.inUse": plural({ one: "{n} in use stays", other: "{n} in use stay" }),
+  "admin.handover.failed": plural({ one: "{n} could not be moved", other: "{n} could not be moved" }),
+  "admin.handover.mayReturn": "a few may go back to a player aboard a ship or one changing them",
   "admin.handover.onlyInUse": plural({ one: "Nothing handed to {player}: the one object left is in use", other: "Nothing handed to {player}: the {n} objects left are in use" }),
   "admin.handover.capped": "hand over again for the rest",
   "admin.handover.already": "{player} already simulates everything near them that can move",

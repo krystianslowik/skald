@@ -595,8 +595,11 @@ function Players() {
   const handover = admin.bridgeOn && admin.players.length >= 2;
   const reason = oldPlugin ? t("admin.handover.old", { plugin: bridge?.plugin ?? "?" }) : agentLacks ? t("admin.handover.oldAgent") : null;
   const off = !!admin.blocker || !!reason;
-  const handOver = (name: string) => {
-    if (armed !== name) return setArmed(name);
+  // Armed per row by the player's id, so two players sharing a name (#23)
+  // do not arm each other. The command itself still names the player: the
+  // agent resolves names only.
+  const handOver = (key: string, name: string) => {
+    if (armed !== key) return setArmed(key);
     setArmed(null);
     void admin.run("sim-handover", { player: name }, { done: (data) => handoverText(i18n, name, data) }).then((r) => r.ok && refreshAdminLinks());
   };
@@ -608,7 +611,7 @@ function Players() {
         <ul className="divide-y divide-iron/25">
           {admin.players.map((p) => {
             const lp = live.players.find((x) => (x.id ?? x.name) === (p.id ?? p.name));
-            const on = armed === p.name;
+            const on = armed === (p.id ?? p.name);
             return (
               <li key={p.id ?? p.name}>
                 <button type="button" onClick={() => admin.open({ kind: "player", name: p.name })} className="press flex min-h-12 w-full flex-wrap items-center gap-x-3 py-1.5 text-left">
@@ -633,7 +636,7 @@ function Players() {
                       // The visible words first, then whose row it is.
                       aria-label={on ? undefined : `${t("admin.handover.button")}: ${p.name}`}
                       aria-describedby={reason ? whyId : undefined}
-                      onClick={() => handOver(p.name)}
+                      onClick={() => handOver(p.id ?? p.name, p.name)}
                       className={`press inline-flex min-h-9 shrink-0 items-center rounded-[3px] border px-3 text-xs font-bold coarse:min-h-11 disabled:cursor-not-allowed disabled:opacity-40 ${on ? "border-flame bg-ember/30 text-bone ring-2 ring-flame" : "border-iron/60 bg-black/30 text-label"}`}
                     >
                       {on ? t("admin.handover.confirm", { player: p.name }) : t("admin.handover.button")}
