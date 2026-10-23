@@ -39,7 +39,7 @@ spec:
           initContainers:
             # Copies the plugin and the run scripts into the shared volume.
             - name: skald-terrain
-              image: ghcr.io/krystianslowik/skald-terrain:2026.10.32
+              image: ghcr.io/krystianslowik/skald-terrain:2026.10.33
               imagePullPolicy: IfNotPresent
               resources:
                 requests: {cpu: 10m, memory: 8Mi}

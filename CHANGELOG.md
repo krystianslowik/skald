@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.33] - 2026-10-23
+
 ### Fixed
 
 - The ping now shows for players on crossplay. The admin plugin could lose count of the game's once-a-second keep-alive when several answers reached the server at once, which on crossplay happens all the time; from then on that player's ping showed as unknown for the rest of the session, or about a second too high. The plugin now counts every keep-alive and its answer as the game handles them, so the ping is right however the answers bunch up, and also when it rises or falls by more than a second, as long as the connection delivers every keep-alive, which the game's connections are built to do. "Ping unknown" now only shows for a few seconds after a player joins, during a stall, or when the plugin cannot count on this game version. When the plugin knows the count for one player went wrong (a client sending a stray answer, or a crossplay connection that restarts its session and drops what was on its way), that player's ping shows as unknown until they reconnect (#200, #202).
