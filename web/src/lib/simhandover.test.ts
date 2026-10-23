@@ -25,8 +25,19 @@ describe("simulation handover wording (#203)", () => {
     expect(handoverText(pl, "Ragnar", {})).toBe("Nikt inny nie liczy niczego obok: Ragnar");
   });
 
+  it("says when objects were left alone on purpose, or failed", () => {
+    expect(handoverText(en, "Ragnar", { objects: 0, loose: 2, kept: 40 })).toBe("Nothing handed to Ragnar: the 42 objects near them hold items or lie on the ground, and are left alone on purpose");
+    expect(handoverText(en, "Ragnar", { objects: 0, kept: 1 })).toBe("Nothing handed to Ragnar: the one object near them holds items or lies on the ground, and is left alone on purpose");
+    expect(handoverText(pl, "Ragnar", { objects: 0, kept: 3 })).toBe("Nic nie przekazano (Ragnar): 3 obiekty obok trzymają przedmioty albo leżą na ziemi i celowo zostają");
+    // Failures come first: the admin should know something went wrong.
+    expect(handoverText(en, "Ragnar", { objects: 0, failed: 3, kept: 5 })).toBe("Nothing handed to Ragnar: 3 objects could not be moved");
+    expect(handoverText(pl, "Ragnar", { objects: 0, failed: 2 })).toBe("Nic nie przekazano (Ragnar): nie dało się przenieść 2 obiektów");
+    // Moved some, kept the rest: both said.
+    expect(handoverText(en, "Ragnar", { objects: 10, zones: 2, loose: 1, kept: 4 })).toBe("Ragnar now simulates 10 more objects, in 2 zones · 5 holding items stay · a few may go back to a player aboard a ship or one changing them");
+  });
+
   it("reads odd answers as nothing", () => {
-    expect(handoverResult(null)).toEqual({ objects: 0, zones: 0, fromPeers: 0, already: 0, inUse: 0, loose: 0, failed: 0, capped: false });
+    expect(handoverResult(null)).toEqual({ objects: 0, zones: 0, fromPeers: 0, already: 0, inUse: 0, loose: 0, kept: 0, failed: 0, capped: false });
     expect(handoverResult({ objects: "12", zones: -1, capped: "yes" })).toMatchObject({ objects: 0, zones: 0, capped: false });
   });
 });
