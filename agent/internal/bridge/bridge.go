@@ -1215,7 +1215,7 @@ func (c *Client) summarizeResult(cmd string, data json.RawMessage, ev map[string
 	// A simulation handover's counts. Generic names, so kept for that
 	// command only.
 	if cmd == "sim-handover" {
-		for _, k := range []string{"objects", "zones", "fromPeers", "already", "inUse", "loose", "failed"} {
+		for _, k := range []string{"objects", "zones", "fromPeers", "already", "inUse", "loose", "kept", "failed"} {
 			if v, ok := d[k]; ok {
 				ev[k] = v
 			}

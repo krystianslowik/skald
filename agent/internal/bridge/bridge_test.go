@@ -111,7 +111,7 @@ func (f *fakePlugin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ok(map[string]any{"prefab": "piece_chest_wood", "item": "Iron", "amount": 20, "position": map[string]any{"x": 10.5, "y": 31.2, "z": -4}, "loaded": true, "room": 460,
 			"slots": []any{map[string]any{"x": 0, "y": 0, "added": 10, "stack": 30}, map[string]any{"x": 3, "y": 0, "added": 10, "stack": 10}}})
 	case "/v1/sim/handover":
-		ok(map[string]any{"player": "Freya", "objects": 812, "zones": 4, "fromPeers": 1, "already": 37, "inUse": 2, "loose": 5, "failed": 1, "capped": false})
+		ok(map[string]any{"player": "Freya", "objects": 812, "zones": 4, "fromPeers": 1, "already": 37, "inUse": 2, "loose": 5, "kept": 40, "failed": 1, "capped": false})
 	case "/v1/build/refuel-fires":
 		by := map[string]any{"piece_groundtorch_wood": 14, "fire_pit": 3}
 		for i := 0; i < 30; i++ {
@@ -656,7 +656,7 @@ func TestSimHandoverSendsTheUidAndAuditsCounts(t *testing.T) {
 		t.Fatalf("want 1 admin event, got %+v", evs)
 	}
 	e := evs[0]
-	if e["command"] != "sim-handover" || e["result"] != "ok" || e["player"] != "Freya" || e["objects"] != float64(812) || e["zones"] != float64(4) || e["fromPeers"] != float64(1) || e["already"] != float64(37) || e["inUse"] != float64(2) || e["loose"] != float64(5) || e["failed"] != float64(1) || e["capped"] != false {
+	if e["command"] != "sim-handover" || e["result"] != "ok" || e["player"] != "Freya" || e["objects"] != float64(812) || e["zones"] != float64(4) || e["fromPeers"] != float64(1) || e["already"] != float64(37) || e["inUse"] != float64(2) || e["loose"] != float64(5) || e["kept"] != float64(40) || e["failed"] != float64(1) || e["capped"] != false {
 		t.Fatalf("sim-handover %+v", e)
 	}
 }
