@@ -38,9 +38,14 @@ namespace Skald.Bridge
     sealed class LinkTracker
     {
         public const float WindowS = 10f;
-        // Pings kept waiting for a reply; the game drops a peer after 30 s
-        // without one, so more than this means pings went unseen.
-        const int MaxInFlight = 40;
+        // Pings kept waiting for a reply. The game drops a peer after 30 s
+        // without one and pings once a second, so more than this means the
+        // count is off.
+        const int MaxInFlight = 64;
+        // How long the game may show a reply the hooks did not report before
+        // the hooks count as not firing (a long frame alone can open a gap
+        // of a few seconds between the two clocks, until the next reply).
+        const float SilentS = 10f;
 
         sealed class Peer
         {
@@ -49,7 +54,7 @@ namespace Skald.Bridge
             // Pairing is off for good: a reply came with no ping left, or
             // more pings waited than the game allows, so some went unseen.
             public bool Unpaired;
-            public float LastWait = -1f;
+            public float LastWait = -1f, SilentSince = -1f;
             public int Replies;
             public readonly Queue<float> Sent = new Queue<float>();
             public readonly Queue<(float t, int ms)> Rtts = new Queue<(float, int)>();
@@ -103,7 +108,7 @@ namespace Skald.Bridge
         public void Waited(long id, float now, float wait)
         {
             var p = Get(id, now);
-            p.Unpaired = true;
+            if (!p.Unpaired) Unpair(p);
             if (p.LastWait >= 0f && wait < p.LastWait)
             {
                 p.Replies++;
@@ -112,6 +117,23 @@ namespace Skald.Bridge
             p.LastWait = wait;
             p.LastReplyAt = now - wait;
             Trim(p, now);
+        }
+
+        // Cross-checks the hooks against the game's own "time since the last
+        // reply" (ZRpc.GetTimeSinceLastPing), once a frame. True once the game
+        // has kept showing a recent reply the hooks never reported for
+        // SilentS: the reply hook does not fire (inlined, or the game moved
+        // the code), so the reply times are not to be trusted.
+        public bool Silent(long id, float now, float gameWait)
+        {
+            if (!peers.TryGetValue(id, out var p)) return false;
+            if (gameWait < 1.5f && now - p.LastReplyAt > gameWait + 3f)
+            {
+                if (p.SilentSince < 0f) p.SilentSince = now;
+                return now - p.SilentSince > SilentS;
+            }
+            p.SilentSince = -1f;
+            return false;
         }
 
         static void Unpair(Peer p)

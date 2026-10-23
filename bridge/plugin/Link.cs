@@ -22,9 +22,8 @@ namespace Skald.Bridge
         static readonly Dictionary<ZRpc, long> Ids = new Dictionary<ZRpc, long>();
         static long nextId;
         static bool tickOff, simBroken;
-        // hooked: the keep-alive hooks are in place and working; server: the
-        // game runs as the server (set by Tick), so the hooks record.
-        static bool hooked, server;
+        // The keep-alive hooks are in place and working.
+        static bool hooked;
         static readonly HashSet<string> QueueOff = new HashSet<string>(), QualityOff = new HashSet<string>();
         static float prunedAt;
 
@@ -89,11 +88,8 @@ namespace Skald.Bridge
         // dt (__0). Half of dt keeps clear of float rounding either way.
         static void PingAfter(ZRpc __instance, float __0, float ___m_pingTimer, float __state)
         {
-            if (!hooked || !server || tickOff) return;
-            try
-            {
-                if (___m_pingTimer < __state + __0 * 0.5f) Record(__instance, true);
-            }
+            if (!hooked || tickOff || !(___m_pingTimer < __state + __0 * 0.5f)) return;
+            try { Record(__instance, true); }
             catch (Exception e) { Unhook(e); }
         }
 
@@ -101,7 +97,7 @@ namespace Skald.Bridge
         // game reads the package as if nothing had looked.
         static void OnReceivePing(ZRpc __instance, ZPackage __0)
         {
-            if (!hooked || !server || tickOff) return;
+            if (!hooked || tickOff) return;
             try
             {
                 int pos = __0.GetPos();
@@ -114,8 +110,11 @@ namespace Skald.Bridge
             catch (Exception e) { Unhook(e); }
         }
 
+        // Server side only: on a client the plugin has no peers to report.
         static void Record(ZRpc rpc, bool ping)
         {
+            var net = ZNet.instance;
+            if (net == null || !net.IsServer()) return;
             float now = Time.realtimeSinceStartup;
             long id = IdOf(rpc, now);
             if (ping) Tracker.Sent(id, now);
@@ -127,6 +126,13 @@ namespace Skald.Bridge
             if (!hooked) return;
             hooked = false;
             Off("link round trip", e);
+        }
+
+        static void Unhook(string why)
+        {
+            if (!hooked) return;
+            hooked = false;
+            SkaldBridgePlugin.Warn("link round trip off: " + why);
         }
 
         // The tracker id of a connection, made on first sight. With the hooks
@@ -159,8 +165,7 @@ namespace Skald.Bridge
         static void TickPeers()
         {
             var net = ZNet.instance;
-            server = net != null && net.IsServer();
-            if (!server) return;
+            if (net == null || !net.IsServer()) return;
             float now = Time.realtimeSinceStartup;
             var peers = net.GetPeers();
             for (int i = 0; i < peers.Count; i++)
@@ -168,7 +173,9 @@ namespace Skald.Bridge
                 var rpc = peers[i]?.m_rpc;
                 if (rpc == null) continue;
                 long id = IdOf(rpc, now);
-                if (!hooked) Tracker.Waited(id, now, rpc.GetTimeSinceLastPing());
+                float wait = rpc.GetTimeSinceLastPing();
+                if (hooked && Tracker.Silent(id, now, wait)) Unhook("the game handles keep-alive replies the hook does not see");
+                if (!hooked) Tracker.Waited(id, now, wait);
             }
             if (now - prunedAt > LinkTracker.WindowS && Ids.Count > 0)
             {

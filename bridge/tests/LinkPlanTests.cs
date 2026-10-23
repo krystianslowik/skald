@@ -102,19 +102,25 @@ public class LinkPlanTests
         // the replies to pings 10 .. 10+n-2 are held back until the reply to
         // the next one is in, and all n are handled in one frame.
         var t = new LinkTracker();
-        float release = 0f, burstAt = -1f;
+        float release = 0f, burstAt = -1f, first = 0f, period = 0f;
         var truth = new List<(float at, int ms)>();
         bool checkedBurst = false;
         float now = Play(t, 1, 0f, 40f, (k, sent) =>
         {
-            if (k == 10) burstAt = release = sent + (n - 1) + 0.1f;
+            // The harness's ping period (a whole number of frames over 1 s).
+            if (k == 0) first = sent;
+            if (k == 1) period = sent - first;
+            if (k == 10) burstAt = release = sent + (n - 1) * period + 0.1f;
             return k >= 10 && k < 10 + n - 1 ? release - sent : 0.1f;
         }, now =>
         {
             // Right after the burst, every reply in it is paired with its own
             // ping: the median and the worst are what the window really saw.
-            if (checkedBurst || burstAt < 0f || now < burstAt + Frame) return;
+            // The frame that handled the burst: the first at or after its release.
+            if (checkedBurst || burstAt < 0f || now < burstAt) return;
             checkedBurst = true;
+            // All n replies were handled in that one frame.
+            Assert.Equal(n, truth.FindAll(x => x.at == now).Count);
             var b = t.Snapshot(1, now);
             Assert.False(b.Unsure);
             Assert.Equal(Median(truth, now), b.RttMs);
@@ -139,7 +145,11 @@ public class LinkPlanTests
         // read 1110 ms from then on (unsure for good once jitter made it
         // fall). Live on crossplay: unsure for some players all session.
         var t = new LinkTracker();
-        float now = Play(t, 1, 0f, 40f, (k, sent) => k == 10 ? 1.2f : k >= 11 ? 0.1f : 0.8f);
+        var truth = new List<(float at, int ms)>();
+        float now = Play(t, 1, 0f, 40f, (k, sent) => k == 10 ? 1.2f : k >= 11 ? 0.1f : 0.8f, truth: truth);
+        // The replies to pings 10 and 11 were handled in one frame.
+        Assert.Equal(truth[10].at, truth[11].at);
+        Assert.True(truth[10].at - truth[9].at < 1.5f, "no stall before them");
         var s = t.Snapshot(1, now);
         Assert.False(s.Unsure);
         Near(100, s.RttMs);
@@ -308,9 +318,9 @@ public class LinkPlanTests
     {
         var t = new LinkTracker();
         t.Seen(5, 0f, true);
-        for (int i = 1; i <= 60; i++) t.Sent(5, i);
-        t.Replied(5, 60.5f);
-        Assert.True(t.Snapshot(5, 60.5f).Unsure);
+        for (int i = 1; i <= 70; i++) t.Sent(5, i);
+        t.Replied(5, 70.5f);
+        Assert.True(t.Snapshot(5, 70.5f).Unsure);
         Assert.Equal(0, t.InFlight(5));
     }
 
@@ -333,6 +343,52 @@ public class LinkPlanTests
         Assert.Null(s.RttMaxMs);
         Assert.InRange(s.ReplyGapMaxS, 0.9f, 1.1f);
         Assert.Equal(5, t.RepliesSeen(7));
+    }
+
+    [Fact]
+    public void FallingBackToTheGameWaitDropsTheHookedRoundTrip()
+    {
+        // The hooks turned off mid-session: what they timed is not shown as
+        // current any more.
+        var t = new LinkTracker();
+        float now = Play(t, 1, 0f, 5f, 0.15f);
+        Assert.False(t.Snapshot(1, now).Unsure);
+        t.Waited(1, now + Frame, 0.5f);
+        var s = t.Snapshot(1, now + Frame);
+        Assert.True(s.Unsure);
+        Assert.Null(s.RttMs);
+    }
+
+    [Fact]
+    public void HooksThatDoNotSeeTheGameRepliesAreCaught()
+    {
+        // The game keeps showing a reply within the last second, but the hook
+        // reports none: after a while the hooks count as not firing.
+        var t = new LinkTracker();
+        t.Seen(1, 0f, true);
+        bool silent = false;
+        float at = -1f;
+        for (float now = Frame; now < 30f && !silent; now += Frame)
+        {
+            if (t.Silent(1, now, now % 1f)) { silent = true; at = now; }
+        }
+        Assert.True(silent);
+        Assert.InRange(at, 13f, 16f);
+    }
+
+    [Fact]
+    public void ALongFrameAloneIsNotTakenForSilentHooks()
+    {
+        // A 5 s frame: the game's wait moves by its capped frame time only,
+        // so the clocks part by seconds until the next reply, which the hook
+        // does report.
+        var t = new LinkTracker();
+        float now = Play(t, 1, 0f, 5f, 0.15f);
+        float gameWait = 0.5f;
+        Assert.False(t.Silent(1, now + 5f, gameWait + 0.333f));
+        Assert.False(t.Silent(1, now + 6f, gameWait + 0.4f));
+        t.Replied(1, now + 6.2f);
+        for (float x = now + 6.2f; x < now + 30f; x += 0.5f) Assert.False(t.Silent(1, x, x - (now + 6.2f) < 1f ? x - (now + 6.2f) : 2f));
     }
 
     [Fact]

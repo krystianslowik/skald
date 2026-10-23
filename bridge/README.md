@@ -252,7 +252,12 @@ keep-alive hooks are applied once at startup, inside a try: if a hooked
 method or the private `m_pingTimer` is gone, patching fails, one warning line
 says so, and only the round trip goes blank. The hook bodies catch
 everything and never throw into the game; the first failure there unhooks
-the round trip the same way. They record only on a server.
+the round trip the same way. They record only on a server. Once a frame the
+plugin also checks the hooks against the game's own `GetTimeSinceLastPing()`:
+if the game keeps showing a recent reply that the reply hook never reported
+(for 10 s, so that one long frame cannot trip it), the hooks are taken as
+not firing, one warning line says so, and the round trip goes blank as if
+patching had failed.
 
 ### Simulation handover
 
@@ -564,8 +569,9 @@ The pairing is exact by construction and unit-tested in
 up and down by more than a second, heavy jitter, a stall and its recovery,
 peers joining while others have pings in flight). Read from the decompiled
 1.0 assemblies only: that `ZRpc.UpdatePing` and `ZRpc.ReceivePing` are not
-inlined into `ZRpc.Update` by the server's runtime (if they were, the hooks
-would never fire and every ping stays unsure), and that the plugin loads
+inlined into `ZRpc.Update` by the server's runtime (if the reply hook never
+fired, the cross-check above turns the round trip off after about 10 s, with
+one warning line), and that the plugin loads
 before the first player connects, so no ping goes out unseen. Check after
 deploying with players on crossplay: `pingUnsure` gone within a few seconds
 of each joining, and `pingMs` in the range 0.6.0 showed for the one player
