@@ -1049,7 +1049,7 @@ export class MockAgent implements AgentSource {
         const shares = target === "Ragnar" || target === "Freya";
         const moves = shares && this.simBase !== target;
         if (moves) this.simBase = target;
-        data = { player: target, objects: moves ? 1058 : 0, zones: moves ? 6 : 0, fromPeers: moves ? 1 : 0, already: shares ? (moves ? 180 : 1240) : 320, inUse: moves ? 2 : 0, loose: moves ? 3 : 0, failed: 0, capped: false };
+        data = { player: target, objects: moves ? 1058 : 0, zones: moves ? 6 : 0, fromPeers: moves ? 1 : 0, already: shares ? (moves ? 180 : 1240) : 320, inUse: moves ? 2 : 0, loose: moves ? 3 : 0, kept: moves ? 64 : 0, failed: 0, capped: false };
         break;
       }
       case "refuel-fires": {
@@ -1088,7 +1088,7 @@ export class MockAgent implements AgentSource {
     if (!Array.isArray(data)) {
       for (const k of ["killed", "tamed", "repaired", "smelters", "kilns", "skipped", "full", "fermenters", "fires", "off", "world", "capped", "unloaded", "plants", "sentTo", "stopped", "started", "label", "stacks", "day", "loaded"]) if (k in data) counts[k] = data[k];
       // A simulation handover's counts: generic names, kept for that command only (as the agent does).
-      if (command === "sim-handover") for (const k of ["objects", "zones", "fromPeers", "already", "inUse", "loose", "failed"]) if (k in data) counts[k] = data[k];
+      if (command === "sim-handover") for (const k of ["objects", "zones", "fromPeers", "already", "inUse", "loose", "kept", "failed"]) if (k in data) counts[k] = data[k];
       if (data.added && typeof data.added === "object") counts.added = data.added;
       if (data.byPrefab && typeof data.byPrefab === "object") counts.byPrefab = data.byPrefab;
       if (typeof data.fuel === "string") counts.fuel = data.fuel;
