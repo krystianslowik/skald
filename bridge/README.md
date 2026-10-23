@@ -189,7 +189,7 @@ loaded are counted as `unloaded` and skipped. `radius` is at most 100 m.
 | `POST /v1/map/pins` | `pins: [{x, z, name, type: icon0..icon4}]`, `player` or `at`, `radius` | Merges shared pins into the tables in range. Pins carry the fixed owner id `0x534B414C44` ("SKALD") and skip duplicates (same name within 1 m) |
 | `POST /v1/nearby` | `player` or `at`, `radius` | Counts objects by prefab, and how many are loaded. Read-only diagnostics |
 | `POST /v1/containers/add` | `prefab` (e.g. `piece_chest_wood`), `at: {x, y, z}` (the chest's position in the save, within 0.5 m), `item`, `amount` (1-9999) | Puts items into one chest, through the game's own `Inventory`: tops up stacks of that item, then fills empty slots. Refuses with 409 when a player has the chest open or stands within reach of it, when there is no room (the message says how many fit), when two chests sit on the spot, or when the chest holds items the server does not know or that do not read back the same; 404 when the chest or the item is gone; 400 for carts, ships and graves. The server takes ownership and writes the `items` ZDO value, so a client that has the chest loaded reloads it within a second and gets ownership back within two; an unloaded chest just keeps the new items. Answers `slots: [{x, y, added, stack}]`, `room` (left), `loaded` and `position` |
-| `POST /v1/sim/handover` | `player` | Hands the simulation of the area around a player to that player: every saved object in the area the game's ownership pass covers for them (the same scan as `sim`) that another connected player simulates now, and that nobody is using, gets them as owner. Skips objects not saved with the world (player characters, projectiles), objects outside the player's active area, objects with no owner, owned by the server or by a peer that left, objects in use (a ship being steered, a mount being ridden, an open chest, a cart in harness), and items lying on the ground. Each moved object's data revision jumps ahead so late updates from the old owner cannot take it back. At most 5000 objects per call; `capped` says it stopped there. An object that fails is skipped and counted, and the rest still move. Answers `objects` (moved), `zones` (the zones they lie in), `fromPeers` (how many players they came from), `already` (the player simulated these already), `inUse` and `loose` (left alone), `failed` and `capped`; never who they came from. See [Simulation handover](#simulation-handover) (0.7.0+) |
+| `POST /v1/sim/handover` | `player` | Hands the simulation of the area around a player to that player: every saved object in the area the game's ownership pass covers for them (the same scan as `sim`) that another connected player simulates now, and that nobody is using, gets them as owner. Skips objects not saved with the world (player characters, projectiles), objects outside the player's active area, objects with no owner, owned by the server or by a peer that left, objects in use (a ship being steered, a mount being ridden, an open chest, a cart in harness), items lying on the ground, and objects that hold or work items (chests, smelters and kilns, fermenters, beehives, cooking stations, item and armor stands, pickables, sap collectors, fires, shield generators, turrets, catapults, feasts, fish, ore deposits). Each moved object's data revision jumps ahead so late updates from the old owner cannot take it back. At most 5000 objects per call; `capped` says it stopped there. An object that fails is skipped and counted, and the rest still move. Answers `objects` (moved), `zones` (the zones they lie in), `fromPeers` (how many players they came from), `already` (the player simulated these already), `inUse`, `loose` and `kept` (left alone), `failed` and `capped`; never who they came from. See [Simulation handover](#simulation-handover) (0.7.0+) |
 
 ### Link and simulation load
 
@@ -306,6 +306,27 @@ with ownership, read from the decompiled 1.0 assemblies (build l-1.0.20):
   auto-stack merge or a partial take asks the owner first
   (`RPC_RequestOwn`) and then writes or destroys the drop as owner, so moving
   the owner in the middle could let two clients act on one drop.
+- **What holds or works items stays too.** The revision jump below drops the
+  old owner's last writes to a moved object, and many owner-side item
+  handlers record an item going in or out only in the object's data:
+  `Smelter` spawns a bar and then shortens its queue (kilns, furnaces,
+  windmills, spinning wheels and refineries are smelters too), the ore a
+  player adds is taken from their inventory before the owner queues it, and
+  `Pickable`, `Beehive`, `Fermenter`, `ItemStand`, `CookingStation`,
+  `SapCollector` and a `Container` take-all work the same way. Dropping such a
+  write could duplicate or lose an item, so objects whose prefab has one of
+  these components are left with their owner (`kept`): `Container` (also in
+  children: graves, cart and ship storage, the incinerator), `Smelter`,
+  `Fermenter`, `Beehive`, `CookingStation`, `ItemStand`, `ArmorStand`,
+  `Pickable`, `PickableItem`, `SapCollector`, `Fireplace` (fuel added by
+  players), `ShieldGenerator` and `Turret` (fuel and ammo), `Catapult`,
+  `Feast`, `Fish`, and `MineRock` / `MineRock5` (each mined area's health is
+  data, and its drops spawn when it breaks). The components are looked up
+  once per prefab. Not on the list: building pieces, trees and plain
+  destructibles (their drops come with the object's destruction, which does
+  not depend on revisions), and creatures (`Tameable`'s saddle is the one item
+  write there, and only in the instant a saddle goes on). An object whose
+  data revision is too near the 32-bit top to jump is kept as well.
 - **Late updates from the old owner.** In `RPC_ZDOData` the server takes a
   client's object whole, owner included, when the client's data revision is
   newer than its own. The old owner keeps sending updates until it hears of
@@ -313,15 +334,18 @@ with ownership, read from the decompiled 1.0 assemblies (build l-1.0.20):
   owner back on the server, while the old owner has already taken the new
   owner and stopped simulating (`ShouldSend` sees no change to send it back):
   nobody would simulate the object until the old owner leaves. So the
-  handover moves the object's data revision 1024 ahead together with the
-  owner. The late updates then fail the "newer" check, and their older owner
+  handover moves the object's data revision 2^20 ahead together with the
+  owner. That covers the old owner's window, its send backlog plus a round
+  trip (seconds on a bad line), at the hundreds of revisions a second a
+  moving object's sync writes. The late updates then fail the "newer" check, and their older owner
   revision is ignored too; the old owner gets the server's copy with a newer
   data revision and takes it, owner included. The revision is not saved with
   the world (`ZDO.Load` starts it at 0), and game code compares it only for
   "changed since" (`Container`, `ItemDrop`, `Door`, `ZSyncTransform`), so the
   jump costs one reload of the object on each client. The cost players see:
-  the old owner's last round trip of changes to those objects is dropped, so
-  a moving creature or cart can snap back once.
+  the old owner's last changes to the moved objects (creatures, carts,
+  building pieces) are dropped, so a moving creature or cart can snap back
+  once. No item moves are lost, since what holds items is not moved.
 
 **Not verified on a live server.** All of the above is read from code. What
 the code does not settle:
@@ -329,8 +353,9 @@ the code does not settle:
 - **The revision jump in practice.** That the old owner steps down cleanly,
   and how visible the one snap back is. Check: with a working smelter and a
   tamed animal at the base, hand it over, wait 10 s, and both should still
-  work (the smelter keeps smelting, the animal moves and eats); compare both
-  players' `sim.owned` over the same 10 s.
+  work (the smelter keeps smelting with its old owner, the animal moves and
+  eats with the new one); compare both players' `sim.owned` over the same
+  10 s.
 - **Client-side handovers.** `Ship.UpdateOwner` on the owning client hands a
   ship with players aboard to one of them when the owner is not aboard, so a
   ship carrying passengers goes back to a passenger. That is the game's own

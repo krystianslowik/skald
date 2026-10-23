@@ -32,6 +32,17 @@ namespace Skald.Bridge
         // which can duplicate or lose the item. The game's pass hands drops
         // out by itself.
         Loose,
+        // It holds or works items for players: chests (graves, cart and ship
+        // storage too), smelters and kilns, fermenters, beehives, cooking
+        // stations, item and armor stands, pickables, sap collectors, fires,
+        // shield generators, turrets, catapults, feasts, fish, ore deposits.
+        // Their owner records an item going in or out only in the object's
+        // data (a bar spawned and the queue shortened, ore taken from the
+        // player and then queued, a pick, a take-all). The data revision
+        // jump below drops the old owner's last writes, so such a move could
+        // be undone after the item already appeared or vanished: a duplicate
+        // or a loss. They stay with their owner.
+        Keeps,
     }
 
     // The game-independent half of POST /v1/sim/handover (Link.Handover),
@@ -55,7 +66,7 @@ namespace Skald.Bridge
         // One object: its saved flag, whether it lies in the target's active
         // area, its current owner, whether that owner is a connected player,
         // and whether someone is using it.
-        public static HandoverStep Step(bool persistent, bool inArea, long owner, long target, long server, bool ownerConnected, bool inUse, bool itemDrop)
+        public static HandoverStep Step(bool persistent, bool inArea, long owner, long target, long server, bool ownerConnected, bool inUse, bool itemDrop, bool holdsItems)
         {
             if (!persistent) return HandoverStep.Transient;
             if (!inArea) return HandoverStep.OutOfArea;
@@ -63,6 +74,7 @@ namespace Skald.Bridge
             if (owner == target) return HandoverStep.Already;
             if (owner == server || !ownerConnected) return HandoverStep.NotAPlayer;
             if (itemDrop) return HandoverStep.Loose;
+            if (holdsItems) return HandoverStep.Keeps;
             if (inUse) return HandoverStep.InUse;
             return HandoverStep.Take;
         }
@@ -90,16 +102,27 @@ namespace Skald.Bridge
         // far ahead makes those late updates fail the "newer" check (their
         // owner revision is older too, so they are dropped), and the old
         // owner, seeing a newer revision from the server, takes the server's
-        // copy and steps down. The cost: the old owner's last round trip of
-        // changes to those objects is lost (they rubber-band once). 1024 is
-        // far more updates than a client sends for one object in a round
-        // trip. The revision is not saved with the world (ZDO.Load starts it
-        // at 0) and game code only compares it for "changed since" (!=), so
-        // the jump costs one reload of the object on each client.
-        public const uint DataRevisionMargin = 1024;
+        // copy and steps down. The cost: the old owner's last changes to
+        // those objects are lost (a moving creature or cart snaps back once),
+        // which is why objects that hold items are not moved at all (Keeps).
+        // The margin covers the old owner's window: its send backlog plus a
+        // round trip, seconds on a bad line, while a moving object's sync
+        // writes several revisions a frame (hundreds a second). 2^20 is
+        // about an hour of that and still leaves 4000 handovers of room
+        // before the 32-bit revision saturates. The revision is not saved
+        // with the world (ZDO.Load starts it at 0) and game code only
+        // compares it for "changed since" (!=), so the jump costs one reload
+        // of the object on each client.
+        public const uint DataRevisionMargin = 1u << 20;
 
         // The revision to set; saturates instead of wrapping to a small one.
         public static uint BumpedDataRevision(uint rev) => rev > uint.MaxValue - DataRevisionMargin ? uint.MaxValue : rev + DataRevisionMargin;
+
+        // Whether the jump still leaves the new owner a margin of room. Near
+        // the top a saturated revision would wrap on the new owner's next
+        // write, and the server would then take its updates as old; such an
+        // object is left with its owner instead (counted as kept).
+        public static bool RoomToBump(uint rev) => rev <= uint.MaxValue - 2 * DataRevisionMargin;
     }
 
     // Counts what one handover moved: objects, the zones they lie in, and how
@@ -108,7 +131,7 @@ namespace Skald.Bridge
     {
         readonly HashSet<(int, int)> zones = new HashSet<(int, int)>();
         readonly HashSet<long> from = new HashSet<long>();
-        public int Objects, Already, InUse, Loose, Failed;
+        public int Objects, Already, InUse, Loose, Kept, Failed;
         public bool Capped;
 
         // Whether there is room for one more object; false sets Capped.
@@ -132,6 +155,7 @@ namespace Skald.Bridge
                 case HandoverStep.Already: Already++; break;
                 case HandoverStep.InUse: InUse++; break;
                 case HandoverStep.Loose: Loose++; break;
+                case HandoverStep.Keeps: Kept++; break;
             }
         }
 

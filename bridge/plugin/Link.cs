@@ -256,18 +256,34 @@ namespace Skald.Bridge
         // ---- POST /v1/sim/handover ------------------------------------------
 
         static readonly List<ZDO> HandoverScratch = new List<ZDO>();
-        // Whether a prefab is an item on the ground, by prefab hash.
-        static readonly Dictionary<int, bool> ItemDrops = new Dictionary<int, bool>();
+        // What a prefab is to a handover, by prefab hash: an item on the
+        // ground, or something that holds or works items (HandoverStep.Keeps
+        // says why each is left alone).
+        enum Holds { Nothing, ItemDrop, Items }
+        static readonly Dictionary<int, Holds> Holding = new Dictionary<int, Holds>();
 
-        static bool IsItemDrop(ZDO z)
+        // Containers are looked for in children too: a cart's and a ship's
+        // storage sit on a child object.
+        static readonly Type[] ItemHolders =
+        {
+            typeof(Container), typeof(Smelter), typeof(Fermenter), typeof(Beehive), typeof(CookingStation),
+            typeof(ItemStand), typeof(ArmorStand), typeof(Pickable), typeof(PickableItem), typeof(SapCollector),
+            typeof(Fireplace), typeof(ShieldGenerator), typeof(Turret), typeof(Catapult), typeof(Feast),
+            typeof(Fish), typeof(MineRock), typeof(MineRock5),
+        };
+
+        static Holds HoldingOf(ZDO z)
         {
             int hash = z.GetPrefab();
-            if (ItemDrops.TryGetValue(hash, out bool known)) return known;
+            if (Holding.TryGetValue(hash, out var known)) return known;
             var prefab = ZNetScene.instance != null ? ZNetScene.instance.GetPrefab(hash) : null;
-            bool drop = prefab != null && prefab.GetComponent<ItemDrop>() != null;
-            // An unknown hash is not kept: the scene may not have every prefab yet.
-            if (prefab != null) ItemDrops[hash] = drop;
-            return drop;
+            if (prefab == null) return Holds.Nothing; // not kept: the scene may not have every prefab yet
+            var h = Holds.Nothing;
+            if (prefab.GetComponent<ItemDrop>() != null) h = Holds.ItemDrop;
+            else foreach (var t in ItemHolders)
+                if (prefab.GetComponentInChildren(t, true) != null) { h = Holds.Items; break; }
+            Holding[hash] = h;
+            return h;
         }
 
         // One object of a handover: its step, counted, and the move if it is taken.
@@ -276,13 +292,15 @@ namespace Skald.Bridge
             long owner = z.GetOwner();
             var pos = z.GetPosition();
             bool candidate = z.Persistent && owner != 0 && owner != target && owner != server;
+            var holds = candidate ? HoldingOf(z) : Holds.Nothing;
             var step = HandoverPlan.Step(
                 z.Persistent,
                 ZNetScene.InActiveArea(pos, zone),
                 owner, target, server,
                 owner != 0 && ZNet.instance.GetPeer(owner) != null,
                 HandoverPlan.InUse(z.GetLong(ZDOVars.s_user, 0L), z.GetInt(ZDOVars.s_inUse), z.GetBool(ZDOVars.s_attachJointHash)),
-                candidate && IsItemDrop(z));
+                holds == Holds.ItemDrop,
+                holds == Holds.Items || !HandoverPlan.RoomToBump(z.DataRevision));
             if (step == HandoverStep.Take && !count.Room()) return;
             var zz = ZoneSystem.GetZone(pos);
             if (step == HandoverStep.Take)
@@ -330,6 +348,9 @@ namespace Skald.Bridge
                     try { HandOne(z, zone, target, server, count); }
                     catch (Exception e) when (!(e is MissingMemberException || e is TypeLoadException || e is TypeInitializationException))
                     {
+                        // One line per call, with the first failure: enough to
+                        // find the cause without a line per object.
+                        if (count.Failed == 0) SkaldBridgePlugin.Warn("sim handover: skipped an object that failed: " + e.GetType().Name + ": " + e.Message);
                         count.Failed++;
                     }
                 }
@@ -349,6 +370,7 @@ namespace Skald.Bridge
                 already = count.Already,
                 inUse = count.InUse,
                 loose = count.Loose,
+                kept = count.Kept,
                 failed = count.Failed,
                 capped = count.Capped,
             });

@@ -6,8 +6,8 @@ public class HandoverPlanTests
     // Peer uids as the game hands them out (fixtures only).
     const long Ragnar = 1001, Freya = 2002, Server = 9009;
 
-    static HandoverStep Step(bool persistent = true, bool inArea = true, long owner = Freya, bool connected = true, bool inUse = false, bool itemDrop = false) =>
-        HandoverPlan.Step(persistent, inArea, owner, Ragnar, Server, connected, inUse, itemDrop);
+    static HandoverStep Step(bool persistent = true, bool inArea = true, long owner = Freya, bool connected = true, bool inUse = false, bool itemDrop = false, bool holdsItems = false) =>
+        HandoverPlan.Step(persistent, inArea, owner, Ragnar, Server, connected, inUse, itemDrop, holdsItems);
 
     [Fact]
     public void TakesWhatAnotherConnectedPlayerSimulates()
@@ -57,18 +57,42 @@ public class HandoverPlanTests
     }
 
     [Fact]
+    public void LeavesWhatHoldsOrWorksItems()
+    {
+        // A smelter, a chest, a pickable: the revision jump could undo an
+        // item move the old owner just made.
+        Assert.Equal(HandoverStep.Keeps, Step(holdsItems: true));
+        Assert.Equal(HandoverStep.Keeps, Step(holdsItems: true, inUse: true));
+        Assert.Equal(HandoverStep.Loose, Step(itemDrop: true, holdsItems: true));
+        Assert.Equal(HandoverStep.Already, Step(owner: Ragnar, holdsItems: true));
+        Assert.Equal(HandoverStep.Transient, Step(persistent: false, holdsItems: true));
+        var c = new HandoverCounter();
+        c.Add(HandoverStep.Keeps, Freya, 2, 2);
+        c.Add(HandoverStep.Keeps, Freya, 2, 3);
+        Assert.Equal(2, c.Kept);
+        Assert.Equal(0, c.Objects);
+        Assert.Equal(0, c.Zones);
+    }
+
+    [Fact]
     public void MovesTheDataRevisionPastTheOldOwnersLateUpdates()
     {
-        // A late update from the old owner carries at most a few revisions
-        // more than the server had: after the bump it is no longer newer.
+        // A bad line: seconds of backlog at hundreds of sync writes a second
+        // still stay under the jump.
+        Assert.Equal(1u << 20, HandoverPlan.DataRevisionMargin);
         uint server = 4000;
         uint bumped = HandoverPlan.BumpedDataRevision(server);
         Assert.Equal(server + HandoverPlan.DataRevisionMargin, bumped);
-        Assert.False(server + 50 > bumped);
+        Assert.False(server + 10 * 800 > bumped);
         // Saturates instead of wrapping to an old-looking revision.
         Assert.Equal(uint.MaxValue, HandoverPlan.BumpedDataRevision(uint.MaxValue - 10));
         Assert.Equal(uint.MaxValue, HandoverPlan.BumpedDataRevision(uint.MaxValue));
         Assert.Equal(HandoverPlan.DataRevisionMargin, HandoverPlan.BumpedDataRevision(0));
+        // Near the top the object is not moved at all: the new owner's next
+        // write would wrap.
+        Assert.True(HandoverPlan.RoomToBump(0));
+        Assert.True(HandoverPlan.RoomToBump(uint.MaxValue - 2 * HandoverPlan.DataRevisionMargin));
+        Assert.False(HandoverPlan.RoomToBump(uint.MaxValue - 2 * HandoverPlan.DataRevisionMargin + 1));
     }
 
     [Fact]
