@@ -159,6 +159,11 @@ export function describeAdmin(i: I18n, d: Record<string, unknown>): string {
       return describeFill(i, command, d, actor, player);
     case "refuel-fires":
       return describeRefuel(i, d, actor, player);
+    case "sim-handover": {
+      // Always for a player; "found nothing" when no object moved.
+      const n = Number(d.objects ?? 0) || 0;
+      return n > 0 ? i.tn("saga.admin.sim-handover", n, { actor, player }) : i.t("saga.admin.sim-handover.none", { actor, player });
+    }
     case "grow":
       vars.n = Number(d.plants ?? 0);
       break;

@@ -13,6 +13,7 @@
     <Compile Include="../plugin/ChestPlan.cs" Link="ChestPlan.cs" />
     <Compile Include="../plugin/RefuelPlan.cs" Link="RefuelPlan.cs" />
     <Compile Include="../plugin/LinkPlan.cs" Link="LinkPlan.cs" />
+    <Compile Include="../plugin/HandoverPlan.cs" Link="HandoverPlan.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="xunit.v3" Version="4.0.2" />

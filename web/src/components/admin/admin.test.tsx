@@ -1026,6 +1026,33 @@ describe("admin", () => {
     expect(await screen.findByRole("dialog", { name: "Admin" })).toBeInTheDocument();
   });
 
+  it("hands a player the simulation of their area on a second tap, and says what moved (#203)", async () => {
+    const calls = api(status(), (url) =>
+      url === "/api/admin/sim-handover" ? Response.json({ ok: true, data: { player: "Freya", objects: 1058, zones: 6, fromPeers: 1, already: 180, inUse: 2, capped: false } }) : Response.json({ ok: true, data: {} }),
+    );
+    renderDashboard();
+    const panel = await openAdmin("Players");
+    const go = within(panel).getByRole("button", { name: "Hand over simulation: Freya" });
+    expect(within(panel).getByRole("button", { name: "Hand over simulation: Ragnar" })).toBeEnabled();
+    // The first tap only arms, and says what will happen.
+    fireEvent.click(go);
+    expect(calls.find((c) => c.url === "/api/admin/sim-handover")).toBeUndefined();
+    expect(within(panel).getByRole("status")).toHaveTextContent("Moves what other players simulate around Freya over to them.");
+    fireEvent.click(within(panel).getByRole("button", { name: "Tap again: hand over to Freya" }));
+    await waitFor(() => expect(calls.find((c) => c.url === "/api/admin/sim-handover")).toBeTruthy());
+    expect(calls.find((c) => c.url === "/api/admin/sim-handover")!.body).toEqual({ player: "Freya" });
+    expect(await screen.findByText("Freya now simulates 1,058 more objects, in 6 zones · 2 in use stay")).toBeInTheDocument();
+  });
+
+  it("greys out the handover on a plugin before 0.7.0, and says why", async () => {
+    api(status({}, { plugin: "0.6.0" }));
+    renderDashboard();
+    const panel = await openAdmin("Players");
+    const go = within(panel).getByRole("button", { name: "Hand over simulation: Freya" });
+    expect(go).toBeDisabled();
+    expect(go).toHaveAccessibleDescription("Admin plugin 0.6.0 cannot hand over simulation: that needs 0.7.0 or later.");
+  });
+
   it("says in the panel's words why the bridge refused a fill", async () => {
     api(status(), (url) => (url === "/api/admin/fill-smelters" ? Response.json({ ok: false, error: "no connected player 'Ragnar'" }, { status: 404 }) : Response.json({ ok: true, data: {} })));
     renderDashboard();
@@ -1439,6 +1466,20 @@ describe("refuel lines in the saga", () => {
     expect(describeAdmin(pl, { actor: "k", command: "refuel-fires", result: "ok", fires: 0, full: 1 })).toBe("k nie dołożył nic do ognia (już pełne: 1)");
     expect(describeAdmin(pl, { actor: "k", command: "refuel-fires", result: "ok", fires: 0, player: "Freya" })).toBe("k nie znalazł ognia do podsycenia obok: Freya");
     expect(describeAdmin(en, { actor: "k", command: "refuel-fires", result: "timeout" })).toBe("k: refuelling fires took too long");
+  });
+});
+
+describe("simulation handover lines in the saga", () => {
+  it("says how much moved, or that nothing did", () => {
+    const en = makeI18n("en");
+    const pl = makeI18n("pl");
+    const ok = { actor: "k", command: "sim-handover", result: "ok", player: "Ragnar", objects: 1058, zones: 6, fromPeers: 1, already: 180, inUse: 2 };
+    expect(describeAdmin(en, ok).replace(/\u00a0/g, " ")).toBe("k handed Ragnar the simulation of 1,058 objects");
+    expect(describeAdmin(pl, ok).replace(/\u00a0/g, " ")).toBe("k przekazał liczenie 1058 obiektów: Ragnar");
+    expect(describeAdmin(en, { ...ok, objects: 1 })).toBe("k handed Ragnar the simulation of 1 object");
+    expect(describeAdmin(en, { ...ok, objects: 0 })).toBe("k found nothing to hand over to Ragnar");
+    expect(describeAdmin(pl, { ...ok, objects: 0 })).toBe("k nie znalazł nic do przekazania: Ragnar");
+    expect(describeAdmin(en, { actor: "k", command: "sim-handover", result: "timeout", player: "Ragnar" })).toBe("k: a simulation handover took too long");
   });
 });
 

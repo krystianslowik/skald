@@ -893,6 +893,7 @@ export const ADMIN_COMMANDS = [
   "map-reveal",
   "map-pins",
   "chest-add",
+  "sim-handover",
   "ack-build",
 ] as const;
 export type AdminCommand = (typeof ADMIN_COMMANDS)[number];

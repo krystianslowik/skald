@@ -82,6 +82,7 @@ var Commands = map[string]Command{
 	"map-reveal":       {Path: "/v1/map/reveal"},
 	"map-pins":         {Path: "/v1/map/pins"},
 	"chest-add":        {Path: "/v1/containers/add", Validate: validateChestAdd},
+	"sim-handover":     {Path: "/v1/sim/handover"},
 }
 
 // Reads is the allow-list of GET /bridge/{name}, besides status, players and bans.
@@ -1206,7 +1207,7 @@ func (c *Client) summarizeResult(cmd string, data json.RawMessage, ev map[string
 	if json.Unmarshal(data, &d) != nil {
 		return
 	}
-	for _, k := range []string{"killed", "tamed", "alreadyTamed", "repaired", "smelters", "kilns", "skipped", "full", "fermenters", "fires", "off", "world", "capped", "plants", "sentTo", "stopped", "started", "label", "stacks", "unloaded", "day", "loaded"} {
+	for _, k := range []string{"killed", "tamed", "alreadyTamed", "repaired", "smelters", "kilns", "skipped", "full", "fermenters", "fires", "off", "world", "capped", "plants", "sentTo", "stopped", "started", "label", "stacks", "unloaded", "day", "loaded", "objects", "zones", "fromPeers", "already", "inUse"} {
 		if v, ok := d[k]; ok {
 			ev[k] = v
 		}

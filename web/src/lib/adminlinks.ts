@@ -70,6 +70,13 @@ function start(): () => void {
   };
 }
 
+/** Reads the links again now instead of at the next poll (after a simulation handover). */
+export function refreshAdminLinks(): void {
+  if (users === 0 || inFlight) return;
+  if (timer) clearTimeout(timer);
+  void poll();
+}
+
 const subscribe = (f: () => void) => {
   subs.add(f);
   return () => subs.delete(f);

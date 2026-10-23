@@ -401,6 +401,30 @@ describe("mock bridge", () => {
     mock.stop();
   });
 
+  it("hands the shared base's simulation to a player, and the player list follows", async () => {
+    const mock = new MockAgent(Date.now, "UTC");
+    const evs: AgentEvent[] = [];
+    const abort = new AbortController();
+    void mock.stream(1_000_000, (e) => evs.push(e), abort.signal);
+    type Sim = { data: { players: { name: string; sim: { owned: number } }[] } };
+    const owned = async (name: string) => ((await mock.bridge({ op: "players" })).body as Sim).data.players.find((p) => p.name === name)!.sim.owned;
+    expect(await owned("Freya")).toBe(1240);
+    const run = (player: string) => mock.bridge({ op: "run", command: "sim-handover", body: { player }, actor: "t" });
+    const first = await run("Ragnar");
+    expect(first.status).toBe(200);
+    expect((first.body as { data: unknown }).data).toMatchObject({ player: "Ragnar", objects: 1058, zones: 6, fromPeers: 1, inUse: 2, capped: false });
+    expect(await owned("Ragnar")).toBe(1240);
+    expect(await owned("Freya")).toBe(180);
+    // Again: nothing left to move, all of it counted as already theirs.
+    expect(((await run("Ragnar")).body as { data: unknown }).data).toMatchObject({ objects: 0, already: 1240 });
+    expect((await run("Nobody")).status).toBe(404);
+    const runs = evs.filter((e) => e.type === "admin").map((e) => e.data);
+    expect(runs.map((f) => f.result)).toEqual(["ok", "ok", "error"]);
+    expect(runs[0]).toMatchObject({ command: "sim-handover", player: "Ragnar", objects: 1058, zones: 6, fromPeers: 1, already: 180, inUse: 2 });
+    abort.abort();
+    mock.stop();
+  });
+
   it("refuels the fires around a player, counted by prefab", async () => {
     const mock = new MockAgent(Date.now, "UTC");
     const evs: AgentEvent[] = [];
