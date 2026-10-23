@@ -110,6 +110,8 @@ func (f *fakePlugin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/v1/containers/add":
 		ok(map[string]any{"prefab": "piece_chest_wood", "item": "Iron", "amount": 20, "position": map[string]any{"x": 10.5, "y": 31.2, "z": -4}, "loaded": true, "room": 460,
 			"slots": []any{map[string]any{"x": 0, "y": 0, "added": 10, "stack": 30}, map[string]any{"x": 3, "y": 0, "added": 10, "stack": 10}}})
+	case "/v1/sim/handover":
+		ok(map[string]any{"player": "Freya", "objects": 812, "zones": 4, "fromPeers": 1, "already": 37, "inUse": 2, "capped": false})
 	case "/v1/build/refuel-fires":
 		by := map[string]any{"piece_groundtorch_wood": 14, "fire_pit": 3}
 		for i := 0; i < 30; i++ {
@@ -617,6 +619,38 @@ func TestRefuelAuditCountsFiresByPrefab(t *testing.T) {
 	// The biggest groups always make it into a capped event, whatever the map order.
 	if by["piece_groundtorch_wood"] != float64(14) || by["fire_pit"] != float64(3) || len(by) != 20 {
 		t.Fatalf("refuel-fires byPrefab %+v", e["byPrefab"])
+	}
+}
+
+func TestSimHandoverSendsTheUidAndAuditsCounts(t *testing.T) {
+	if Commands["sim-handover"].Path != "/v1/sim/handover" {
+		t.Fatalf("sim-handover missing from the allow-list")
+	}
+	hub := events.New(100, 10)
+	f := &fakePlugin{build: "l-1.0.17"}
+	c := newClient(t, f, hub, "")
+	if _, err := c.Run(context.Background(), "sim-handover", map[string]any{"player": "Freya"}, "k"); err != nil {
+		t.Fatal(err)
+	}
+	// The plugin gets the peer uid, never the name the panel sent.
+	f.mu.Lock()
+	var sent string
+	for _, cl := range f.calls {
+		if cl.Path == "/v1/sim/handover" {
+			sent = cl.Body
+		}
+	}
+	f.mu.Unlock()
+	if !strings.Contains(sent, `"player":"42"`) {
+		t.Fatalf("sim-handover body %s", sent)
+	}
+	evs := adminEvents(t, hub)
+	if len(evs) != 1 {
+		t.Fatalf("want 1 admin event, got %+v", evs)
+	}
+	e := evs[0]
+	if e["command"] != "sim-handover" || e["result"] != "ok" || e["player"] != "Freya" || e["objects"] != float64(812) || e["zones"] != float64(4) || e["fromPeers"] != float64(1) || e["already"] != float64(37) || e["inUse"] != float64(2) || e["capped"] != false {
+		t.Fatalf("sim-handover %+v", e)
 	}
 }
 
