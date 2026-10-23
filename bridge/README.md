@@ -228,7 +228,7 @@ makes the whole area stutter for the others while the server itself is idle.
   all seen (a reply with no ping waiting, which a client can also cause by
   sending a stray reply, more pings unanswered than the game's 30 s timeout
   allows, or a crossplay session reset: that player's ping then stays unknown
-  until they reconnect; the first such case logs one warning line). An unsure ping is no verdict of its own: the panel then judges
+  until they reconnect; the first stray reply or overflow logs one warning line, a session reset logs none). An unsure ping is no verdict of its own: the panel then judges
   the link by stalls and the send backlog. On Steam, the socket's own ping is
   used when `GetConnectionQuality` gives one.
 - `replyGapMaxS`: the longest wait for a keep-alive reply in the last 10 s,
