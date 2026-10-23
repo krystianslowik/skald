@@ -995,7 +995,7 @@ export interface LinkQuality {
   pingMs?: number;
   /** Worst round trip over the last 10 s, ms. */
   pingMaxMs?: number;
-  /** No ping right now: after a stall or while a slow round trip falls the plugin cannot pair replies with pings; no verdict by itself (stalls and backlog decide). */
+  /** No ping right now: no reply timed in the last 10 s, or the plugin cannot count the keep-alive; no verdict by itself (stalls and backlog decide). */
   pingUnsure?: boolean;
   /** Longest wait for a keep-alive reply in the last 10 s, s: about 1 when healthy. */
   replyGapMaxS?: number;

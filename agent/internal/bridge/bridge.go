@@ -484,10 +484,9 @@ type Link struct {
 	// plugin); PingMaxMs the worst. Rounded to 10 ms.
 	PingMs    *int `json:"pingMs,omitempty"`
 	PingMaxMs *int `json:"pingMaxMs,omitempty"`
-	// PingUnsure: the ping is left out because, after a stall or while a
-	// round trip over a second falls, the plugin cannot tell which reply
-	// answers which ping. No verdict by itself: the panel then goes by
-	// stalls and the send backlog.
+	// PingUnsure: the plugin has no round trip to show (no reply timed in
+	// the last 10 s, or the keep-alive cannot be counted). No verdict by
+	// itself: the panel then goes by stalls and the send backlog.
 	PingUnsure bool `json:"pingUnsure,omitempty"`
 	// ReplyGapMaxS is the longest wait for a keep-alive reply in the last
 	// 10 s: about 1 s on a healthy link, more when it stalls.

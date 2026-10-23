@@ -16,7 +16,7 @@ namespace Skald.Bridge
     public class SkaldBridgePlugin : BaseUnityPlugin
     {
         public const string Guid = "dev.skald.bridge";
-        public const string Version = "0.7.0";
+        public const string Version = "0.8.0";
         public const string Prefix = "[SkaldBridge]";
 
         internal static ManualLogSource Log;
@@ -61,6 +61,9 @@ namespace Skald.Bridge
                 server = new HttpServer(port, token);
                 server.Start();
                 Info("loaded v" + Version + ", listening on 127.0.0.1:" + port + ", game build " + SafeGameVersion());
+                // Optional, and before any player connects: without it only
+                // the link round trip goes blank.
+                Link.Hook();
             }
             catch (Exception e)
             {

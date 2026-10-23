@@ -111,7 +111,7 @@ describe("a ping the plugin is unsure of", () => {
       </I18nProvider>,
     );
     const section = screen.getByRole("region", { name: "Connection and area" });
-    expect(section).toHaveTextContent("stalls of up to 3.1 s · ping unknown for now, after a stall or a slow spell");
+    expect(section).toHaveTextContent("stalls of up to 3.1 s · ping unknown for now");
     expect(section).not.toHaveTextContent("crossplay gives no ping");
   });
 });
