@@ -9,6 +9,8 @@ above them.
 
 ## [Unreleased]
 
+## [2026.10.32] - 2026-10-23
+
 ### Added
 
 - Hand over simulation: each player's row in the admin sheet's Players tab has a **Hand over simulation** button (Polish: **Przekaż liczenie**). It moves what other players simulate around that player over to them, so a player on a good line or a fast PC can take a busy base from one who makes it stutter. A second tap confirms. The message after it says how many objects moved and in how many zones, and the player's "Simulates the area" line updates. Things someone is using right now stay with that player: a ship being steered, a mount being ridden, an open chest, a cart in harness. Items lying on the ground and everything that holds or works items stay too (chests and graves, carts and ships with storage, smelters and kilns, fermenters, beehives, cooking stations, item stands, crops and berries, fires, ore deposits, animals that take a saddle), so an item going in or out at that moment cannot be duplicated or lost. Player characters and arrows never move. A creature the old owner was moving at that moment can snap back once. The game keeps the new assignment while the player stays near, and goes back to its usual rules once they walk away (#203).
