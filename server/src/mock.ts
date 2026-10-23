@@ -140,20 +140,23 @@ interface MockPos {
  * A plausible link and simulation load per player, as bridge 0.6.0 reports
  * them through the agent's admin-only player list (never on positions):
  * Ragnar on a good line, Freya on a bad one that simulates most of the
- * base, anyone else in between. Jittered a little.
+ * base, anyone else in between. Jittered a little. `base` is who simulates
+ * the base Ragnar and Freya share (Freya until a simulation handover).
  */
-function mockLink(name: string): Pick<AdminPlayer, "link" | "sim"> {
+function mockLink(name: string, base: string = "Freya"): Pick<AdminPlayer, "link" | "sim"> {
   const j = (n: number, by: number) => Math.max(0, Math.round((n + (Math.random() - 0.5) * by) / 10) * 10);
+  // The shared base: 1,240 objects for whoever runs it, 180 of their own for the other.
+  const shared = (who: string) => (who === base ? { owned: 1240, nearby: 1500, zones: 7 } : { owned: 180, nearby: 1500, zones: 2 });
   if (name === "Ragnar") {
     return {
       link: { transport: "crossplay", pingMs: j(60, 20), pingMaxMs: j(90, 20), replyGapMaxS: 1, queueBytes: 0, outBps: 4200, inBps: 900 },
-      sim: { owned: 180, nearby: 1500, zones: 2 },
+      sim: shared("Ragnar"),
     };
   }
   if (name === "Freya") {
     return {
       link: { transport: "crossplay", pingMs: j(240, 40), pingMaxMs: j(620, 80), replyGapMaxS: 3.4, queueBytes: 11264, outBps: 2600, inBps: 1500 },
-      sim: { owned: 1240, nearby: 1500, zones: 7 },
+      sim: shared("Freya"),
     };
   }
   return {
@@ -266,6 +269,8 @@ export class MockAgent implements AgentSource {
   private bans: { id: string; platform: Platform; name?: string }[] = [{ id: "5e1d0c3b2a190807", platform: "steam", name: "Hrafn" }, { id: "0f9e8d7c6b5a4f3e", platform: "xbox" }];
   private event: { name: string; at: number; duration: number } | null = null;
   private frozen = false;
+  /** Who simulates the base Ragnar and Freya share; a simulation handover moves it. */
+  private simBase = "Freya";
   private acked = false;
   private lastPositions = "";
   /** The positions lease, as on the agent (no expiry: the hub renews and ends it). */
@@ -718,7 +723,7 @@ export class MockAgent implements AgentSource {
     if (this.state.server.status !== "running") return fail(502, "bridge unavailable");
     switch (req.op) {
       case "players":
-        return ok({ players: this.livePlayers().map((p): AdminPlayer => ({ ...p, y: 34, hasCharacter: true, ...mockLink(p.name) })) });
+        return ok({ players: this.livePlayers().map((p): AdminPlayer => ({ ...p, y: 34, hasCharacter: true, ...mockLink(p.name, this.simBase) })) });
       case "read":
         switch (req.name) {
           case "time": {
@@ -1036,6 +1041,17 @@ export class MockAgent implements AgentSource {
         data = { fermenters: 2, skipped: 0, full: 1, unloaded: 0, added: { [mead]: 2 }, near, radius: Number(body.radius ?? 20) };
         break;
       }
+      case "sim-handover": {
+        // The plugin's rule (bridge/plugin/HandoverPlan.cs) on the shared
+        // base: what the other one simulates there moves, two things in use
+        // stay, and what the target ran already is counted as such.
+        if (!target) return fail(400, "missing 'player'");
+        const shares = target === "Ragnar" || target === "Freya";
+        const moves = shares && this.simBase !== target;
+        if (moves) this.simBase = target;
+        data = { player: target, objects: moves ? 1058 : 0, zones: moves ? 6 : 0, fromPeers: moves ? 1 : 0, already: shares ? (moves ? 180 : 1240) : 320, inUse: moves ? 2 : 0, capped: false };
+        break;
+      }
       case "refuel-fires": {
         // The plugin's rules (bridge/plugin/RefuelPlan.cs) on a base whose
         // torches and fires burn down: a wider radius reaches more of them,
@@ -1070,7 +1086,7 @@ export class MockAgent implements AgentSource {
     this.log(`[Info   :Skald Bridge] [SkaldBridge] audit actor=${actor} cmd=POST /v1/${command} result=ok ${JSON.stringify({ ok: true, data })}`);
     const counts: Record<string, unknown> = {};
     if (!Array.isArray(data)) {
-      for (const k of ["killed", "tamed", "repaired", "smelters", "kilns", "skipped", "full", "fermenters", "fires", "off", "world", "capped", "unloaded", "plants", "sentTo", "stopped", "started", "label", "stacks", "day", "loaded"]) if (k in data) counts[k] = data[k];
+      for (const k of ["killed", "tamed", "repaired", "smelters", "kilns", "skipped", "full", "fermenters", "fires", "off", "world", "capped", "unloaded", "plants", "sentTo", "stopped", "started", "label", "stacks", "day", "loaded", "objects", "zones", "fromPeers", "already", "inUse"]) if (k in data) counts[k] = data[k];
       if (data.added && typeof data.added === "object") counts.added = data.added;
       if (data.byPrefab && typeof data.byPrefab === "object") counts.byPrefab = data.byPrefab;
       if (typeof data.fuel === "string") counts.fuel = data.fuel;
