@@ -420,7 +420,7 @@ describe("mock bridge", () => {
     expect((await run("Nobody")).status).toBe(404);
     const runs = evs.filter((e) => e.type === "admin").map((e) => e.data);
     expect(runs.map((f) => f.result)).toEqual(["ok", "ok", "error"]);
-    expect(runs[0]).toMatchObject({ command: "sim-handover", player: "Ragnar", objects: 1058, zones: 6, fromPeers: 1, already: 180, inUse: 2 });
+    expect(runs[0]).toMatchObject({ command: "sim-handover", player: "Ragnar", objects: 1058, zones: 6, fromPeers: 1, already: 180, inUse: 2, loose: 3, failed: 0 });
     abort.abort();
     mock.stop();
   });
