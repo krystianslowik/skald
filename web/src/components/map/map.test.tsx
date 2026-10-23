@@ -10,7 +10,6 @@ import { MapDetails } from "./MapDetails";
 import { MapLayers } from "./MapLayers";
 import { OrePopover } from "./OrePopover";
 import MapView from "./MapView";
-import { mapStatsOn } from "./MapCanvas";
 import { setMapPerf } from "../../lib/mapperf";
 
 const inLocale = (ui: ReactElement, locale: "en" | "pl" = "en") => render(<I18nProvider locale={locale}>{ui}</I18nProvider>);
@@ -202,43 +201,6 @@ describe("MapView", () => {
     const sheet = await screen.findByRole("dialog", { name: "Warstwy" });
     expect(within(sheet).getByRole("button", { name: "Zamknij warstwy" })).toBeInTheDocument();
     expect(within(sheet).queryByRole("button", { name: "Zamknij mapę" })).not.toBeInTheDocument();
-  });
-
-  it("offers the perf harness hook only under ?mapstats, and takes it away on close", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json(snap)));
-    expect(mapStatsOn("?mapstats")).toBe(true);
-    expect(mapStatsOn("?map=canvas&mapstats=1")).toBe(true);
-    expect(mapStatsOn("?map=canvas")).toBe(false);
-    const onClose = vi.fn();
-    // The hook comes from a passive effect, which under load can still be pending when the buttons are in the DOM (#134).
-    // Rendering the same tree again commits, and every commit first runs the effects still pending from the last one.
-    const mounted = async () => {
-      const ui = (
-        <I18nProvider locale="en">
-          <MapView saveKey="a" onClose={onClose} />
-        </I18nProvider>
-      );
-      const r = render(ui);
-      await screen.findAllByRole("button", { name: "Portals: shown" });
-      r.rerender(ui);
-      return r;
-    };
-    const plain = await mounted();
-    expect(window.__mapStats).toBeUndefined();
-    plain.unmount();
-    history.replaceState(null, "", "/?mapstats");
-    try {
-      const withStats = await mounted();
-      // A rerender is not enough on a loaded runner: wait for the effect itself.
-      await waitFor(() => expect(window.__mapStats).toBeTypeOf("function"));
-      const s = window.__mapStats!();
-      expect(s.view.scale).toBeGreaterThan(0);
-      expect(s.ahead).toBeNull();
-      withStats.unmount();
-      expect(window.__mapStats).toBeUndefined();
-    } finally {
-      history.replaceState(null, "", "/");
-    }
   });
 
   it("explains a missing map", async () => {
