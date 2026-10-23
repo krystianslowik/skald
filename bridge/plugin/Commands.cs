@@ -66,6 +66,7 @@ namespace Skald.Bridge
             R("POST", "/v1/map/pins", true, Extras.AddPins),
             R("POST", "/v1/nearby", false, Extras.Nearby),
             R("POST", "/v1/containers/add", true, Chests.Add),
+            R("POST", "/v1/sim/handover", true, Link.Handover),
             // Read-only terrain sampling, off the main thread (see Terrain.cs).
             new Route { Method = "GET", Path = "/v1/terrain/info", Handler = Terrain.Info, OffThread = true },
             new Route { Method = "GET", Path = "/v1/terrain/tile", Handler = Terrain.Tile, OffThread = true },

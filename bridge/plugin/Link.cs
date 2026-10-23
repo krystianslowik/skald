@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 
 namespace Skald.Bridge
@@ -250,6 +251,68 @@ namespace Skald.Bridge
             }
             finally { Scratch.Clear(); }
             return res;
+        }
+
+        // ---- POST /v1/sim/handover ------------------------------------------
+
+        static readonly List<ZDO> HandoverScratch = new List<ZDO>();
+
+        // Hands the simulation of the target's area to the target: every saved
+        // object in the area the game's own ownership pass covers for them
+        // (the same scan as the sim block above) that another connected
+        // player simulates now, and that nobody is using, gets the target as
+        // owner (HandoverPlan has the rules and why). The game's pass then
+        // leaves them with the target while the target stays near. Answers
+        // counts only, never who the objects came from.
+        public static object Handover(JObject a)
+        {
+            Commands.Net();
+            var p = Commands.FindPlayer(Commands.Str(a, "player"));
+            var man = ZDOMan.instance;
+            if (man == null) throw new CommandError(503, "world not loaded yet");
+            var synced = ZNet.instance.GetSyncedSimulationDistance();
+            var near = new SimulationDistance(synced.NearSimulationDistance, 0, synced.IsClassic);
+            var zone = ZoneSystem.GetZone(p.m_refPos);
+            long target = p.m_uid, server = ZDOMan.GetSessionID();
+            var count = new HandoverCounter();
+            try
+            {
+                HandoverScratch.Clear();
+                man.FindSectorObjects(zone, near, HandoverScratch);
+                foreach (var z in HandoverScratch)
+                {
+                    // A player's own character is not saved, so Step skips it
+                    // anyway; this keeps it out whatever a game update does.
+                    if (z == null || z.m_uid == p.m_characterID) continue;
+                    long owner = z.GetOwner();
+                    var pos = z.GetPosition();
+                    var step = HandoverPlan.Step(
+                        z.Persistent,
+                        ZNetScene.InActiveArea(pos, zone),
+                        owner, target, server,
+                        owner != 0 && ZNet.instance.GetPeer(owner) != null,
+                        HandoverPlan.InUse(z.GetLong(ZDOVars.s_user, 0L), z.GetInt(ZDOVars.s_inUse), z.GetBool(ZDOVars.s_attachJointHash)));
+                    if (step == HandoverStep.Take && !count.Room()) break;
+                    var zz = ZoneSystem.GetZone(pos);
+                    count.Add(step, owner, zz.x, zz.y);
+                    // Bumps the owner revision: every peer in range learns the
+                    // new owner with the next object update it gets.
+                    if (step == HandoverStep.Take) z.SetOwner(target);
+                }
+            }
+            finally { HandoverScratch.Clear(); }
+            // Fresh numbers for the next player list, not the scan from before.
+            simAt = -SimEveryS;
+            return Commands.Ok(new
+            {
+                player = p.m_playerName,
+                objects = count.Objects,
+                zones = count.Zones,
+                fromPeers = count.FromPeers,
+                already = count.Already,
+                inUse = count.InUse,
+                capped = count.Capped,
+            });
         }
     }
 }

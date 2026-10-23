@@ -25,6 +25,8 @@ bridge/
     HttpServer.cs        loopback listener, token check, audit log, error mapping
     Commands.cs          route table + priority-1 commands
     Extras.cs            priority-2 commands
+    Link.cs              link probe, simulation load and handover (POST /v1/sim/handover)
+    HandoverPlan.cs      handover rules (pure .NET, unit-tested)
     MapData.cs           cartography-table blob codec (pure .NET, unit-tested)
   tests/                 xunit tests for MapData (`dotnet test bridge/tests`)
   k8s/test-server.yaml   throwaway crossplay test server (namespace skald-bridge-test)
@@ -187,6 +189,7 @@ loaded are counted as `unloaded` and skipped. `radius` is at most 100 m.
 | `POST /v1/map/pins` | `pins: [{x, z, name, type: icon0..icon4}]`, `player` or `at`, `radius` | Merges shared pins into the tables in range. Pins carry the fixed owner id `0x534B414C44` ("SKALD") and skip duplicates (same name within 1 m) |
 | `POST /v1/nearby` | `player` or `at`, `radius` | Counts objects by prefab, and how many are loaded. Read-only diagnostics |
 | `POST /v1/containers/add` | `prefab` (e.g. `piece_chest_wood`), `at: {x, y, z}` (the chest's position in the save, within 0.5 m), `item`, `amount` (1-9999) | Puts items into one chest, through the game's own `Inventory`: tops up stacks of that item, then fills empty slots. Refuses with 409 when a player has the chest open or stands within reach of it, when there is no room (the message says how many fit), when two chests sit on the spot, or when the chest holds items the server does not know or that do not read back the same; 404 when the chest or the item is gone; 400 for carts, ships and graves. The server takes ownership and writes the `items` ZDO value, so a client that has the chest loaded reloads it within a second and gets ownership back within two; an unloaded chest just keeps the new items. Answers `slots: [{x, y, added, stack}]`, `room` (left), `loaded` and `position` |
+| `POST /v1/sim/handover` | `player` | Hands the simulation of the area around a player to that player: every saved object in the area the game's ownership pass covers for them (the same scan as `sim`) that another connected player simulates now, and that nobody is using, gets them as owner. Skips objects not saved with the world (player characters, projectiles), objects outside the player's active area, objects with no owner, owned by the server or by a peer that left, and objects in use (a ship being steered, a mount being ridden, an open chest, a cart in harness). At most 5000 objects per call; `capped` says it stopped there. Answers `objects` (moved), `zones` (the zones they lie in), `fromPeers` (how many players they came from), `already` (the player simulated these already), `inUse` (left alone) and `capped`; never who they came from. See [Simulation handover](#simulation-handover) (0.7.0+) |
 
 ### Link and simulation load
 
@@ -255,6 +258,69 @@ makes the whole area stutter for the others while the server itself is idle.
 Every one of these is optional: a game update that renames a member blanks
 that value (one warning line) instead of failing `/v1/players`, which the
 map's positions depend on. None of them is in the startup binding probe.
+
+### Simulation handover
+
+`POST /v1/sim/handover` moves ZDO ownership on the server. What the game does
+with ownership, read from the decompiled 1.0 assemblies (build l-1.0.20):
+
+- **The ownership pass.** Only the server runs it (`ZDOMan.Update` ->
+  `ReleaseZDOS`), every 2 s: `ReleaseNearbyZDOS` once with the server's own
+  reference position and then once per peer in `m_peers`, each over
+  `FindSectorObjects` around the zone of that peer's reference position with
+  the near simulation distance. It skips every object that is not saved with
+  the world (`!ZDO.Persistent`).
+- **When it takes an object.** For a peer's turn: an object that peer owns is
+  released (owner 0) once it lies outside the peer's active area
+  (`ZNetScene.InActiveArea` around the peer's zone); an object someone else
+  owns goes to the peer only when it has no owner or lies outside its current
+  owner's active area, and lies inside the peer's. A "valid owner" is thus any
+  connected peer (or the server) whose active area holds the object; there is
+  no other test (no ping, no load, no platform).
+- **Why a handover sticks.** The handover only moves objects inside the
+  target's active area. On the next pass the old owner's turn finds an owner
+  (the target) whose active area holds the object, so leaves it, and the
+  target's own turn keeps it. When the target walks away the object falls
+  outside their area, and the next peer whose turn comes and has it in range
+  takes it, as the game would have done anyway.
+- **How the change travels.** `ZDO.SetOwner` on the server bumps the object's
+  owner revision and marks its sector dirty, so every peer in range gets the
+  new owner with its next object update (`ZDOMan.SendZDOs`). A client that
+  receives a higher owner revision takes the new owner even when its data is
+  not newer (`RPC_ZDOData`). Each moved object is sent again to every peer in
+  range, so one call moves at most 5000.
+- **What is left alone, and why.** Objects not saved with the world: the
+  pass never moves them, and the server destroys them as orphans when their
+  owner leaves (`RemoveOrphanNonPersistentZDOS`), so a player character or an
+  arrow must stay with its owner. Objects outside the target's active area:
+  the target's own turn would release them within 2 s. Objects owned by the
+  server or by a peer that left, or by nobody: the pass hands those out by
+  itself. Objects in use, read from their saved values: a ship's helm or a
+  saddle with a `user` (`ShipControlls`, `Sadle`: the owner grants control),
+  a chest with `InUse` 1 (`Container`: the opener owns it while it is open and
+  only the owner saves the inventory), a cart with `attachJoint` (`Vagon`).
+  The game moves those only from the owner's own client, to the player using
+  them.
+
+**Not verified on a live server.** All of the above is read from code. What
+the code does not settle:
+
+- **An update in flight takes it back.** In `RPC_ZDOData` the server takes a
+  client's object data whole, owner included, when its data revision is newer
+  than the server's. The old owner keeps sending the objects it changes
+  (moving creatures, carts, smelters at work) until it hears of the new
+  owner; an update already on its way when the handover runs puts that object
+  back with the old owner, and the pass then leaves it there. Expect the
+  handover to be complete for still objects (building pieces, chests,
+  plants) and partial for busy ones. Check: compare both players' `sim.owned`
+  3 to 5 s after the call; a second call should take the rest.
+- **Client-side handovers.** `Ship.UpdateOwner` on the owning client hands a
+  ship with players aboard to one of them when the owner is not aboard, so a
+  ship carrying passengers goes back to a passenger. That is the game's own
+  rule and is left to it.
+- **The load itself.** Whether the new owner simulates the area more smoothly
+  than the old one depends on their machine and line; the panel's link line
+  is the only guide.
 
 These answer `501` with the reason, because the state they touch lives only on
 the client: `POST /v1/weather`, `/v1/player/feed`, `/v1/player/godmode`,
@@ -437,6 +503,15 @@ uninitialised `Minimap` and the palette lookup have not run against a loaded
 world yet. Check after deploying: `GET /v1/terrain/info` answers, its `forest`
 is `mask` and `palette.source` says whether the colours came from the game;
 `X-Skald-Sample-Ms` on a 260 x 260 tile shows the real cost per tile.
+
+**New in v0.7.0, not yet verified on a live server:** `POST /v1/sim/handover`.
+It compiles against the 1.0 reference assemblies and its rules (what moves,
+what is left alone, the counts and the 5000 cap) are unit-tested in
+`tests/HandoverPlanTests.cs`. How the game treats the new owner is read from
+code only; see [Simulation handover](#simulation-handover) for what is
+verified from code and what to check live: with two players at one base,
+hand it to the one who simulates less, then compare both players' `sim`
+over the next 10 s, and walk the new owner away to see the area go back.
 
 **New in v0.6.0, not yet verified on a live server:** `link` and `sim` in
 `GET /v1/players`, and the refuel default of 30 m. They compile against the 1.0
