@@ -6,7 +6,8 @@ import { isOriginRefusal } from "../../lib/api";
 import { gameVersion } from "../../lib/format";
 import { failText, notifyTestText } from "../../lib/refusal";
 import { useLivePositions } from "../../lib/live";
-import { useAdminLinks } from "../../lib/adminlinks";
+import { refreshAdminLinks, useAdminLinks } from "../../lib/adminlinks";
+import { handoverText } from "../../lib/simhandover";
 import { LinkLine } from "./LinkInfo";
 import { modLevel, useI18n, type TextKey } from "../../i18n";
 import { ItemIcon } from "../storage/ItemIcon";
@@ -574,12 +575,31 @@ function pickNotify(r: NotifyConfig): NotifyConfig {
   return { source: r.source, masked: r.masked ?? null, enabled: r.enabled, kinds: r.kinds ?? [] };
 }
 
-/** Everyone at the fire, live: tap for their sheet. */
+/**
+ * Everyone at the fire, live: tap for their sheet. With two or more players
+ * each row can hand the simulation of the area around that player to them
+ * (bridge 0.7.0+): the first tap arms, the second hands over.
+ */
 function Players() {
-  const { t } = useI18n();
+  const i18n = useI18n();
+  const { t } = i18n;
   const admin = useAdmin()!;
   const live = useLivePositions();
   const links = useAdminLinks(admin.present && admin.unlocked);
+  const [armed, setArmed] = useArmed<string | null>(null);
+  const whyId = useId();
+  const bridge = admin.status?.bridge;
+  const oldPlugin = pluginBelow(admin.status, "0.7.0");
+  const agentLacks = !!bridge && bridge.commands.length > 0 && !bridge.commands.includes("sim-handover");
+  // Handing over needs someone to take it from.
+  const handover = admin.bridgeOn && admin.players.length >= 2;
+  const reason = oldPlugin ? t("admin.handover.old", { plugin: bridge?.plugin ?? "?" }) : agentLacks ? t("admin.handover.oldAgent") : null;
+  const off = !!admin.blocker || !!reason;
+  const handOver = (name: string) => {
+    if (armed !== name) return setArmed(name);
+    setArmed(null);
+    void admin.run("sim-handover", { player: name }, { done: (data) => handoverText(i18n, name, data) }).then((r) => r.ok && refreshAdminLinks());
+  };
   return (
     <Section title={t("admin.players.title")} id="admin-players" aside={String(admin.players.length)}>
       {admin.players.length === 0 ? (
@@ -588,6 +608,7 @@ function Players() {
         <ul className="divide-y divide-iron/25">
           {admin.players.map((p) => {
             const lp = live.players.find((x) => (x.id ?? x.name) === (p.id ?? p.name));
+            const on = armed === p.name;
             return (
               <li key={p.id ?? p.name}>
                 <button type="button" onClick={() => admin.open({ kind: "player", name: p.name })} className="press flex min-h-12 w-full flex-wrap items-center gap-x-3 py-1.5 text-left">
@@ -599,10 +620,35 @@ function Players() {
                   </svg>
                   <LinkLine p={links.get(p.id ?? p.name)} className="basis-full pl-7" />
                 </button>
+                {handover && (
+                  <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1.5 pb-2 pl-7">
+                    {on && (
+                      <p role="status" className="basis-full text-xs text-flame">
+                        {t("admin.handover.hint", { player: p.name })}
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      disabled={off}
+                      // The visible words first, then whose row it is.
+                      aria-label={on ? undefined : `${t("admin.handover.button")}: ${p.name}`}
+                      aria-describedby={reason ? whyId : undefined}
+                      onClick={() => handOver(p.name)}
+                      className={`press inline-flex min-h-9 shrink-0 items-center rounded-[3px] border px-3 text-xs font-bold coarse:min-h-11 disabled:cursor-not-allowed disabled:opacity-40 ${on ? "border-flame bg-ember/30 text-bone ring-2 ring-flame" : "border-iron/60 bg-black/30 text-label"}`}
+                    >
+                      {on ? t("admin.handover.confirm", { player: p.name }) : t("admin.handover.button")}
+                    </button>
+                  </div>
+                )}
               </li>
             );
           })}
         </ul>
+      )}
+      {handover && reason && (
+        <p id={whyId} className="mt-2 text-xs text-flame">
+          {reason}
+        </p>
       )}
     </Section>
   );
