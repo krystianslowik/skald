@@ -100,6 +100,7 @@ namespace Skald.Bridge
         void OnDestroy()
         {
             server?.Stop();
+            Link.Unpatch();
         }
 
         // Runs fn on the main thread and waits up to timeoutMs for the result.

@@ -50,7 +50,9 @@ anonymously and without the 2.3 GB install:
   login (its framework build, run by the .NET SDK, so it works the same on
   Linux, macOS and Apple Silicon)
 - `BepInEx.dll` and `0Harmony.dll` (HarmonyX, which BepInEx ships and
-  loads) from `denikson/BepInExPack_Valheim` 5.4.2351 on Thunderstore
+  loads) from `denikson/BepInExPack_Valheim` 5.4.2351 on Thunderstore; the
+  zip is checked against a sha256 pinned in `build.sh` (another
+  `BEPINEX_PACK_VERSION` needs its own `BEPINEX_PACK_SHA256`)
 
 The game assemblies are not on NuGet in a current version (the BepInEx feed's
 `Valheim.GameLibs` stops at 0.202.14), and the plugin calls them directly, so
@@ -203,11 +205,18 @@ makes the whole area stutter for the others while the server itself is idle.
   and worst over the last 10 s. `ZRpc` pings each peer once a second
   (`ZRpc.UpdatePing`) and the peer answers each one (`ZRpc.ReceivePing`
   with `false`). The plugin hooks both with Harmony and notes the time of
-  every ping going out and every reply being handled, per connection. The
-  socket is reliable and ordered, so the n-th reply answers the n-th ping:
-  each reply is paired with the oldest ping still unanswered. That is exact
-  however many replies one frame handles (crossplay hands several to the
-  game at once) and for round trips longer than the second between pings.
+  every ping going out and every reply being handled, per connection. Each
+  reply is paired with the oldest ping still unanswered. This rests on one
+  assumption: the socket delivers every keep-alive, in order, so the n-th
+  reply answers the n-th ping. Under it the pairing holds however many
+  replies one frame handles (crossplay hands several to the game at once)
+  and for round trips longer than the second between pings. The one known
+  case that breaks the assumption on a live connection is
+  `ZPlayFabSocket.ResetAll` (the remote restarted its session: the socket
+  drops what it had in flight), and a third hook on it stops that player's
+  pairing, so their ping shows as unknown until they reconnect. A drop the
+  plugin cannot see would leave that player's ping reading a second or more
+  high.
   The resolution is a frame (about 20 ms at 50 fps); on crossplay both the
   ping and the reply also pass through the socket's compression thread,
   which adds up to a frame or two, as it does for everything the game sends.
@@ -217,8 +226,9 @@ makes the whole area stutter for the others while the server itself is idle.
   trip is not known: no reply was timed in the window (a player who just
   joined, or a stall), the hooks are off, or one connection's pings were not
   all seen (a reply with no ping waiting, which a client can also cause by
-  sending a stray reply: that player's ping then stays unknown until they
-  reconnect). An unsure ping is no verdict of its own: the panel then judges
+  sending a stray reply, more pings unanswered than the game's 30 s timeout
+  allows, or a crossplay session reset: that player's ping then stays unknown
+  until they reconnect; the first such case logs one warning line). An unsure ping is no verdict of its own: the panel then judges
   the link by stalls and the send backlog. On Steam, the socket's own ping is
   used when `GetConnectionQuality` gives one.
 - `replyGapMaxS`: the longest wait for a keep-alive reply in the last 10 s,
@@ -252,12 +262,17 @@ keep-alive hooks are applied once at startup, inside a try: if a hooked
 method or the private `m_pingTimer` is gone, patching fails, one warning line
 says so, and only the round trip goes blank. The hook bodies catch
 everything and never throw into the game; the first failure there unhooks
-the round trip the same way. They record only on a server. Once a frame the
-plugin also checks the hooks against the game's own `GetTimeSinceLastPing()`:
-if the game keeps showing a recent reply that the reply hook never reported
-(for 10 s, so that one long frame cannot trip it), the hooks are taken as
-not firing, one warning line says so, and the round trip goes blank as if
-patching had failed.
+the round trip the same way. They record only on a server, and are removed
+when the plugin unloads. The session-reset hook is optional on top: if it
+cannot be applied, one warning line says so and the ping still works, only
+without following resets. Once a frame the plugin also checks the hooks:
+if the game keeps showing a recent reply (its own `GetTimeSinceLastPing()`)
+that the reply hook never reported, or no ping is reported for a player for
+more than 3 s although the game pings everyone once a second, for 10 s on
+end (so that one long frame cannot trip it), the hooks are taken as not
+firing, one warning line says so, and the round trip goes blank as if
+patching had failed. The reply hook runs before any other mod's prefix
+(`Priority.First`), so it reads the package where the game will.
 
 ### Simulation handover
 
@@ -564,10 +579,12 @@ what is verified from code and what to check live:
 - walk the new owner away and see the area go back.
 
 **New in v0.8.0, not yet verified on a live server:** the keep-alive hooks.
-The pairing is exact by construction and unit-tested in
+The pairing is exact as long as the socket delivers every keep-alive (see
+above for the crossplay session reset) and is unit-tested in
 `tests/LinkPlanTests.cs` (several replies in one frame, round trips stepping
 up and down by more than a second, heavy jitter, a stall and its recovery,
-peers joining while others have pings in flight). Read from the decompiled
+peers joining while others have pings in flight, a session reset, hooks
+that do not fire). Read from the decompiled
 1.0 assemblies only: that `ZRpc.UpdatePing` and `ZRpc.ReceivePing` are not
 inlined into `ZRpc.Update` by the server's runtime (if the reply hook never
 fired, the cross-check above turns the round trip off after about 10 s, with

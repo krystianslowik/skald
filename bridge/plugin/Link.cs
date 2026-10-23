@@ -22,8 +22,16 @@ namespace Skald.Bridge
         static readonly Dictionary<ZRpc, long> Ids = new Dictionary<ZRpc, long>();
         static long nextId;
         static bool tickOff, simBroken;
-        // The keep-alive hooks are in place and working.
-        static bool hooked;
+        // The keep-alive hooks are in place and working; lostWarned: the one
+        // warning for a peer whose count broke has been logged.
+        static bool hooked, lostWarned;
+        // The Harmony instance, as object so that this class loads without
+        // HarmonyLib (see Patch).
+        static object harmony;
+        // Crossplay sockets that dropped what they had in flight, from the
+        // ResetAll hook; Tick stops the pairing of their peers. A queue,
+        // since PlayFab may call it off the main thread.
+        static readonly System.Collections.Concurrent.ConcurrentQueue<ISocket> ResetSockets = new System.Collections.Concurrent.ConcurrentQueue<ISocket>();
         static readonly HashSet<string> QueueOff = new HashSet<string>(), QualityOff = new HashSet<string>();
         static float prunedAt;
 
@@ -42,6 +50,12 @@ namespace Skald.Bridge
         // into it: the first failure unhooks the round trip, with one line.
         // Without the hooks the reply gaps still come from the game's own
         // GetTimeSinceLastPing, read once a frame.
+        //
+        // The pairing assumes the socket delivers every keep-alive in order.
+        // The one known exception is ZPlayFabSocket.ResetAll on a live peer
+        // (the remote restarted its session): it drops the pings in flight,
+        // so a third hook stops that peer's pairing (unsure until it
+        // reconnects) instead of reading a second or more high for good.
 
         internal static void Hook()
         {
@@ -71,7 +85,8 @@ namespace Skald.Bridge
                 // ___m_pingTimer binds the private field when patching: a game
                 // update that renames it fails here, not in the game loop.
                 h.Patch(update, prefix: new HarmonyMethod(typeof(Link), nameof(PingBefore)), postfix: new HarmonyMethod(typeof(Link), nameof(PingAfter)));
-                h.Patch(receive, prefix: new HarmonyMethod(typeof(Link), nameof(OnReceivePing)));
+                // First: peek the flag before any other mod's prefix reads on.
+                h.Patch(receive, prefix: new HarmonyMethod(typeof(Link), nameof(OnReceivePing)) { priority = Priority.First });
             }
             catch
             {
@@ -79,7 +94,40 @@ namespace Skald.Bridge
                 throw;
             }
             hooked = true;
+            harmony = h;
+            // Optional on top: without it a crossplay session reset can leave
+            // one peer's ping a second or more high.
+            try
+            {
+                var reset = AccessTools.Method(typeof(ZPlayFabSocket), "ResetAll", Type.EmptyTypes);
+                if (reset == null || reset.DeclaringType != typeof(ZPlayFabSocket)) SkaldBridgePlugin.Warn("link round trip: ZPlayFabSocket.ResetAll not found, crossplay session resets not followed");
+                else h.Patch(reset, postfix: new HarmonyMethod(typeof(Link), nameof(OnSocketReset)));
+            }
+            catch (Exception e) { Off("link resync on crossplay session reset", e); }
             return null;
+        }
+
+        // Plugin.OnDestroy: the hooks go with the plugin.
+        internal static void Unpatch()
+        {
+            hooked = false;
+            if (harmony == null) return;
+            try { UnpatchAll(); }
+            catch (Exception) { }
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void UnpatchAll()
+        {
+            ((Harmony)harmony).UnpatchSelf();
+            harmony = null;
+        }
+
+        static void OnSocketReset(ZPlayFabSocket __instance)
+        {
+            if (!hooked || tickOff) return;
+            try { ResetSockets.Enqueue(__instance); }
+            catch (Exception) { }
         }
 
         static void PingBefore(float ___m_pingTimer, out float __state) => __state = ___m_pingTimer;
@@ -117,8 +165,12 @@ namespace Skald.Bridge
             if (net == null || !net.IsServer()) return;
             float now = Time.realtimeSinceStartup;
             long id = IdOf(rpc, now);
-            if (ping) Tracker.Sent(id, now);
-            else Tracker.Replied(id, now);
+            var lost = ping ? Tracker.Sent(id, now) : Tracker.Replied(id, now);
+            if (lost == LinkTracker.Lost.None || lostWarned) return;
+            lostWarned = true;
+            SkaldBridgePlugin.Warn("link round trip: lost count of one player's keep-alive (" +
+                (lost == LinkTracker.Lost.StrayReply ? "a reply with no ping waiting" : "too many pings unanswered") +
+                "), their ping stays unknown until they reconnect; further cases are not logged");
         }
 
         static void Unhook(Exception e)
@@ -175,8 +227,12 @@ namespace Skald.Bridge
                 long id = IdOf(rpc, now);
                 float wait = rpc.GetTimeSinceLastPing();
                 if (hooked && Tracker.Silent(id, now, wait)) Unhook("the game handles keep-alive replies the hook does not see");
+                if (hooked && Tracker.PingSilent(id, now)) Unhook("the game sends keep-alive pings the hook does not see");
                 if (!hooked) Tracker.Waited(id, now, wait);
             }
+            while (ResetSockets.TryDequeue(out var sock))
+                foreach (var kv in Ids)
+                    if (kv.Key.GetSocket() == sock) Tracker.Reset(kv.Value);
             if (now - prunedAt > LinkTracker.WindowS && Ids.Count > 0)
             {
                 prunedAt = now;

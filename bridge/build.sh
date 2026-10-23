@@ -26,6 +26,14 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 refs=${GAME_REFS:-$here/refs}
 bepinex_version=${BEPINEX_PACK_VERSION:-5.4.2351}
+# sha256 of that version's zip (Thunderstore publishes no checksum). Another
+# BEPINEX_PACK_VERSION needs its own BEPINEX_PACK_SHA256, or the check is
+# skipped with a warning.
+if [ "$bepinex_version" = 5.4.2351 ]; then
+  bepinex_sha256=${BEPINEX_PACK_SHA256:-bce631497976a93977ceb08e166712e6c31d15244956f89f17df092a9b62e29f}
+else
+  bepinex_sha256=${BEPINEX_PACK_SHA256:-}
+fi
 dd_version=${DEPOTDOWNLOADER_VERSION:-3.4.0}
 need="assembly_valheim assembly_utils Splatform Newtonsoft.Json UnityEngine UnityEngine.CoreModule"
 
@@ -54,6 +62,13 @@ fetch() {
   echo "fetching BepInExPack_Valheim $bepinex_version ..."
   curl -fsSL -o "$tmp/bepinex.zip" \
     "https://thunderstore.io/package/download/denikson/BepInExPack_Valheim/$bepinex_version/"
+  if [ -n "$bepinex_sha256" ]; then
+    if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum "$tmp/bepinex.zip" | cut -d' ' -f1)
+    else got=$(shasum -a 256 "$tmp/bepinex.zip" | cut -d' ' -f1); fi
+    [ "$got" = "$bepinex_sha256" ] || { echo "BepInExPack_Valheim $bepinex_version: sha256 $got, expected $bepinex_sha256" >&2; exit 1; }
+  else
+    echo "warning: no sha256 for BepInExPack_Valheim $bepinex_version, not checked" >&2
+  fi
   (cd "$tmp" && unzip -q bepinex.zip -d bepinex)
   mkdir -p "$refs"
   for d in $need; do

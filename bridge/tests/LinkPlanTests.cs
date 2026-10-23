@@ -392,6 +392,103 @@ public class LinkPlanTests
     }
 
     [Fact]
+    public void ATransportResetStopsThePairingInsteadOfReadingHigh()
+    {
+        // A crossplay session reset drops the two pings in flight: their
+        // replies never come. Paired on, every later reply would read two
+        // seconds high; after Reset the ping is unknown instead.
+        var t = new LinkTracker();
+        t.Seen(1, 0f, true);
+        t.Sent(1, 1f);
+        t.Replied(1, 1.15f);
+        t.Sent(1, 2f);
+        t.Sent(1, 3f);
+        t.Reset(1);
+        for (int i = 4; i <= 20; i++)
+        {
+            t.Sent(1, i);
+            t.Replied(1, i + 0.15f);
+        }
+        var s = t.Snapshot(1, 20.2f);
+        Assert.True(s.Unsure);
+        Assert.Null(s.RttMs);
+        // The gaps still count.
+        Assert.InRange(s.ReplyGapMaxS, 0.99f, 1.01f);
+        // Other peers are not touched.
+        t.Seen(2, 0f, true);
+        t.Sent(2, 1f);
+        t.Replied(2, 1.1f);
+        t.Reset(3);
+        Near(100, t.Snapshot(2, 1.2f).RttMs);
+    }
+
+    [Fact]
+    public void LosingTheCountIsReportedOnce()
+    {
+        var t = new LinkTracker();
+        t.Seen(1, 0f, true);
+        Assert.Equal(LinkTracker.Lost.None, t.Sent(1, 1f));
+        Assert.Equal(LinkTracker.Lost.None, t.Replied(1, 1.1f));
+        Assert.Equal(LinkTracker.Lost.StrayReply, t.Replied(1, 1.2f));
+        // Already off: no second report.
+        Assert.Equal(LinkTracker.Lost.None, t.Replied(1, 1.3f));
+        t.Seen(2, 0f, true);
+        var lost = LinkTracker.Lost.None;
+        for (int i = 1; i <= 70 && lost == LinkTracker.Lost.None; i++) lost = t.Sent(2, i);
+        Assert.Equal(LinkTracker.Lost.Overflow, lost);
+    }
+
+    [Fact]
+    public void APingHookThatDoesNotFireIsCaught()
+    {
+        // Replies come in, no ping is ever reported.
+        var t = new LinkTracker();
+        t.Seen(1, 0f, true);
+        float at = -1f;
+        for (float now = Frame; now < 30f && at < 0f; now += Frame)
+            if (t.PingSilent(1, now)) at = now;
+        Assert.InRange(at, 13f, 13.1f);
+        // Pings once a second never trip it, nor does one 5 s frame.
+        var u = new LinkTracker();
+        float end = Play(u, 2, 0f, 20f, (k, s) => 0.15f, now => Assert.False(u.PingSilent(2, now)));
+        Assert.False(u.PingSilent(2, end + 5f));
+        Play(u, 2, end + 5f, 20f, (k, s) => 0.15f, now => Assert.False(u.PingSilent(2, now)));
+    }
+
+    [Fact]
+    public void AFloodOfRepliesKeepsTheGapListSmallAndTheMaximumRight()
+    {
+        // A 4 s stall, then a client sending a stray reply every frame and
+        // spaced ones in between.
+        var t = new LinkTracker();
+        t.Seen(1, 0f, true);
+        t.Replied(1, 1f);
+        t.Replied(1, 5f);
+        float now = 5f;
+        for (int i = 0; i < 5000; i++)
+        {
+            now += Frame;
+            t.Replied(1, now);
+            t.Replied(1, now);
+        }
+        Assert.True(t.GapsKept(1) <= 256, $"{t.GapsKept(1)} gaps kept");
+        // The stall has aged out; frame-sized gaps are left.
+        Assert.InRange(t.Snapshot(1, now).ReplyGapMaxS, 0.019f, 0.021f);
+        // Falling gaps (each shorter than the last) stay bounded too, and the
+        // largest in the window still shows.
+        var u = new LinkTracker();
+        u.Seen(1, 0f, true);
+        float x = 0f;
+        for (int i = 0; i < 2000; i++)
+        {
+            x += 0.5f / (i + 1);
+            u.Replied(1, x);
+        }
+        Assert.True(u.GapsKept(1) <= 256);
+        Assert.InRange(u.Snapshot(1, x).ReplyGapMaxS, 0.49f, 0.51f);
+    }
+
+    [Fact]
     public void AFastLinkReadsLow()
     {
         var t = new LinkTracker();
