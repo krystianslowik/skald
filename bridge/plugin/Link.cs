@@ -256,6 +256,65 @@ namespace Skald.Bridge
         // ---- POST /v1/sim/handover ------------------------------------------
 
         static readonly List<ZDO> HandoverScratch = new List<ZDO>();
+        // What a prefab is to a handover, by prefab hash: an item on the
+        // ground, or something that holds or works items (HandoverStep.Keeps
+        // says why each is left alone).
+        enum Holds { Nothing, ItemDrop, Items }
+        static readonly Dictionary<int, Holds> Holding = new Dictionary<int, Holds>();
+
+        // Containers are looked for in children too: a cart's and a ship's
+        // storage sit on a child object.
+        static readonly Type[] ItemHolders =
+        {
+            typeof(Container), typeof(Smelter), typeof(Fermenter), typeof(Beehive), typeof(CookingStation),
+            typeof(ItemStand), typeof(ArmorStand), typeof(Pickable), typeof(PickableItem), typeof(SapCollector),
+            typeof(Fireplace), typeof(ShieldGenerator), typeof(Turret), typeof(Catapult), typeof(Feast),
+            typeof(Fish), typeof(MineRock), typeof(MineRock5),
+            // The saddle lives in the animal's data: a dropped add or remove loses or doubles it.
+            typeof(Sadle),
+        };
+
+        static Holds HoldingOf(ZDO z)
+        {
+            int hash = z.GetPrefab();
+            if (Holding.TryGetValue(hash, out var known)) return known;
+            var prefab = ZNetScene.instance != null ? ZNetScene.instance.GetPrefab(hash) : null;
+            if (prefab == null) return Holds.Nothing; // not kept: the scene may not have every prefab yet
+            var h = Holds.Nothing;
+            if (prefab.GetComponent<ItemDrop>() != null) h = Holds.ItemDrop;
+            else foreach (var t in ItemHolders)
+                if (prefab.GetComponentInChildren(t, true) != null) { h = Holds.Items; break; }
+            Holding[hash] = h;
+            return h;
+        }
+
+        // One object of a handover: its step, counted, and the move if it is taken.
+        static void HandOne(ZDO z, Vector2s zone, long target, long server, HandoverCounter count)
+        {
+            long owner = z.GetOwner();
+            var pos = z.GetPosition();
+            bool candidate = z.Persistent && owner != 0 && owner != target && owner != server;
+            var holds = candidate ? HoldingOf(z) : Holds.Nothing;
+            var step = HandoverPlan.Step(
+                z.Persistent,
+                ZNetScene.InActiveArea(pos, zone),
+                owner, target, server,
+                owner != 0 && ZNet.instance.GetPeer(owner) != null,
+                HandoverPlan.InUse(z.GetLong(ZDOVars.s_user, 0L), z.GetInt(ZDOVars.s_inUse), z.GetBool(ZDOVars.s_attachJointHash)),
+                holds == Holds.ItemDrop,
+                holds == Holds.Items || !HandoverPlan.RoomToBump(z.DataRevision));
+            if (step == HandoverStep.Take && !count.Room()) return;
+            var zz = ZoneSystem.GetZone(pos);
+            if (step == HandoverStep.Take)
+            {
+                // Data revision first (see HandoverPlan.DataRevisionMargin),
+                // then the owner, which bumps the owner revision and marks the
+                // sector dirty: every peer in range gets the object again.
+                z.DataRevision = HandoverPlan.BumpedDataRevision(z.DataRevision);
+                z.SetOwner(target);
+            }
+            count.Add(step, owner, zz.x, zz.y);
+        }
 
         // Hands the simulation of the target's area to the target: every saved
         // object in the area the game's own ownership pass covers for them
@@ -284,25 +343,26 @@ namespace Skald.Bridge
                     // A player's own character is not saved, so Step skips it
                     // anyway; this keeps it out whatever a game update does.
                     if (z == null || z.m_uid == p.m_characterID) continue;
-                    long owner = z.GetOwner();
-                    var pos = z.GetPosition();
-                    var step = HandoverPlan.Step(
-                        z.Persistent,
-                        ZNetScene.InActiveArea(pos, zone),
-                        owner, target, server,
-                        owner != 0 && ZNet.instance.GetPeer(owner) != null,
-                        HandoverPlan.InUse(z.GetLong(ZDOVars.s_user, 0L), z.GetInt(ZDOVars.s_inUse), z.GetBool(ZDOVars.s_attachJointHash)));
-                    if (step == HandoverStep.Take && !count.Room()) break;
-                    var zz = ZoneSystem.GetZone(pos);
-                    count.Add(step, owner, zz.x, zz.y);
-                    // Bumps the owner revision: every peer in range learns the
-                    // new owner with the next object update it gets.
-                    if (step == HandoverStep.Take) z.SetOwner(target);
+                    if (count.Capped) break;
+                    // One object that throws (a half-loaded or odd prefab) is
+                    // skipped and counted; the rest still move. A game update
+                    // that broke a binding still turns the command off.
+                    try { HandOne(z, zone, target, server, count); }
+                    catch (Exception e) when (!(e is MissingMemberException || e is TypeLoadException || e is TypeInitializationException))
+                    {
+                        // One line per call, with the first failure: enough to
+                        // find the cause without a line per object.
+                        if (count.Failed == 0) SkaldBridgePlugin.Warn("sim handover: skipped an object that failed: " + e.GetType().Name + ": " + e.Message);
+                        count.Failed++;
+                    }
                 }
             }
-            finally { HandoverScratch.Clear(); }
-            // Fresh numbers for the next player list, not the scan from before.
-            simAt = -SimEveryS;
+            finally
+            {
+                HandoverScratch.Clear();
+                // Fresh numbers for the next player list, not the scan from before.
+                simAt = -SimEveryS;
+            }
             return Commands.Ok(new
             {
                 player = p.m_playerName,
@@ -311,6 +371,9 @@ namespace Skald.Bridge
                 fromPeers = count.FromPeers,
                 already = count.Already,
                 inUse = count.InUse,
+                loose = count.Loose,
+                kept = count.Kept,
+                failed = count.Failed,
                 capped = count.Capped,
             });
         }

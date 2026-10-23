@@ -160,9 +160,10 @@ export function describeAdmin(i: I18n, d: Record<string, unknown>): string {
     case "refuel-fires":
       return describeRefuel(i, d, actor, player);
     case "sim-handover": {
-      // Always for a player; "found nothing" when no object moved.
+      // Always for a player; "found nothing" when no object moved, "could not" when some failed.
       const n = Number(d.objects ?? 0) || 0;
-      return n > 0 ? i.tn("saga.admin.sim-handover", n, { actor, player }) : i.t("saga.admin.sim-handover.none", { actor, player });
+      if (n > 0) return i.tn("saga.admin.sim-handover", n, { actor, player });
+      return i.t(Number(d.failed ?? 0) > 0 ? "saga.admin.sim-handover.failed" : "saga.admin.sim-handover.none", { actor, player });
     }
     case "grow":
       vars.n = Number(d.plants ?? 0);

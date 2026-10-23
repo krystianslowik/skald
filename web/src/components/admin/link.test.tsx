@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useAdminLinks } from "../../lib/adminlinks";
+import { refreshAdminLinks, useAdminLinks } from "../../lib/adminlinks";
 import { I18nProvider, makeI18n } from "../../i18n";
 import { linkVerdict } from "../../lib/link";
 import type { PlayerLink } from "../../lib/adminlinks";
@@ -155,5 +155,31 @@ describe("admin-only link polling", () => {
       await vi.advanceTimersByTimeAsync(11000);
     });
     expect(calls.length).toBe(2);
+  });
+
+  it("reads again after a poll that was on its way when a refresh was asked for", async () => {
+    const calls: string[] = [];
+    const answer = () => Response.json({ ok: true, data: { players: [{ id: "Freya", name: "Freya", platform: "steam", x: 0, y: 0, z: 0, health: 1, maxHealth: 1, hasCharacter: true, ...BAD }] } });
+    let release: () => void = () => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        calls.push(String(url));
+        // The first read hangs until released, as a slow answer would.
+        if (calls.length === 1) return new Promise<Response>((r) => (release = () => r(answer())));
+        return Promise.resolve(answer());
+      }),
+    );
+    const { unmount } = render(<Probe on />);
+    await waitFor(() => expect(calls.length).toBe(1));
+    // A handover lands while that read is out: it may predate the change.
+    refreshAdminLinks();
+    expect(calls.length).toBe(1);
+    await act(async () => {
+      release();
+    });
+    // Read again at once, not after the 5 s poll.
+    await waitFor(() => expect(calls.length).toBe(2), { timeout: 1000 });
+    unmount();
   });
 });
