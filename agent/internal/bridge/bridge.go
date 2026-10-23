@@ -1207,9 +1207,18 @@ func (c *Client) summarizeResult(cmd string, data json.RawMessage, ev map[string
 	if json.Unmarshal(data, &d) != nil {
 		return
 	}
-	for _, k := range []string{"killed", "tamed", "alreadyTamed", "repaired", "smelters", "kilns", "skipped", "full", "fermenters", "fires", "off", "world", "capped", "plants", "sentTo", "stopped", "started", "label", "stacks", "unloaded", "day", "loaded", "objects", "zones", "fromPeers", "already", "inUse"} {
+	for _, k := range []string{"killed", "tamed", "alreadyTamed", "repaired", "smelters", "kilns", "skipped", "full", "fermenters", "fires", "off", "world", "capped", "plants", "sentTo", "stopped", "started", "label", "stacks", "unloaded", "day", "loaded"} {
 		if v, ok := d[k]; ok {
 			ev[k] = v
+		}
+	}
+	// A simulation handover's counts. Generic names, so kept for that
+	// command only.
+	if cmd == "sim-handover" {
+		for _, k := range []string{"objects", "zones", "fromPeers", "already", "inUse", "loose", "failed"} {
+			if v, ok := d[k]; ok {
+				ev[k] = v
+			}
 		}
 	}
 	for _, k := range []string{"near", "kicked", "player"} {
