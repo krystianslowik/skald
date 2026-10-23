@@ -1041,7 +1041,7 @@ describe("admin", () => {
     fireEvent.click(within(panel).getByRole("button", { name: "Tap again: hand over to Freya" }));
     await waitFor(() => expect(calls.find((c) => c.url === "/api/admin/sim-handover")).toBeTruthy());
     expect(calls.find((c) => c.url === "/api/admin/sim-handover")!.body).toEqual({ player: "Freya" });
-    expect(await screen.findByText("Freya now simulates 1,058 more objects, in 6 zones · 2 in use stay · a few may go back to a player aboard a ship or one changing them")).toBeInTheDocument();
+    expect(await screen.findByText("Freya now simulates 1,058 more objects, in 6 zones · 2 in use stay · a few may go back to a player who is changing them")).toBeInTheDocument();
   });
 
   it("greys out the handover on a plugin before 0.7.0, and says why", async () => {

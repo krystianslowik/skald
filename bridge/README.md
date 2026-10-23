@@ -189,7 +189,7 @@ loaded are counted as `unloaded` and skipped. `radius` is at most 100 m.
 | `POST /v1/map/pins` | `pins: [{x, z, name, type: icon0..icon4}]`, `player` or `at`, `radius` | Merges shared pins into the tables in range. Pins carry the fixed owner id `0x534B414C44` ("SKALD") and skip duplicates (same name within 1 m) |
 | `POST /v1/nearby` | `player` or `at`, `radius` | Counts objects by prefab, and how many are loaded. Read-only diagnostics |
 | `POST /v1/containers/add` | `prefab` (e.g. `piece_chest_wood`), `at: {x, y, z}` (the chest's position in the save, within 0.5 m), `item`, `amount` (1-9999) | Puts items into one chest, through the game's own `Inventory`: tops up stacks of that item, then fills empty slots. Refuses with 409 when a player has the chest open or stands within reach of it, when there is no room (the message says how many fit), when two chests sit on the spot, or when the chest holds items the server does not know or that do not read back the same; 404 when the chest or the item is gone; 400 for carts, ships and graves. The server takes ownership and writes the `items` ZDO value, so a client that has the chest loaded reloads it within a second and gets ownership back within two; an unloaded chest just keeps the new items. Answers `slots: [{x, y, added, stack}]`, `room` (left), `loaded` and `position` |
-| `POST /v1/sim/handover` | `player` | Hands the simulation of the area around a player to that player: every saved object in the area the game's ownership pass covers for them (the same scan as `sim`) that another connected player simulates now, and that nobody is using, gets them as owner. Skips objects not saved with the world (player characters, projectiles), objects outside the player's active area, objects with no owner, owned by the server or by a peer that left, objects in use (a ship being steered, a mount being ridden, an open chest, a cart in harness), items lying on the ground, and objects that hold or work items (chests, smelters and kilns, fermenters, beehives, cooking stations, item and armor stands, pickables, sap collectors, fires, shield generators, turrets, catapults, feasts, fish, ore deposits). Each moved object's data revision jumps ahead so late updates from the old owner cannot take it back. At most 5000 objects per call; `capped` says it stopped there. An object that fails is skipped and counted, and the rest still move. Answers `objects` (moved), `zones` (the zones they lie in), `fromPeers` (how many players they came from), `already` (the player simulated these already), `inUse`, `loose` and `kept` (left alone), `failed` and `capped`; never who they came from. See [Simulation handover](#simulation-handover) (0.7.0+) |
+| `POST /v1/sim/handover` | `player` | Hands the simulation of the area around a player to that player: every saved object in the area the game's ownership pass covers for them (the same scan as `sim`) that another connected player simulates now, and that nobody is using, gets them as owner. Skips objects not saved with the world (player characters, projectiles), objects outside the player's active area, objects with no owner, owned by the server or by a peer that left, objects in use (a ship being steered, a mount being ridden, an open chest, a cart in harness), items lying on the ground, and objects that hold or work items (chests, smelters and kilns, fermenters, beehives, cooking stations, item and armor stands, pickables, sap collectors, fires, shield generators, turrets, catapults, feasts, fish, ore deposits, animals that take a saddle, and carts and ships with storage, since their storage is a chest). Each moved object's data revision jumps ahead so late updates from the old owner cannot take it back. At most 5000 objects per call; `capped` says it stopped there. An object that fails is skipped and counted, and the rest still move. Answers `objects` (moved), `zones` (the zones they lie in), `fromPeers` (how many players they came from), `already` (the player simulated these already), `inUse`, `loose` and `kept` (left alone), `failed` and `capped`; never who they came from. See [Simulation handover](#simulation-handover) (0.7.0+) |
 
 ### Link and simulation load
 
@@ -343,9 +343,10 @@ with ownership, read from the decompiled 1.0 assemblies (build l-1.0.20):
   the world (`ZDO.Load` starts it at 0), and game code compares it only for
   "changed since" (`Container`, `ItemDrop`, `Door`, `ZSyncTransform`), so the
   jump costs one reload of the object on each client. The cost players see:
-  the old owner's last changes to the moved objects (creatures, carts,
-  building pieces) are dropped, so a moving creature or cart can snap back
-  once. No item moves are lost, since what holds items is not moved.
+  the old owner's last changes to the moved objects (creatures, building
+  pieces, a raft) are dropped, so a moving creature can snap back once. No
+  item moves are lost, since what holds items is not moved: that includes
+  carts and ships with storage and animals that take a saddle.
 
 **Not verified on a live server.** All of the above is read from code. What
 the code does not settle:
@@ -357,9 +358,10 @@ the code does not settle:
   eats with the new one); compare both players' `sim.owned` over the same
   10 s.
 - **Client-side handovers.** `Ship.UpdateOwner` on the owning client hands a
-  ship with players aboard to one of them when the owner is not aboard, so a
-  ship carrying passengers goes back to a passenger. That is the game's own
-  rule and is left to it.
+  ship with players aboard to one of them when the owner is not aboard. Only
+  a raft can be moved (the other ships hold a chest and stay), and a raft
+  carrying passengers goes back to a passenger. That is the game's own rule
+  and is left to it.
 - **The load itself.** Whether the new owner simulates the area more smoothly
   than the old one depends on their machine and line; the panel's link line
   is the only guide.

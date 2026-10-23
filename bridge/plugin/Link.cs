@@ -270,6 +270,8 @@ namespace Skald.Bridge
             typeof(ItemStand), typeof(ArmorStand), typeof(Pickable), typeof(PickableItem), typeof(SapCollector),
             typeof(Fireplace), typeof(ShieldGenerator), typeof(Turret), typeof(Catapult), typeof(Feast),
             typeof(Fish), typeof(MineRock), typeof(MineRock5),
+            // The saddle lives in the animal's data: a dropped add or remove loses or doubles it.
+            typeof(Sadle),
         };
 
         static Holds HoldingOf(ZDO z)

@@ -10,11 +10,11 @@ describe("simulation handover wording (#203)", () => {
 
   it("says how much the player now simulates, and what stayed", () => {
     const moved = { player: "Ragnar", objects: 1058, zones: 6, fromPeers: 1, already: 180, inUse: 2, capped: false };
-    expect(handoverText(en, "Ragnar", moved)).toBe("Ragnar now simulates 1,058 more objects, in 6 zones · 2 in use stay · a few may go back to a player aboard a ship or one changing them");
-    expect(plain(handoverText(pl, "Ragnar", moved))).toBe("Ragnar liczy teraz o 1058 obiektów więcej, w 6 strefach · 2 w użyciu zostają · część może wrócić do gracza na pokładzie łodzi albo do tego, kto je właśnie zmienia");
-    expect(handoverText(en, "Freya", { objects: 1, zones: 1 })).toBe("Freya now simulates 1 more object, in 1 zone · a few may go back to a player aboard a ship or one changing them");
-    expect(handoverText(pl, "Freya", { objects: 3, zones: 1 })).toBe("Freya liczy teraz o 3 obiekty więcej, w 1 strefie · część może wrócić do gracza na pokładzie łodzi albo do tego, kto je właśnie zmienia");
-    expect(handoverText(en, "Freya", { objects: 5000, zones: 9, failed: 2, capped: true })).toBe("Freya now simulates 5,000 more objects, in 9 zones · 2 could not be moved · hand over again for the rest · a few may go back to a player aboard a ship or one changing them");
+    expect(handoverText(en, "Ragnar", moved)).toBe("Ragnar now simulates 1,058 more objects, in 6 zones · 2 in use stay · a few may go back to a player who is changing them");
+    expect(plain(handoverText(pl, "Ragnar", moved))).toBe("Ragnar liczy teraz o 1058 obiektów więcej, w 6 strefach · 2 w użyciu zostają · część może wrócić do gracza, który je właśnie zmienia");
+    expect(handoverText(en, "Freya", { objects: 1, zones: 1 })).toBe("Freya now simulates 1 more object, in 1 zone · a few may go back to a player who is changing them");
+    expect(handoverText(pl, "Freya", { objects: 3, zones: 1 })).toBe("Freya liczy teraz o 3 obiekty więcej, w 1 strefie · część może wrócić do gracza, który je właśnie zmienia");
+    expect(handoverText(en, "Freya", { objects: 5000, zones: 9, failed: 2, capped: true })).toBe("Freya now simulates 5,000 more objects, in 9 zones · 2 could not be moved · hand over again for the rest · a few may go back to a player who is changing them");
   });
 
   it("says why nothing moved", () => {
@@ -33,7 +33,7 @@ describe("simulation handover wording (#203)", () => {
     expect(handoverText(en, "Ragnar", { objects: 0, failed: 3, kept: 5 })).toBe("Nothing handed to Ragnar: 3 objects could not be moved");
     expect(handoverText(pl, "Ragnar", { objects: 0, failed: 2 })).toBe("Nic nie przekazano (Ragnar): nie dało się przenieść 2 obiektów");
     // Moved some, kept the rest: both said.
-    expect(handoverText(en, "Ragnar", { objects: 10, zones: 2, loose: 1, kept: 4 })).toBe("Ragnar now simulates 10 more objects, in 2 zones · 5 holding items stay · a few may go back to a player aboard a ship or one changing them");
+    expect(handoverText(en, "Ragnar", { objects: 10, zones: 2, loose: 1, kept: 4 })).toBe("Ragnar now simulates 10 more objects, in 2 zones · 5 holding items stay · a few may go back to a player who is changing them");
   });
 
   it("reads odd answers as nothing", () => {
