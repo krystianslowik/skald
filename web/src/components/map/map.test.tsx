@@ -229,6 +229,8 @@ describe("MapView", () => {
     history.replaceState(null, "", "/?mapstats");
     try {
       const withStats = await mounted();
+      // A rerender is not enough on a loaded runner: wait for the effect itself.
+      await waitFor(() => expect(window.__mapStats).toBeTypeOf("function"));
       const s = window.__mapStats!();
       expect(s.view.scale).toBeGreaterThan(0);
       expect(s.ahead).toBeNull();
