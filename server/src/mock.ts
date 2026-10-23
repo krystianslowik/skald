@@ -18,6 +18,7 @@ import type {
   ApplyMode,
   BridgeStatus,
   FillStations,
+  AdminPlayer,
   LogLine,
   MapItem,
   MapSnapshot,
@@ -133,6 +134,32 @@ interface MockPos {
   tz: number;
   health: number;
   maxHealth: number;
+}
+
+/**
+ * A plausible link and simulation load per player, as bridge 0.6.0 reports
+ * them through the agent's admin-only player list (never on positions):
+ * Ragnar on a good line, Freya on a bad one that simulates most of the
+ * base, anyone else in between. Jittered a little.
+ */
+function mockLink(name: string): Pick<AdminPlayer, "link" | "sim"> {
+  const j = (n: number, by: number) => Math.max(0, Math.round((n + (Math.random() - 0.5) * by) / 10) * 10);
+  if (name === "Ragnar") {
+    return {
+      link: { transport: "crossplay", pingMs: j(60, 20), pingMaxMs: j(90, 20), replyGapMaxS: 1, queueBytes: 0, outBps: 4200, inBps: 900 },
+      sim: { owned: 180, nearby: 1500, zones: 2 },
+    };
+  }
+  if (name === "Freya") {
+    return {
+      link: { transport: "crossplay", pingMs: j(240, 40), pingMaxMs: j(620, 80), replyGapMaxS: 3.4, queueBytes: 11264, outBps: 2600, inBps: 1500 },
+      sim: { owned: 1240, nearby: 1500, zones: 7 },
+    };
+  }
+  return {
+    link: { transport: "crossplay", pingMs: j(150, 30), pingMaxMs: j(260, 40), replyGapMaxS: 1.4, queueBytes: 2048, outBps: 3800, inBps: 1100 },
+    sim: { owned: 320, nearby: 410, zones: 3 },
+  };
 }
 
 const NOISE = [
@@ -691,7 +718,7 @@ export class MockAgent implements AgentSource {
     if (this.state.server.status !== "running") return fail(502, "bridge unavailable");
     switch (req.op) {
       case "players":
-        return ok({ players: this.livePlayers().map((p) => ({ ...p, y: 34, hasCharacter: true })) });
+        return ok({ players: this.livePlayers().map((p): AdminPlayer => ({ ...p, y: 34, hasCharacter: true, ...mockLink(p.name) })) });
       case "read":
         switch (req.name) {
           case "time": {

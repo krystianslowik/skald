@@ -225,6 +225,24 @@ describe("admin with an admin password", () => {
     expect((await post(app, "/api/admin/save", both(), {})).status).toBe(403);
   });
 
+  it("lets the polled player list read without sliding the idle timeout (#195)", async () => {
+    const { app, advance } = await setup({ admin: true });
+    const cookie = await signIn(app);
+    const admin = adminCookie(await post(app, "/api/admin/unlock", cookie, { password: "jarl" }));
+    const both = `${cookie}; ${admin}`;
+    // A tab left open polls every 5 s for 29 minutes: allowed, and no new admin cookie.
+    for (let i = 0; i < 29; i++) {
+      advance(60_000);
+      const r = await app.request("/api/admin/players", { headers: { Cookie: both } });
+      expect(r.status).toBe(200);
+      expect(r.headers.get("set-cookie") ?? "").not.toContain("skald_admin=");
+    }
+    // The session still ends 30 minutes after the unlock.
+    advance(2 * 60_000);
+    expect((await app.request("/api/admin/players", { headers: { Cookie: both } })).status).toBe(403);
+    expect((await post(app, "/api/admin/save", both, {})).status).toBe(403);
+  });
+
   it("does not accept an admin cookie next to another session", async () => {
     const { app } = await setup({ admin: true });
     const a = await signIn(app);

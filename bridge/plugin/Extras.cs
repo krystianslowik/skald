@@ -429,7 +429,7 @@ namespace Skald.Bridge
         {
             Net();
             var pos = Target(a, out string near);
-            float r = Radius(a, 50f);
+            float r = Radius(a, 30f);
             int lit = 0, full = 0, off = 0, world = 0, unloaded = 0;
             bool capped = false;
             var byPrefab = new Dictionary<string, int>();

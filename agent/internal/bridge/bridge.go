@@ -149,6 +149,12 @@ type Client struct {
 	acked    string
 	// last positions published, to skip unchanged samples.
 	lastPositions string
+
+	// readMu serialises reads of the plugin's player list; playersRaw is
+	// the last one, read at playersAt (see readPlayers).
+	readMu     sync.Mutex
+	playersRaw []byte
+	playersAt  time.Time
 }
 
 // New returns a client; nil when token is empty (the bridge is off).
@@ -459,6 +465,118 @@ type Player struct {
 	Health       *float64 `json:"health"`
 	MaxHealth    *float64 `json:"maxHealth"`
 	HasCharacter bool     `json:"hasCharacter"`
+	// Link and Sim come from bridge 0.6.0 on; nil before, or when the
+	// plugin could not read them. Admins only: GET /bridge/players, which
+	// the web tier serves behind its admin check. The public positions
+	// event never carries them.
+	Link *Link `json:"link,omitempty"`
+	Sim  *Sim  `json:"sim,omitempty"`
+}
+
+// Link is a player's connection as the server sees it. Never an address,
+// a host name or an id: the transport is one word.
+type Link struct {
+	// Transport is "crossplay" (the PlayFab relay), "steam" or "other".
+	Transport string `json:"transport"`
+	// PingMs is the median round trip over the last 10 s (Steam's own ping
+	// when the socket has one, else the game's keep-alive timed by the
+	// plugin); PingMaxMs the worst. Rounded to 10 ms.
+	PingMs    *int `json:"pingMs,omitempty"`
+	PingMaxMs *int `json:"pingMaxMs,omitempty"`
+	// PingUnsure: the ping is left out because, after a stall or while a
+	// round trip over a second falls, the plugin cannot tell which reply
+	// answers which ping. No verdict by itself: the panel then goes by
+	// stalls and the send backlog.
+	PingUnsure bool `json:"pingUnsure,omitempty"`
+	// ReplyGapMaxS is the longest wait for a keep-alive reply in the last
+	// 10 s: about 1 s on a healthy link, more when it stalls.
+	ReplyGapMaxS *float64 `json:"replyGapMaxS,omitempty"`
+	// QueueBytes is what the server still has to get through to the
+	// player, rounded down; above 8 KiB the game holds back world updates
+	// to them (ZDOMan.SendZDOs needs 2 KiB of room under 10 KiB).
+	QueueBytes *int `json:"queueBytes,omitempty"`
+	// OutBps and InBps are bytes a second to and from the player.
+	OutBps *int `json:"outBps,omitempty"`
+	InBps  *int `json:"inBps,omitempty"`
+}
+
+// Sim is what a player simulates for everyone near: the objects in their
+// active area, and how many of them (in how many zones) they own.
+type Sim struct {
+	Owned  int `json:"owned"`
+	Nearby int `json:"nearby"`
+	Zones  int `json:"zones"`
+}
+
+type rawLink struct {
+	Transport    string   `json:"transport"`
+	PingMs       *float64 `json:"pingMs"`
+	PingMaxMs    *float64 `json:"pingMaxMs"`
+	PingUnsure   bool     `json:"pingUnsure"`
+	ReplyGapMaxS *float64 `json:"replyGapMaxS"`
+	QueueBytes   *float64 `json:"queueBytes"`
+	OutBps       *float64 `json:"outBps"`
+	InBps        *float64 `json:"inBps"`
+}
+
+// link turns the plugin's numbers into what the web gets: a known
+// transport word and rounded values, so a live sample does not differ
+// from the last one by a millisecond or a byte.
+func (r *rawLink) link() *Link {
+	if r == nil {
+		return nil
+	}
+	l := &Link{Transport: "other"}
+	switch r.Transport {
+	case "playfab":
+		l.Transport = "crossplay"
+	case "steam":
+		l.Transport = "steam"
+	}
+	l.PingMs = roundTo(r.PingMs, 10)
+	l.PingMaxMs = roundTo(r.PingMaxMs, 10)
+	l.PingUnsure = r.PingUnsure && l.PingMs == nil
+	if r.ReplyGapMaxS != nil && *r.ReplyGapMaxS >= 0 {
+		v := round1(*r.ReplyGapMaxS)
+		l.ReplyGapMaxS = &v
+	}
+	// Down, so a backlog just under the game's limit never reads as over it.
+	l.QueueBytes = floorTo(r.QueueBytes, 256)
+	l.OutBps = roundTo(r.OutBps, 100)
+	l.InBps = roundTo(r.InBps, 100)
+	return l
+}
+
+// roundTo rounds a non-negative plugin number to a multiple of step; nil
+// stays nil, and so does a negative or absurd value.
+func roundTo(v *float64, step float64) *int {
+	if v == nil || *v < 0 || *v > 1e9 || math.IsNaN(*v) {
+		return nil
+	}
+	n := int(math.Round(*v/step) * step)
+	return &n
+}
+
+// floorTo is roundTo, rounding down.
+func floorTo(v *float64, step float64) *int {
+	if v == nil || *v < 0 || *v > 1e9 || math.IsNaN(*v) {
+		return nil
+	}
+	n := int(math.Floor(*v/step) * step)
+	return &n
+}
+
+type rawSim struct {
+	Owned  int `json:"owned"`
+	Nearby int `json:"nearby"`
+	Zones  int `json:"zones"`
+}
+
+func (r *rawSim) sim() *Sim {
+	if r == nil || r.Owned < 0 || r.Nearby < 0 || r.Zones < 0 {
+		return nil
+	}
+	return &Sim{Owned: r.Owned, Nearby: r.Nearby, Zones: r.Zones}
 }
 
 type rawPlayer struct {
@@ -470,12 +588,42 @@ type rawPlayer struct {
 	HasCharacter bool     `json:"hasCharacter"`
 	Health       *float64 `json:"health"`
 	MaxHealth    *float64 `json:"maxHealth"`
+	Link         *rawLink `json:"link"`
+	Sim          *rawSim  `json:"sim"`
 }
 
-// Players reads the connected players and refreshes the private tables.
+// playersShareFor is how long one read of the plugin's player list serves
+// every caller (the positions poll, admin tabs polling links, the sync):
+// the plugin builds it on the game's main thread, link and simulation load
+// included, so callers share it rather than multiply that work.
+const playersShareFor = 2 * time.Second
+
+// Players reads the connected players, sharing a read up to 2 s old, and
+// refreshes the private tables.
 func (c *Client) Players(ctx context.Context) ([]Player, error) {
+	return c.players(ctx, playersShareFor)
+}
+
+// readPlayers fetches the plugin's list, or hands out the last one while it
+// is younger than maxAge. One fetch at a time: callers arriving during it
+// wait and share its answer.
+func (c *Client) readPlayers(ctx context.Context, maxAge time.Duration) ([]byte, time.Time, error) {
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
+	if maxAge > 0 && c.playersRaw != nil && time.Since(c.playersAt) < maxAge {
+		return c.playersRaw, c.playersAt, nil
+	}
 	readAt := time.Now()
 	data, err := c.call(ctx, http.MethodGet, "/v1/players", "", nil)
+	if err != nil {
+		return nil, readAt, err
+	}
+	c.playersRaw, c.playersAt = data, readAt
+	return data, readAt, nil
+}
+
+func (c *Client) players(ctx context.Context, maxAge time.Duration) ([]Player, error) {
+	data, readAt, err := c.readPlayers(ctx, maxAge)
 	if err != nil {
 		return nil, err
 	}
@@ -519,6 +667,8 @@ func (c *Client) Players(ctx context.Context) ([]Player, error) {
 			Health:       p.Health,
 			MaxHealth:    p.MaxHealth,
 			HasCharacter: p.HasCharacter,
+			Link:         p.Link.link(),
+			Sim:          p.Sim.sim(),
 		})
 	}
 	c.mu.Unlock()
@@ -831,13 +981,14 @@ func number(v any) (float64, bool) {
 	return 0, false
 }
 
-// uidOf finds a connected player's uid by name, from a fresh player list.
+// uidOf finds a connected player's uid by name, from a fresh player list:
+// never a shared one, so a player who joined a second ago can be named.
 func (c *Client) uidOf(ctx context.Context, name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "", &Error{http.StatusBadRequest, "missing player name"}
 	}
-	if _, err := c.Players(ctx); err != nil {
+	if _, err := c.players(ctx, 0); err != nil {
 		return "", err
 	}
 	c.mu.Lock()

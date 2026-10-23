@@ -133,3 +133,32 @@ describe("MockAgent 1.0 crossplay", () => {
     }
   });
 });
+
+describe("MockAgent link quality (#195)", () => {
+  it("serves link and sim on the admin player list only, never on positions", async () => {
+    const m = new MockAgent();
+    const events: AgentEvent[] = [];
+    const ac = new AbortController();
+    const done = m.stream(0, (e) => events.push(e), ac.signal);
+    await m.watchPositions(true);
+    (m as unknown as { samplePositions(): void }).samplePositions();
+    const pos = events.filter((e) => e.type === "positions");
+    expect(pos.length).toBeGreaterThan(0);
+    for (const e of pos) {
+      for (const p of e.data.players as Record<string, unknown>[]) {
+        expect(p).not.toHaveProperty("link");
+        expect(p).not.toHaveProperty("sim");
+      }
+    }
+    const res = await m.bridge({ op: "players" });
+    const players = (res.body as { data: { players: Record<string, unknown>[] } }).data.players;
+    expect(players.length).toBeGreaterThan(0);
+    for (const p of players) {
+      expect(p.link).toMatchObject({ transport: "crossplay" });
+      expect(p.sim).toHaveProperty("owned");
+    }
+    ac.abort();
+    await done;
+    m.stop();
+  });
+});

@@ -770,7 +770,16 @@ start. The NetworkPolicy needs no change: the plugin is loopback only.
   BepInEx off, kill switch, or still starting; `disabled`: the plugin turned
   itself off, usually after a game patch; `token`; `loading`; `restarting`),
   the plugin version and the **game build**, `tested` and `acknowledged`.
-- `GET /bridge/players`: name, platform type, position and health. The
+- `GET /bridge/players`: name, platform type, position and health, and from
+  bridge 0.6.0 on each player's `link` (transport word, keep-alive ping and
+  its worst over 10 s, longest reply gap, send backlog, bytes a second) and
+  `sim` (objects in their active area, how many they own, in how many
+  zones). The agent shares one read of the plugin's list between callers
+  for up to 2 s (a command naming a player still reads afresh). Only here,
+  behind skald-web's admin check
+  (`GET /api/admin/players`, polled every 5 s by open admin views; unlike
+  other admin calls it does not restart the admin idle timeout, so a tab
+  left open still locks); the public `positions` event never carries them. The
   plugin's peer uids, platform ids and PlayFab ids **never leave the agent**:
   it keeps a private name to uid table and swaps a name for its uid before a
   command goes on.

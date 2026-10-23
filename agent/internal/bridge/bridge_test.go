@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,6 +28,8 @@ type fakePlugin struct {
 	calls    []call
 	bans     []string
 	status   map[string]int // path -> forced status
+	jitter   int            // > 0: every player list read changes the link and sim by this
+	reads    int
 }
 
 type call struct {
@@ -75,9 +79,14 @@ func (f *fakePlugin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ok(map[string]any{"plugin": "0.1.1", "gameBuild": build, "worldLoaded": true, "timeFrozen": false})
 	case "/v1/players":
 		// Raw JSON: the uid is a full 64-bit long, beyond float64 precision.
+		f.mu.Lock()
+		f.reads++
+		d := f.jitter * f.reads
+		f.mu.Unlock()
 		w.WriteHeader(200)
 		_, _ = io.WriteString(w, `{"ok":true,"data":{"time":1,"players":[
-			{"uid":1234567890123456789,"name":"Ragnar","platformId":"Xbox_2533274800000001","userId":"Xbox_2533274800000001","playfabId":"ABCDEF0123456789","position":{"x":10.04,"y":31,"z":-20.06},"hasCharacter":true,"health":25,"maxHealth":50},
+			{"uid":1234567890123456789,"name":"Ragnar","platformId":"Xbox_2533274800000001","userId":"Xbox_2533274800000001","playfabId":"ABCDEF0123456789","position":{"x":10.04,"y":31,"z":-20.06},"hasCharacter":true,"health":25,"maxHealth":50,
+			 "link":{"transport":"playfab","pingMs":`+strconv.Itoa(243+d)+`,"pingMaxMs":418,"replyGapMaxS":1.04,"queueBytes":`+strconv.Itoa(8400+d)+`,"outBps":5170,"inBps":1234},"sim":{"owned":`+strconv.Itoa(1240+d)+`,"nearby":1500,"zones":7}},
 			{"uid":42,"name":"Freya","platformId":"Steam_76561190000000002","userId":null,"playfabId":"0011","position":{"x":-5,"y":30,"z":5},"hasCharacter":true,"health":null,"maxHealth":null}]}}`)
 	case "/v1/bans":
 		f.mu.Lock()
@@ -176,6 +185,73 @@ func TestPlayersStripIDs(t *testing.T) {
 	}
 	if len(ps) != 2 || ps[1].Name != "Ragnar" || ps[1].Platform != "xbox" || ps[0].Platform != "steam" || ps[1].X != 10.04 || *ps[1].Health != 25 {
 		t.Fatalf("got %s", b)
+	}
+}
+
+func TestPlayersLinkAndSim(t *testing.T) {
+	c := newClient(t, &fakePlugin{build: "l-1.0.17"}, nil, "")
+	ps, err := c.Players(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Freya's plugin answer has neither (an older plugin): both stay out.
+	if ps[0].Link != nil || ps[0].Sim != nil {
+		t.Fatalf("freya %+v", ps[0])
+	}
+	l, s := ps[1].Link, ps[1].Sim
+	if l == nil || l.Transport != "crossplay" || *l.PingMs != 240 || *l.PingMaxMs != 420 || *l.ReplyGapMaxS != 1 || *l.QueueBytes != 8192 || *l.OutBps != 5200 || *l.InBps != 1200 {
+		t.Fatalf("link %+v", l)
+	}
+	if s == nil || s.Owned != 1240 || s.Nearby != 1500 || s.Zones != 7 {
+		t.Fatalf("sim %+v", s)
+	}
+}
+
+func TestPlayerReadsAreShared(t *testing.T) {
+	f := &fakePlugin{build: "l-1.0.17"}
+	c := newClient(t, f, nil, "")
+	reads := func() int { f.mu.Lock(); defer f.mu.Unlock(); return f.reads }
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); _, _ = c.Players(ctx) }()
+	}
+	wg.Wait()
+	if _, err := c.Players(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Six callers within 2 s: one read of the plugin's list.
+	if n := reads(); n != 1 {
+		t.Fatalf("reads = %d, want 1", n)
+	}
+	// A command naming a player reads afresh.
+	if _, err := c.Run(ctx, "kick", map[string]any{"player": "Ragnar"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if n := reads(); n != 2 {
+		t.Fatalf("reads after a command = %d, want 2", n)
+	}
+}
+
+func TestRawLinkIsSanitised(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	l := (&rawLink{Transport: "203.0.113.7:2456", PingMs: f(-1), QueueBytes: f(math.NaN()), OutBps: f(1e12), ReplyGapMaxS: f(-2)}).link()
+	if l.Transport != "other" || l.PingMs != nil || l.QueueBytes != nil || l.OutBps != nil || l.ReplyGapMaxS != nil {
+		t.Fatalf("got %+v", l)
+	}
+	if u := (&rawLink{Transport: "playfab", PingUnsure: true, ReplyGapMaxS: f(3.1)}).link(); !u.PingUnsure || u.PingMs != nil {
+		t.Fatalf("unsure %+v", u)
+	}
+	// A ping and "unsure" together: the ping wins.
+	if u := (&rawLink{Transport: "playfab", PingUnsure: true, PingMs: f(120)}).link(); u.PingUnsure {
+		t.Fatalf("unsure with ping %+v", u)
+	}
+	if (&rawLink{Transport: "steam"}).link().Transport != "steam" || (*rawLink)(nil).link() != nil {
+		t.Fatal("transport")
+	}
+	if (&rawSim{Owned: -1}).sim() != nil || (*rawSim)(nil).sim() != nil {
+		t.Fatal("sim")
 	}
 }
 
@@ -608,7 +684,9 @@ func TestChestAdd(t *testing.T) {
 
 func TestPositions(t *testing.T) {
 	hub := events.New(100, 10)
-	c := newClient(t, &fakePlugin{build: "l-1.0.17"}, hub, "")
+	// Every read differs in link and sim only: the public stream carries
+	// neither, so standing still still sends nothing new.
+	c := newClient(t, &fakePlugin{build: "l-1.0.17", jitter: 50}, hub, "")
 	_, ch := hub.Subscribe(0)
 	defer hub.Unsubscribe(ch)
 	var mu sync.Mutex
@@ -652,9 +730,19 @@ func TestPlayersReportPeerPlatforms(t *testing.T) {
 	t.Cleanup(srv.Close)
 	got := make(chan []Peer, 64)
 	before := time.Now()
+	// The first read's time; later reads (SyncPlayers keeps going) leave it.
+	var readMu sync.Mutex
 	var readAt time.Time
 	c := New(Options{URL: srv.URL, Token: testToken, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		OnPlayers: func(at time.Time, p []Peer) PlayerIDs { readAt = at; got <- p; return PlayerIDs{} }})
+		OnPlayers: func(at time.Time, p []Peer) PlayerIDs {
+			readMu.Lock()
+			if readAt.IsZero() {
+				readAt = at
+			}
+			readMu.Unlock()
+			got <- p
+			return PlayerIDs{}
+		}})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var wanted atomic.Bool
@@ -667,8 +755,11 @@ func TestPlayersReportPeerPlatforms(t *testing.T) {
 		if fmt.Sprint(p) != fmt.Sprint(want) {
 			t.Fatalf("peers = %v, want %v", p, want)
 		}
-		if readAt.Before(before) || readAt.After(time.Now()) {
-			t.Fatalf("readAt = %v, not the start of the read", readAt)
+		readMu.Lock()
+		first := readAt
+		readMu.Unlock()
+		if first.Before(before) || first.After(time.Now()) {
+			t.Fatalf("readAt = %v, not the start of the read", first)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("SyncPlayers never read the player list")

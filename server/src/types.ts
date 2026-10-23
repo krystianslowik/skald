@@ -968,6 +968,50 @@ export interface LivePlayer {
   maxHealth: number | null;
 }
 
+/**
+ * A connected player as GET /api/admin/players serves it (admins only): the
+ * live fields plus their link and what they simulate. Neither is ever on the
+ * public `positions` stream.
+ */
+export interface AdminPlayer extends LivePlayer {
+  y: number;
+  hasCharacter: boolean;
+  /** The player's connection as the server sees it (bridge 0.6.0+ and an agent that passes it on). */
+  link?: LinkQuality;
+  /** What the player simulates for everyone near (bridge 0.6.0+). */
+  sim?: SimLoad;
+}
+
+/**
+ * A player's connection as the server sees it. Every number is optional:
+ * the socket may not report it (crossplay has no ping of its own; the plugin
+ * times the game's keep-alive instead).
+ */
+export interface LinkQuality {
+  /** "crossplay" (the PlayFab relay), "steam" or "other". */
+  transport: "crossplay" | "steam" | "other";
+  /** Median round trip over the last 10 s, ms (10 ms steps). */
+  pingMs?: number;
+  /** Worst round trip over the last 10 s, ms. */
+  pingMaxMs?: number;
+  /** No ping right now: after a stall or while a slow round trip falls the plugin cannot pair replies with pings; no verdict by itself (stalls and backlog decide). */
+  pingUnsure?: boolean;
+  /** Longest wait for a keep-alive reply in the last 10 s, s: about 1 when healthy. */
+  replyGapMaxS?: number;
+  /** Bytes the server still has to get through to the player, rounded down; above 8 KiB the game holds back world updates. */
+  queueBytes?: number;
+  /** Bytes a second to and from the player. */
+  outBps?: number;
+  inBps?: number;
+}
+
+/** The objects in a player's active area and how many of them (in how many zones) they own, i.e. simulate. */
+export interface SimLoad {
+  owned: number;
+  nearby: number;
+  zones: number;
+}
+
 /** A ban list entry by opaque id; the platform id stays in the agent. */
 export interface BanEntry {
   id: string;

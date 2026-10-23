@@ -6,6 +6,8 @@ import { Sheet } from "../Sheet";
 import { Shield } from "../Shield";
 import { useAdmin } from "./AdminContext";
 import { BAN_HOLD_MS, HoldButton } from "./HoldButton";
+import { useAdminLinks } from "../../lib/adminlinks";
+import { LinkDetail } from "./LinkInfo";
 import { AdminHead, BridgeBanner, Btn, Chip, HealthBar, Section, platformOf } from "./parts";
 
 /** Teleport spots the plugin knows by alias (bridge/README.md). */
@@ -19,12 +21,14 @@ export function PlayerSheet({ name, onClose }: { name: string; onClose: () => vo
   const { t, lookup } = useI18n();
   const admin = useAdmin();
   const live = useLivePositions();
+  const links = useAdminLinks(!!admin?.present && !!admin.unlocked);
   const [busy, setBusy] = useState<string | null>(null);
   if (!admin) return null;
   const me = live.players.find((p) => p.name === name);
   const platform = me?.platform ?? platformOf(admin.players, name);
   const here = admin.players.some((p) => p.name === name);
   const off = !!admin.blocker || !here;
+  const link = links.get(admin.players.find((p) => p.name === name)?.id ?? name);
 
   const act = async (key: string, fn: () => Promise<unknown>) => {
     setBusy(key);
@@ -66,6 +70,7 @@ export function PlayerSheet({ name, onClose }: { name: string; onClose: () => vo
       <div className="pb-4">
         {me && <HealthBar health={me.health} max={me.maxHealth} className="mb-3" />}
         <BridgeBanner compact />
+        {here && link && <LinkDetail p={link} />}
 
         <Section title={t("admin.player.teleport")}>
           <div className="flex flex-wrap gap-2">

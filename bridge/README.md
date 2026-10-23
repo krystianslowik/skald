@@ -139,7 +139,7 @@ Commands that act at a place take either `player` or `at: {x, z[, y]}`. Without
 | Method + path | Body | Does |
 |---|---|---|
 | `GET /v1/health` | | Plugin version, game build, world loaded, frozen time, which game singletons exist |
-| `GET /v1/players` | | `uid, name, platformId, userId, playfabId, position{x,y,z}, hasCharacter, health, maxHealth` per connected player. Position comes from the character ZDO, falling back to the peer reference position. Cheap enough to poll every 2 s |
+| `GET /v1/players` | | `uid, name, platformId, userId, playfabId, position{x,y,z}, hasCharacter, health, maxHealth, link, sim` per connected player. Position comes from the character ZDO, falling back to the peer reference position. `link` (0.6.0+, null when unreadable): `transport` (`playfab`, `steam`, `tcp` or `other`, from the socket's type name; the agent passes `playfab` on as `crossplay` and `tcp` as `other`), `pingMs` and `pingMaxMs` (median and worst round trip over 10 s, see [Link and simulation load](#link-and-simulation-load)), `pingUnsure` (true while, just after a stall, the round trip is left out rather than guessed), `replyGapMaxS`, `queueBytes`, `outBps`, `inBps`. `sim` (0.6.0+): `owned`, `nearby`, `zones`. Cheap enough to poll every 2 s |
 | `POST /v1/broadcast` | `text`, `type`: `center` (default) / `topleft` / `narrator` | Sends the game's `ShowMessage` routed RPC to everybody. `narrator` is a center message in gold italics, using TMP rich text with the text inside `<noparse>`. `chat` answers 501: the Xbox client did not show a shout sent from the server, which has no sender platform id |
 | `POST /v1/save` | | `ZNet.Save`. The log shows `World save (5/5) done` |
 | `POST /v1/kick` | `player` | `ZNet.Kick` with the player's platform id |
@@ -178,7 +178,7 @@ loaded are counted as `unloaded` and skipped. `radius` is at most 100 m.
 | `POST /v1/build/fill-kilns` | `player` or `at`, `radius` | Charcoal kilns get their first input (wood) up to capacity with `RPC_AddOre`. Answers `kilns`, `skipped`, `full`, `unloaded` and `added` (item: stations) |
 | `POST /v1/build/fill-smelters` | `player` or `at`, `radius`, `what` (`ore`, `both` (default) or `coal`), `ore` (an item `GET /v1/build/stations` lists, or `current`; not needed for `coal`) | `RPC_AddOre` with that ore and/or `RPC_AddFuel`, up to capacity. A station that does not take the ore gets nothing (`skipped`); with `current` each station gets the ore at the head of its queue, and one holding no ore gets only fuel (`both`) or nothing (`ore`). Answers `smelters`, `skipped`, `full`, `unloaded`, `added` and `fuel` |
 | `POST /v1/build/fill-fermenters` | `player` or `at`, `radius`, `base` (a mead base `GET /v1/build/stations` lists) | `RPC_AddItem` with that base, once, on every empty fermenter. One still fermenting or holding mead to tap is left alone (`full`). Answers `fermenters`, `skipped`, `full`, `unloaded` and `added` (0.4.0+) |
-| `POST /v1/build/refuel-fires` | `player` or `at`, `radius` (default 50) | Every fire with a `Fireplace` component that a player built and could feed by hand (torches, sconces, campfires, hearths, braziers, lanterns, the hot tub: it has a fuel item, does not burn forever, the game lets it be refilled, and its ZDO has a `creator`) gets `RPC_SetFuelAmount` with its own `m_maxFuel`. Fires nobody built (Fuling camps, abandoned houses, dungeons; `world`) are never touched. One turned off (`state` not 1) is left off (`off`), and one whose fuel rounded up is already at the maximum is left alone (`full`), as the game does. At most 500 fires per call; `capped` says the call stopped there. The `Fireplace` values are read once per prefab. Answers `fires`, `full`, `off`, `world`, `unloaded`, `capped` and `byPrefab` (prefab: fires refuelled) (0.5.0+) |
+| `POST /v1/build/refuel-fires` | `player` or `at`, `radius` (default 30; 50 before 0.6.0) | Every fire with a `Fireplace` component that a player built and could feed by hand (torches, sconces, campfires, hearths, braziers, lanterns, the hot tub: it has a fuel item, does not burn forever, the game lets it be refilled, and its ZDO has a `creator`) gets `RPC_SetFuelAmount` with its own `m_maxFuel`. Fires nobody built (Fuling camps, abandoned houses, dungeons; `world`) are never touched. One turned off (`state` not 1) is left off (`off`), and one whose fuel rounded up is already at the maximum is left alone (`full`), as the game does. At most 500 fires per call; `capped` says the call stopped there. The `Fireplace` values are read once per prefab. Answers `fires`, `full`, `off`, `world`, `unloaded`, `capped` and `byPrefab` (prefab: fires refuelled) (0.5.0+) |
 | `GET /v1/build/stations` | | Every kiln and smelter prefab with the items it takes, in the game's order, read from the prefabs' `Smelter` components, and every fermenter with the mead bases its `Fermenter` component takes: `{kilns:[{prefab, inputs}], smelters:[{prefab, fuel, inputs}], fermenters:[{prefab, inputs}]}` (`fermenters` 0.4.0+). A kiln burns nothing and makes what a smelter burns; a smelter burns what a kiln makes. Windmills, spinning wheels and the eitr refinery are neither |
 | `POST /v1/build/grow` | `player` or `at`, `radius` | Back-dates the plant time of crops and saplings |
 | `GET /v1/tombstones` | | `id, owner, position, loaded` |
@@ -187,6 +187,74 @@ loaded are counted as `unloaded` and skipped. `radius` is at most 100 m.
 | `POST /v1/map/pins` | `pins: [{x, z, name, type: icon0..icon4}]`, `player` or `at`, `radius` | Merges shared pins into the tables in range. Pins carry the fixed owner id `0x534B414C44` ("SKALD") and skip duplicates (same name within 1 m) |
 | `POST /v1/nearby` | `player` or `at`, `radius` | Counts objects by prefab, and how many are loaded. Read-only diagnostics |
 | `POST /v1/containers/add` | `prefab` (e.g. `piece_chest_wood`), `at: {x, y, z}` (the chest's position in the save, within 0.5 m), `item`, `amount` (1-9999) | Puts items into one chest, through the game's own `Inventory`: tops up stacks of that item, then fills empty slots. Refuses with 409 when a player has the chest open or stands within reach of it, when there is no room (the message says how many fit), when two chests sit on the spot, or when the chest holds items the server does not know or that do not read back the same; 404 when the chest or the item is gone; 400 for carts, ships and graves. The server takes ownership and writes the `items` ZDO value, so a client that has the chest loaded reloads it within a second and gets ownership back within two; an unloaded chest just keeps the new items. Answers `slots: [{x, y, added, stack}]`, `room` (left), `loaded` and `position` |
+
+### Link and simulation load
+
+In Valheim the client that owns an area simulates it for everyone near:
+creatures, fires, carts, ships. One player on a bad line or a slow machine
+makes the whole area stutter for the others while the server itself is idle.
+`GET /v1/players` therefore reports, per player:
+
+- `pingMs`, `pingMaxMs`: the round trip of the game's own keep-alive. `ZRpc`
+  pings each peer once a second (a timer that restarts when the ping goes
+  out) and resets `GetTimeSinceLastPing()` when the reply comes back. The
+  plugin reads both once a frame, from the frame a peer joins the game's peer
+  list: a drop of the ping timer (`ZRpc.m_pingTimer`, private, read by
+  reflection) is a ping going out, a drop of the wait is a reply coming in.
+  The socket is reliable and ordered, so each reply is paired with the oldest
+  ping still unanswered, which also times round trips longer than the second
+  between pings. Median and worst over the last 10 s, frame-accurate (about
+  20 ms at 50 fps). A peer first seen mid-session (not possible while the
+  plugin loads with the game) starts from a guess at the pings in flight; a
+  reply with no ping left to pair restarts the pairing. A reply in each of
+  two frames in a row is told apart by the ping timer, which grows by the
+  same frame time as the wait. After a stall (a wait over 1.5 s) the replies
+  to the pings sent during it often arrive in one frame and only one shows;
+  but a round trip that has just gone up for good looks the same at that
+  moment. So the pings sent longer ago than the shortest round trip seen are
+  set aside, not dropped, and `pingMs` is left out (`pingUnsure`) until the
+  next reply settles it. Replies a frame or two behind are the rest of the
+  burst and answer the set-aside pings. Otherwise the set-aside pings are
+  dropped only on a clear burst (as in-flight pings they would have round
+  trips well under the one that ended the stall, and the listed ping gives
+  the round trip from before the stall); in every other case they are kept,
+  which can read high but never low, and the ping stays unsure unless the
+  reply clearly matches a step up. A round trip over a second that falls by
+  100 ms or more without a stall also makes the ping unsure (see the known
+  limit below). Unsure ends with a round trip under 900 ms (pairing a reply
+  with a ping one too early adds a whole interval, so such a sample proves
+  there is no over-read), clear evidence, a drained burst, or a reply that
+  would pair to a negative round trip. An unsure ping is no verdict of its
+  own: the panel then judges the link by stalls and the send backlog. The
+  ping timer is read through a getter compiled once (plain reflection if the
+  runtime cannot compile). On Steam, the
+  socket's own ping is used when `GetConnectionQuality` gives one.
+- `replyGapMaxS`: the longest wait for a keep-alive reply in the last 10 s.
+  About 1 on a healthy link; it climbs while the link stalls (the game drops
+  the peer at 30).
+- `queueBytes`: `ISocket.GetSendQueueSize()`. On crossplay that is a quarter
+  of the bytes sent and not yet acknowledged. `ZDOMan.SendZDOs` sends world
+  updates only with 2048 of room under 10240, so above 8192 the game stops
+  sending that player world updates until the queue drains. The agent
+  rounds it down, so a backlog just under the limit never reads as over it.
+- `outBps`, `inBps`: `ISocket.GetConnectionQuality`'s byte rates. On
+  crossplay (`ZPlayFabSocket`, through `ZNetStats`) its ping and quality are
+  always 0, so they are not used; on Steam it goes through the client
+  networking API, and the first failure turns it off for that socket kind
+  (one warning line). `GetCurrentSendRate` is
+  never called: crossplay throws `NotImplementedException`.
+- `sim`: the objects in the player's active area, found the way the game hands
+  out ownership (`ZDOMan.ReleaseNearbyZDOS`: `FindSectorObjects` around the
+  zone of the peer's reference position, near simulation distance only), with
+  how many of them (all ZDOs, not only persistent ones) the player owns and in
+  how many zones. One scan for everyone at most every 5 s, cached in between,
+  on the main thread inside the request (the game runs the same search for
+  every peer every 2 s). A failed scan is retried at the next one; only a
+  broken binding after a game update turns it off.
+
+Every one of these is optional: a game update that renames a member blanks
+that value (one warning line) instead of failing `/v1/players`, which the
+map's positions depend on. None of them is in the startup binding probe.
 
 These answer `501` with the reason, because the state they touch lives only on
 the client: `POST /v1/weather`, `/v1/player/feed`, `/v1/player/godmode`,
@@ -369,6 +437,47 @@ uninitialised `Minimap` and the palette lookup have not run against a loaded
 world yet. Check after deploying: `GET /v1/terrain/info` answers, its `forest`
 is `mask` and `palette.source` says whether the colours came from the game;
 `X-Skald-Sample-Ms` on a 260 x 260 tile shows the real cost per tile.
+
+**New in v0.6.0, not yet verified on a live server:** `link` and `sim` in
+`GET /v1/players`, and the refuel default of 30 m. They compile against the 1.0
+reference assemblies, and the keep-alive timing (round trip, gaps, the 10 s
+window, departed peers) and the ownership count are unit-tested in
+`tests/LinkPlanTests.cs`. Everything about the game side is read from the
+decompiled 1.0 assemblies only, not seen on a running server:
+`ZRpc.GetTimeSinceLastPing` and the private `m_pingTimer`, the ping once a
+second, replies handled before the next ping in `ZRpc.Update`, a new `ZRpc`
+starting with both timers at 0, `ZPlayFabSocket.GetSendQueueSize` (in-flight bytes x 0.25),
+`ZNetStats.GetConnectionQuality` (zeros for ping and quality, real byte
+rates), `ZSteamSocket.GetConnectionQuality` (client API, may fail on a
+dedicated server), and `ZDOMan.FindSectorObjects` called from a plugin. Check
+after deploying with a player on crossplay: `pingMs` should be plausible
+(compare with the in-game F2 ping), `replyGapMaxS` near 1, `queueBytes` near 0
+standing still, and a player alone at a base should own most of its objects.
+
+Known limit of the keep-alive timing, from simulation only: when the round
+trip falls by more than the second between pings (a link recovering from a
+lag spike), the ordered socket delivers several replies in one frame with no
+stall before them, and the pairing ends up whole seconds high. Only the
+remainder of the fall after whole ping intervals shows (1.5 to 0.3 s reads
+as 1.5 to 1.3 s; a fall of exactly whole seconds shows nothing). So a round
+trip over a second that falls by 100 ms or more makes the ping unsure, until
+a round trip under 900 ms shows the pairing is sound. In simulation:
+
+- 1.1 to 0.2 s (no bunching): known and right again within a few replies.
+- 1.5 to 0.3 s and 2.1 to 0.1 s: unsure for good on a calm link (never a
+  wrong number); the panel then goes by stalls and backlog.
+- 1.2 to 1.05 s: also unsure for good, though nothing bunched, since a fall
+  that small looks the same as the remainder of a bunched one. The link then
+  shows without a ping, judged by stalls and backlog alone.
+- Round trips jittering between 0.8 and 1.6 s: unsure about half the time.
+  Between 0.3 and 1.8 s: unsure most of the time and, when shown, never under
+  the median but at times seconds over it (set-aside pings are kept when the
+  evidence is unclear).
+- A recovery by exactly whole seconds with no jitter at all is not seen and
+  can still read high.
+
+Stalls and the send backlog are not affected. Steps up and bursts after a
+stall read right; see `tests/LinkPlanTests.cs`.
 
 **New in v0.5.0, not yet verified on a live server:** `build/refuel-fires`
 compiles against the 1.0 reference assemblies, and which fires it takes and what
