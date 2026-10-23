@@ -37,7 +37,7 @@ bridge/
 
 ```sh
 bridge/build.sh                   # fetches refs into bridge/refs/ on first run
-GAME_REFS=/some/dir bridge/build.sh   # or point at a dir with the 7 DLLs below
+GAME_REFS=/some/dir bridge/build.sh   # or point at a dir with the 8 DLLs below
 ```
 
 The first run fetches the reference DLLs into `bridge/refs/` (gitignored), all
@@ -49,7 +49,10 @@ anonymously and without the 2.3 GB install:
   [DepotDownloader](https://github.com/SteamRE/DepotDownloader)'s anonymous
   login (its framework build, run by the .NET SDK, so it works the same on
   Linux, macOS and Apple Silicon)
-- `BepInEx.dll` from `denikson/BepInExPack_Valheim` 5.4.2351 on Thunderstore
+- `BepInEx.dll` and `0Harmony.dll` (HarmonyX, which BepInEx ships and
+  loads) from `denikson/BepInExPack_Valheim` 5.4.2351 on Thunderstore; the
+  zip is checked against a sha256 pinned in `build.sh` (another
+  `BEPINEX_PACK_VERSION` needs its own `BEPINEX_PACK_SHA256`)
 
 The game assemblies are not on NuGet in a current version (the BepInEx feed's
 `Valheim.GameLibs` stops at 0.202.14), and the plugin calls them directly, so
@@ -141,7 +144,7 @@ Commands that act at a place take either `player` or `at: {x, z[, y]}`. Without
 | Method + path | Body | Does |
 |---|---|---|
 | `GET /v1/health` | | Plugin version, game build, world loaded, frozen time, which game singletons exist |
-| `GET /v1/players` | | `uid, name, platformId, userId, playfabId, position{x,y,z}, hasCharacter, health, maxHealth, link, sim` per connected player. Position comes from the character ZDO, falling back to the peer reference position. `link` (0.6.0+, null when unreadable): `transport` (`playfab`, `steam`, `tcp` or `other`, from the socket's type name; the agent passes `playfab` on as `crossplay` and `tcp` as `other`), `pingMs` and `pingMaxMs` (median and worst round trip over 10 s, see [Link and simulation load](#link-and-simulation-load)), `pingUnsure` (true while, just after a stall, the round trip is left out rather than guessed), `replyGapMaxS`, `queueBytes`, `outBps`, `inBps`. `sim` (0.6.0+): `owned`, `nearby`, `zones`. Cheap enough to poll every 2 s |
+| `GET /v1/players` | | `uid, name, platformId, userId, playfabId, position{x,y,z}, hasCharacter, health, maxHealth, link, sim` per connected player. Position comes from the character ZDO, falling back to the peer reference position. `link` (0.6.0+, null when unreadable): `transport` (`playfab`, `steam`, `tcp` or `other`, from the socket's type name; the agent passes `playfab` on as `crossplay` and `tcp` as `other`), `pingMs` and `pingMaxMs` (median and worst round trip over 10 s, see [Link and simulation load](#link-and-simulation-load)), `pingUnsure` (true while the round trip is not known, rather than guessed), `replyGapMaxS`, `queueBytes`, `outBps`, `inBps`. `sim` (0.6.0+): `owned`, `nearby`, `zones`. Cheap enough to poll every 2 s |
 | `POST /v1/broadcast` | `text`, `type`: `center` (default) / `topleft` / `narrator` | Sends the game's `ShowMessage` routed RPC to everybody. `narrator` is a center message in gold italics, using TMP rich text with the text inside `<noparse>`. `chat` answers 501: the Xbox client did not show a shout sent from the server, which has no sender platform id |
 | `POST /v1/save` | | `ZNet.Save`. The log shows `World save (5/5) done` |
 | `POST /v1/kick` | `player` | `ZNet.Kick` with the player's platform id |
@@ -198,43 +201,40 @@ creatures, fires, carts, ships. One player on a bad line or a slow machine
 makes the whole area stutter for the others while the server itself is idle.
 `GET /v1/players` therefore reports, per player:
 
-- `pingMs`, `pingMaxMs`: the round trip of the game's own keep-alive. `ZRpc`
-  pings each peer once a second (a timer that restarts when the ping goes
-  out) and resets `GetTimeSinceLastPing()` when the reply comes back. The
-  plugin reads both once a frame, from the frame a peer joins the game's peer
-  list: a drop of the ping timer (`ZRpc.m_pingTimer`, private, read by
-  reflection) is a ping going out, a drop of the wait is a reply coming in.
-  The socket is reliable and ordered, so each reply is paired with the oldest
-  ping still unanswered, which also times round trips longer than the second
-  between pings. Median and worst over the last 10 s, frame-accurate (about
-  20 ms at 50 fps). A peer first seen mid-session (not possible while the
-  plugin loads with the game) starts from a guess at the pings in flight; a
-  reply with no ping left to pair restarts the pairing. A reply in each of
-  two frames in a row is told apart by the ping timer, which grows by the
-  same frame time as the wait. After a stall (a wait over 1.5 s) the replies
-  to the pings sent during it often arrive in one frame and only one shows;
-  but a round trip that has just gone up for good looks the same at that
-  moment. So the pings sent longer ago than the shortest round trip seen are
-  set aside, not dropped, and `pingMs` is left out (`pingUnsure`) until the
-  next reply settles it. Replies a frame or two behind are the rest of the
-  burst and answer the set-aside pings. Otherwise the set-aside pings are
-  dropped only on a clear burst (as in-flight pings they would have round
-  trips well under the one that ended the stall, and the listed ping gives
-  the round trip from before the stall); in every other case they are kept,
-  which can read high but never low, and the ping stays unsure unless the
-  reply clearly matches a step up. A round trip over a second that falls by
-  100 ms or more without a stall also makes the ping unsure (see the known
-  limit below). Unsure ends with a round trip under 900 ms (pairing a reply
-  with a ping one too early adds a whole interval, so such a sample proves
-  there is no over-read), clear evidence, a drained burst, or a reply that
-  would pair to a negative round trip. An unsure ping is no verdict of its
-  own: the panel then judges the link by stalls and the send backlog. The
-  ping timer is read through a getter compiled once (plain reflection if the
-  runtime cannot compile). On Steam, the
-  socket's own ping is used when `GetConnectionQuality` gives one.
-- `replyGapMaxS`: the longest wait for a keep-alive reply in the last 10 s.
-  About 1 on a healthy link; it climbs while the link stalls (the game drops
-  the peer at 30).
+- `pingMs`, `pingMaxMs`: the round trip of the game's own keep-alive, median
+  and worst over the last 10 s. `ZRpc` pings each peer once a second
+  (`ZRpc.UpdatePing`) and the peer answers each one (`ZRpc.ReceivePing`
+  with `false`). The plugin hooks both with Harmony and notes the time of
+  every ping going out and every reply being handled, per connection. Each
+  reply is paired with the oldest ping still unanswered. This rests on one
+  assumption: the socket delivers every keep-alive, in order, so the n-th
+  reply answers the n-th ping. Under it the pairing holds however many
+  replies one frame handles (crossplay hands several to the game at once)
+  and for round trips longer than the second between pings. The one known
+  case that breaks the assumption on a live connection is
+  `ZPlayFabSocket.ResetAll` (the remote restarted its session: the socket
+  drops what it had in flight), and a third hook on it stops that player's
+  pairing, so their ping shows as unknown until they reconnect. A drop the
+  plugin cannot see would leave that player's ping reading a second or more
+  high.
+  The resolution is a frame (about 20 ms at 50 fps); on crossplay both the
+  ping and the reply also pass through the socket's compression thread,
+  which adds up to a frame or two, as it does for everything the game sends.
+  The reply hook reads the ping's flag and puts the read position back, so
+  the game reads the package unchanged; the ping hook only compares the
+  game's private ping timer before and after. `pingUnsure` means the round
+  trip is not known: no reply was timed in the window (a player who just
+  joined, or a stall), the hooks are off, or one connection's pings were not
+  all seen (a reply with no ping waiting, which a client can also cause by
+  sending a stray reply, more pings unanswered than the game's 30 s timeout
+  allows, or a crossplay session reset: that player's ping then stays unknown
+  until they reconnect; the first stray reply or overflow logs one warning line, a session reset logs none). An unsure ping is no verdict of its own: the panel then judges
+  the link by stalls and the send backlog. On Steam, the socket's own ping is
+  used when `GetConnectionQuality` gives one.
+- `replyGapMaxS`: the longest wait for a keep-alive reply in the last 10 s,
+  from the reply times above (with the hooks off, from the game's public
+  `GetTimeSinceLastPing()`, read once a frame). About 1 on a healthy link; it
+  climbs while the link stalls (the game drops the peer at 30).
 - `queueBytes`: `ISocket.GetSendQueueSize()`. On crossplay that is a quarter
   of the bytes sent and not yet acknowledged. `ZDOMan.SendZDOs` sends world
   updates only with 2048 of room under 10240, so above 8192 the game stops
@@ -257,7 +257,22 @@ makes the whole area stutter for the others while the server itself is idle.
 
 Every one of these is optional: a game update that renames a member blanks
 that value (one warning line) instead of failing `/v1/players`, which the
-map's positions depend on. None of them is in the startup binding probe.
+map's positions depend on. None of them is in the startup binding probe. The
+keep-alive hooks are applied once at startup, inside a try: if a hooked
+method or the private `m_pingTimer` is gone, patching fails, one warning line
+says so, and only the round trip goes blank. The hook bodies catch
+everything and never throw into the game; the first failure there unhooks
+the round trip the same way. They record only on a server, and are removed
+when the plugin unloads. The session-reset hook is optional on top: if it
+cannot be applied, one warning line says so and the ping still works, only
+without following resets. Once a frame the plugin also checks the hooks:
+if the game keeps showing a recent reply (its own `GetTimeSinceLastPing()`)
+that the reply hook never reported, or no ping is reported for a player for
+more than 3 s although the game pings everyone once a second, for 10 s on
+end (so that one long frame cannot trip it), the hooks are taken as not
+firing, one warning line says so, and the round trip goes blank as if
+patching had failed. The reply hook runs before any other mod's prefix
+(`Priority.First`), so it reads the package where the game will.
 
 ### Simulation handover
 
@@ -423,7 +438,9 @@ one `read <cmd> result=...` warning instead. The token is never logged.
   `[SkaldBridge] disabled: game API binding failed (Type.member), game build …`,
   and serves only 503s. A `MissingMember`/`TypeLoad` error inside a command
   turns off just that command, with one log line. The game keeps running in
-  every case. No Harmony patches are used.
+  every case. The only Harmony patches are the two keep-alive hooks on `ZRpc`
+  (see [Link and simulation load](#link-and-simulation-load)): they observe,
+  never change what the game does, and turn themselves off on any error.
 - **Token.** It is compared as constant-time SHA-256. Bodies over 64 KB are
   refused. Strings are length-capped.
 - **Terrain.** Read-only, off the main thread, one tile at a time, rate-limited
@@ -561,46 +578,32 @@ what is verified from code and what to check live:
   10 s: both still work;
 - walk the new owner away and see the area go back.
 
-**New in v0.6.0, not yet verified on a live server:** `link` and `sim` in
-`GET /v1/players`, and the refuel default of 30 m. They compile against the 1.0
-reference assemblies, and the keep-alive timing (round trip, gaps, the 10 s
-window, departed peers) and the ownership count are unit-tested in
-`tests/LinkPlanTests.cs`. Everything about the game side is read from the
-decompiled 1.0 assemblies only, not seen on a running server:
-`ZRpc.GetTimeSinceLastPing` and the private `m_pingTimer`, the ping once a
-second, replies handled before the next ping in `ZRpc.Update`, a new `ZRpc`
-starting with both timers at 0, `ZPlayFabSocket.GetSendQueueSize` (in-flight bytes x 0.25),
-`ZNetStats.GetConnectionQuality` (zeros for ping and quality, real byte
-rates), `ZSteamSocket.GetConnectionQuality` (client API, may fail on a
-dedicated server), and `ZDOMan.FindSectorObjects` called from a plugin. Check
-after deploying with a player on crossplay: `pingMs` should be plausible
-(compare with the in-game F2 ping), `replyGapMaxS` near 1, `queueBytes` near 0
-standing still, and a player alone at a base should own most of its objects.
+**New in v0.8.0, not yet verified on a live server:** the keep-alive hooks.
+The pairing is exact as long as the socket delivers every keep-alive (see
+above for the crossplay session reset) and is unit-tested in
+`tests/LinkPlanTests.cs` (several replies in one frame, round trips stepping
+up and down by more than a second, heavy jitter, a stall and its recovery,
+peers joining while others have pings in flight, a session reset, hooks
+that do not fire). Read from the decompiled
+1.0 assemblies only: that `ZRpc.UpdatePing` and `ZRpc.ReceivePing` are not
+inlined into `ZRpc.Update` by the server's runtime (if the reply hook never
+fired, the cross-check above turns the round trip off after about 10 s, with
+one warning line), and that the plugin loads
+before the first player connects, so no ping goes out unseen. Check after
+deploying with players on crossplay: `pingUnsure` gone within a few seconds
+of each joining, and `pingMs` in the range 0.6.0 showed for the one player
+it could pair (median about 150 ms, worst about 220 ms on that server).
 
-Known limit of the keep-alive timing, from simulation only: when the round
-trip falls by more than the second between pings (a link recovering from a
-lag spike), the ordered socket delivers several replies in one frame with no
-stall before them, and the pairing ends up whole seconds high. Only the
-remainder of the fall after whole ping intervals shows (1.5 to 0.3 s reads
-as 1.5 to 1.3 s; a fall of exactly whole seconds shows nothing). So a round
-trip over a second that falls by 100 ms or more makes the ping unsure, until
-a round trip under 900 ms shows the pairing is sound. In simulation:
-
-- 1.1 to 0.2 s (no bunching): known and right again within a few replies.
-- 1.5 to 0.3 s and 2.1 to 0.1 s: unsure for good on a calm link (never a
-  wrong number); the panel then goes by stalls and backlog.
-- 1.2 to 1.05 s: also unsure for good, though nothing bunched, since a fall
-  that small looks the same as the remainder of a bunched one. The link then
-  shows without a ping, judged by stalls and backlog alone.
-- Round trips jittering between 0.8 and 1.6 s: unsure about half the time.
-  Between 0.3 and 1.8 s: unsure most of the time and, when shown, never under
-  the median but at times seconds over it (set-aside pings are kept when the
-  evidence is unclear).
-- A recovery by exactly whole seconds with no jitter at all is not seen and
-  can still read high.
-
-Stalls and the send backlog are not affected. Steps up and bursts after a
-stall read right; see `tests/LinkPlanTests.cs`.
+**New in v0.6.0:** `link` and `sim` in `GET /v1/players`, and the refuel
+default of 30 m. Seen live (2026.10.31, three players on crossplay):
+`replyGapMaxS` about 1 to 1.2, `queueBytes` up to a few KB, `sim` plausible.
+0.6.0 and 0.7.0 inferred the keep-alive from the game's timers once a frame
+and could not see two replies handled in one frame: one ping stayed listed
+for good and that player's ping read about a second high, or unsure for the
+whole session (#202). 0.8.0 replaces that with the hooks above. Not yet seen
+live: `ZSteamSocket.GetConnectionQuality` (client API, may fail on a
+dedicated server), and that a player alone at a base owns most of its
+objects.
 
 **New in v0.5.0, not yet verified on a live server:** `build/refuel-fires`
 compiles against the 1.0 reference assemblies, and which fires it takes and what

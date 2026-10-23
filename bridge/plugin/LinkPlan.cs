@@ -7,14 +7,15 @@ namespace Skald.Bridge
     sealed class LinkSample
     {
         // Median and worst round trip of the game's own keep-alive (ZRpc
-        // ping), in ms; null before the first reply was timed.
+        // ping), in ms; null while no reply in the window was timed.
         public int? RttMs, RttMaxMs;
         // The longest wait for a keep-alive reply, now or within the window,
         // in seconds. About 1 on a healthy link (one ping a second); a stalled
         // link climbs towards the game's 30 s timeout.
         public float ReplyGapMaxS;
-        // The round trip is not known right now (after a stall no reply has
-        // explained yet, or while a slow one falls): RttMs and RttMaxMs are null.
+        // The round trip is not known: no reply was timed in the window (none
+        // yet, or a stall), or the keep-alive is not counted at all (the
+        // game patches are off, or the peer's pings were not all seen).
         public bool Unsure;
     }
 
@@ -28,245 +29,185 @@ namespace Skald.Bridge
     // The game-independent half of the link probe (Link.cs), unit-tested in
     // bridge/tests.
     //
-    // The game pings every peer once a second (ZRpc.UpdatePing: a timer that
-    // restarts when the ping goes out) and resets "time since last ping"
-    // when the reply comes back. Watching both once a frame sees each ping go
-    // out (the timer drops) and each reply come in (the wait drops). The
-    // socket is reliable and ordered, so a reply answers the oldest ping
-    // still unanswered: pairing them in order times every round trip, also
-    // one longer than the second between pings.
+    // The game pings every peer once a second (ZRpc.UpdatePing) and the peer
+    // answers each ping (ZRpc.ReceivePing). Link.cs hooks both and reports
+    // each ping going out (Sent) and each reply being handled (Replied), with
+    // its time. The socket is reliable and ordered, so the n-th reply answers
+    // the n-th ping: a reply is paired with the oldest ping still unanswered,
+    // whatever the round trip and however many replies one frame handles.
     sealed class LinkTracker
     {
         public const float WindowS = 10f;
-        // How close (s) the round trip from a set-aside ping must come to the
-        // one that ended the stall to count as a step up.
-        const float SameRttS = 0.25f;
-        // Replies this close behind each other are one burst.
-        const float BurstS = 0.1f;
-        // Pings kept waiting for a reply; the game gives up after 30 s.
-        const int MaxInFlight = 32;
-        // A wait for a reply this long may end with several replies at once.
-        const float StallS = 1.5f;
+        // Pings kept waiting for a reply. The game drops a peer after 30 s
+        // without one and pings once a second, so more than this means the
+        // count is off.
+        const int MaxInFlight = 64;
+        // How long the game may show a reply the hooks did not report before
+        // the hooks count as not firing (a long frame alone can open a gap
+        // of a few seconds between the two clocks, until the next reply).
+        const float SilentS = 10f;
+        // Gaps kept per peer: only the largest matter, so a flood of replies
+        // (a client sending stray ones) cannot grow the list.
+        const int MaxGaps = 256;
+
+        // Why a peer's pairing stopped (Sent/Replied return it once).
+        public enum Lost { None, StrayReply, Overflow }
 
         sealed class Peer
         {
-            public float LastWait = -1f, LastPingTimer = -1f;
+            // The last reply, or when the peer was first seen.
+            public float LastReplyAt;
+            // The last ping, or when the peer was first seen.
+            public float LastSentAt;
+            // Pairing is off for good: a reply came with no ping left, more
+            // pings waited than the game allows, or the transport dropped
+            // what was in flight (see Reset).
+            public bool Unpaired;
+            public float LastWait = -1f, SilentSince = -1f, PingSilentSince = -1f;
             public int Replies;
-            // The round trip is not known right now (see Settle).
-            public bool Unsure;
-            // Pings a stall-ending reply took as answered, kept until the next
-            // reply shows whether they were, and that reply's round trip.
-            public readonly List<float> Maybe = new List<float>();
-            public float StallRtt;
-            // The last round trip paired, in ms (-1 before the first).
-            public int LastRttMs = -1;
-            // The median round trip just before the last stall, in ms (-1: none).
-            public int PreStallMs = -1;
             public readonly Queue<float> Sent = new Queue<float>();
             public readonly Queue<(float t, int ms)> Rtts = new Queue<(float, int)>();
-            public readonly Queue<(float t, float gap)> Gaps = new Queue<(float, float)>();
+            // Gaps in arrival order, each larger than every later one: the
+            // first is the window's largest (a later, larger gap makes the
+            // earlier ones irrelevant to the maximum).
+            public readonly List<(float t, float gap)> Gaps = new List<(float, float)>();
         }
 
         readonly Dictionary<long, Peer> peers = new Dictionary<long, Peer>();
 
-        // One frame's reading of a peer: wait = seconds since the last reply,
-        // pingTimer = seconds since the last ping went out (null when the
-        // game's private timer cannot be read: then only gaps are known).
-        public void Observe(long uid, float now, float wait, float? pingTimer)
+        Peer Get(long id, float now)
         {
-            if (!peers.TryGetValue(uid, out var p))
+            if (!peers.TryGetValue(id, out var p)) peers[id] = p = new Peer { LastReplyAt = now, LastSentAt = now };
+            return p;
+        }
+
+        // A peer the watch starts on. fromStart: no ping can have gone out to
+        // it unseen (its ZRpc is new, or the hooks were in place before it
+        // connected); otherwise its replies are only gaps, never round trips.
+        public void Seen(long id, float now, bool fromStart)
+        {
+            if (peers.ContainsKey(id)) return;
+            Get(id, now).Unpaired = !fromStart;
+        }
+
+        // A ping went out at t. Overflow when this one stopped the pairing.
+        public Lost Sent(long id, float t)
+        {
+            var p = Get(id, t);
+            p.LastSentAt = t;
+            if (p.Unpaired) return Lost.None;
+            p.Sent.Enqueue(t);
+            if (p.Sent.Count <= MaxInFlight) return Lost.None;
+            Unpair(p);
+            return Lost.Overflow;
+        }
+
+        // A reply was handled at t. StrayReply when it stopped the pairing.
+        public Lost Replied(long id, float t)
+        {
+            var p = Get(id, t);
+            p.Replies++;
+            AddGap(p, t, t - p.LastReplyAt);
+            p.LastReplyAt = t;
+            var lost = Lost.None;
+            if (!p.Unpaired)
             {
-                peers[uid] = p = new Peer();
-                Start(p, now, wait, pingTimer);
+                if (p.Sent.Count > 0) p.Rtts.Enqueue((t, Ms(t - p.Sent.Dequeue())));
+                else
+                {
+                    Unpair(p);
+                    lost = Lost.StrayReply;
+                }
             }
-            // ZRpc.Update handles replies before it sends the next ping, so a
-            // frame with both pairs the reply with an earlier ping.
-            if (Replied(p, wait, pingTimer))
+            Trim(p, t);
+            return lost;
+        }
+
+        // The transport dropped what it had in flight on a live connection
+        // (ZPlayFabSocket.ResetAll after the remote restarted its session):
+        // the pings sent before never get a reply, and which later reply
+        // answers which ping cannot be proven, so the pairing stops.
+        public void Reset(long id)
+        {
+            if (peers.TryGetValue(id, out var p) && !p.Unpaired) Unpair(p);
+        }
+
+        // Without the hooks: the game's own "time since the last reply"
+        // (ZRpc.GetTimeSinceLastPing), read once a frame. A drop is a reply;
+        // that gives the gaps but no round trip.
+        public void Waited(long id, float now, float wait)
+        {
+            var p = Get(id, now);
+            if (!p.Unpaired) Unpair(p);
+            if (p.LastWait >= 0f && wait < p.LastWait)
             {
                 p.Replies++;
-                p.Gaps.Enqueue((now, p.LastWait));
-                // Handled during the frame the wait restarted in: half of it.
-                float at = now - wait / 2f;
-                bool stall = p.LastWait > StallS;
-                if (pingTimer.HasValue && p.Maybe.Count > 0 && p.LastWait < BurstS)
-                {
-                    // The rest of a burst, a frame or two behind the reply that
-                    // ended the stall: it answers a ping set aside. Pings go out
-                    // a second apart, so a step up never answers this fast.
-                    Sample(p, now, Ms(at - p.Maybe[0]));
-                    p.Maybe.RemoveAt(0);
-                    if (p.Maybe.Count == 0)
-                    {
-                        // The burst drained: aligned again, and its falling
-                        // samples are no sign of a recovery.
-                        p.Unsure = false;
-                        p.LastRttMs = -1;
-                    }
-                }
-                else if (pingTimer.HasValue && p.Maybe.Count > 0 && !stall) Settle(p, now, at);
-                else if (pingTimer.HasValue && p.Sent.Count > 0)
-                {
-                    float rtt = at - p.Sent.Dequeue();
-                    if (rtt >= 0f && rtt < 30f)
-                    {
-                        Sample(p, now, Ms(rtt));
-                        if (stall) DropAnswered(p, at, rtt);
-                    }
-                    else
-                    {
-                        // Out of step: start over with the next ping, which
-                        // also settles any doubt about the pairing.
-                        p.Sent.Clear();
-                        p.Maybe.Clear();
-                        p.Unsure = false;
-                    }
-                }
-                else if (stall) DropAnswered(p, at, -1f);
-            }
-            if (pingTimer.HasValue)
-            {
-                if (p.LastPingTimer >= 0 && pingTimer.Value < p.LastPingTimer)
-                {
-                    p.Sent.Enqueue(now - pingTimer.Value);
-                    while (p.Sent.Count > MaxInFlight) p.Sent.Dequeue();
-                }
-                p.LastPingTimer = pingTimer.Value;
+                AddGap(p, now, p.LastWait);
             }
             p.LastWait = wait;
+            p.LastReplyAt = now - wait;
             Trim(p, now);
         }
 
-        // The first look at a peer. Link.Tick watches every peer from the
-        // frame it joins the game's peer list, when its ZRpc is new: both
-        // timers started together and no ping has gone out until the first
-        // second is over, so nothing is in flight. Seen later than that (the
-        // wait and the ping timer apart), the pings sent since the last reply
-        // are taken as the ones in flight; a guess that is off shows as a
-        // reply with no ping left, which starts the pairing over.
-        static void Start(Peer p, float now, float wait, float? pingTimer)
+        // Cross-checks the hooks against the game's own "time since the last
+        // reply" (ZRpc.GetTimeSinceLastPing), once a frame. True once the game
+        // has kept showing a recent reply the hooks never reported for
+        // SilentS: the reply hook does not fire (inlined, or the game moved
+        // the code), so the reply times are not to be trusted.
+        public bool Silent(long id, float now, float gameWait)
         {
-            if (!pingTimer.HasValue || Math.Abs(wait - pingTimer.Value) < 0.1f) return;
-            var sent = new List<float>();
-            for (float ago = pingTimer.Value; ago < wait; ago += 1f) sent.Add(now - ago);
-            sent.Reverse();
-            foreach (var t in sent) p.Sent.Enqueue(t);
+            if (!peers.TryGetValue(id, out var p)) return false;
+            if (gameWait < 1.5f && now - p.LastReplyAt > gameWait + 3f)
+            {
+                if (p.SilentSince < 0f) p.SilentSince = now;
+                return now - p.SilentSince > SilentS;
+            }
+            p.SilentSince = -1f;
+            return false;
+        }
+
+        // The other half of the cross-check: the game pings every peer once a
+        // second, whatever the link does, so no ping reported for more than
+        // 3 s, for SilentS on end, means the ping hook does not fire.
+        public bool PingSilent(long id, float now)
+        {
+            if (!peers.TryGetValue(id, out var p)) return false;
+            if (now - p.LastSentAt > 3f)
+            {
+                if (p.PingSilentSince < 0f) p.PingSilentSince = now;
+                return now - p.PingSilentSince > SilentS;
+            }
+            p.PingSilentSince = -1f;
+            return false;
+        }
+
+        static void AddGap(Peer p, float t, float gap)
+        {
+            // Replies handled in one frame add nothing to the maximum.
+            if (gap <= 0f) return;
+            var g = p.Gaps;
+            while (g.Count > 0 && g[g.Count - 1].gap <= gap) g.RemoveAt(g.Count - 1);
+            g.Add((t, gap));
+            // Strictly falling gaps within the window: drop the smallest.
+            if (g.Count > MaxGaps) g.RemoveAt(g.Count - 2);
+        }
+
+        static void Unpair(Peer p)
+        {
+            p.Unpaired = true;
+            p.Sent.Clear();
+            p.Rtts.Clear();
         }
 
         static int Ms(float s) => (int)Math.Round(s * 1000f);
 
-        // A round trip over a second falling, without a stall: the link may be
-        // recovering. When it falls by more than the second between pings,
-        // replies bunch up behind the slow ones in the ordered socket and
-        // some never show, which leaves the pairing whole seconds high. What
-        // shows of the fall is only its remainder after whole ping intervals
-        // (1.5 to 0.3 s reads as 1.5 to 1.3 s), so any clear fall counts.
-        // The ping is left out until a sample under 900 ms (which a pairing
-        // one ping too early cannot give), clear evidence, a drained burst or
-        // a pairing that starts over shows it is sound (a stall alone does not).
-        const int RecoverAboveMs = 1000, RecoverFallMs = 100;
-
-        static void Sample(Peer p, float now, int ms)
+        public LinkSample Snapshot(long id, float now)
         {
-            if (p.LastRttMs >= RecoverAboveMs && p.LastRttMs - ms >= RecoverFallMs) p.Unsure = true;
-            // Pairing a reply with a ping one too early adds at least a ping
-            // interval, so a sample this far under a second proves there is
-            // no over-read: the pairing is sound again.
-            if (p.Unsure && p.Maybe.Count == 0 && ms < RecoverAboveMs - 100) p.Unsure = false;
-            p.LastRttMs = ms;
-            p.Rtts.Enqueue((now, ms));
-        }
-
-        // A reply ending a stall often comes with the replies to the pings
-        // sent during it, in one frame, and only one shows: left listed, every
-        // round trip after it would read seconds high. A ping sent longer ago
-        // than the shortest round trip seen is taken as answered with it; a
-        // later one is still on its way (a long first wait after joining on a
-        // slow link is the same case). But a round trip that has just gone up
-        // for good looks the same at this point, and then the pings set aside
-        // are still on their way: they are kept in Maybe, and the round trip
-        // is unsure until the next reply settles it.
-        static void DropAnswered(Peer p, float repliedAt, float rtt)
-        {
-            p.Maybe.Clear();
-            p.PreStallMs = -1;
-            if (p.Rtts.Count > 1)
-            {
-                // Without the sample the stall itself just added.
-                var ms = new List<int>();
-                foreach (var x in p.Rtts) ms.Add(x.ms);
-                ms.RemoveAt(ms.Count - 1);
-                ms.Sort();
-                p.PreStallMs = ms[ms.Count / 2];
-            }
-            int min = int.MaxValue;
-            foreach (var r in p.Rtts) min = Math.Min(min, r.ms);
-            float before = p.Rtts.Count == 0 ? float.MaxValue : repliedAt - min * 0.8f / 1000f;
-            while (p.Sent.Count > 0 && p.Sent.Peek() < before) p.Maybe.Add(p.Sent.Dequeue());
-            if (p.Maybe.Count == 0) return;
-            p.StallRtt = rtt;
-            p.Unsure = true;
-        }
-
-        // The first reply after pings were set aside decides, on clear
-        // evidence only:
-        // - a step up: pairing it with the oldest set-aside ping gives about
-        //   the round trip that ended the stall (and the listed one does not),
-        //   so the set-aside pings are still in flight;
-        // - a burst: those pings would have round trips well under the one
-        //   that ended the stall (they went out later and came back with it),
-        //   and the listed ping gives about the round trip from before it, so
-        //   they were answered in the burst.
-        // Anything else (a jittery link) keeps them, which can only read high,
-        // never low, and leaves the round trip unsure until clear evidence or
-        // a pairing that starts over.
-        static void Settle(Peer p, float now, float at)
-        {
-            float kept = at - p.Maybe[0];
-            float dropped = p.Sent.Count > 0 ? at - p.Sent.Peek() : -1f;
-            float r = p.StallRtt;
-            bool keptFits = r >= 0f && Math.Abs(kept - r) < SameRttS;
-            bool droppedFits = dropped >= 0f && r >= 0f && Math.Abs(dropped - r) < SameRttS;
-            bool burst = r >= 0f && dropped >= 0f && kept <= r - 0.5f && p.PreStallMs >= 0 && Math.Abs(Ms(dropped) - p.PreStallMs) <= 300;
-            if (burst && !keptFits)
-            {
-                p.Sent.Dequeue();
-                Sample(p, now, Ms(dropped));
-                p.Unsure = false;
-                p.Maybe.Clear();
-                return;
-            }
-            // Keep the set-aside pings: this reply answers the oldest.
-            var all = new List<float>(p.Maybe);
-            all.AddRange(p.Sent);
-            p.Sent.Clear();
-            for (int i = 1; i < all.Count; i++) p.Sent.Enqueue(all[i]);
-            p.Maybe.Clear();
-            Sample(p, now, Ms(kept));
-            p.Unsure = !(keptFits && !droppedFits);
-        }
-
-        // Whether a reply came in since the last frame. The wait restarts
-        // when one is handled, so it drops; but a reply in each of two
-        // frames in a row can leave it no lower than the frame before. The
-        // ping timer grows by the same frame time as the wait, so without a
-        // reply the wait must have grown by exactly that much.
-        static bool Replied(Peer p, float wait, float? pingTimer)
-        {
-            if (p.LastWait < 0) return false;
-            if (wait < p.LastWait) return true;
-            if (!pingTimer.HasValue || p.LastPingTimer < 0 || pingTimer.Value < p.LastPingTimer) return false;
-            float dt = pingTimer.Value - p.LastPingTimer;
-            return wait < p.LastWait + dt - 1e-4f;
-        }
-
-        public LinkSample Snapshot(long uid, float now)
-        {
-            if (!peers.TryGetValue(uid, out var p)) return null;
+            if (!peers.TryGetValue(id, out var p)) return null;
             Trim(p, now);
-            var s = new LinkSample { ReplyGapMaxS = Math.Max(0f, p.LastWait) };
-            foreach (var g in p.Gaps) s.ReplyGapMaxS = Math.Max(s.ReplyGapMaxS, g.gap);
-            s.Unsure = p.Unsure;
-            if (p.Rtts.Count > 0 && !p.Unsure)
+            var s = new LinkSample { ReplyGapMaxS = Math.Max(0f, now - p.LastReplyAt) };
+            if (p.Gaps.Count > 0) s.ReplyGapMaxS = Math.Max(s.ReplyGapMaxS, p.Gaps[0].gap);
+            if (p.Rtts.Count > 0)
             {
                 var ms = new List<int>(p.Rtts.Count);
                 foreach (var r in p.Rtts) ms.Add(r.ms);
@@ -274,6 +215,7 @@ namespace Skald.Bridge
                 s.RttMs = ms[ms.Count / 2];
                 s.RttMaxMs = ms[ms.Count - 1];
             }
+            s.Unsure = !s.RttMs.HasValue;
             return s;
         }
 
@@ -281,19 +223,27 @@ namespace Skald.Bridge
         public void Keep(ICollection<long> live)
         {
             var gone = new List<long>();
-            foreach (var uid in peers.Keys) if (!live.Contains(uid)) gone.Add(uid);
-            foreach (var uid in gone) peers.Remove(uid);
+            foreach (var id in peers.Keys) if (!live.Contains(id)) gone.Add(id);
+            foreach (var id in gone) peers.Remove(id);
         }
 
         public int Count => peers.Count;
 
         // Replies seen from one peer since it was first observed.
-        public int RepliesSeen(long uid) => peers.TryGetValue(uid, out var p) ? p.Replies : 0;
+        public int RepliesSeen(long id) => peers.TryGetValue(id, out var p) ? p.Replies : 0;
+
+        // Gaps kept for one peer (bounded by MaxGaps).
+        public int GapsKept(long id) => peers.TryGetValue(id, out var p) ? p.Gaps.Count : 0;
+
+        // Pings still waiting for a reply.
+        public int InFlight(long id) => peers.TryGetValue(id, out var p) ? p.Sent.Count : 0;
 
         static void Trim(Peer p, float now)
         {
             while (p.Rtts.Count > 0 && now - p.Rtts.Peek().t > WindowS) p.Rtts.Dequeue();
-            while (p.Gaps.Count > 0 && now - p.Gaps.Peek().t > WindowS) p.Gaps.Dequeue();
+            int old = 0;
+            while (old < p.Gaps.Count && now - p.Gaps[old].t > WindowS) old++;
+            if (old > 0) p.Gaps.RemoveRange(0, old);
         }
     }
 

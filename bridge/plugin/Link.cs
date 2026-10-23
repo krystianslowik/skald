@@ -1,8 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Linq.Expressions;
-using System.Reflection;
 using System.Runtime.CompilerServices;
+using HarmonyLib;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
@@ -18,11 +17,21 @@ namespace Skald.Bridge
     static class Link
     {
         static readonly LinkTracker Tracker = new LinkTracker();
-        // Peers by object, not uid: a peer is watched from the frame it joins
-        // the game's list, before its uid is known (see LinkTracker.Start).
-        static readonly Dictionary<ZNetPeer, long> Ids = new Dictionary<ZNetPeer, long>();
+        // Peers by their ZRpc (one per connection): the hooks see only the
+        // ZRpc, and Tick drops the ones no longer in the game's peer list.
+        static readonly Dictionary<ZRpc, long> Ids = new Dictionary<ZRpc, long>();
         static long nextId;
-        static bool tickOff, pingTimerOff, simBroken;
+        static bool tickOff, simBroken;
+        // The keep-alive hooks are in place and working; lostWarned: the one
+        // warning for a peer whose count broke has been logged.
+        static bool hooked, lostWarned;
+        // The Harmony instance, as object so that this class loads without
+        // HarmonyLib (see Patch).
+        static object harmony;
+        // Crossplay sockets that dropped what they had in flight, from the
+        // ResetAll hook; Tick stops the pairing of their peers. A queue,
+        // since PlayFab may call it off the main thread.
+        static readonly System.Collections.Concurrent.ConcurrentQueue<ISocket> ResetSockets = new System.Collections.Concurrent.ConcurrentQueue<ISocket>();
         static readonly HashSet<string> QueueOff = new HashSet<string>(), QualityOff = new HashSet<string>();
         static float prunedAt;
 
@@ -31,7 +40,167 @@ namespace Skald.Bridge
 
         static bool IsBindingError(Exception e) => e is MissingMemberException || e is TypeLoadException;
 
-        // ---- the per-frame keep-alive watch (Plugin.Update) ----------------
+        // ---- the keep-alive hooks (Harmony, applied once in Awake) ----------
+        //
+        // ZRpc.UpdatePing sends the ping once a second; ZRpc.ReceivePing
+        // handles both a ping from the peer (true: answered) and the reply to
+        // ours (false: "time since last ping" restarts). Each send and each
+        // reply is reported with its time to the tracker, which pairs them in
+        // order. Nothing here changes what the game does, and nothing throws
+        // into it: the first failure unhooks the round trip, with one line.
+        // Without the hooks the reply gaps still come from the game's own
+        // GetTimeSinceLastPing, read once a frame.
+        //
+        // The pairing assumes the socket delivers every keep-alive in order.
+        // The one known exception is ZPlayFabSocket.ResetAll on a live peer
+        // (the remote restarted its session): it drops the pings in flight,
+        // so a third hook stops that peer's pairing (unsure until it
+        // reconnects) instead of reading a second or more high for good.
+
+        internal static void Hook()
+        {
+            try
+            {
+                string missing = Patch();
+                if (missing != null) SkaldBridgePlugin.Warn("link round trip off: ZRpc." + missing + " not found");
+            }
+            catch (Exception e)
+            {
+                hooked = false;
+                Off("link round trip", e);
+            }
+        }
+
+        // Kept apart so a missing HarmonyLib fails here, inside Hook's try.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static string Patch()
+        {
+            var receive = AccessTools.Method(typeof(ZRpc), "ReceivePing", new[] { typeof(ZPackage) });
+            if (receive == null) return "ReceivePing";
+            var update = AccessTools.Method(typeof(ZRpc), "UpdatePing", new[] { typeof(float) });
+            if (update == null) return "UpdatePing";
+            var h = new Harmony(SkaldBridgePlugin.Guid + ".link");
+            try
+            {
+                // ___m_pingTimer binds the private field when patching: a game
+                // update that renames it fails here, not in the game loop.
+                h.Patch(update, prefix: new HarmonyMethod(typeof(Link), nameof(PingBefore)), postfix: new HarmonyMethod(typeof(Link), nameof(PingAfter)));
+                // First: peek the flag before any other mod's prefix reads on.
+                h.Patch(receive, prefix: new HarmonyMethod(typeof(Link), nameof(OnReceivePing)) { priority = Priority.First });
+            }
+            catch
+            {
+                try { h.UnpatchSelf(); } catch (Exception) { }
+                throw;
+            }
+            hooked = true;
+            harmony = h;
+            // Optional on top: without it a crossplay session reset can leave
+            // one peer's ping a second or more high.
+            try
+            {
+                var reset = AccessTools.Method(typeof(ZPlayFabSocket), "ResetAll", Type.EmptyTypes);
+                if (reset == null || reset.DeclaringType != typeof(ZPlayFabSocket)) SkaldBridgePlugin.Warn("link round trip: ZPlayFabSocket.ResetAll not found, crossplay session resets not followed");
+                else h.Patch(reset, postfix: new HarmonyMethod(typeof(Link), nameof(OnSocketReset)));
+            }
+            catch (Exception e) { Off("link resync on crossplay session reset", e); }
+            return null;
+        }
+
+        // Plugin.OnDestroy: the hooks go with the plugin.
+        internal static void Unpatch()
+        {
+            hooked = false;
+            if (harmony == null) return;
+            try { UnpatchAll(); }
+            catch (Exception) { }
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void UnpatchAll()
+        {
+            ((Harmony)harmony).UnpatchSelf();
+            harmony = null;
+        }
+
+        static void OnSocketReset(ZPlayFabSocket __instance)
+        {
+            if (!hooked || tickOff) return;
+            try { ResetSockets.Enqueue(__instance); }
+            catch (Exception) { }
+        }
+
+        static void PingBefore(float ___m_pingTimer, out float __state) => __state = ___m_pingTimer;
+
+        // The ping went out when the timer restarted instead of moving on by
+        // dt (__0). Half of dt keeps clear of float rounding either way.
+        static void PingAfter(ZRpc __instance, float __0, float ___m_pingTimer, float __state)
+        {
+            if (!hooked || tickOff || !(___m_pingTimer < __state + __0 * 0.5f)) return;
+            try { Record(__instance, true); }
+            catch (Exception e) { Unhook(e); }
+        }
+
+        // Peeks the ping's flag and puts the read position back, so the
+        // game reads the package as if nothing had looked.
+        static void OnReceivePing(ZRpc __instance, ZPackage __0)
+        {
+            if (!hooked || tickOff) return;
+            try
+            {
+                int pos = __0.GetPos();
+                bool ask;
+                try { ask = __0.ReadBool(); }
+                catch (System.IO.EndOfStreamException) { return; } // malformed: the game deals with it
+                finally { __0.SetPos(pos); }
+                if (!ask) Record(__instance, false);
+            }
+            catch (Exception e) { Unhook(e); }
+        }
+
+        // Server side only: on a client the plugin has no peers to report.
+        static void Record(ZRpc rpc, bool ping)
+        {
+            var net = ZNet.instance;
+            if (net == null || !net.IsServer()) return;
+            float now = Time.realtimeSinceStartup;
+            long id = IdOf(rpc, now);
+            var lost = ping ? Tracker.Sent(id, now) : Tracker.Replied(id, now);
+            if (lost == LinkTracker.Lost.None || lostWarned) return;
+            lostWarned = true;
+            SkaldBridgePlugin.Warn("link round trip: lost count of one player's keep-alive (" +
+                (lost == LinkTracker.Lost.StrayReply ? "a reply with no ping waiting" : "too many pings unanswered") +
+                "), their ping stays unknown until they reconnect; further cases are not logged");
+        }
+
+        static void Unhook(Exception e)
+        {
+            if (!hooked) return;
+            hooked = false;
+            Off("link round trip", e);
+        }
+
+        static void Unhook(string why)
+        {
+            if (!hooked) return;
+            hooked = false;
+            SkaldBridgePlugin.Warn("link round trip off: " + why);
+        }
+
+        // The tracker id of a connection, made on first sight. With the hooks
+        // in place since Awake (before the game opens a socket) every ping to
+        // it has been seen, so its replies can be paired.
+        static long IdOf(ZRpc rpc, float now)
+        {
+            if (!Ids.TryGetValue(rpc, out long id))
+            {
+                Ids[rpc] = id = ++nextId;
+                Tracker.Seen(id, now, hooked);
+            }
+            return id;
+        }
+
+        // ---- once a frame (Plugin.Update) ------------------------------------
 
         internal static void Tick()
         {
@@ -53,69 +222,29 @@ namespace Skald.Bridge
             var peers = net.GetPeers();
             for (int i = 0; i < peers.Count; i++)
             {
-                var p = peers[i];
-                if (p == null || p.m_rpc == null) continue;
-                if (!Ids.TryGetValue(p, out long id)) Ids[p] = id = ++nextId;
-                Tracker.Observe(id, now, p.m_rpc.GetTimeSinceLastPing(), PingTimer(p.m_rpc));
+                var rpc = peers[i]?.m_rpc;
+                if (rpc == null) continue;
+                long id = IdOf(rpc, now);
+                float wait = rpc.GetTimeSinceLastPing();
+                if (hooked && Tracker.Silent(id, now, wait)) Unhook("the game handles keep-alive replies the hook does not see");
+                if (hooked && Tracker.PingSilent(id, now)) Unhook("the game sends keep-alive pings the hook does not see");
+                if (!hooked) Tracker.Waited(id, now, wait);
             }
+            while (ResetSockets.TryDequeue(out var sock))
+                foreach (var kv in Ids)
+                    if (kv.Key.GetSocket() == sock) Tracker.Reset(kv.Value);
             if (now - prunedAt > LinkTracker.WindowS && Ids.Count > 0)
             {
                 prunedAt = now;
-                var here = new HashSet<ZNetPeer>(peers);
+                var here = new HashSet<ZRpc>();
+                for (int i = 0; i < peers.Count; i++) if (peers[i]?.m_rpc != null) here.Add(peers[i].m_rpc);
                 var live = new HashSet<long>();
-                foreach (var kv in new List<KeyValuePair<ZNetPeer, long>>(Ids))
+                foreach (var kv in new List<KeyValuePair<ZRpc, long>>(Ids))
                 {
                     if (here.Contains(kv.Key)) live.Add(kv.Value);
                     else Ids.Remove(kv.Key);
                 }
                 Tracker.Keep(live);
-            }
-        }
-
-        // ZRpc.m_pingTimer is private: read through a getter compiled once,
-        // so the per-frame read neither reflects nor boxes. Without it the
-        // reply gap still works; only the round trip goes blank.
-        static Func<ZRpc, float> readPingTimer;
-
-        static float? PingTimer(ZRpc rpc)
-        {
-            if (pingTimerOff) return null;
-            try
-            {
-                if (readPingTimer == null)
-                {
-                    var f = typeof(ZRpc).GetField("m_pingTimer", BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (f == null || f.FieldType != typeof(float))
-                    {
-                        pingTimerOff = true;
-                        SkaldBridgePlugin.Warn("link probe: ZRpc.m_pingTimer not found, round trip off");
-                        return null;
-                    }
-                    readPingTimer = Getter(f);
-                }
-                return readPingTimer(rpc);
-            }
-            catch (Exception e)
-            {
-                pingTimerOff = true;
-                Off("link round trip", e);
-                return null;
-            }
-        }
-
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        static Func<ZRpc, float> Getter(FieldInfo f)
-        {
-            try
-            {
-                var rpc = Expression.Parameter(typeof(ZRpc), "rpc");
-                return Expression.Lambda<Func<ZRpc, float>>(Expression.Field(rpc, f), rpc).Compile();
-            }
-            catch (Exception e)
-            {
-                // A runtime that cannot compile: plain reflection, a box a frame.
-                SkaldBridgePlugin.Warn("link probe: compiled getter unavailable (" + e.GetType().Name + "), reading by reflection");
-                return r => (float)f.GetValue(r);
             }
         }
 
@@ -127,7 +256,7 @@ namespace Skald.Bridge
             try
             {
                 // With the probe off the tracker holds stale readings: none then.
-                var s = !tickOff && Ids.TryGetValue(p, out long id) ? Tracker.Snapshot(id, Time.realtimeSinceStartup) : null;
+                var s = !tickOff && p.m_rpc != null && Ids.TryGetValue(p.m_rpc, out long id) ? Tracker.Snapshot(id, Time.realtimeSinceStartup) : null;
                 var sock = p.m_socket;
                 string kind = sock?.GetType().Name ?? "";
                 int? queue = null, socketPing = null, outBps = null, inBps = null;
@@ -160,8 +289,8 @@ namespace Skald.Bridge
                     // Steam's own ping when it has one, else the timed keep-alive.
                     pingMs = socketPing ?? s?.RttMs,
                     pingMaxMs = socketPing.HasValue ? null : s?.RttMaxMs,
-                    // After a stall or while a slow round trip falls the
-                    // keep-alive cannot be paired: no ping rather than a wrong one.
+                    // No reply timed in the window, or the hooks are off:
+                    // no ping rather than a wrong one.
                     pingUnsure = !socketPing.HasValue && s != null && s.Unsure ? true : (bool?)null,
                     replyGapMaxS = s == null ? (float?)null : (float)Math.Round(s.ReplyGapMaxS, 1),
                     queueBytes = queue,

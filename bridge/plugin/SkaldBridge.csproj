@@ -11,7 +11,8 @@
     <!--
       Game, Unity and BepInEx DLLs come from the operator's own install (see
       fetch-refs.sh) and are never committed. GameRefs must contain the game's
-      Managed/ DLLs plus BepInEx.dll.
+      Managed/ DLLs plus BepInEx.dll and 0Harmony.dll (HarmonyX, shipped with
+      BepInEx).
     -->
     <GameRefs Condition="'$(GameRefs)' == ''">$(MSBuildThisFileDirectory)../refs</GameRefs>
   </PropertyGroup>
@@ -26,5 +27,6 @@
     <Reference Include="UnityEngine"><HintPath>$(GameRefs)/UnityEngine.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.CoreModule"><HintPath>$(GameRefs)/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="BepInEx"><HintPath>$(GameRefs)/BepInEx.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(GameRefs)/0Harmony.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
 </Project>

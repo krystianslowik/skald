@@ -120,7 +120,7 @@ jobs:
           path: bridge/refs
           key: bridge-refs-${{ hashFiles('bridge/build.sh') }}
       # Compiled against the game's own assemblies: build.sh fetches the six
-      # it needs (about 2 MB, anonymous) and BepInEx.dll, never committed.
+      # it needs (about 2 MB, anonymous), BepInEx.dll and 0Harmony.dll, never committed.
       - run: sh build.sh
       - run: sh -n install.sh
       - uses: actions/upload-artifact@v7.0.2
