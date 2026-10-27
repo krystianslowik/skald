@@ -23,7 +23,7 @@ COPY web/ ./
 COPY server/src /src/server/src
 RUN npm run build
 
-FROM --platform=$BUILDPLATFORM oven/bun:1.4.3-alpine AS server-build
+FROM --platform=$BUILDPLATFORM oven/bun:1.4.4-alpine AS server-build
 ARG TARGETARCH
 # The release (2026.10.0), compiled into the binary; local builds report "dev".
 ARG VERSION=dev
