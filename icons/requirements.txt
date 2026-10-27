@@ -6,7 +6,7 @@ UnityPy==1.25.4
 astc_encoder_py==0.1.12
 archspec==0.2.6
 attrs==26.1.0
-brotli==1.2.0
+brotli==1.2.1
 fsspec==2026.9.0
 lz4==4.4.5
 pillow==12.3.0
