@@ -9,6 +9,6 @@ attrs==26.1.0
 brotli==1.2.0
 fsspec==2026.9.0
 lz4==4.4.5
-pillow==12.3.0
+pillow==13.0.0
 texture2ddecoder==1.0.6
 tpk_ar==0.2.4
