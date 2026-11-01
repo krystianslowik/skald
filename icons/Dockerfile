@@ -7,7 +7,7 @@
 # Wheels are built in a full Python image: not every package publishes a
 # wheel for every architecture (UnityPy has none for linux/arm64), and the
 # runtime image carries no compiler.
-FROM python:3.14 AS wheels
+FROM python:3.15 AS wheels
 WORKDIR /src
 COPY requirements.txt .
 # --no-deps: UnityPy's fmod_toolkit dependency bundles the proprietary libfmod;
@@ -15,7 +15,7 @@ COPY requirements.txt .
 # MIT, BSD or Apache licensed; see THIRD_PARTY_NOTICES.md.
 RUN pip wheel --no-cache-dir --no-deps -r requirements.txt -w /wheels
 
-FROM python:3.14-slim
+FROM python:3.15-slim
 ARG VERSION=dev
 LABEL org.opencontainers.image.title=skald-icons \
       org.opencontainers.image.description="Item icon sheet for Skald, from the operator's own Valheim server files" \
